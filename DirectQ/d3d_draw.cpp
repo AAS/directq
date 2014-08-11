@@ -788,26 +788,6 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 
 	// now turn them into textures
 	D3D_UploadTexture (&char_textures[0], newchars, 256, 256, IMAGE_ALPHA);
-
-#if 0
-	// brighten the default chars a little as they can be hard to see
-	D3DLOCKED_RECT lockrect;
-	char_textures[0]->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
-	byte *rgba = (byte *) lockrect.pBits;
-
-	for (i = 0; i < 256 * 256; i++, rgba += 4)
-	{
-		for (j = 0; j < 3; j++)
-		{
-			float f = (float) rgba[j] / 255.0f;
-			f *= 1.10;
-			rgba[j] = BYTE_CLAMPF (f);
-		}
-	}
-
-	char_textures[0]->UnlockRect (0);
-	char_textures[0]->AddDirtyRect (NULL);
-#endif
 }
 
 

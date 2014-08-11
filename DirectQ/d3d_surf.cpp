@@ -138,19 +138,19 @@ void D3D_ModelSurfsBeginMap (void)
 
 void D3D_SetupModelSurf (d3d_modelsurf_t *ms, msurface_t *surf, texture_t *tex, entity_t *ent = NULL, int alpha = 255)
 {
+	// check for lightmap modifications
+	D3DLight_CheckSurfaceForModification (surf);
+
 	// base textures are commnon to all (liquids won't have lightmaps but they'll be NULL anyway)
 	ms->textures[TEXTURE_LIGHTMAP] = surf->d3d_LightmapTex;
 	ms->textures[TEXTURE_DIFFUSE] = tex->teximage->d3d_Texture;
 
 	// the luma image also decides the shader pass to use
 	// (this assumes that the surf is solid, it will be correctly set for liquid elsewhere)
-	if (tex->lumaimage)
+	if (tex->lumaimage && gl_fullbrights.integer)
 	{
-		if (gl_fullbrights.integer)
-			ms->shaderpass = alpha < 255 ? FX_PASS_WORLD_LUMA_ALPHA : FX_PASS_WORLD_LUMA;
-		else ms->shaderpass = alpha < 255 ? FX_PASS_WORLD_LUMA_NOLUMA_ALPHA : FX_PASS_WORLD_LUMA_NOLUMA;
-
 		ms->textures[TEXTURE_LUMA] = tex->lumaimage->d3d_Texture;
+		ms->shaderpass = alpha < 255 ? FX_PASS_WORLD_LUMA_ALPHA : FX_PASS_WORLD_LUMA;
 	}
 	else
 	{
@@ -162,9 +162,6 @@ void D3D_SetupModelSurf (d3d_modelsurf_t *ms, msurface_t *surf, texture_t *tex, 
 	ms->surf = surf;
 	ms->ent = ent;
 	ms->surfalpha = alpha;
-
-	// check for lightmap modifications
-	D3DLight_CheckSurfaceForModification (ms->surf);
 
 	// chain the modelsurf in it's proper texture chain for proper f2b ordering
 	// (this actually gives b2f but the reversal of the chain per-lightmap will return it to f2b)
@@ -448,7 +445,7 @@ void D3DSurf_RecursiveShowNodes (mnode_t *node, int clipflags, int depth)
 			} while (--c);
 		}
 
-		// D3DBrush_ShowLeafsDrawSurfaces ((mleaf_t *) node);
+		//D3DBrush_ShowLeafsDrawSurfaces ((mleaf_t *) node);
 		return;
 	}
 
@@ -640,6 +637,8 @@ void D3D_BuildWorld (void)
 void D3DSurf_DrawWorld (void)
 {
 	// update lightmaps as early as possible
+	// fixme - it's faster to do them at the end of the surf drawing in GL so that the new maps have more time to
+	// be uploading before they're needed again; cross-check this on intel/etc
 	D3DLight_UpdateLightmaps ();
 
 	// set the final projection matrix that we'll actually use

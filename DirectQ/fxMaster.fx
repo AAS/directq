@@ -66,9 +66,7 @@ sampler tmu7Sampler : register(s7) = sampler_state {Texture = <tmu7Texture>;};
 float4 FogCalc (float4 color, float4 fogpos)
 {
 	float fogdist = length (fogpos);
-	float fogfactor = clamp (exp2 (-FogDensity * FogDensity * fogdist * fogdist * 1.442695), 0.0, 1.0);
-	return lerp (FogColor, color, fogfactor);
-	return color;
+	return lerp (FogColor, color, clamp (exp2 (FogDensity * fogdist * fogdist), 0.0, 1.0));
 }
 #endif
 
@@ -79,15 +77,13 @@ float4 GetLumaColor (float4 texcolor, float4 lightmap, float4 lumacolor, float4 
 float4 GetLumaColor (float4 texcolor, float4 lightmap, float4 lumacolor)
 #endif
 {
+	// take the highest because sometimes the lit pixels can be brighter than if the fullbright is used
+	// this is valid for both internal native and external textures
 #ifdef hlsl_fog
-	float4 lumaon = FogCalc (texcolor * lightmap * Overbright, FogPosition) + lumacolor;
-	float4 lumaoff = FogCalc ((texcolor + lumacolor) * lightmap * Overbright, FogPosition);
+	return max (lumacolor, FogCalc (texcolor * lightmap * Overbright, FogPosition));
 #else
-	float4 lumaon = (texcolor * lightmap * Overbright) + lumacolor;
-	float4 lumaoff = (texcolor + lumacolor) * lightmap * Overbright;
+	return max (lumacolor, (texcolor * lightmap * Overbright));
 #endif
-
-	return max (lumaon, lumaoff);
 }
 
 
@@ -240,21 +236,6 @@ struct VertAliasPS
 };
 
 
-float4 PSAliasLumaNoLuma (VertAliasPS Input) : COLOR0
-{
-	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
-
-#ifdef hlsl_fog
-	float4 color = FogCalc ((tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright), Input.FogPosition);
-#else
-	float4 color = (tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright);
-#endif
-
-	color.a = AlphaVal;
-	return color;
-}
-
-
 float4 GetColormapColor (VertAliasPS Input)
 {
 	// and this, ladies and gentlemen, is one reason why Quake sucks but Quake II doesn't...
@@ -266,24 +247,20 @@ float4 GetColormapColor (VertAliasPS Input)
 }
 
 
-float4 PSAliasPlayerLumaNoLuma (VertAliasPS Input) : COLOR0
+float4 PSAliasGetShade (float3 Color, float3 Normal, float3 Vector)
 {
-	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+	float shadedot = dot (Normal, Vector);
 
-#ifdef hlsl_fog
-	float4 color = FogCalc ((GetColormapColor (Input) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright), Input.FogPosition);
-#else
-	float4 color = (GetColormapColor (Input) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright);
-#endif
-
-	color.a = AlphaVal;
-	return color;
+	// wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case 
+	if (shadedot < 0)
+		return float4 (Color * (1.0f + shadedot * (13.0f / 44.0f)), 1.0f);
+	return float4 (Color * (1.0f + shadedot), 1.0f);
 }
 
 
 float4 PSAliasPlayerLuma (VertAliasPS Input) : COLOR0
 {
-	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
 	float4 color = GetLumaColor (GetColormapColor (Input), Shade, tex2D (tmu1Sampler, Input.Tex0), Input.FogPosition);
@@ -298,7 +275,7 @@ float4 PSAliasPlayerLuma (VertAliasPS Input) : COLOR0
 
 float4 PSAliasPlayerNoLuma (VertAliasPS Input) : COLOR0
 {
-	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
 	float4 color = FogCalc (GetColormapColor (Input) * (Shade * Overbright), Input.FogPosition);
@@ -313,7 +290,7 @@ float4 PSAliasPlayerNoLuma (VertAliasPS Input) : COLOR0
 
 float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 {
-	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
 	float4 color = GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), Shade, tex2D (tmu1Sampler, Input.Tex0), Input.FogPosition);
@@ -328,7 +305,7 @@ float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 
 float4 PSAliasNoLuma (VertAliasPS Input) : COLOR0
 {
-	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
 	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright), Input.FogPosition);
@@ -344,7 +321,7 @@ float4 PSAliasNoLuma (VertAliasPS Input) : COLOR0
 float4 PSAliasKurok (VertAliasPS Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu0Sampler, Input.Tex0);
-	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
 	float4 color = FogCalc (texcolor * (Shade * Overbright), Input.FogPosition);
@@ -426,7 +403,7 @@ struct VertInstancedPS
 
 float4 PSAliasInstancedNoLuma (VertInstancedPS Input) : COLOR0
 {
-	float4 Shade = float4 (Input.ColorAlpha.rgb * (dot (Input.Normal, Input.SVector) * -0.5f + 1.0f), 1.0f);
+	float4 Shade = PSAliasGetShade (Input.ColorAlpha.rgb, Input.Normal, Input.SVector);
 
 #ifdef hlsl_fog
 	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright), Input.FogPosition);
@@ -441,27 +418,12 @@ float4 PSAliasInstancedNoLuma (VertInstancedPS Input) : COLOR0
 
 float4 PSAliasInstancedLuma (VertInstancedPS Input) : COLOR0
 {
-	float4 Shade = float4 (Input.ColorAlpha.rgb * (dot (Input.Normal, Input.SVector) * -0.5f + 1.0f), 1.0f);
+	float4 Shade = PSAliasGetShade (Input.ColorAlpha.rgb, Input.Normal, Input.SVector);
 
 #ifdef hlsl_fog
 	float4 color = GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), Shade, tex2D (tmu1Sampler, Input.Tex0), Input.FogPosition);
 #else
 	float4 color = GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), Shade, tex2D (tmu1Sampler, Input.Tex0));
-#endif
-
-	color.a = Input.ColorAlpha.a;
-	return color;
-}
-
-
-float4 PSAliasInstancedLumaNoLuma (VertInstancedPS Input) : COLOR0
-{
-	float4 Shade = float4 (Input.ColorAlpha.rgb * (dot (Input.Normal, Input.SVector) * -0.5f + 1.0f), 1.0f);
-
-#ifdef hlsl_fog
-	float4 color = FogCalc ((tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright), Input.FogPosition);
-#else
-	float4 color = (tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright);
 #endif
 
 	color.a = Input.ColorAlpha.a;
@@ -520,9 +482,6 @@ VertShadowPS ShadowVS (VertShadowVS Input)
 	VertShadowPS Output;
 
 	float4 BasePosition = mul (Input.LastPosition * aliaslerp.y + Input.CurrPosition * aliaslerp.x, EntMatrix);
-
-	// the lightspot comes after the baseline matrix multiplication and is just stored in ShadeVector for convenience
-	BasePosition.z = ShadeVector.z + 0.1f;
 
 	Output.Position = mul (BasePosition, WorldMatrix);
 
@@ -847,16 +806,6 @@ float4 PSWorldNoLumaAlpha (PSWorldVert Input) : COLOR0
 }
 
 
-float4 PSWorldLumaNoLuma (PSWorldVert Input) : COLOR0
-{
-#ifdef hlsl_fog
-	return FogCalc ((tex2D (tmu1Sampler, Input.Tex0) + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright), Input.FogPosition);
-#else
-	return (tex2D (tmu1Sampler, Input.Tex0) + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright);
-#endif
-}
-
-
 float4 PSWorldLuma (PSWorldVert Input) : COLOR0
 {
 #ifdef hlsl_fog
@@ -875,21 +824,6 @@ float4 PSWorldLumaAlpha (PSWorldVert Input) : COLOR0
 	float4 color = GetLumaColor (texcolor, tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0), Input.FogPosition);
 #else
 	float4 color = GetLumaColor (texcolor, tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0));
-#endif
-
-	color.a = AlphaVal * texcolor.a;
-	return color;
-}
-
-
-float4 PSWorldLumaNoLumaAlpha (PSWorldVert Input) : COLOR0
-{
-	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
-
-#ifdef hlsl_fog
-	float4 color = FogCalc ((texcolor + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright), Input.FogPosition);
-#else
-	float4 color = (texcolor + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright);
 #endif
 
 	color.a = AlphaVal * texcolor.a;
@@ -1092,24 +1026,6 @@ technique MasterRefresh
 		PixelShader = compile ps_2_0 PSDrawUnderwater ();
 	}
 
-	pass FX_PASS_ALIAS_LUMA_NOLUMA
-	{
-		VertexShader = compile vs_2_0 VSAliasVS ();
-		PixelShader = compile ps_2_0 PSAliasLumaNoLuma ();
-	}
-
-	pass FX_PASS_WORLD_LUMA_NOLUMA
-	{
-		VertexShader = compile vs_2_0 VSWorldCommon ();
-		PixelShader = compile ps_2_0 PSWorldLumaNoLuma ();
-	}
-
-	pass FX_PASS_WORLD_LUMA_NOLUMA_ALPHA
-	{
-		VertexShader = compile vs_2_0 VSWorldCommon ();
-		PixelShader = compile ps_2_0 PSWorldLumaNoLumaAlpha ();
-	}
-
 	pass FX_PASS_ALIAS_INSTANCED_NOLUMA
 	{
 		VertexShader = compile vs_2_0 VSAliasVSInstanced ();
@@ -1122,12 +1038,6 @@ technique MasterRefresh
 		PixelShader = compile ps_2_0 PSAliasInstancedLuma ();
 	}
 
-	pass FX_PASS_ALIAS_INSTANCED_LUMA_NOLUMA
-	{
-		VertexShader = compile vs_2_0 VSAliasVSInstanced ();
-		PixelShader = compile ps_2_0 PSAliasInstancedLumaNoLuma ();
-	}
-
 	pass FX_PASS_ALIAS_VIEWMODEL_NOLUMA
 	{
 		VertexShader = compile vs_2_0 VSAliasVSViewModel ();
@@ -1138,12 +1048,6 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 VSAliasVSViewModel ();
 		PixelShader = compile ps_2_0 PSAliasLuma ();
-	}
-
-	pass FX_PASS_ALIAS_VIEWMODEL_LUMA_NOLUMA
-	{
-		VertexShader = compile vs_2_0 VSAliasVSViewModel ();
-		PixelShader = compile ps_2_0 PSAliasLumaNoLuma ();
 	}
 
 	pass FX_PASS_CORONA
@@ -1186,12 +1090,6 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 VSAliasVS ();
 		PixelShader = compile ps_2_0 PSAliasPlayerLuma ();
-	}
-
-	pass FX_PASS_ALIAS_PLAYER_LUMA_NOLUMA
-	{
-		VertexShader = compile vs_2_0 VSAliasVS ();
-		PixelShader = compile ps_2_0 PSAliasPlayerLumaNoLuma ();
 	}
 }
 

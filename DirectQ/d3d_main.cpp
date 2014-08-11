@@ -704,11 +704,13 @@ void D3DMain_SetupD3D (void)
 
 	if (r_draworder.value)
 	{
+		// note - the comment in id quake cvar.h is incorrect; the correct default for r_draworder is 0 (per id quake r_main.c)
 		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 0.0f, 1);
 		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
 	}
 	else
 	{
+		// note - the comment in id quake cvar.h is incorrect; the correct default for r_draworder is 0 (per id quake r_main.c)
 		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
 		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
 	}
@@ -887,7 +889,6 @@ void R_SetupEntitiesOnList (void)
 
 		// add entities to the draw lists
 		if (!r_drawentities.integer) continue;
-		if (ent->Occluded) continue;
 
 		switch (ent->model->type)
 		{
@@ -946,13 +947,15 @@ void D3DRMain_HLSLSetup (void)
 	D3DHLSL_SetFloatArray ("viewright", r_viewvectors.right, 3);
 	D3DHLSL_SetFloatArray ("viewup", r_viewvectors.up, 3);
 
+	float RealFogDensity = 0;
+
 	if (r_underwaterfogcolours[3] > 0)
 	{
 		// Con_Printf ("enabled underwater fog\n");
 		// approximate; looks OK
 		D3DHLSL_SetFloatArray ("FogColor", r_underwaterfogcolours, 4);
 		D3DHLSL_SetFloat ("SkyFog", 0.025f);
-		D3DHLSL_SetFloat ("FogDensity", r_underwaterfogcolours[3] / 640.0f);
+		RealFogDensity = r_underwaterfogcolours[3] / 640.0f;
 	}
 	else
 	{
@@ -968,8 +971,8 @@ void D3DRMain_HLSLSetup (void)
 
 			// nehahra fog divides by 100
 			if (gl_fogdensityscale.value > 0)
-				D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
-			else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 100.0f));
+				RealFogDensity = (d3d_FogDensity / gl_fogdensityscale.value);
+			else RealFogDensity = (d3d_FogDensity / 100.0f);
 		}
 		else
 		{
@@ -979,14 +982,20 @@ void D3DRMain_HLSLSetup (void)
 
 			// fitz fog divides by 64
 			if (gl_fogdensityscale.value > 0)
-				D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
-			else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 64.0f));
+				RealFogDensity = d3d_FogDensity / gl_fogdensityscale.value;
+			else RealFogDensity = d3d_FogDensity / 64.0f;
 		}
 	}
+
+	// precalc this to save some shader instructions
+	RealFogDensity = -RealFogDensity * RealFogDensity;
+
+	D3DHLSL_SetFloat ("FogDensity", RealFogDensity);
 }
 
 
 void D3DPart_DrawSmokePuffs (double frametime);
+void V_AdjustContentCShift (int contents);
 
 void R_RenderView (double frametime)
 {
@@ -1007,6 +1016,7 @@ void R_RenderView (double frametime)
 	R_SetupFrame ();
 	D3DWarp_InitializeTurb ();
 	D3D_UpdateContentsColor ();
+	V_AdjustContentCShift (d3d_RenderDef.viewleaf->contents);
 	D3D_PrepareOverbright ();
 
 	// set up to render

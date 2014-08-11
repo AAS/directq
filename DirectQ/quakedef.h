@@ -22,6 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // be a little kinder to the CRT in Quake by telling it to act like it's single-threaded
 // #define _CRT_DISABLE_PERFCRIT_LOCKS
 
+// defined as early as possible as it's needed in multiple headers
+#define	MAX_DLIGHTS		128
+
 // make qsort calls easier on the eye...
 typedef int (*sortfunc_t) (const void *, const void *);
 

@@ -620,207 +620,28 @@ cvar_t host_framerate ("host_framerate", "0");
 cvar_t host_timescale ("host_timescale", "0");
 cvar_t host_speeds ("host_speeds", "0");			// set for running times
 
+#define FRAME_DELTA (1.0 / 72.0)
 
-typedef struct host_timer_s
+static double host_frametime = 0;
+static double host_fixedtime = 0;
+static double host_fixedaccum = 0;
+
+
+void Host_ResetFixedTime (void)
 {
-	double accumulated;
-	double frametime;
-	double delta;
-	bool runframe;
-} host_timer_t;
-
-
-host_timer_t host_fxtimer;
-host_timer_t host_svtimer;
-host_timer_t host_timer;
-
-
-void Host_AdvanceTimer (host_timer_t *t, double frametime)
-{
-	t->accumulated += frametime;
-
-	if (t->accumulated >= t->delta)
-	{
-		t->frametime = t->accumulated;
-		t->accumulated = 0;
-		t->runframe = true;
-	}
-	else
-	{
-		t->runframe = false;
-		t->frametime = 0.0;
-	}
+	host_fixedaccum = 0.0;
+	host_fixedtime = 0.0;
 }
 
-
-void Host_RunTimerNow (host_timer_t *t, double frametime)
-{
-	t->frametime = frametime;
-	t->accumulated = 0.0;
-	t->runframe = true;
-}
-
-
-void Host_InitTimer (host_timer_t *t, double delta = (1.0 / 72.0))
-{
-	t->delta = delta;
-	t->accumulated = 0.0;
-	t->frametime = 0.0;
-	t->runframe = false;
-}
-
-
-void Host_InitTimers (void)
-{
-	Host_InitTimer (&host_fxtimer);
-	Host_InitTimer (&host_svtimer);
-}
-
-
-bool Host_FilterTime (DWORD time)
-{
-	// no upper bound - if you've got it, flaunt it!!!
-	if (host_maxfps.value < 10) Cvar_Set (&host_maxfps, 10.0f);
-
-	// allow adjusting the delta time to use
-	if (cls.demorecording)
-		Host_InitTimer (&host_timer);
-	else if (cls.download.web)
-		Host_InitTimer (&host_timer, 0);
-	else if (cls.timedemo)
-		Host_InitTimer (&host_timer, 0);
-	else if (!cl.paused && (cl.maxclients > 1 || key_dest == key_game))
-	{
-		if (host_maxfps.value > 1000)
-			Host_InitTimer (&host_timer, 0);
-		else Host_InitTimer (&host_timer, 1.0 / (double) host_maxfps.value);
-	}
-	else Host_InitTimer (&host_timer);
-
-	// times are accumulated as native DWORDs; doing this as floats or even doubles
-	// causes HUGE timer lag (in the order of 15% to 20%)
-	static DWORD dwRealTime = 0;
-	static DWORD dwOldRealTime = 0;
-
-	dwRealTime += time;
-	realtime = (double) dwRealTime * 0.001;
-
-	// advance the main host timer by the frame delta
-	Host_AdvanceTimer (&host_timer, (double) (dwRealTime - dwOldRealTime) * 0.001);
-
-	// framerate is too high
-	if (!host_timer.runframe)
-	{
-		// this sends any moves that have accumulated since the last full send for better online responsiveness
-		// "lag" here is misleading; this isn't really a lag simulation at all...
-		if (!sv.active && !cls.demoplayback && (cl.movemessages > 2)) CL_SendLagMove ();
-		return false;
-	}
-
-	// store back time
-	dwOldRealTime = dwRealTime;
-
-	// fixme - this and host_timescale should only affect client frametime if (!sv.active)
-	if (host_framerate.value > 0)
-		host_timer.frametime = host_framerate.value;
-	else if (host_timer.frametime > 0.1)
-		host_timer.frametime = 0.1;
-
-	// this crap is needed for compatibility with fitz which defaults this cvar to 0
-	// i would have chosen 1 but oh well
-	if (host_timescale.value > 0) host_timer.frametime *= host_timescale.value;
-
-	// advance our timers
-	Host_AdvanceTimer (&host_fxtimer, host_timer.frametime);
-	Host_AdvanceTimer (&host_svtimer, host_timer.frametime);
-
-	// we're running a normal frame now
-	return true;
-}
 
 void VID_DefaultMonitorGamma_f (void);
-
-LONG WINAPI ExceptClient (LPEXCEPTION_POINTERS toast)
-{
-	// restore monitor gamma
-	VID_DefaultMonitorGamma_f ();
-
-	// if we're not using a debug build all that we can do is display an error
-	MessageBox (NULL, "Unhandled exception during client frame.\n",
-				"An error has occurred",
-				MB_OK | MB_ICONSTOP);
-
-	// down she goes
-	return EXCEPTION_EXECUTE_HANDLER;
-}
-
-
-LONG WINAPI ExceptPreClient (LPEXCEPTION_POINTERS toast)
-{
-	// restore monitor gamma
-	VID_DefaultMonitorGamma_f ();
-
-	// if we're not using a debug build all that we can do is display an error
-	MessageBox (NULL, "Unhandled exception during pre-client frame.\n",
-				"An error has occurred",
-				MB_OK | MB_ICONSTOP);
-
-	// down she goes
-	return EXCEPTION_EXECUTE_HANDLER;
-}
-
-
-LONG WINAPI ExceptServer (LPEXCEPTION_POINTERS toast)
-{
-	// restore monitor gamma
-	VID_DefaultMonitorGamma_f ();
-
-	// if we're not using a debug build all that we can do is display an error
-	MessageBox (NULL, "Unhandled exception during server frame.\n",
-				"An error has occurred",
-				MB_OK | MB_ICONSTOP);
-
-	// down she goes
-	return EXCEPTION_EXECUTE_HANDLER;
-}
-
-
-LONG WINAPI ExceptRenderer (LPEXCEPTION_POINTERS toast)
-{
-	// restore monitor gamma
-	VID_DefaultMonitorGamma_f ();
-
-	// if we're not using a debug build all that we can do is display an error
-	MessageBox (NULL, "Unhandled exception during renderer frame.\n",
-				"An error has occurred",
-				MB_OK | MB_ICONSTOP);
-
-	// down she goes
-	return EXCEPTION_EXECUTE_HANDLER;
-}
-
-
-LONG WINAPI ExceptSound (LPEXCEPTION_POINTERS toast)
-{
-	// restore monitor gamma
-	VID_DefaultMonitorGamma_f ();
-
-	// if we're not using a debug build all that we can do is display an error
-	MessageBox (NULL, "Unhandled exception during sound frame.\n",
-				"An error has occurred",
-				MB_OK | MB_ICONSTOP);
-
-	// down she goes
-	return EXCEPTION_EXECUTE_HANDLER;
-}
-
+void IN_ReadDirectInputMessages (void);
 
 void Host_Frame (DWORD time)
 {
-	static double time1 = 0;
-	static double time2 = 0;
-	static double time3 = 0;
-	int pass1, pass2, pass3;
+	static DWORD milliseconds = 0;
+	static double nextframetime = 0;
+	static double oldrealtime = 0;
 
 	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver)) return;
@@ -829,10 +650,63 @@ void Host_Frame (DWORD time)
 	// (unless we're in a demo - see srand call in cl_demo - in which case we keep random effects consistent across playbacks)
 	if (!cls.demoplayback) rand ();
 
-	// decide if we're going to run a frame
-	if (!Host_FilterTime (time)) return;
+	// always read input and update keystates
+	IN_ReadDirectInputMessages ();
 
-	//SetUnhandledExceptionFilter (ExceptPreClient);
+	// decide if we're going to run a frame
+	//if (!Host_FilterTime (time)) return;
+	// accumulate as an integer millisecond timer to prevent floating point falloff
+	milliseconds += time;
+	realtime = (double) milliseconds * 0.001;
+
+	if (realtime < nextframetime)
+	{
+		// this sends any moves that have accumulated since the last full send for better online responsiveness
+		// "lag" here is misleading; this isn't really a lag simulation at all...
+		if (!sv.active && !cls.demoplayback && (cl.movemessages > 2)) CL_SendLagMove ();
+		return;
+	}
+
+	if (cls.demorecording)
+		nextframetime += FRAME_DELTA;
+	else if (cls.download.web)
+		nextframetime = realtime;
+	else if (cls.timedemo)
+		nextframetime = realtime;
+	else if (cls.state != ca_connected && !cls.demoplayback)
+		nextframetime += FRAME_DELTA;
+	else if (!cl.paused && (cl.maxclients > 1 || key_dest == key_game))
+	{
+		if (host_maxfps.value > 1000)
+			nextframetime = realtime;
+		else if (host_maxfps.value < 10)
+			nextframetime += 0.1;
+		else nextframetime += (1.0 / (double) host_maxfps.value);
+	}
+	else nextframetime += FRAME_DELTA;
+
+	host_frametime = (realtime - oldrealtime);
+	oldrealtime = realtime;
+
+	// fixme - this and host_timescale should only affect client frametime if (!sv.active)
+	if (host_framerate.value > 0)
+		host_frametime = host_framerate.value;
+	else if (host_frametime > 0.1)
+		host_frametime = 0.1;
+
+	// this crap is needed for compatibility with fitz which defaults this cvar to 0
+	// i would have chosen 1 but oh well
+	if (host_timescale.value > 0) host_frametime *= host_timescale.value;
+
+	// advance our fixed rate timer
+	host_fixedaccum += host_frametime;
+
+	if (host_fixedaccum >= FRAME_DELTA)
+	{
+		host_fixedtime = host_fixedaccum;
+		host_fixedaccum = 0;
+	}
+	else host_fixedtime = 0.0;
 
 	// always accumulate commands even if we're not sending to the server
 	CL_AccumulateCmd ();
@@ -841,57 +715,35 @@ void Host_Frame (DWORD time)
 	IN_Commands ();
 	NET_Poll ();
 
-	if (sv.active && host_svtimer.runframe)
+	if (sv.active && (host_fixedtime > 0))
 	{
 		CL_SendCmd ();
-		//SetUnhandledExceptionFilter (ExceptServer);
-		SV_UpdateServer (host_svtimer.frametime);
+		SV_UpdateServer (host_fixedtime);
 	}
-	else if (!sv.active && host_fxtimer.runframe)
+	else if (!sv.active && (host_fixedtime > 0))
 		CL_SendCmd ();
 
 	if (cls.state == ca_connected)
 	{
-		//SetUnhandledExceptionFilter (ExceptClient);
-
 		// the client is only updated if actually connected
-		if ((sv.active && host_svtimer.runframe) || !sv.active)
-			CL_UpdateClient (host_timer.frametime, true);
-		else CL_UpdateClient (host_timer.frametime, false);
+		if ((sv.active && (host_fixedtime > 0)) || !sv.active)
+			CL_UpdateClient (host_frametime, true);
+		else CL_UpdateClient (host_frametime, false);
 	}
 
-	if (host_speeds.value) time1 = Sys_FloatTime ();
-
-	//SetUnhandledExceptionFilter (ExceptRenderer);
-
 	// update the display
-	SCR_UpdateScreen (host_timer.frametime);
+	SCR_UpdateScreen (host_frametime);
 
-	if (host_speeds.value) time2 = Sys_FloatTime ();
-
-	if (host_fxtimer.runframe)
+	if (host_fixedtime > 0)
 	{
-		//SetUnhandledExceptionFilter (ExceptSound);
-
 		// sound is CPU-intensive so we scale back the rate at which it updates
 		if (cls.signon == SIGNON_CONNECTED)
-			S_Update (host_fxtimer.frametime, r_refdef.vieworigin, r_viewvectors.forward, r_viewvectors.right, r_viewvectors.up);
-		else S_Update (host_fxtimer.frametime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
+			S_Update (host_fixedtime, r_refdef.vieworigin, r_viewvectors.forward, r_viewvectors.right, r_viewvectors.up);
+		else S_Update (host_fixedtime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 
 		// finish sound
 		CDAudio_Update ();
 		MediaPlayer_Update ();
-	}
-
-	if (host_speeds.value)
-	{
-		pass1 = (time1 - time3) * 1000;
-		time3 = Sys_FloatTime ();
-		pass2 = (time2 - time1) * 1000;
-		pass3 = (time3 - time2) * 1000;
-
-		SCR_SetHostSpeeds (host_timer.frametime, pass1, pass2, pass3);
-		// Con_Printf ("%3i tot %3i server %3i gfx %3i snd\n", pass1 + pass2 + pass3, pass1, pass2, pass3);
 	}
 }
 

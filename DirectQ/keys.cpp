@@ -1255,12 +1255,9 @@ void ClearAllStates (void)
 	{
 		// trigger the up action for all down keys
 		if (keydown[i] || key_repeats[i])
-		{
 			Key_Event (i, false);
-			keydown[i] = false;
-		}
 
-		// clear repeats
+		keydown[i] = false;
 		key_repeats[i] = 0;
 	}
 

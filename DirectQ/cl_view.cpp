@@ -299,6 +299,9 @@ void V_SetContentsColor (int contents)
 
 void V_CalcIndividualBlend (float *rgba, float r, float g, float b, float a)
 {
+	// no blend
+	if (a < 1) return;
+
 	// calc alpha amount
 	float a2 = a / 255.0;
 
@@ -318,16 +321,21 @@ void V_CalcIndividualBlend (float *rgba, float r, float g, float b, float a)
 V_CalcPowerupCshift
 =============
 */
+cvar_t v_quadcshift ("v_quadcshift", 1.0f);
+cvar_t v_suitcshift ("v_suitcshift", 1.0f);
+cvar_t v_ringcshift ("v_ringcshift", 1.0f);
+cvar_t v_pentcshift ("v_pentcshift", 1.0f);
+
 void V_CalcPowerupCshift (void)
 {
 	// default is no shift for no powerups
 	float rgba[4]= {0, 0, 0, 0};
 
 	// now let's see what we've got
-	if (cl.items & IT_QUAD) V_CalcIndividualBlend (rgba, 0, 0, 255, 30);
-	if (cl.items & IT_SUIT) V_CalcIndividualBlend (rgba, 0, 255, 0, 20);
-	if (cl.items & IT_INVISIBILITY) V_CalcIndividualBlend (rgba, 100, 100, 100, 100);
-	if (cl.items & IT_INVULNERABILITY) V_CalcIndividualBlend (rgba, 255, 255, 0, 30);
+	if ((cl.items & IT_QUAD) && v_quadcshift.value >= 0) V_CalcIndividualBlend (rgba, 0, 0, 255, (int) (30.0f * v_quadcshift.value));
+	if ((cl.items & IT_SUIT) && v_suitcshift.value >= 0) V_CalcIndividualBlend (rgba, 0, 255, 0, (int) (20.0f * v_suitcshift.value));
+	if ((cl.items & IT_INVISIBILITY) && v_ringcshift.value >= 0) V_CalcIndividualBlend (rgba, 100, 100, 100, (int) (100.0f * v_ringcshift.value));
+	if ((cl.items & IT_INVULNERABILITY) && v_pentcshift.value >= 0) V_CalcIndividualBlend (rgba, 255, 255, 0, (int) (30.0f * v_pentcshift.value));
 
 	// clamp blend 0-255 and store out
 	cl.cshifts[CSHIFT_POWERUP].destcolor[0] = BYTE_CLAMP (rgba[0]);
@@ -342,14 +350,45 @@ void V_CalcPowerupCshift (void)
 V_CalcBlend
 =============
 */
+cvar_t v_contentblend ("v_contentblend", 1.0f);
+cvar_t v_damagecshift ("v_damagecshift", 1.0f);
+cvar_t v_bonusflash ("v_bonusflash", 1.0f);
+cvar_t v_powerupcshift ("v_powerupcshift", 1.0f);
+
+cvar_t v_emptycshift ("v_emptycshift", 1.0f);
+cvar_t v_solidcshift ("v_solidcshift", 1.0f);
+cvar_t v_lavacshift ("v_lavacshift", 1.0f);
+cvar_t v_watercshift ("v_watercshift", 1.0f);
+cvar_t v_slimecshift ("v_slimecshift", 1.0f);
+
+void V_AdjustContentCShift (int contents)
+{
+	if (contents == CONTENTS_SOLID && v_solidcshift.value >= 0)
+		cl.cshifts[CSHIFT_CONTENTS].percent *= v_solidcshift.value;
+	else if (contents == CONTENTS_EMPTY && v_emptycshift.value >= 0)
+		cl.cshifts[CSHIFT_CONTENTS].percent *= v_emptycshift.value;
+	else if (contents == CONTENTS_LAVA && v_lavacshift.value >= 0)
+		cl.cshifts[CSHIFT_CONTENTS].percent *= v_lavacshift.value;
+	else if (contents == CONTENTS_WATER && v_watercshift.value >= 0)
+		cl.cshifts[CSHIFT_CONTENTS].percent *= v_watercshift.value;
+	else if (contents == CONTENTS_SLIME && v_slimecshift.value >= 0)
+		cl.cshifts[CSHIFT_CONTENTS].percent *= v_slimecshift.value;
+}
+
+
 void V_CalcBlend (void)
 {
 	float rgba[4]= {0, 0, 0, 0};
 
 	for (int j = 0; j < NUM_CSHIFTS; j++)
 	{
+		if (j == CSHIFT_CONTENTS && v_contentblend.value >= 0) cl.cshifts[j].percent *= v_contentblend.value;
+		if (j == CSHIFT_DAMAGE && v_damagecshift.value >= 0) cl.cshifts[j].percent *= v_damagecshift.value;
+		if (j == CSHIFT_BONUS && v_bonusflash.value >= 0) cl.cshifts[j].percent *= v_bonusflash.value;
+		if (j == CSHIFT_POWERUP && v_powerupcshift.value >= 0) cl.cshifts[j].percent *= v_powerupcshift.value;
+
 		// no shift
-		if (!cl.cshifts[j].percent) continue;
+		if (cl.cshifts[j].percent < 1) continue;
 
 		V_CalcIndividualBlend (rgba,
 			cl.cshifts[j].destcolor[0],
@@ -592,6 +631,10 @@ V_CalcRefdef
 
 ==================
 */
+cvar_t cl_stepsmooth ("cl_stepsmooth", "1", CVAR_ARCHIVE);
+cvar_t cl_stepsmooth_mult ("cl_stepsmooth_mult", "80", CVAR_ARCHIVE);
+cvar_t cl_stepsmooth_delta ("cl_stepsmooth_delta", "12", CVAR_ARCHIVE);
+
 void V_CalcRefdef (void)
 {
 	entity_t	*ent, *view;
@@ -669,21 +712,20 @@ void V_CalcRefdef (void)
 	if (v_gunkick.value) VectorAdd (r_refdef.viewangles, kickangle, r_refdef.viewangles);
 
 	// smooth out stair step ups
-	if (cl.onground && ent->origin[2] - oldz > 0)
+	if (cl.onground && ent->origin[2] - oldz > 0 && cl_stepsmooth.value)
 	{
 		// WARNING - don't try anything sexy with time in here or you'll
 		// screw things up and make the engine appear to run jerky
-		float steptime = cl.frametime;
+		float steptime = cl.time - cl.oldtime;
 
-#define STEP_DELTA	12.0f
 		if (steptime < 0) steptime = 0;
 
 		// ???? what does this magic number signify anyway ????
 		// looks like it should really be 72...?
-		oldz += steptime * 80.0f;
+		oldz += steptime * cl_stepsmooth_mult.value;
 
 		if (oldz > ent->origin[2]) oldz = ent->origin[2];
-		if (ent->origin[2] - oldz > STEP_DELTA) oldz = ent->origin[2] - STEP_DELTA;
+		if (ent->origin[2] - oldz > cl_stepsmooth_delta.value) oldz = ent->origin[2] - cl_stepsmooth_delta.value;
 
 		r_refdef.vieworigin[2] += oldz - ent->origin[2];
 		view->origin[2] += oldz - ent->origin[2];

@@ -759,7 +759,6 @@ void CL_ParseUpdate (int bits)
 	if (ent->msgtime != cl.mtime[1])
 	{
 		// entity was not present on the previous frame
-		ent->Occluded = false;
 		forcelink = true;
 	}
 	else forcelink = false;
@@ -944,8 +943,6 @@ void CL_ParseUpdate (int bits)
 		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical as they might be pointing to invalid frames in the new model!!!
 		CL_ClearInterpolation (ent, CLEAR_POSES);
 
-		ent->Occluded = false;
-
 		// reset frame and skin too...!
 		if (!(bits & U_FRAME)) ent->frame = 0;
 		if (!(bits & U_SKIN)) ent->skinnum = 0;
@@ -1059,27 +1056,21 @@ void CL_ParseClientdata (void)
 	cl.onground = (bits & SU_ONGROUND) != 0;
 	cl.inwater = (bits & SU_INWATER) != 0;
 
-	if (bits & SU_WEAPONFRAME)
-		clnewstats[STAT_WEAPONFRAME] = MSG_ReadByte ();
-	else clnewstats[STAT_WEAPONFRAME] = 0;
+	clnewstats[STAT_WEAPONFRAME] = (bits & SU_WEAPONFRAME) ? MSG_ReadByte () : 0;
+	clnewstats[STAT_ARMOR] = (bits & SU_ARMOR) ? MSG_ReadByte () : 0;
 
-	if (bits & SU_ARMOR)
-		clnewstats[STAT_ARMOR] = MSG_ReadByte ();
-	else clnewstats[STAT_ARMOR] = 0;
-
-	if (bits & SU_WEAPON)
-	{
-		if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
-			clnewstats[STAT_WEAPON] = MSG_ReadByte ();
-		else clnewstats[STAT_WEAPON] = CL_ReadByteShort ();
-	}
-	else clnewstats[STAT_WEAPON] = 0;
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
+		clnewstats[STAT_WEAPON] = (bits & SU_WEAPON) ? MSG_ReadByte () : 0;
+	else clnewstats[STAT_WEAPON] = (bits & SU_WEAPON) ? CL_ReadByteShort () : 0;
 
 	clnewstats[STAT_HEALTH] = MSG_ReadShort ();
 	clnewstats[STAT_AMMO] = MSG_ReadByte ();
 
-	for (i = 0; i < 4; i++)
-		clnewstats[STAT_SHELLS + i] = MSG_ReadByte ();
+	// fixme - should be short for new protocol???
+	clnewstats[STAT_SHELLS + 0] = MSG_ReadByte ();
+	clnewstats[STAT_SHELLS + 1] = MSG_ReadByte ();
+	clnewstats[STAT_SHELLS + 2] = MSG_ReadByte ();
+	clnewstats[STAT_SHELLS + 3] = MSG_ReadByte ();
 
 	if (standard_quake)
 		clnewstats[STAT_ACTIVEWEAPON] = MSG_ReadByte ();
@@ -1104,9 +1095,7 @@ void CL_ParseClientdata (void)
 		Con_DPrintf ("updated death location\n");
 	}
 	else if (cl.stats[STAT_HEALTH] < 1 && clnewstats[STAT_HEALTH] > 0)
-	{
 		vid.recalc_refdef = true;
-	}
 
 	// now update the stats for real
 	for (i = 0; i < 32; i++)
@@ -1125,6 +1114,7 @@ CL_ParseStatic
 */
 void R_AddEfrags (entity_t *ent);
 void D3DMain_BBoxForEnt (entity_t *ent);
+void D3DLight_PrepStaticEntityLighting (entity_t *ent);
 
 void CL_ParseStatic (int version)
 {
@@ -1162,6 +1152,9 @@ void CL_ParseStatic (int version)
 	if (ent->model)
 	{
 		R_AddEfrags (ent);
+
+		// cut down on recursive lightpoint calls per frame at runtime
+		D3DLight_PrepStaticEntityLighting (ent);
 
 		// necessary to call this here???
 		D3DMain_BBoxForEnt (ent);

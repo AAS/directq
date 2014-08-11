@@ -426,7 +426,7 @@ void CL_Record_f (void)
 }
 
 
-void Host_InitTimers (void);
+void Host_ResetFixedTime (void);
 
 bool CL_DoPlayDemo (void)
 {
@@ -491,7 +491,7 @@ bool CL_DoPlayDemo (void)
 	srand (demoseed);
 
 	// reinit the timers to keep fx consistent
-	Host_InitTimers ();
+	Host_ResetFixedTime ();
 
 	// success
 	return true;

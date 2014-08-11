@@ -1642,6 +1642,10 @@ void HUD_MiniDeathmatchOverlay (void)
 }
 
 
+int scr_frames = 0;
+double scr_startfps = 0;
+float scr_fps = 0;
+
 void HUD_DrawFPS (void)
 {
 	static float	oldtime = 0;
@@ -1667,13 +1671,14 @@ void HUD_DrawFPS (void)
 	if (scr_showfps.value)
 	{
 		// positioning
-		char str[17];
+		char str[32];
 
 		// position over the main refresh so that it will always update properly
 		int y1 = 40 + sb_lines;
 		int y2 = 11 + sb_lines;
 
 		// sometimes between level transitions we get a < 0 fps so don't let it happen
+		// (round FPS to the nearest int)
 		if (fps < 0)
 			_snprintf (str, 16, "0 fps");
 		else _snprintf (str, 16, "%i fps", (int) (fps + 0.5f));

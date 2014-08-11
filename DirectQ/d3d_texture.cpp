@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
+
 extern LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[];
 
 void D3DTexture_MipChange (cvar_t *var);
@@ -43,6 +44,61 @@ d3d_texture_t *d3d_TextureList = NULL;
 int d3d_NumTextures = 0;
 
 
+void D3DTexture_MipMap (byte *in, int width, int height)
+{
+	byte *out = in;
+
+	width <<= 2;
+	height >>= 1;
+
+	for (int i = 0; i < height; i++, in += width)
+	{
+		for (int j = 0; j < width; j += 8, out += 4, in += 8)
+		{
+			out[0] = (in[0] + in[4] + in[width + 0] + in[width + 4]) >> 2;
+			out[1] = (in[1] + in[5] + in[width + 1] + in[width + 5]) >> 2;
+			out[2] = (in[2] + in[6] + in[width + 2] + in[width + 6]) >> 2;
+			out[3] = (in[3] + in[7] + in[width + 3] + in[width + 7]) >> 2;
+		}
+	}
+}
+
+
+void D3DTexture_MipMap (byte *in, byte *out, int width, int height)
+{
+	width <<= 2;
+	height >>= 1;
+
+	for (int i = 0; i < height; i++, in += width)
+	{
+		for (int j = 0; j < width; j += 8, out += 4, in += 8)
+		{
+			out[0] = (in[0] + in[4] + in[width + 0] + in[width + 4]) >> 2;
+			out[1] = (in[1] + in[5] + in[width + 1] + in[width + 5]) >> 2;
+			out[2] = (in[2] + in[6] + in[width + 2] + in[width + 6]) >> 2;
+			out[3] = (in[3] + in[7] + in[width + 3] + in[width + 7]) >> 2;
+		}
+	}
+}
+
+
+void D3DTexture_GenerateMipLevels (unsigned *data, int width, int height, int flags, LPDIRECT3DTEXTURE9 tex)
+{
+	DWORD mips = tex->GetLevelCount ();
+	D3DLOCKED_RECT lockrect;
+
+	// copy in miplevel 0
+	if (SUCCEEDED (tex->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE)))
+	{
+		memcpy (lockrect.pBits, data, width * height * 4);
+		tex->UnlockRect (0);
+	}
+
+	// filter the rest (needed for NP2 support)
+	if (mips > 1) D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX);
+}
+
+
 void D3DTexture_MipChange (cvar_t *var)
 {
 	if (!d3d_Device) return;
@@ -55,18 +111,13 @@ void D3DTexture_MipChange (cvar_t *var)
 		if (!(tex->texture->flags & IMAGE_MIPMAP)) continue;
 		if (!(tex->texture->flags & IMAGE_BSP)) continue;
 
-		D3DLOCKED_RECT lockrect_old;
-		D3DLOCKED_RECT lockrect_new;
+		D3DLOCKED_RECT lockrect;
 		D3DSURFACE_DESC surfdesc;
 		LPDIRECT3DTEXTURE9 newtex = NULL;
-
-		hr = tex->texture->d3d_Texture->GetLevelDesc (0, &surfdesc);
-		if (FAILED (hr)) continue;
-
-		// ensure
-		if (surfdesc.Format != D3DFMT_X8R8G8B8 && surfdesc.Format != D3DFMT_A8R8G8B8) continue;
-
 		int miplevels = 0;
+
+		if (FAILED (tex->texture->d3d_Texture->GetLevelDesc (0, &surfdesc))) continue;
+		if (surfdesc.Format != D3DFMT_X8R8G8B8 && surfdesc.Format != D3DFMT_A8R8G8B8) continue;
 
 		if (!(tex->texture->flags & IMAGE_MIPMAP))
 			miplevels = 1;
@@ -79,35 +130,27 @@ void D3DTexture_MipChange (cvar_t *var)
 			else miplevels = 0;
 		}
 
-		hr = d3d_Device->CreateTexture (surfdesc.Width, surfdesc.Height, miplevels, surfdesc.Usage, surfdesc.Format, surfdesc.Pool, &newtex, NULL);
+		hr = d3d_Device->CreateTexture (surfdesc.Width,
+			surfdesc.Height,
+			miplevels,
+			0,
+			surfdesc.Format,
+			surfdesc.Pool,
+			&newtex,
+			NULL);
+
 		if (FAILED (hr)) continue;
 
-		hr = newtex->LockRect (0, &lockrect_new, NULL, 0);
-
-		if (FAILED (hr))
+		if (SUCCEEDED (tex->texture->d3d_Texture->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE)))
 		{
-			newtex->Release ();
-			continue;
+			// gen mip levels
+			D3DTexture_GenerateMipLevels ((unsigned *) lockrect.pBits, surfdesc.Width, surfdesc.Height, tex->texture->flags, newtex);
+
+			tex->texture->d3d_Texture->UnlockRect (0);
+			tex->texture->d3d_Texture->Release ();
+			tex->texture->d3d_Texture = newtex;
 		}
-
-		hr = tex->texture->d3d_Texture->LockRect (0, &lockrect_old, NULL, 0);
-
-		if (FAILED (hr))
-		{
-			newtex->UnlockRect (0);
-			newtex->Release ();
-			continue;
-		}
-
-		memcpy (lockrect_new.pBits, lockrect_old.pBits, surfdesc.Width * surfdesc.Height * 4);
-
-		tex->texture->d3d_Texture->UnlockRect (0);
-		newtex->UnlockRect (0);
-
-		D3DXFilterTexture (newtex, NULL, 0, D3DX_FILTER_BOX);
-
-		SAFE_RELEASE (tex->texture->d3d_Texture);
-		tex->texture->d3d_Texture = newtex;
+		else newtex->Release ();
 	}
 }
 
@@ -155,27 +198,20 @@ void D3D_MakeQuakePalettes (byte *palette)
 		d3d_QuakePalette.standard[i].peBlue = rgb[2];
 		d3d_QuakePalette.standard[i].peFlags = alpha;
 
-		// pre-bake the fullbright stuff into the palettes so that we can avoid some expensive shader ops
 		if (vid.fullbright[i])
 		{
-			p1 = &d3d_QuakePalette.luma[i];
-			p2 = &d3d_QuakePalette.noluma[i];
+			d3d_QuakePalette.luma[i].peRed = rgb[0];
+			d3d_QuakePalette.luma[i].peGreen = rgb[1];
+			d3d_QuakePalette.luma[i].peBlue = rgb[2];
+			d3d_QuakePalette.luma[i].peFlags = 255;
 		}
 		else
 		{
-			p1 = &d3d_QuakePalette.noluma[i];
-			p2 = &d3d_QuakePalette.luma[i];
+			d3d_QuakePalette.luma[i].peRed = 0;
+			d3d_QuakePalette.luma[i].peGreen = 0;
+			d3d_QuakePalette.luma[i].peBlue = 0;
+			d3d_QuakePalette.luma[i].peFlags = 255;
 		}
-
-		p1->peRed = rgb[0];
-		p1->peGreen = rgb[1];
-		p1->peBlue = rgb[2];
-		p1->peFlags = alpha;
-
-		p2->peRed = 0;
-		p2->peGreen = 0;
-		p2->peBlue = 0;
-		p2->peFlags = alpha;
 
 		d3d_QuakePalette.standard32[i] = D3DCOLOR_XRGB (rgb[0], rgb[1], rgb[2]);
 
@@ -460,6 +496,9 @@ void TM_AlphaEdgeFix (byte *data, int width, int height)
 
 void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int scaled_width, int scaled_height, int flags)
 {
+	// for hunk usage
+	int hunkmark = MainHunk->GetLowMark ();
+
 	// default to the standard palette
 	PALETTEENTRY *activepal = d3d_QuakePalette.standard;
 
@@ -474,27 +513,29 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 			activepal = d3d_QuakePalette.standard;
 		else if (flags & IMAGE_LUMA)
 			activepal = d3d_QuakePalette.luma;
-		else activepal = d3d_QuakePalette.noluma;
+		else activepal = d3d_QuakePalette.standard;
 	}
 	else activepal = d3d_QuakePalette.standard;
 
 	// now get the final palette in a format we can transfer to the raw data
 	unsigned *palette = D3D_GetTexturePalette (activepal, flags);
-
-	D3DLOCKED_RECT lockrect;
-	texture[0]->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
-	unsigned *trans = (unsigned *) lockrect.pBits;
+	unsigned *trans = NULL;
 
 	// note - we don't check for np2 support here because we also need to account for clamping to max size
 	if (scaled_width == width && scaled_height == height)
 	{
+		// 32 bit shouldn't alloc trans but should just copy the pointer
 		if (flags & IMAGE_32BIT)
-			D3D_Transfer32BitTexture ((unsigned *) data, trans, width * height);
-		else D3D_Transfer8BitTexture ((byte *) data, trans, width * height, palette);
+			trans = (unsigned *) data;
+		else
+		{
+			trans = (unsigned *) MainHunk->Alloc (scaled_width * scaled_height * 4);
+			D3D_Transfer8BitTexture ((byte *) data, trans, width * height, palette);
+		}
 	}
 	else
 	{
-		int hunkmark = MainHunk->GetLowMark ();
+		trans = (unsigned *) MainHunk->Alloc (scaled_width * scaled_height * 4);
 
 		if (flags & IMAGE_PADDABLE)
 		{
@@ -513,25 +554,19 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 				D3D_Resample32BitTexture ((unsigned *) data, width, height, trans, scaled_width, scaled_height);
 			else D3D_Resample8BitTexture ((byte *) data, width, height, trans, scaled_width, scaled_height, palette);
 		}
-
-		MainHunk->FreeToLowMark (hunkmark);
 	}
+
+	// it's a bug if this is still NULL
+	assert (trans);
 
 	// fix alpha edges on textures that need them
 	if ((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE))
-		TM_AlphaEdgeFix ((byte *) lockrect.pBits, scaled_width, scaled_height);
+		TM_AlphaEdgeFix ((byte *) trans, scaled_width, scaled_height);
 
-	// to do - mipmap with gamma correction here
-	// (is there a D3DX option to do it?)
-
-	texture[0]->UnlockRect (0);
-	texture[0]->AddDirtyRect (NULL);
-
-	// automatic mipmapping sucks because it doesn't support a box filter
-	if (flags & IMAGE_MIPMAP)
-		D3DXFilterTexture (texture[0], NULL, 0, D3DX_FILTER_BOX);
+	D3DTexture_GenerateMipLevels (trans, scaled_width, scaled_height, flags, texture[0]);
 
 	texture[0]->PreLoad ();
+	MainHunk->FreeToLowMark (hunkmark);
 }
 
 
@@ -771,7 +806,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 		memcpy (tex->data, tex->data + 32 * 31, 32);
 
 	// try to load an external texture
-	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, tex->identifier, flags);
+	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, tex->identifier, tex->flags);
 
 	if (!externalloaded)
 	{
@@ -795,7 +830,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			tex->flags
 		);
 
-		if (!tex->d3d_Texture && (flags & IMAGE_SCRAP))
+		if (!tex->d3d_Texture && (tex->flags & IMAGE_SCRAP))
 		{
 			return NULL;
 		}

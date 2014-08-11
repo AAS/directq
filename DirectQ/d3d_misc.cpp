@@ -256,9 +256,10 @@ void D3DTexture_RegisterChains (void);
 void D3DBrush_CreateVBOs (void);
 void D3DLight_EndBuildingLightmaps (void);
 void D3DBrush_BuildBModelVBOs (void);
-void Host_InitTimers (void);
+void Host_ResetFixedTime (void);
 void D3DSurf_BuildWorldCache (void);
 void D3DPart_SmokePuffNewMap (void);
+void ClearAllStates (void);;
 
 void R_NewMap (void)
 {
@@ -332,6 +333,7 @@ void R_NewMap (void)
 
 	// activate the mouse and flush the directinput buffers
 	// (pretend we're fullscreen because we definitely want to hide the mouse here)
+	ClearAllStates ();
 	IN_SetMouseState (true);
 
 	// revalidate the skybox in case the last one was cleared
@@ -348,7 +350,7 @@ void R_NewMap (void)
 	d3d_RenderDef.RegistrationSequence++;
 
 	// reinit the timers to keep fx consistent
-	Host_InitTimers ();
+	Host_ResetFixedTime ();
 
 	// we're running a map now
 	cls.maprunning = true;

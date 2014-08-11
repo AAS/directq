@@ -1507,7 +1507,7 @@ This is called at the start of each level
 */
 void CL_WipeParticles (void);
 void Mod_InitForMap (model_t *mod);
-void Host_InitTimers (void);
+void Host_ResetFixedTime (void);
 
 void SV_SpawnServer (char *server)
 {
@@ -1667,7 +1667,7 @@ void SV_SpawnServer (char *server)
 	SV_Physics (0.1);
 
 	// set up host timers
-	Host_InitTimers ();
+	Host_ResetFixedTime ();
 
 	// create a baseline for more efficient communications
 	SV_CreateBaseline ();

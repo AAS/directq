@@ -220,10 +220,10 @@ bad_mesh_1:;
 		// this was the *only* *practical* example of these functions usage i could find, everything else just says
 		// "use them" but doesn't actually say *how* (indicating that a lot of folks don't really know what they're talking about...)
 		int numtris = hdr->numindexes / 3;
-		unsigned short *newindexes = (unsigned short *) MainHunk->Alloc (hdr->numindexes * sizeof (unsigned short), FALSE);
-		DWORD *optresult = (DWORD *) MainHunk->Alloc ((hdr->nummesh > numtris ? hdr->nummesh : numtris) * sizeof (DWORD), FALSE);
-		aliasmesh_t *newvertexes = (aliasmesh_t *) MainHunk->Alloc (hdr->nummesh * sizeof (aliasmesh_t), FALSE);
-		DWORD *remap = (DWORD *) MainHunk->Alloc (hdr->nummesh * sizeof (DWORD), FALSE);
+		unsigned short *newindexes = (unsigned short *) MainHunk->Alloc (hdr->numindexes * sizeof (unsigned short));
+		DWORD *optresult = (DWORD *) MainHunk->Alloc ((hdr->nummesh > numtris ? hdr->nummesh : numtris) * sizeof (DWORD));
+		aliasmesh_t *newvertexes = (aliasmesh_t *) MainHunk->Alloc (hdr->nummesh * sizeof (aliasmesh_t));
+		DWORD *remap = (DWORD *) MainHunk->Alloc (hdr->nummesh * sizeof (DWORD));
 
 		D3DXOptimizeFaces (hdr->indexes, numtris, hdr->nummesh, FALSE, optresult);
 
@@ -674,18 +674,12 @@ d3d_aliasstate_t d3d_AliasState;
 
 void D3DAlias_SetupLighting (entity_t *ent, float *shadevector, float *shadelight)
 {
-	// set up other stuff for lighting
-	float lightvec[3] = {-1, 0, 0};
-	avectors_t av;
+	float an = (ent->angles[1] + ent->angles[0]) / 180 * D3DX_PI;
 
-	ent->angles[0] = -ent->angles[0];	// stupid quake bug
-	AngleVectors (ent->angles, &av);
-	ent->angles[0] = -ent->angles[0];	// stupid quake bug
-
-	// rotate the lighting vector into the model's frame of reference
-	shadevector[0] = DotProduct (lightvec, av.forward);
-	shadevector[1] = -DotProduct (lightvec, av.right);
-	shadevector[2] = DotProduct (lightvec, av.up);
+	shadevector[0] = cos (-an);
+	shadevector[1] = sin (-an);
+	shadevector[2] = 1;
+	VectorNormalize (shadevector);
 
 	// copy these out because we need to keep the originals in the entity for frame averaging
 	VectorCopy2 (shadelight, ent->shadelight);
@@ -742,6 +736,20 @@ void D3DAlias_TransformStandard (entity_t *ent, aliashdr_t *hdr)
 }
 
 
+#define SHADOW_SKEW_X	-0.7	// skew along x axis. -0.7 to mimic glquake shadows
+#define SHADOW_SKEW_Y	0		// skew along y axis. 0 to mimic glquake shadows
+#define SHADOW_VSCALE	0		// 0 = completely flat
+#define SHADOW_HEIGHT	0.1		// how far above the floor to render the shadow
+
+D3DMATRIX r_shadowmatrix =
+{
+	1,				0,				0,				0,
+	0,				1,				0,				0,
+	SHADOW_SKEW_X,	SHADOW_SKEW_Y,	SHADOW_VSCALE,	0,
+	0,				0,				SHADOW_HEIGHT,	1
+};
+
+
 void D3DAlias_TransformShadowed (entity_t *ent, aliashdr_t *hdr)
 {
 	// initialize entity matrix to identity
@@ -749,6 +757,11 @@ void D3DAlias_TransformShadowed (entity_t *ent, aliashdr_t *hdr)
 
 	// build the transformation for this entity.  shadows only rotate around Z
 	D3DMatrix_Translate (&ent->matrix, ent->origin);
+
+	D3DMatrix_Translate (&ent->matrix, 0, 0, -(ent->origin[2] - ent->aliasstate.lightspot[2]));
+	D3DMatrix_Multiply (&ent->matrix, &r_shadowmatrix, &ent->matrix);
+	D3DMatrix_Translate (&ent->matrix, 0, 0, (ent->origin[2] - ent->aliasstate.lightspot[2]));
+
 	D3DMatrix_Rotate (&ent->matrix, 0, 0, 1, ent->angles[1]);
 
 	// run the final transform for scaling
@@ -788,7 +801,7 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, int flags = 0)
 		D3D_SetStreamSource (2, NULL, 0, 0);
 
 		// shadows just reuse the ShadeVector uniform for the lightspot as a convenience measure
-		D3DHLSL_SetFloatArray ("ShadeVector", state->lightspot, 3);
+		// D3DHLSL_SetFloatArray ("ShadeVector", state->lightspot, 3);
 	}
 	else
 	{
@@ -1114,7 +1127,11 @@ void D3DAlias_SetupAliasModel (entity_t *ent)
 	// (although in it's current incarnation the supporting infrastructure just works with the player)
 	state->teximage = hdr->skins[ent->skinnum].teximage[anim];
 	state->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
-	state->cmapimage = hdr->skins[ent->skinnum].cmapimage[anim];
+
+	// nehahra uses player.mdl for non-players :(
+	if (ent->entnum >= 1 && ent->entnum <= cl.maxclients && (ent->model->flags & EF_PLAYER))
+		state->cmapimage = hdr->skins[ent->skinnum].cmapimage[anim];
+	else state->cmapimage = NULL;
 
 	// build the sort order (which may be inverted for more optimal reuse)
 	// keeping the lowest first ensures that it's more likely to be reused, which works out well for quake anims
@@ -1158,6 +1175,9 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 
 		if (!stateset)
 		{
+			// this should still be set from the initial setup but let's make sure
+			D3DHLSL_SetFloat ("Overbright", d3d_OverbrightModulate);
+
 			D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
 			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
 
@@ -1218,20 +1238,11 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 				D3DHLSL_SetPass (FX_PASS_ALIAS_KUROK);
 				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
 			}
-			else if (state->lumaimage)
+			else if (state->lumaimage && gl_fullbrights.integer)
 			{
 				if ((ent->model->flags & EF_PLAYER) && state->cmapimage && !gl_nocolors.value)
-				{
-					if (gl_fullbrights.integer)
-						D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA);
-					else D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA_NOLUMA);
-				}
-				else
-				{
-					if (gl_fullbrights.integer)
-						D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
-					else D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA_NOLUMA);
-				}
+					D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA);
+				else D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
 
 				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
 				D3DHLSL_SetTexture (1, state->lumaimage->d3d_Texture);
@@ -1310,12 +1321,9 @@ void D3DAlias_DrawInstances (entity_t **ents, int numents, int firstent, int num
 		aliasstate_t *state = &ents[firstent]->aliasstate;
 
 		// set texture and choose the correct shader
-		if (state->lumaimage)
+		if (state->lumaimage && gl_fullbrights.integer)
 		{
-			if (gl_fullbrights.integer)
-				D3DHLSL_SetPass (FX_PASS_ALIAS_INSTANCED_LUMA);
-			else D3DHLSL_SetPass (FX_PASS_ALIAS_INSTANCED_LUMA_NOLUMA);
-
+			D3DHLSL_SetPass (FX_PASS_ALIAS_INSTANCED_LUMA);
 			D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
 			D3DHLSL_SetTexture (1, state->lumaimage->d3d_Texture);
 		}
@@ -1562,12 +1570,9 @@ void D3DAlias_DrawViewModel (void)
 	if (ent->lerppose[LERP_LAST] < 0) ent->lerppose[LERP_LAST] = 0;
 
 	// assume that the textures will always need to change
-	if (ent->aliasstate.lumaimage)
+	if (ent->aliasstate.lumaimage && gl_fullbrights.integer)
 	{
-		if (gl_fullbrights.integer)
-			D3DHLSL_SetPass (FX_PASS_ALIAS_VIEWMODEL_LUMA);
-		else D3DHLSL_SetPass (FX_PASS_ALIAS_VIEWMODEL_LUMA_NOLUMA);
-
+		D3DHLSL_SetPass (FX_PASS_ALIAS_VIEWMODEL_LUMA);
 		D3DHLSL_SetTexture (0, ent->aliasstate.teximage->d3d_Texture);
 		D3DHLSL_SetTexture (1, ent->aliasstate.lumaimage->d3d_Texture);
 	}

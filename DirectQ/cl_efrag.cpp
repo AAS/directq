@@ -117,7 +117,7 @@ void R_StoreEfrags (efrag_t **ppefrag)
 		// some progs might try to send static ents with no model through here...
 		if (!pefrag->entity->model) continue;
 
-		// prevent adding twice in this render frame (in an entity is in more than one leaf)
+		// prevent adding twice in this render frame (or if an entity is in more than one leaf)
 		if (pefrag->entity->visframe == d3d_RenderDef.framecount) continue;
 
 		switch (pefrag->entity->model->type)

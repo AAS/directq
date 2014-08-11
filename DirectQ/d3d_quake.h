@@ -34,7 +34,6 @@ void D3DRTT_EndScene (void);
 typedef struct palettedef_s
 {
 	PALETTEENTRY luma[256];
-	PALETTEENTRY noluma[256];
 	PALETTEENTRY standard[256];
 
 	D3DCOLOR standard32[256];
@@ -115,24 +114,17 @@ void D3DHLSL_SetVectorArray (D3DXHANDLE handle, D3DXVECTOR4 *vecs, int len);
 #define FX_PASS_WORLD_LUMA_ALPHA			12
 #define FX_PASS_SPRITE						13
 #define FX_PASS_UNDERWATER					14
-#define FX_PASS_ALIAS_LUMA_NOLUMA			15
-#define FX_PASS_WORLD_LUMA_NOLUMA			16
-#define FX_PASS_WORLD_LUMA_NOLUMA_ALPHA		17
-#define FX_PASS_ALIAS_INSTANCED_NOLUMA		18
-#define FX_PASS_ALIAS_INSTANCED_LUMA		19
-#define FX_PASS_ALIAS_INSTANCED_LUMA_NOLUMA	20
-#define FX_PASS_ALIAS_VIEWMODEL_NOLUMA		21
-#define FX_PASS_ALIAS_VIEWMODEL_LUMA		22
-#define FX_PASS_ALIAS_VIEWMODEL_LUMA_NOLUMA	23
-#define FX_PASS_CORONA						24
-#define FX_PASS_BBOXES						25
-#define FX_PASS_LIQUID_RIPPLE				26
-#define FX_PASS_PARTICLE_SQUARE				27
-#define FX_PASS_ALIAS_KUROK					28
-#define FX_PASS_ALIAS_PLAYER_NOLUMA			29
-#define FX_PASS_ALIAS_PLAYER_LUMA			30
-#define FX_PASS_ALIAS_PLAYER_LUMA_NOLUMA	31
-
+#define FX_PASS_ALIAS_INSTANCED_NOLUMA		15
+#define FX_PASS_ALIAS_INSTANCED_LUMA		16
+#define FX_PASS_ALIAS_VIEWMODEL_NOLUMA		17
+#define FX_PASS_ALIAS_VIEWMODEL_LUMA		18
+#define FX_PASS_CORONA						19
+#define FX_PASS_BBOXES						20
+#define FX_PASS_LIQUID_RIPPLE				21
+#define FX_PASS_PARTICLE_SQUARE				22
+#define FX_PASS_ALIAS_KUROK					23
+#define FX_PASS_ALIAS_PLAYER_NOLUMA			24
+#define FX_PASS_ALIAS_PLAYER_LUMA			25
 
 void D3DHLSL_Init (void);
 void D3DHLSL_Shutdown (void);
@@ -244,7 +236,6 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags);
 image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, int flags = 0);
 void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags);
-
 
 void D3D_ReleaseTextures (void);
 void D3D_FlushTextures (void);

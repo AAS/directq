@@ -693,12 +693,9 @@ void D3DBrush_DrawVBOSurfaces (void)
 			D3DHLSL_SetTexture (0, dc->tmu0tex);
 			D3DHLSL_SetTexture (1, tex->teximage->d3d_Texture);
 
-			if (tex->lumaimage)
+			if (tex->lumaimage && gl_fullbrights.integer)
 			{
-				if (gl_fullbrights.integer)
-					dc->ShaderPass = FX_PASS_WORLD_LUMA;
-				else dc->ShaderPass = FX_PASS_WORLD_LUMA_NOLUMA;
-
+				dc->ShaderPass = FX_PASS_WORLD_LUMA;
 				D3DHLSL_SetTexture (2, tex->lumaimage->d3d_Texture);
 			}
 			else dc->ShaderPass = FX_PASS_WORLD_NOLUMA;

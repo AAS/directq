@@ -80,9 +80,6 @@ typedef struct entity_s
 	int						relinkframe;	// static entities only; frame when added to the visedicts list
 	vec3_t					modelorg;		// relative to r_origin
 
-	// occlusion queries
-	bool					Occluded;
-
 	// allocation sequence number in the current map
 	int						allocnum;
 
@@ -123,15 +120,12 @@ typedef struct entity_s
 	// distance from client (for depth sorting)
 	float		dist;
 
-	// FIXME: could turn these into a union
-	// done (trivial_accept is only on alias models, topnode only on brush models)
-	union
-	{
-		int						trivial_accept;
-		struct mnode_s			*topnode;		// for bmodels, first world node
-	};
-	//  that splits bmodel, or NULL if
-	//  not split
+	struct mnode_s *topnode;
+
+	// static entities only
+	bool isStatic;
+	struct msurface_s *lightsurf;
+	float lightspot[3];
 
 	// the matrix used for transforming this entity
 	// D3DXMATRIX in *incredibly* unhappy living in an entity_t struct...

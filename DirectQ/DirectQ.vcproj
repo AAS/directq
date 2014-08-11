@@ -393,6 +393,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\in_joy.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\in_win.cpp"
 				>
 			</File>

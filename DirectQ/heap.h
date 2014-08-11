@@ -38,7 +38,7 @@ class CQuakeHunk
 public:
 	CQuakeHunk (int maxsizemb);
 	~CQuakeHunk (void);
-	void *Alloc (int size, BOOL memset0 = TRUE);
+	void *Alloc (int size);
 	void Free (void);
 	float GetSizeMB (void);
 

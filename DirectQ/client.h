@@ -74,8 +74,6 @@ typedef struct
 
 #define	SIGNON_CONNECTED		4			// signon messages to receive before connected
 
-#define	MAX_DLIGHTS		128
-
 #define DLF_NOCORONA	1	// set if the dynamic light is not to have a corona
 #define DLF_KILL		2	// kill the light automatically after 1 frame
 

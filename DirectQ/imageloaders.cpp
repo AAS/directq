@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
+void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags);
+
 #pragma pack (push, 1)
 typedef struct q2wal_s
 {
@@ -143,10 +145,10 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		len,
 		D3DX_DEFAULT,
 		D3DX_DEFAULT,
-		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+		1,
 		0,
 		D3DFMT_A8R8G8B8,
-		D3DPOOL_MANAGED,
+		D3DPOOL_SYSTEMMEM,
 		D3DX_FILTER_LINEAR,
 		D3DX_FILTER_BOX,
 		0,
@@ -155,11 +157,25 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		tex
 	);
 
-	// fixme - load into system ram instead, lock, then load through our normal loader
-
-	// now bring it into video RAM
 	if (SUCCEEDED (hr))
-		tex[0]->PreLoad ();
+	{
+		// load into system ram instead, lock, then load through our normal loader
+		// we load faster this way as we get to use our fast mipmap generator rather than the slow D3D one
+		LPDIRECT3DTEXTURE9 tex2 = NULL;
+		D3DLOCKED_RECT lockrect;
+		D3DSURFACE_DESC surfdesc;
+
+		tex[0]->GetLevelDesc (0, &surfdesc);
+		tex[0]->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+		D3D_UploadTexture (&tex2, lockrect.pBits, surfdesc.Width, surfdesc.Height, flags | IMAGE_32BIT);
+		tex[0]->UnlockRect (0);
+		tex[0]->Release ();
+		tex[0] = tex2;
+
+		// now bring it into video RAM
+		if (SUCCEEDED (hr))
+			tex[0]->PreLoad ();
+	}
 
 	return hr;
 }

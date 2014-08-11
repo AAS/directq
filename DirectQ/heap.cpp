@@ -343,7 +343,7 @@ float CQuakeHunk::GetSizeMB (void)
 }
 
 
-void *CQuakeHunk::Alloc (int size, BOOL memset0)
+void *CQuakeHunk::Alloc (int size)
 {
 	if (this->LowMark + size >= this->MaxSize)
 	{
@@ -368,12 +368,6 @@ void *CQuakeHunk::Alloc (int size, BOOL memset0)
 	// fix up pointers and return what we got
 	byte *buf = this->BasePtr + this->LowMark;
 	this->LowMark += size;
-
-	// ensure set to 0 memory (bug city otherwise)
-	// sometimes we don't want to memset 0 the allocation; this should be used with EXTREME caution
-	// and generally only if we know that the entire allocation is going to be more or less immediately
-	// overwritten with valid data (FIXME : should I rename the param to reflect this?)
-	if (memset0) memset (buf, 0, size);
 
 	TotalSize += size;
 

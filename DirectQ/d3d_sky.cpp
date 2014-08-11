@@ -128,42 +128,6 @@ void D3DSky_FinalizeSky (void)
 */
 
 
-void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int scaled_width, int scaled_height, int flags);
-
-void D3DSky_LoadTexture (LPDIRECT3DTEXTURE9 *tex, void *data, int width, int height, int flags)
-{
-	if (!tex[0])
-	{
-		// if the texture was released (it's size changed) we need to respecify it completely
-		D3D_UploadTexture (tex, data, width, height, flags);
-		return;
-	}
-
-	// otherwise it's the same size so we just need to replace the data
-	// the scaled sizes are initially equal to the original sizes (for np2 support)
-	int scaled_width = width;
-	int scaled_height = height;
-
-	// check scaling here first
-	if (!d3d_GlobalCaps.supportNonPow2)
-	{
-		scaled_width = D3D_PowerOf2Size (width);
-		scaled_height = D3D_PowerOf2Size (height);
-	}
-	else
-	{
-		scaled_width = (width + 3) & ~3;
-		scaled_height = (height + 3) & ~3;
-	}
-
-	// clamp to max texture size
-	if (scaled_width > d3d_DeviceCaps.MaxTextureWidth) scaled_width = d3d_DeviceCaps.MaxTextureWidth;
-	if (scaled_height > d3d_DeviceCaps.MaxTextureHeight) scaled_height = d3d_DeviceCaps.MaxTextureHeight;
-
-	D3D_LoadTextureData (tex, data, width, height, scaled_width, scaled_height, flags);
-}
-
-
 /*
 =============
 D3DSky_InitTextures
@@ -227,7 +191,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 
 	// upload it - solid sky can go up as 8 bit
 	if (!D3D_LoadExternalTexture (&solidskytexture, va ("%s_solid", mt->name), 0))
-		D3DSky_LoadTexture (&solidskytexture, trans, transwidth, transheight, 0);
+		D3D_UploadTexture (&solidskytexture, trans, transwidth, transheight, 0);
 
 	// bottom layer
 	for (int i = 0; i < transheight; i++)
@@ -245,7 +209,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 	// upload it - alpha sky needs to go up as 32 bit owing to averaging
 	// don't compress it so that we can lock it for alpha updating
 	if (!D3D_LoadExternalTexture (&alphaskytexture, va ("%s_alpha", mt->name), IMAGE_ALPHA))
-		D3DSky_LoadTexture (&alphaskytexture, trans, transwidth, transheight, IMAGE_32BIT | IMAGE_ALPHA);
+		D3D_UploadTexture (&alphaskytexture, trans, transwidth, transheight, IMAGE_32BIT | IMAGE_ALPHA);
 
 	// prevent it happening first time during game play
 	Zone_Free (trans);

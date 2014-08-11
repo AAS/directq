@@ -407,6 +407,20 @@ Loads in a model for the given name
 model_t *Mod_ForName (char *name, bool crash) {return Mod_LoadModel (Mod_FindName (name), crash);}
 
 
+bool HasLumaTexels (byte *data, int size)
+{
+	for (int i = 0; i < size; i++)
+	{
+		if (data[i] == 255) continue;
+		if (data[i] < 224) continue;
+
+		return true;
+	}
+
+	return false;
+}
+
+
 /*
 ===============================================================================
 
@@ -535,9 +549,8 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 
 				if (mt->name[0] == '*') texflags |= IMAGE_LIQUID;
 
-				// load the luma first so that we know if we have it (remind me again of why we need to know that)
-				tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, lumaflags);
 				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, texflags);
+				tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, lumaflags);
 			}
 			else
 			{
@@ -2099,8 +2112,8 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 			int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
 			int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
 
-			luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 			tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
+			luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 
 			if (!stricmp (mod->name, "progs/player.mdl"))
 			{
@@ -2139,8 +2152,8 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 				int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
 				int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
 
-				luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 				tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
+				luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 
 				if (!stricmp (mod->name, "progs/player.mdl"))
 				{

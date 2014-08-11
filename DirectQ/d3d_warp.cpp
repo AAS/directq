@@ -81,7 +81,7 @@ void D3DWarp_CreateWWTex (int detaillevel)
 	// protect against multiple calls
 	SAFE_RELEASE (d3d_WWTexture);
 
-	hr = d3d_Device->CreateTexture (detail, detail, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &d3d_WWTexture, NULL);
+	hr = d3d_Device->CreateTexture (detail, detail, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &d3d_WWTexture, NULL);
 	if (FAILED (hr)) Sys_Error ("D3DWarp_CreateWWTex : d3d_Device->CreateTexture failed");
 
 	D3DLOCKED_RECT lockrect;
@@ -102,8 +102,6 @@ void D3DWarp_CreateWWTex (int detaillevel)
 	}
 
 	d3d_WWTexture->UnlockRect (0);
-	D3DXFilterTexture (d3d_WWTexture, NULL, 0, D3DX_FILTER_BOX);
-
 	// D3DXSaveTextureToFile ("wwtex.png", D3DXIFF_PNG, d3d_WWTexture, NULL);
 }
 
@@ -602,7 +600,7 @@ void D3DRTT_EndScene (void)
 	if (r_waterwarpfactor.value < 1) Cvar_Set (&r_waterwarpfactor, 1.0f);
 
 	// rescale to the approx same range as software quake
-	float warpscale = (r_waterwarpscale.value * 7.0f) / 5.0f;
+	float warpscale = (r_waterwarpscale.value * 7.0f) / 10.0f;
 
 	float Scale[3] =
 	{
@@ -610,7 +608,7 @@ void D3DRTT_EndScene (void)
 		// the incoming texcoord
 		warpscale * (float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height * 0.2f,
 		warpscale * 0.2f,
-		(r_waterwarpfactor.value / 1500.0f)
+		(r_waterwarpfactor.value / 1000.0f)
 	};
 
 	D3DHLSL_SetFloatArray ("Scale", Scale, 3);

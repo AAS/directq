@@ -251,7 +251,7 @@ typedef struct msurface_s
 
 	// lighting info
 	int			dlightframe;
-	int			dlightbits[4];
+	int			dlightbits[MAX_DLIGHTS >> 5];
 
 	// overbright factor for surf
 	int			overbright;

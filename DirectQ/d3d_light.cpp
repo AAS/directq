@@ -161,9 +161,12 @@ void D3DLight_EndCoronas (void)
 	}
 }
 
+cvar_t v_dlightcshift ("v_dlightcshift", 1.0f);
 
 void D3DLight_AddLightBlend (float r, float g, float b, float a2)
 {
+	if (v_dlightcshift.value >= 0) a2 *= v_dlightcshift.value;
+
 	float	a;
 	float blend[4] =
 	{
@@ -617,6 +620,7 @@ LIGHT SAMPLING
 =============================================================================
 */
 
+msurface_t		*lightsurf;
 mplane_t		*lightplane;
 vec3_t			lightspot;
 
@@ -735,6 +739,9 @@ loc0:;
 				color[0] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
 			}
 
+			// store out the surf that was hit
+			lightsurf = surf;
+
 			// success
 			return true;
 		}
@@ -758,6 +765,68 @@ void R_MinimumLight (float *c, float factor)
 }
 
 
+void D3DLight_StaticEnt (entity_t *e, msurface_t *surf, float *color)
+{
+	int ds = (int) ((float) DotProduct (e->lightspot, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+	int dt = (int) ((float) DotProduct (e->lightspot, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+
+	ds -= surf->texturemins[0];
+	dt -= surf->texturemins[1];
+
+	lightsurf = e->lightsurf;
+	VectorCopy2 (lightspot, e->lightspot);
+
+	if (surf->samples)
+	{
+		// LordHavoc: enhanced to interpolate lighting
+		byte *lightmap;
+		int maps,
+			dsfrac = ds & 15,
+			dtfrac = dt & 15,
+			r00 = 0, g00 = 0, b00 = 0,
+			r01 = 0, g01 = 0, b01 = 0,
+			r10 = 0, g10 = 0, b10 = 0,
+			r11 = 0, g11 = 0, b11 = 0;
+		float scale;
+		int line3 = ((surf->extents[0] >> 4) + 1) * 3;
+
+		// LordHavoc: *3 for color
+		lightmap = surf->samples + ((dt >> 4) * ((surf->extents[0] >> 4) + 1) + (ds >> 4)) * 3;
+
+		for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+		{
+			// keep this consistent with BSP lighting
+			scale = (float) d_lightstylevalue[surf->styles[maps]];
+
+			r00 += (float) lightmap[0] * scale;
+			g00 += (float) lightmap[1] * scale;
+			b00 += (float) lightmap[2] * scale;
+
+			r01 += (float) lightmap[3] * scale;
+			g01 += (float) lightmap[4] * scale;
+			b01 += (float) lightmap[5] * scale;
+
+			r10 += (float) lightmap[line3 + 0] * scale;
+			g10 += (float) lightmap[line3 + 1] * scale;
+			b10 += (float) lightmap[line3 + 2] * scale;
+
+			r11 += (float) lightmap[line3 + 3] * scale;
+			g11 += (float) lightmap[line3 + 4] * scale;
+			b11 += (float) lightmap[line3 + 5] * scale;
+
+			// LordHavoc: *3 for colored lighting
+			lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3;
+		}
+
+		// somebody's just taking the piss here...
+		// (lightmap is BGR so swap back to RGB)
+		color[2] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
+		color[1] += (float) ((int) ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)));
+		color[0] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
+	}
+}
+
+
 void D3DLight_LightPoint (entity_t *e, float *c)
 {
 	vec3_t dist;
@@ -774,6 +843,7 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 	end[2] = start[2] - 2048;
 
 	lightplane = NULL;
+	lightsurf = NULL;
 
 	// keep MDL lighting consistent with the world
 	if (r_fullbright.integer || !cl.worldmodel->brushhdr->lightdata)
@@ -813,7 +883,10 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 		}
 
 		// add lighting from lightmaps
-		R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
+		if (e->isStatic && e->lightsurf)
+			D3DLight_StaticEnt (e, e->lightsurf, c);
+		else if (!e->isStatic)
+			R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
 	}
 
 	// round lighting to the nearest to help prevent stair steps
@@ -835,10 +908,25 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 	}
 
 	// set minimum light values
-	if (e == &cl.viewent) R_MinimumLight (c, 72);
-	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, 24);
-	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, 72);
-	if (e->model->type == mod_brush) R_MinimumLight (c, 18);
+	if (e == &cl.viewent) R_MinimumLight (c, (72 >> r_overbright.integer));
+	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, (24 >> r_overbright.integer));
+	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, (72 >> r_overbright.integer));
+	if (e->model->type == mod_brush) R_MinimumLight (c, (18 >> r_overbright.integer));
+}
+
+
+void D3DLight_PrepStaticEntityLighting (entity_t *ent)
+{
+	// throw away returned light
+	float discard[3];
+
+	// this needs to run first otherwise the ent won't be lit!!!
+	D3DLight_LightPoint (ent, discard);
+
+	// mark as static and save out the results
+	ent->isStatic = true;
+	ent->lightsurf = lightsurf;
+	VectorCopy2 (ent->lightspot, lightspot);
 }
 
 
@@ -1051,7 +1139,11 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 		// it's unsafe to use the scratch buffer for this because it happens during map loading and other loads
 		// may also want to use it for their own stuff; we'll just put it on the hunk instead
 		if (!d3d_Lightmaps[texnum].Allocated)
+		{
+			// MainHunk->Alloc no longer does a memset 0
 			d3d_Lightmaps[texnum].Allocated = (unsigned short *) MainHunk->Alloc (LightmapWidth * sizeof (unsigned short));
+			memset (d3d_Lightmaps[texnum].Allocated, 0, LightmapWidth * sizeof (unsigned short));
+		}
 
 		int best = LightmapHeight;
 
@@ -1283,6 +1375,9 @@ void D3DLight_CheckSurfaceForModification (msurface_t *surf)
 	// no lightmaps
 	if (surf->flags & SURF_DRAWSKY) return;
 	if (surf->flags & SURF_DRAWTURB) return;
+
+	// ensure that we've got the correct texture for this surf
+	surf->d3d_LightmapTex = d3d_Lightmaps[surf->LightmapTextureNum].Texture;
 
 	// hack the cached dynamic light to force an update on a properties change
 	bool oldcache = surf->cached_dlight;

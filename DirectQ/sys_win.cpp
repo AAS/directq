@@ -635,13 +635,17 @@ void AppActivate (BOOL fActive, BOOL minimize)
 
 void D3DVid_ResizeWindow (HWND hWnd);
 
-cvar_t sys_idletime ("sys_idletime", 10.0f, CVAR_ARCHIVE);
+cvar_t sys_sleeptime ("sys_sleeptime", 0.0f, CVAR_ARCHIVE);
 double last_inputtime = 0;
+bool IN_ReadInputMessages (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 
 /* main window procedure */
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
 	int fActive, fMinimized;
+
+	// check for input messages
+	if (IN_ReadInputMessages (hWnd, Msg, wParam, lParam)) return 0;
 
 	switch (Msg)
 	{
@@ -678,11 +682,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 			EndPaint (hWnd, &ps);
 		}
 
-		return 0;
-
-	case WM_INPUT:
-		last_inputtime = realtime;
-		IN_ReadRawInput ((HRAWINPUT) lParam);
 		return 0;
 
 	case WM_SYSCOMMAND:
@@ -731,42 +730,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 		PostQuitMessage (0);
 		return 0;
-
-	case WM_MOUSEWHEEL:
-		// in the console or the menu we capture the mousewheel and use it for scrolling
-		if (key_dest == key_console)
-		{
-			if ((short) HIWORD (wParam) > 0)
-			{
-				Key_Event (K_PGUP, true);
-				Key_Event (K_PGUP, false);
-			}
-			else
-			{
-				Key_Event (K_PGDN, true);
-				Key_Event (K_PGDN, false);
-			}
-
-			return 0;
-		}
-		else if (key_dest == key_menu)
-		{
-			if ((short) HIWORD (wParam) > 0)
-			{
-				Key_Event (K_UPARROW, true);
-				Key_Event (K_UPARROW, false);
-			}
-			else
-			{
-				Key_Event (K_DOWNARROW, true);
-				Key_Event (K_DOWNARROW, false);
-			}
-
-			return 0;
-		}
-
-		// key_game returns DefWindowProc
-		break;
 
 	case MM_MCINOTIFY:
 		return CDAudio_MessageHandler (hWnd, Msg, wParam, lParam);
@@ -1041,18 +1004,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 			Sleep (PAUSE_SLEEP);
 		else if (!ActiveApp || Minimized || block_drawing)
 			Sleep (NOT_FOCUS_SLEEP);
-		else if (sys_idletime.value > 0 && !cls.demoplayback)
-		{
-			// start sleeping if we go idle (unless we're in a demo in which case we take the full CPU)
-			if (realtime > last_inputtime + (sys_idletime.value * 8))
-				Sleep (100);
-			else if (realtime > last_inputtime + (sys_idletime.value * 4))
-				Sleep (5);
-			else if (realtime > last_inputtime + (sys_idletime.value * 2))
-				Sleep (1);
-			else if (realtime > last_inputtime + sys_idletime.value)
-				Sleep (0);
-		}
 
 		if (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE) != 0)
 		{
@@ -1063,6 +1014,19 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 				TranslateMessage (&msg);
 				DispatchMessage (&msg);
 			}
+		}
+
+		if (sys_sleeptime.value > 0 && !cls.demoplayback)
+		{
+			// start sleeping if we go idle (unless we're in a demo in which case we take the full CPU)
+			if (realtime > last_inputtime + (sys_sleeptime.value * 8))
+				Sleep (100);
+			else if (realtime > last_inputtime + (sys_sleeptime.value * 4))
+				Sleep (5);
+			else if (realtime > last_inputtime + (sys_sleeptime.value * 2))
+				Sleep (1);
+			else if (realtime > last_inputtime + sys_sleeptime.value)
+				Sleep (0);
 		}
 
 		// RMQ engine timer; more limited resolution than QPC but virtually immune to resolution problems at very high FPS
