@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -22,9 +22,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 #include "resource.h"
+#include "d3d_vbo.h"
 
 extern HWND d3d_Window;
-
+void R_AnimateLight (void);
 
 /*
 ============================================================================================================
@@ -110,9 +111,19 @@ D3DXMATRIX *D3D_LoadIdentity (D3DXMATRIX *matrix)
 void D3D_MultMatrix (D3DMATRIX *matrix1, D3DMATRIX *matrix2)
 {
 	D3DXMATRIX *m1 = D3D_MakeD3DXMatrix (matrix1);
-	D3DXMATRIX *m2 = D3D_MakeD3DXMatrix (matrix1);
+	D3DXMATRIX *m2 = D3D_MakeD3DXMatrix (matrix2);
 
 	QD3DXMatrixMultiply (m1, m1, m2);
+}
+
+
+void D3D_MultMatrix (D3DMATRIX *matrixout, D3DMATRIX *matrix1, D3DMATRIX *matrix2)
+{
+	D3DXMATRIX *m1 = D3D_MakeD3DXMatrix (matrix1);
+	D3DXMATRIX *m2 = D3D_MakeD3DXMatrix (matrix2);
+	D3DXMATRIX *m3 = D3D_MakeD3DXMatrix (matrixout);
+
+	QD3DXMatrixMultiply (m3, m1, m2);
 }
 
 
@@ -145,10 +156,27 @@ bool SilentLoad = false;
 char *vs_version;
 char *ps_version;
 
+// used to track the current pass so we know if we need to end old/set state/begin new or just commit changes instead
+int d3d_FXPass = FX_PASS_NOTBEGUN;
+bool d3d_FXCommitPending = false;
+
+void D3D_BeginShaderPass (int passnum)
+{
+	d3d_MasterFX->BeginPass (passnum);
+	d3d_FXCommitPending = false;
+	d3d_FXPass = passnum;
+}
+
+
+void D3D_EndShaderPass (void)
+{
+	d3d_MasterFX->EndPass ();
+	d3d_FXCommitPending = false;
+	d3d_FXPass = FX_PASS_NOTBEGUN;
+}
+
 // effects
-LPD3DXEFFECT d3d_LiquidFX = NULL;
-LPD3DXEFFECT d3d_SkyFX = NULL;
-LPD3DXEFFECT d3d_ScreenFX = NULL;
+LPD3DXEFFECT d3d_MasterFX = NULL;
 
 // vertex declarations
 LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex1 = NULL;
@@ -156,22 +184,6 @@ LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex2 = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyz = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuseTex1 = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuse = NULL;
-
-void D3D_UpgradeShader (char *EffectString, char *old)
-{
-	for (int i = 0;; i++)
-	{
-		if (!EffectString[i]) return;
-
-		if (!strnicmp (&EffectString[i], old, 8))
-		{
-			EffectString[i + 4] = '3';
-			return;
-		}
-	}
-
-	// never reached
-}
 
 
 bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff, int vsver, int psver)
@@ -182,10 +194,6 @@ bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff, int vsver, i
 	// load the resource - note - we don't use D3DXCreateEffectFromResource as importing an RCDATA resource
 	// from a text file in Visual Studio doesn't NULL terminate the file, causing it to blow up.
 	int len = Sys_LoadResourceData (resourceid, (void **) &EffectString);
-
-	// allow a higher vs level in case we have software emulated vs
-	if (vsver >= 3) D3D_UpgradeShader (EffectString, " vs_2_0 ");
-	if (psver >= 3) D3D_UpgradeShader (EffectString, " ps_2_0 ");
 
 	// basline flags
 	DWORD ShaderFlags = D3DXSHADER_SKIPVALIDATION | D3DXFX_DONOTSAVESTATE;
@@ -254,10 +262,15 @@ void D3D_InitHLSL (void)
 	D3D_CreateVertDeclFromFVFCode (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1, &d3d_VDXyzDiffuseTex1);
 	D3D_CreateVertDeclFromFVFCode (D3DFVF_XYZ | D3DFVF_DIFFUSE, &d3d_VDXyzDiffuse);
 
+	// unsupported to begin with
+	d3d_GlobalCaps.supportPixelShaders = false;
+
+	// no PS with < 3 TMUs
+	if (d3d_GlobalCaps.NumTMUs < 3) return;
+
 	// now set up effects
 	vs_version = (char *) QD3DXGetVertexShaderProfile (d3d_Device);
 	ps_version = (char *) QD3DXGetPixelShaderProfile (d3d_Device);
-	d3d_GlobalCaps.supportPixelShaders = false;
 
 	if (!SilentLoad) Con_Printf ("\n");
 
@@ -296,9 +309,7 @@ void D3D_InitHLSL (void)
 	}
 
 	// load effects - if we get this far we know that pixel shaders are available
-	if (!D3D_LoadEffect ("Liquid Shader", IDR_LIQUID, &d3d_LiquidFX, vsvermaj, psvermaj)) return;
-	if (!D3D_LoadEffect ("Sky Shader", IDR_SKY, &d3d_SkyFX, vsvermaj, psvermaj)) return;
-	if (!D3D_LoadEffect ("Screen Shader", IDR_SCREEN, &d3d_ScreenFX, vsvermaj, psvermaj)) return;
+	if (!D3D_LoadEffect ("Master Shader", IDR_MASTERFX, &d3d_MasterFX, vsvermaj, psvermaj)) return;
 
 	if (!SilentLoad) Con_Printf ("Created Shaders OK\n");
 
@@ -311,9 +322,7 @@ void D3D_InitHLSL (void)
 void D3D_ShutdownHLSL (void)
 {
 	// effects
-	SAFE_RELEASE (d3d_LiquidFX);
-	SAFE_RELEASE (d3d_SkyFX);
-	SAFE_RELEASE (d3d_ScreenFX);
+	SAFE_RELEASE (d3d_MasterFX);
 
 	// declarations
 	SAFE_RELEASE (d3d_VDXyzTex1);
@@ -519,13 +528,48 @@ void D3D_SetupTurbState (void);
 void D3D_TakeDownTurbState (void);
 void D3D_EmitWarpSurface (d3d_modelsurf_t *modelsurf);
 
+void D3DParticle_Callback (void *blah)
+{
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+
+	// switch to point sampling for particle mips as they don't need full trilinear
+	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter == D3DTEXF_NONE ? D3DTEXF_NONE : D3DTEXF_POINT);
+
+	if (!d3d_GlobalCaps.usingPixelShaders)
+	{
+		D3D_SetTexCoordIndexes (0);
+
+		D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+
+		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+	}
+}
+
+
+void D3DAlpha_CullCallback (void *blah)
+{
+	D3D_BackfaceCull (D3DCULL_CCW);
+}
+
+
+void D3DAlpha_NoCullCallback (void *blah)
+{
+	D3D_BackfaceCull (D3DCULL_NONE);
+}
+
+
 void D3D_AlphaListStageChange (int oldtype, int newtype)
 {
+	extern LPDIRECT3DTEXTURE9 cachedparticletexture;
+
 	switch (oldtype)
 	{
 	case D3D_ALPHATYPE_WATERWARP:
 		D3D_TakeDownTurbState ();
-		D3D_BackfaceCull (D3DCULL_CCW);
+		VBO_AddCallback (D3DAlpha_CullCallback);
 
 		break;
 
@@ -537,13 +581,57 @@ void D3D_AlphaListStageChange (int oldtype, int newtype)
 	{
 	case D3D_ALPHATYPE_WATERWARP:
 		D3D_SetupTurbState ();
-		D3D_BackfaceCull (D3DCULL_NONE);
+		VBO_AddCallback (D3DAlpha_NoCullCallback);
 
+		break;
+
+	case D3D_ALPHATYPE_PARTICLE:
+		cachedparticletexture = NULL;
+		VBO_AddCallback (D3DParticle_Callback);
 		break;
 
 	default:
 		break;
 	}
+}
+
+
+void VBOAlpha_SetupCallback (void *blah)
+{
+	// enable blending
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+
+	// don't write anything with 0 alpha
+	D3D_SetRenderState (D3DRS_ALPHAREF, (DWORD) 0x00000001);
+	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, TRUE); 
+	D3D_SetRenderState (D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+}
+
+
+void VBOAlpha_TakedownCallback (void *blah)
+{
+	// disable blending (done)
+	// the cull type may have been modified going through here so put it back the way it was
+	D3D_BackfaceCull (D3DCULL_CCW);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE); 
+}
+
+
+void VBOAlpha_ChaseAliasOn (void *blah)
+{
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+}
+
+
+void VBOAlpha_ChaseAliasOff (void *blah)
+{
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 }
 
 
@@ -578,14 +666,11 @@ void D3D_RenderAlphaList (void)
 		);
 	}
 
-	// enable blending
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-
 	int previous = 0;
+	extern LPDIRECT3DTEXTURE9 cachedparticletexture;
+
+	VBO_AddCallback (VBOAlpha_SetupCallback);
+	cachedparticletexture = NULL;
 
 	// now add all the items in it to the alpha buffer
 	for (int i = 0; i < d3d_NumAlphaList; i++)
@@ -603,9 +688,9 @@ void D3D_RenderAlphaList (void)
 			if (d3d_AlphaList[i]->Entity->model->type == mod_alias)
 			{
 				// the viewent needs to write to Z
-				if (d3d_AlphaList[i]->Entity == cl_entities[cl.viewentity] && chase_active.value) D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+				if (d3d_AlphaList[i]->Entity == cl_entities[cl.viewentity] && chase_active.value) VBO_AddCallback (VBOAlpha_ChaseAliasOn);
 				D3D_DrawAliasBatch (&d3d_AlphaList[i]->Entity, 1);
-				if (d3d_AlphaList[i]->Entity == cl_entities[cl.viewentity] && chase_active.value) D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+				if (d3d_AlphaList[i]->Entity == cl_entities[cl.viewentity] && chase_active.value) VBO_AddCallback (VBOAlpha_ChaseAliasOff);
 			}
 			else if (d3d_AlphaList[i]->Entity->model->type == mod_brush)
 				D3D_DrawAlphaBrushModel (d3d_AlphaList[i]->Entity);
@@ -632,14 +717,10 @@ void D3D_RenderAlphaList (void)
 	// take down the final state used (in case it was a HLSL state)
 	D3D_AlphaListStageChange (d3d_AlphaList[d3d_NumAlphaList - 1]->Type, 0);
 
-	// disable blending (done)
-	// the cull type may have been modified going through here so put it back the way it was
-	D3D_BackfaceCull (D3DCULL_CCW);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-
 	// reset alpha list
 	d3d_NumAlphaList = 0;
+
+	VBO_AddCallback (VBOAlpha_TakedownCallback);
 }
 
 
@@ -695,20 +776,12 @@ void R_InitTextures (void)
 // textures to load from resources
 extern LPDIRECT3DTEXTURE9 particledottexture;
 
-extern LPDIRECT3DTEXTURE9 R_PaletteTexture;
-
-LPDIRECT3DTEXTURE9 r_blacktexture = NULL;
-LPDIRECT3DTEXTURE9 r_greytexture = NULL;
-
 void Draw_FreeCrosshairs (void);
 
 void R_ReleaseResourceTextures (void)
 {
 	SAFE_RELEASE (particledottexture);
-
 	SAFE_RELEASE (crosshairtexture);
-	SAFE_RELEASE (r_blacktexture);
-	SAFE_RELEASE (r_greytexture);
 
 	// and replacement crosshairs too
 	Draw_FreeCrosshairs ();
@@ -723,45 +796,8 @@ void R_InitResourceTextures (void)
 	D3D_LoadResourceTexture (&crosshairtexture, IDR_CROSSHAIR, 0);
 	D3D_LoadResourceTexture (&yahtexture, IDR_YOUAREHERE, 0);
 
-	// create a texture for the palette
-	// this is to save on state changes when a flat colour is needed; rather than
-	// switching off texturing and other messing, we just draw this one.
-	byte *paldata = (byte *) scratchbuf;
-
-	for (int i = 0; i < 256; i++)
-	{
-		int row = (i >> 4) * 8;
-		int col = (i & 15) * 8;
-
-		for (int x = col; x < col + 8; x++)
-		{
-			for (int y = row; y < row + 8; y++)
-			{
-				int p = y * 128 + x;
-
-				paldata[p] = i;
-			}
-		}
-	}
-
-	D3D_UploadTexture (&R_PaletteTexture, paldata, 128, 128, 0);
-
-	// clear to black
-	Q_MemSet (paldata, 0, 128 * 128);
-
-	// load the black texture - we must mipmap this and also load it as 32 bit
-	// (in case palette index 0 isn't black).  also load it really really small...
-	D3D_UploadTexture (&r_blacktexture, paldata, 4, 4, IMAGE_MIPMAP);
-
-	// clear to grey
-	Q_MemSet (paldata, 128, 128 * 128);
-
-	// load the black texture - we must mipmap this and also load it as 32 bit
-	// (in case palette index 0 isn't black).  also load it really really small...
-	D3D_UploadTexture (&r_greytexture, paldata, 4, 4, IMAGE_MIPMAP);
-
 	// load the notexture properly
-	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->width, r_notexture_mip->height, IMAGE_MIPMAP);
+	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->width, r_notexture_mip->height, IMAGE_MIPMAP | IMAGE_NOCOMPRESS);
 }
 
 
@@ -776,9 +812,6 @@ cvar_t r_lerpframe ("r_lerpframe", "1", CVAR_ARCHIVE);
 // allow the old QER names as aliases
 cvar_alias_t r_interpolate_model_animation ("r_interpolate_model_animation", &r_lerpframe);
 cvar_alias_t r_interpolate_model_transform ("r_interpolate_model_transform", &r_lerporient);
-
-// these cvars do nothing for now; they only exist to soak up abuse from nehahra maps which expect them to be there
-cvar_t r_oldsky ("r_oldsky", "1", CVAR_NEHAHRA);
 
 cmd_t R_ReadPointFile_f_Cmd ("pointfile", R_ReadPointFile_f);
 
@@ -977,20 +1010,22 @@ void IN_ActivateMouse (void);
 void R_RevalidateSkybox (void);
 void D3D_InitSubdivision (void);
 void D3D_ModelSurfsBeginMap (void);
+void R_FixupBModelBBoxes (void);
+void R_FindHipnoticWindows (void);
 
 void R_NewMap (void)
 {
-	// we're going to be creating some default pool resources here, so
-	// evict the managed resources to get the default stuff into best locations
-	d3d_Device->EvictManagedResources ();
+	// force an initial sbar update
+	Sbar_Changed ();
 
 	// init frame counters
 	d3d_RenderDef.skyframe = -1;
 	d3d_RenderDef.framecount = 1;
 	d3d_RenderDef.visframecount = 0;
 
-	// normal light value
-	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 256;
+	// normal light value - making this consistent with a value of 'm' in R_AnimateLight 
+	// will prevent the upload of lightmaps when a surface is first seen!
+	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 264;
 
 	// clear out efrags (one short???)
 	for (int i = 0; i < cl.worldmodel->brushhdr->numleafs; i++)
@@ -1025,6 +1060,8 @@ void R_NewMap (void)
 	D3D_InitSubdivision ();
 	D3D_ModelSurfsBeginMap ();
 	D3D_AlphaListNewMap ();
+	R_FixupBModelBBoxes ();
+	R_FindHipnoticWindows ();
 
 	// release cached skins to save memory
 	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);
@@ -1058,117 +1095,4 @@ void R_NewMap (void)
 	R_RevalidateSkybox ();
 }
 
-
-/*
-============================================================================================================
-
-		NEHAHRA SHOWLMP STUFF
-
-============================================================================================================
-*/
-
-// nehahra showlmp stuff; this was UGLY, EVIL and DISGUSTING code.
-#define SHOWLMP_MAXLABELS 256
-
-typedef struct showlmp_s
-{
-	bool		isactive;
-	float		x;
-	float		y;
-	char		label[32];
-	char		pic[128];
-} showlmp_t;
-
-showlmp_t *showlmp = NULL;
-extern bool nehahra;
-
-void SHOWLMP_decodehide (void)
-{
-	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
-
-	char *lmplabel = MSG_ReadString ();
-
-	for (int i = 0; i < SHOWLMP_MAXLABELS; i++)
-	{
-		if (showlmp[i].isactive && strcmp (showlmp[i].label, lmplabel) == 0)
-		{
-			showlmp[i].isactive = false;
-			return;
-		}
-	}
-}
-
-
-void SHOWLMP_decodeshow (void)
-{
-	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
-
-	char lmplabel[256], picname[256];
-
-	Q_strncpy (lmplabel, MSG_ReadString (), 255);
-	Q_strncpy (picname, MSG_ReadString (), 255);
-
-	float x = MSG_ReadByte ();
-	float y = MSG_ReadByte ();
-
-	int k = -1;
-
-	for (int i = 0; i < SHOWLMP_MAXLABELS; i++)
-	{
-		if (showlmp[i].isactive)
-		{
-			if (strcmp (showlmp[i].label, lmplabel) == 0)
-			{
-				// drop out to replace it
-				k = i;
-				break;
-			}
-		}
-		else if (k < 0)
-		{
-			// find first empty one to replace
-			k = i;
-		}
-	}
-
-	// none found to replace
-	if (k < 0) return;
-
-	// change existing one
-	showlmp[k].isactive = true;
-	Q_strncpy (showlmp[k].label, lmplabel, 255);
-	Q_strncpy (showlmp[k].pic, picname, 255);
-	showlmp[k].x = x;
-	showlmp[k].y = y;
-}
-
-
-void SHOWLMP_drawall (void)
-{
-	if (!nehahra) return;
-	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
-
-	for (int i = 0; i < SHOWLMP_MAXLABELS; i++)
-	{
-		if (showlmp[i].isactive)
-		{
-			Draw_Pic (showlmp[i].x, showlmp[i].y, Draw_CachePic (showlmp[i].pic));
-		}
-	}
-}
-
-
-void SHOWLMP_clear (void)
-{
-	if (!nehahra) return;
-	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
-
-	for (int i = 0; i < SHOWLMP_MAXLABELS; i++) showlmp[i].isactive = false;
-}
-
-
-void SHOWLMP_newgame (void)
-{
-	showlmp = NULL;
-}
 

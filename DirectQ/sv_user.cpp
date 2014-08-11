@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -125,14 +125,14 @@ void SV_UserFriction (void)
 	vec3_t	start, stop;
 	float	friction;
 	trace_t	trace;
-	
+
 	vel = velocity;
-	
+
 	speed = sqrt(vel[0]*vel[0] +vel[1]*vel[1]);
 	if (!speed)
 		return;
 
-// if the leading edge is over a dropoff, increase friction
+	// if the leading edge is over a dropoff, increase friction
 	start[0] = stop[0] = origin[0] + vel[0]/speed*16;
 	start[1] = stop[1] = origin[1] + vel[1]/speed*16;
 	start[2] = origin[2] + sv_player->v.mins[2];
@@ -142,13 +142,12 @@ void SV_UserFriction (void)
 
 	if (trace.fraction == 1.0)
 		friction = sv_friction.value*sv_edgefriction.value;
-	else
-		friction = sv_friction.value;
+	else friction = sv_friction.value;
 
-// apply friction	
+	// apply friction	
 	control = speed < sv_stopspeed.value ? sv_stopspeed.value : speed;
 	newspeed = speed - host_frametime*control*friction;
-	
+
 	if (newspeed < 0)
 		newspeed = 0;
 	newspeed /= speed;
@@ -308,7 +307,7 @@ void SV_WaterMove (void)
 
 void SV_WaterJump (void)
 {
-	if (sv.dwTime > (sv_player->v.teleport_time * 1000) || !sv_player->v.waterlevel)
+	if (sv.time > sv_player->v.teleport_time || !sv_player->v.waterlevel)
 	{
 		sv_player->v.flags = (int)sv_player->v.flags & ~FL_WATERJUMP;
 		sv_player->v.teleport_time = 0;
@@ -335,11 +334,11 @@ void SV_AirMove (void)
 
 	fmove = cmd.forwardmove;
 	smove = cmd.sidemove;
-	
-// hack to not let you back into teleporter
-	if (sv.dwTime < (sv_player->v.teleport_time * 1000) && fmove < 0)
+
+	// hack to not let you back into teleporter
+	if (sv.time < sv_player->v.teleport_time && fmove < 0)
 		fmove = 0;
-		
+
 	for (i=0; i<3; i++)
 		wishvel[i] = forward[i]*fmove + right[i]*smove;
 
@@ -455,6 +454,14 @@ void SV_ClientThink (void)
 }
 
 
+float MSG_ReadAngle16 (void)
+{
+	int val = MSG_ReadShort();
+	return val * (360.0 / 65536);
+//	return MSG_ReadShort () * (360.0 / 65536);
+}
+
+
 /*
 ===================
 SV_ReadClientMove
@@ -467,11 +474,19 @@ void SV_ReadClientMove (usercmd_t *move)
 	int		bits;
 
 	// read ping time
-	host_client->ping_times[host_client->num_pings % NUM_PING_TIMES] = SV_TIME - MSG_ReadFloat ();
+	host_client->ping_times[host_client->num_pings % NUM_PING_TIMES] = sv.time - MSG_ReadFloat ();
 	host_client->num_pings++;
 
-	// read current angles	
-	for (i = 0; i < 3; i++) angle[i] = MSG_ReadServerAngle (false);
+	// read current angles
+	if ((host_client->netconnection->mod == MOD_PROQUAKE) && sv.Protocol == PROTOCOL_VERSION)
+	{
+		for (i = 0; i < 3; i++)
+			angle[i] = MSG_ReadAngle16 ();
+	}
+	else
+	{
+		for (i = 0; i < 3; i++) angle[i] = MSG_ReadServerAngle (false);
+	}
 
 	VectorCopy (angle, host_client->edict->v.v_angle);
 

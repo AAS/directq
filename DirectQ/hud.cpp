@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -37,7 +37,6 @@ qpic_t		*sb_nums[2][11];
 qpic_t		*sb_colon, *sb_slash;
 qpic_t		*sb_ibar;
 qpic_t		*sb_sbar;
-qpic_t		*sb_scorebar;
 
 qpic_t      *sb_weapons[7][8];   // 0 is active, 1 is owned, 2-5 are flashes
 qpic_t      *sb_ammo[4];
@@ -60,6 +59,10 @@ qpic_t      *rsb_items[2];
 qpic_t      *rsb_ammo[3];
 qpic_t      *rsb_teambord;		// PGM 01/19/97 - team color border
 
+qpic_t		*gfx_ranking_lmp;
+qpic_t		*gfx_finale_lmp;
+qpic_t		*gfx_complete_lmp;
+
 //MED 01/04/97 added two more weapons + 3 alternates for grenade launcher
 qpic_t      *hsb_weapons[7][5];   // 0 is active, 1 is owned, 2-5 are flashes
 //MED 01/04/97 added array to simplify weapon parsing
@@ -70,139 +73,159 @@ qpic_t      *hsb_items[2];
 bool	hud_showscores = false;
 bool	hud_showdemoscores = false;
 
+// so that we force an update the first time we run
+bool	sbar_changed = true;
+bool	sbar_frame = true;
+
+void Sbar_Changed (void)
+{
+	sbar_changed = true;
+	sbar_frame = true;
+}
+
+
 void HUD_Init (void)
 {
 	int i;
 
+	gfx_ranking_lmp = Draw_LoadPic ("gfx/ranking.lmp");
+	gfx_finale_lmp = Draw_LoadPic ("gfx/finale.lmp");
+	gfx_complete_lmp = Draw_LoadPic ("gfx/complete.lmp");
+
+	// these must be loaded first otherwise 0 will butt on to the turtle pic, causing the right edge of
+	// the turtle pic to bleed into the left edge of 0 when using linear filtering with gl_conscale < 1
+	sb_nums[0][10] = Draw_LoadPic ("num_minus");
+	sb_nums[1][10] = Draw_LoadPic ("anum_minus");
+
+	sb_slash = Draw_LoadPic ("num_slash");
+	sb_colon = Draw_LoadPic ("num_colon");
+
 	for (i = 0; i < 10; i++)
 	{
-		sb_nums[0][i] = Draw_PicFromWad (va ("num_%i", i));
-		sb_nums[1][i] = Draw_PicFromWad (va ("anum_%i", i));
+		sb_nums[0][i] = Draw_LoadPic (va ("num_%i", i));
+		sb_nums[1][i] = Draw_LoadPic (va ("anum_%i", i));
 	}
 
-	sb_nums[0][10] = Draw_PicFromWad ("num_minus");
-	sb_nums[1][10] = Draw_PicFromWad ("anum_minus");
+	sb_weapons[0][0] = Draw_LoadPic ("inv_shotgun");
+	sb_weapons[0][1] = Draw_LoadPic ("inv_sshotgun");
+	sb_weapons[0][2] = Draw_LoadPic ("inv_nailgun");
+	sb_weapons[0][3] = Draw_LoadPic ("inv_snailgun");
+	sb_weapons[0][4] = Draw_LoadPic ("inv_rlaunch");
+	sb_weapons[0][5] = Draw_LoadPic ("inv_srlaunch");
+	sb_weapons[0][6] = Draw_LoadPic ("inv_lightng");
 
-	sb_colon = Draw_PicFromWad ("num_colon");
-	sb_slash = Draw_PicFromWad ("num_slash");
-
-	sb_weapons[0][0] = Draw_PicFromWad ("inv_shotgun");
-	sb_weapons[0][1] = Draw_PicFromWad ("inv_sshotgun");
-	sb_weapons[0][2] = Draw_PicFromWad ("inv_nailgun");
-	sb_weapons[0][3] = Draw_PicFromWad ("inv_snailgun");
-	sb_weapons[0][4] = Draw_PicFromWad ("inv_rlaunch");
-	sb_weapons[0][5] = Draw_PicFromWad ("inv_srlaunch");
-	sb_weapons[0][6] = Draw_PicFromWad ("inv_lightng");
-
-	sb_weapons[1][0] = Draw_PicFromWad ("inv2_shotgun");
-	sb_weapons[1][1] = Draw_PicFromWad ("inv2_sshotgun");
-	sb_weapons[1][2] = Draw_PicFromWad ("inv2_nailgun");
-	sb_weapons[1][3] = Draw_PicFromWad ("inv2_snailgun");
-	sb_weapons[1][4] = Draw_PicFromWad ("inv2_rlaunch");
-	sb_weapons[1][5] = Draw_PicFromWad ("inv2_srlaunch");
-	sb_weapons[1][6] = Draw_PicFromWad ("inv2_lightng");
+	sb_weapons[1][0] = Draw_LoadPic ("inv2_shotgun");
+	sb_weapons[1][1] = Draw_LoadPic ("inv2_sshotgun");
+	sb_weapons[1][2] = Draw_LoadPic ("inv2_nailgun");
+	sb_weapons[1][3] = Draw_LoadPic ("inv2_snailgun");
+	sb_weapons[1][4] = Draw_LoadPic ("inv2_rlaunch");
+	sb_weapons[1][5] = Draw_LoadPic ("inv2_srlaunch");
+	sb_weapons[1][6] = Draw_LoadPic ("inv2_lightng");
 
 	for (i = 0; i < 5; i++)
 	{
-		sb_weapons[2 + i][0] = Draw_PicFromWad (va("inva%i_shotgun", i + 1));
-		sb_weapons[2 + i][1] = Draw_PicFromWad (va("inva%i_sshotgun", i + 1));
-		sb_weapons[2 + i][2] = Draw_PicFromWad (va("inva%i_nailgun", i + 1));
-		sb_weapons[2 + i][3] = Draw_PicFromWad (va("inva%i_snailgun", i + 1));
-		sb_weapons[2 + i][4] = Draw_PicFromWad (va("inva%i_rlaunch", i + 1));
-		sb_weapons[2 + i][5] = Draw_PicFromWad (va("inva%i_srlaunch", i + 1));
-		sb_weapons[2 + i][6] = Draw_PicFromWad (va("inva%i_lightng", i + 1));
+		sb_weapons[2 + i][0] = Draw_LoadPic (va("inva%i_shotgun", i + 1));
+		sb_weapons[2 + i][1] = Draw_LoadPic (va("inva%i_sshotgun", i + 1));
+		sb_weapons[2 + i][2] = Draw_LoadPic (va("inva%i_nailgun", i + 1));
+		sb_weapons[2 + i][3] = Draw_LoadPic (va("inva%i_snailgun", i + 1));
+		sb_weapons[2 + i][4] = Draw_LoadPic (va("inva%i_rlaunch", i + 1));
+		sb_weapons[2 + i][5] = Draw_LoadPic (va("inva%i_srlaunch", i + 1));
+		sb_weapons[2 + i][6] = Draw_LoadPic (va("inva%i_lightng", i + 1));
 	}
 
-	sb_ammo[0] = Draw_PicFromWad ("sb_shells");
-	sb_ammo[1] = Draw_PicFromWad ("sb_nails");
-	sb_ammo[2] = Draw_PicFromWad ("sb_rocket");
-	sb_ammo[3] = Draw_PicFromWad ("sb_cells");
+	sb_ammo[0] = Draw_LoadPic ("sb_shells");
+	sb_ammo[1] = Draw_LoadPic ("sb_nails");
+	sb_ammo[2] = Draw_LoadPic ("sb_rocket");
+	sb_ammo[3] = Draw_LoadPic ("sb_cells");
 
-	sb_armor[0] = Draw_PicFromWad ("sb_armor1");
-	sb_armor[1] = Draw_PicFromWad ("sb_armor2");
-	sb_armor[2] = Draw_PicFromWad ("sb_armor3");
+	sb_armor[0] = Draw_LoadPic ("sb_armor1");
+	sb_armor[1] = Draw_LoadPic ("sb_armor2");
+	sb_armor[2] = Draw_LoadPic ("sb_armor3");
 
-	sb_items[0] = Draw_PicFromWad ("sb_key1");
-	sb_items[1] = Draw_PicFromWad ("sb_key2");
-	sb_items[2] = Draw_PicFromWad ("sb_invis");
-	sb_items[3] = Draw_PicFromWad ("sb_invuln");
-	sb_items[4] = Draw_PicFromWad ("sb_suit");
-	sb_items[5] = Draw_PicFromWad ("sb_quad");
+	sb_items[0] = Draw_LoadPic ("sb_key1");
+	sb_items[1] = Draw_LoadPic ("sb_key2");
+	sb_items[2] = Draw_LoadPic ("sb_invis");
+	sb_items[3] = Draw_LoadPic ("sb_invuln");
+	sb_items[4] = Draw_LoadPic ("sb_suit");
+	sb_items[5] = Draw_LoadPic ("sb_quad");
 
-	sb_sigil[0] = Draw_PicFromWad ("sb_sigil1");
-	sb_sigil[1] = Draw_PicFromWad ("sb_sigil2");
-	sb_sigil[2] = Draw_PicFromWad ("sb_sigil3");
-	sb_sigil[3] = Draw_PicFromWad ("sb_sigil4");
+	sb_sigil[0] = Draw_LoadPic ("sb_sigil1");
+	sb_sigil[1] = Draw_LoadPic ("sb_sigil2");
+	sb_sigil[2] = Draw_LoadPic ("sb_sigil3");
+	sb_sigil[3] = Draw_LoadPic ("sb_sigil4");
 
-	sb_faces[4][0] = Draw_PicFromWad ("face1");
-	sb_faces[4][1] = Draw_PicFromWad ("face_p1");
-	sb_faces[3][0] = Draw_PicFromWad ("face2");
-	sb_faces[3][1] = Draw_PicFromWad ("face_p2");
-	sb_faces[2][0] = Draw_PicFromWad ("face3");
-	sb_faces[2][1] = Draw_PicFromWad ("face_p3");
-	sb_faces[1][0] = Draw_PicFromWad ("face4");
-	sb_faces[1][1] = Draw_PicFromWad ("face_p4");
-	sb_faces[0][0] = Draw_PicFromWad ("face5");
-	sb_faces[0][1] = Draw_PicFromWad ("face_p5");
+	sb_faces[4][0] = Draw_LoadPic ("face1");
+	sb_faces[4][1] = Draw_LoadPic ("face_p1");
+	sb_faces[3][0] = Draw_LoadPic ("face2");
+	sb_faces[3][1] = Draw_LoadPic ("face_p2");
+	sb_faces[2][0] = Draw_LoadPic ("face3");
+	sb_faces[2][1] = Draw_LoadPic ("face_p3");
+	sb_faces[1][0] = Draw_LoadPic ("face4");
+	sb_faces[1][1] = Draw_LoadPic ("face_p4");
+	sb_faces[0][0] = Draw_LoadPic ("face5");
+	sb_faces[0][1] = Draw_LoadPic ("face_p5");
 
-	sb_face_invis = Draw_PicFromWad ("face_invis");
-	sb_face_invuln = Draw_PicFromWad ("face_invul2");
-	sb_face_invis_invuln = Draw_PicFromWad ("face_inv2");
-	sb_face_quad = Draw_PicFromWad ("face_quad");
-
-	sb_sbar = Draw_PicFromWad ("sbar");
-	sb_ibar = Draw_PicFromWad ("ibar");
-	sb_scorebar = Draw_PicFromWad ("scorebar");
+	sb_face_invis = Draw_LoadPic ("face_invis");
+	sb_face_invuln = Draw_LoadPic ("face_invul2");
+	sb_face_invis_invuln = Draw_LoadPic ("face_inv2");
+	sb_face_quad = Draw_LoadPic ("face_quad");
 
 	//MED 01/04/97 added new hipnotic weapons
 	if (hipnotic)
 	{
-		hsb_weapons[0][0] = Draw_PicFromWad ("inv_laser");
-		hsb_weapons[0][1] = Draw_PicFromWad ("inv_mjolnir");
-		hsb_weapons[0][2] = Draw_PicFromWad ("inv_gren_prox");
-		hsb_weapons[0][3] = Draw_PicFromWad ("inv_prox_gren");
-		hsb_weapons[0][4] = Draw_PicFromWad ("inv_prox");
+		hsb_weapons[0][0] = Draw_LoadPic ("inv_laser");
+		hsb_weapons[0][1] = Draw_LoadPic ("inv_mjolnir");
+		hsb_weapons[0][2] = Draw_LoadPic ("inv_gren_prox");
+		hsb_weapons[0][3] = Draw_LoadPic ("inv_prox_gren");
+		hsb_weapons[0][4] = Draw_LoadPic ("inv_prox");
 
-		hsb_weapons[1][0] = Draw_PicFromWad ("inv2_laser");
-		hsb_weapons[1][1] = Draw_PicFromWad ("inv2_mjolnir");
-		hsb_weapons[1][2] = Draw_PicFromWad ("inv2_gren_prox");
-		hsb_weapons[1][3] = Draw_PicFromWad ("inv2_prox_gren");
-		hsb_weapons[1][4] = Draw_PicFromWad ("inv2_prox");
+		hsb_weapons[1][0] = Draw_LoadPic ("inv2_laser");
+		hsb_weapons[1][1] = Draw_LoadPic ("inv2_mjolnir");
+		hsb_weapons[1][2] = Draw_LoadPic ("inv2_gren_prox");
+		hsb_weapons[1][3] = Draw_LoadPic ("inv2_prox_gren");
+		hsb_weapons[1][4] = Draw_LoadPic ("inv2_prox");
 
 		for (i = 0; i < 5; i++)
 		{
-			hsb_weapons[2 + i][0] = Draw_PicFromWad (va ("inva%i_laser", i + 1));
-			hsb_weapons[2 + i][1] = Draw_PicFromWad (va ("inva%i_mjolnir", i + 1));
-			hsb_weapons[2 + i][2] = Draw_PicFromWad (va ("inva%i_gren_prox", i + 1));
-			hsb_weapons[2 + i][3] = Draw_PicFromWad (va ("inva%i_prox_gren", i + 1));
-			hsb_weapons[2 + i][4] = Draw_PicFromWad (va ("inva%i_prox", i + 1));
+			hsb_weapons[2 + i][0] = Draw_LoadPic (va ("inva%i_laser", i + 1));
+			hsb_weapons[2 + i][1] = Draw_LoadPic (va ("inva%i_mjolnir", i + 1));
+			hsb_weapons[2 + i][2] = Draw_LoadPic (va ("inva%i_gren_prox", i + 1));
+			hsb_weapons[2 + i][3] = Draw_LoadPic (va ("inva%i_prox_gren", i + 1));
+			hsb_weapons[2 + i][4] = Draw_LoadPic (va ("inva%i_prox", i + 1));
 		}
 
-		hsb_items[0] = Draw_PicFromWad ("sb_wsuit");
-		hsb_items[1] = Draw_PicFromWad ("sb_eshld");
+		hsb_items[0] = Draw_LoadPic ("sb_wsuit");
+		hsb_items[1] = Draw_LoadPic ("sb_eshld");
 	}
 
 	if (rogue)
 	{
-		rsb_invbar[0] = Draw_PicFromWad ("r_invbar1");
-		rsb_invbar[1] = Draw_PicFromWad ("r_invbar2");
+		rsb_weapons[0] = Draw_LoadPic ("r_lava");
+		rsb_weapons[1] = Draw_LoadPic ("r_superlava");
+		rsb_weapons[2] = Draw_LoadPic ("r_gren");
+		rsb_weapons[3] = Draw_LoadPic ("r_multirock");
+		rsb_weapons[4] = Draw_LoadPic ("r_plasma");
 
-		rsb_weapons[0] = Draw_PicFromWad ("r_lava");
-		rsb_weapons[1] = Draw_PicFromWad ("r_superlava");
-		rsb_weapons[2] = Draw_PicFromWad ("r_gren");
-		rsb_weapons[3] = Draw_PicFromWad ("r_multirock");
-		rsb_weapons[4] = Draw_PicFromWad ("r_plasma");
-
-		rsb_items[0] = Draw_PicFromWad ("r_shield1");
-		rsb_items[1] = Draw_PicFromWad ("r_agrav1");
+		rsb_items[0] = Draw_LoadPic ("r_shield1");
+		rsb_items[1] = Draw_LoadPic ("r_agrav1");
 
 		// PGM 01/19/97 - team color border
-		rsb_teambord = Draw_PicFromWad ("r_teambord");
+		rsb_teambord = Draw_LoadPic ("r_teambord");
 		// PGM 01/19/97 - team color border
 
-		rsb_ammo[0] = Draw_PicFromWad ("r_ammolava");
-		rsb_ammo[1] = Draw_PicFromWad ("r_ammomulti");
-		rsb_ammo[2] = Draw_PicFromWad ("r_ammoplasma");
+		rsb_ammo[0] = Draw_LoadPic ("r_ammolava");
+		rsb_ammo[1] = Draw_LoadPic ("r_ammomulti");
+		rsb_ammo[2] = Draw_LoadPic ("r_ammoplasma");
+	}
+
+	// save the bars till last to ensure that everything else goes into the scrap OK
+	sb_sbar = Draw_LoadPic ("sbar");
+	sb_ibar = Draw_LoadPic ("ibar");
+
+	if (rogue)
+	{
+		rsb_invbar[0] = Draw_LoadPic ("r_invbar1");
+		rsb_invbar[1] = Draw_LoadPic ("r_invbar2");
 	}
 }
 
@@ -254,7 +277,7 @@ cmd_t HUD_DontShowScores_Cmd ("-showscores", HUD_DontShowScores);
 
 // new names for compatibility with other engines
 cvar_t cl_sbar ("cl_sbar", "0", CVAR_ARCHIVE);
-cvar_t scr_sbaralpha ("scr_sbaralpha", "1", CVAR_ARCHIVE);
+cvar_t scr_sbaralpha ("scr_sbaralpha", "0.5f", CVAR_ARCHIVE);
 cvar_t scr_centersbar ("scr_centersbar", "1", CVAR_ARCHIVE);
 
 // aliases so that the old dq cvars will still work
@@ -263,8 +286,12 @@ cvar_alias_t hud_centerhud ("hud_centerhud", &scr_centersbar);
 cvar_alias_t hud_overlay ("hud_overlay", &cl_sbar);
 
 // called scr_* for consistency with other engines
-cvar_t scr_showfps ("scr_showfps", 0.0f, CVAR_ARCHIVE);
 cvar_t scr_clock ("scr_clock", 0.0f, CVAR_ARCHIVE);
+cvar_t scr_showfps ("scr_showfps", 0.0f, CVAR_ARCHIVE);
+
+// grrrrrrrrr
+cvar_alias_t show_fps ("show_fps", &scr_showfps);
+cvar_alias_t showfps ("showfps", &scr_showfps);
 
 #include "hud_layout.h"
 
@@ -488,8 +515,6 @@ void HUD_DrawFrags (void)
 }
 
 
-void D3D_ScissorRect (float l, float t, float r, float b);
-
 void HUD_DrawLevelName (int x, int y)
 {
 	// matches max com_token
@@ -529,15 +554,9 @@ void HUD_DrawLevelName (int x, int y)
 		Draw_String (x - l * 4, y, str);
 	else
 	{
-		// this never actually happens as we force-truncate cl.levelname to 40 chars when loading
-		D3D_SetRenderState (D3DRS_SCISSORTESTENABLE, TRUE);
-		D3D_ScissorRect (x - 20 * 8, y - 2, x + 20 * 8, y + 10);
-
 		int ofs = ((int) (realtime * 30)) % (l * 8);
 
 		Draw_String (x - ofs, y, str);
-
-		D3D_SetRenderState (D3DRS_SCISSORTESTENABLE, FALSE);
 	}
 }
 
@@ -583,19 +602,17 @@ void HUD_DeathmatchOverlay (void)
 
 	char str[128];
 	int l, i, x, y, f, k;
-	qpic_t *pic;
 	scoreboard_t *s;
 	int top, bottom;
 	char num[12];
 
-	pic = Draw_CachePic ("gfx/ranking.lmp");
-	Draw_Pic ((vid.width - pic->width) / 2, 32, pic);
+	Draw_Pic ((vid.width - gfx_ranking_lmp->width) / 2, 32, gfx_ranking_lmp);
 
 	// base X
 	x = vid.width / 2;
 
 	// starting Y
-	y = 32 + pic->height + 8;
+	y = 32 + gfx_ranking_lmp->height + 8;
 
 	HUD_DrawLevelName (x, y);
 
@@ -690,16 +707,14 @@ void HUD_DeathmatchOverlay (void)
 }
 
 
-void HUD_SoloScoreboard (char *picname, float solotime)
+void HUD_SoloScoreboard (qpic_t *pic, float solotime)
 {
 	char str[128];
 	int l;
 	int i;
 	int SBX;
 	int SBY;
-	qpic_t *pic;
 
-	pic = Draw_CachePic (picname);
 	Draw_Pic ((vid.width - pic->width) / 2, 48, pic);
 
 	// base X
@@ -875,7 +890,6 @@ void HUD_DrawArmor (int ActiveItems, int ArmorStat)
 
 
 void Draw_Crosshair (int x, int y);
-void Draw_Crosshair (int x, int y, int size);
 
 void HUD_DrawCrossHair (int basex, int basey)
 {
@@ -883,25 +897,7 @@ void HUD_DrawCrossHair (int basex, int basey)
 	basex += cl_crossx.value;
 	basey += cl_crossy.value;
 
-#if 1
 	Draw_Crosshair (basex, basey);
-#else
-	if (crosshair.integer == 1)
-		Draw_Character (basex - 4, basey - 4, '+');
-	else if (crosshair.integer == 2)
-		Draw_Character (basex - 4, basey - 4, '+' + 128);
-	else if (crosshair.integer > 0)
-	{
-		// get scale
-		int crossscale = (int) (32.0f * scr_crosshairscale.value);
-
-		// don't draw if too small
-		if (crossscale < 2) return;
-
-		// draw it
-		Draw_Crosshair (basex - (crossscale / 2), basey - (crossscale / 2), crossscale);
-	}
-#endif
 }
 
 
@@ -955,9 +951,6 @@ void HUD_DrawAmmo (int ActiveItems, int AmmoStat)
 
 		Draw_Pic (x, y, ammopic);
 	}
-
-	// add crosshair drawing here too... (centered better)
-	HUD_DrawCrossHair (scr_vrect.x + scr_vrect.width / 2, scr_vrect.y + scr_vrect.height / 2);
 
 	if (!AmmoStat && (hud_ammoval[cl_sbar.integer].flags & HUD_HIDEIF0)) return;
 
@@ -1311,7 +1304,9 @@ void HUD_DrawSBar (void)
 		int x = HUD_GetX (&hud_sbar[cl_sbar.integer]);
 		int y = HUD_GetY (&hud_sbar[cl_sbar.integer]);
 
-		Draw_Pic (x, y, sb_sbar, scr_sbaralpha.value);
+		if (cl_sbar.integer == 1)
+			Draw_Pic (x, y, sb_sbar, scr_sbaralpha.value);
+		else Draw_Pic (x, y, sb_sbar, 1.0f);
 	}
 }
 
@@ -1334,7 +1329,9 @@ void HUD_DrawIBar (int ActiveWeapon, bool DrawFrags)
 		int x = HUD_GetX (&hud_ibar[cl_sbar.integer]);
 		int y = HUD_GetY (&hud_ibar[cl_sbar.integer]);
 
-		Draw_Pic (x, y, ibarpic, scr_sbaralpha.value);
+		if (cl_sbar.integer == 1)
+			Draw_Pic (x, y, ibarpic, scr_sbaralpha.value);
+		else Draw_Pic (x, y, ibarpic, 1.0f);
 
 		// the 4 mini frag-lists are only drawn on this one
 		if (DrawFrags) HUD_DrawFrags ();
@@ -1427,44 +1424,54 @@ void HUD_MiniDeathmatchOverlay (void)
 }
 
 
-void HUD_DrawFPS (bool force)
+void HUD_DrawFPS (void)
 {
-	extern DWORD dwRealTime;
-	static DWORD dwLastTime = dwRealTime;
-	static int lastframe = host_framecount;
-
-	DWORD fps_frametime = dwRealTime - dwLastTime;
-	int fps_frames = host_framecount - lastframe;
-
+	static int fpsframe = 0;
+	static DWORD acctime = 0;
 	static float fps_fps = 0;
+	static bool firstrun = true;
 
-	if (fps_frametime > 200)
+	acctime += dwHostFrameTime;
+	fpsframe++;
+
+	if (acctime >= 250)
 	{
-		fps_fps = ((float) (fps_frames * 1000)) / ((float) fps_frametime);
-
-		dwLastTime = dwRealTime;
-		lastframe = host_framecount;
+		// we added to both counters above so we guarantee no division by zero
+		fps_fps = 1000.0f / ((float) acctime / (float) fpsframe);
+		acctime = 0;
+		fpsframe = 0;
+		firstrun = false;
 	}
 
-	if (scr_showfps.value || force)
+	if (firstrun)
+	{
+		// while we're starting up we just update roughly
+		fps_fps = 1000.0f / ((float) acctime / (float) fpsframe);
+	}
+
+	if (scr_showfps.value)
 	{
 		// positioning
 		char str[17];
 
-		_snprintf (str, 16, "%4.1f fps", fps_fps);
+		// position over the main refresh so that it will always update properly
+		int y1 = 40 + sb_lines;
+		int y2 = 11 + sb_lines;
+
+		_snprintf (str, 16, "%4i fps", (int) (fps_fps + 0.5f));
 
 		if (cl_sbar.integer > 2)
-			Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 40, str);
-		else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 11, str);
+			Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y1, str);
+		else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y2, str);
 	}
 }
 
 
-void HUD_DrawClock (bool force)
+void HUD_DrawClock (void)
 {
 	char	str[9];
 
-	if (scr_clock.value || force)
+	if (scr_clock.value)
 	{
 		int minutes = cl.time / 60;
 		int seconds = ((int) cl.time) % 60;
@@ -1473,45 +1480,65 @@ void HUD_DrawClock (bool force)
 	}
 	else return;
 
+	// position over the main refresh so that it will always update properly
+	int y1 = 50 + sb_lines;
+	int y2 = 21 + sb_lines;
+
 	// positioning
 	if (cl_sbar.integer > 2)
-		Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 50, str);
-	else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 21, str);
+		Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y1, str);
+	else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y2, str);
 }
 
 
-void HUD_DrawOSDItems (bool force = false)
+void HUD_DrawOSDItems (void)
 {
-	HUD_DrawFPS (force);
-	HUD_DrawClock (force);
+	HUD_DrawFPS ();
+	HUD_DrawClock ();
 }
 
+
+cvar_t fullsbardraw ("fullsbardraw", "0", CVAR_ARCHIVE);
 
 void HUD_DrawHUD (void)
 {
-	// console is fullscreen
+	// no HUD conditions
 	if (scr_con_current == vid.height) return;
-
-	// no HUD
 	if (scr_viewsize.value > 111) return;
-
-	// none here either!!!
 	if (cl.intermission) return;
 
 	// bound sbar
 	if (cl_sbar.integer < 0) Cvar_Set (&cl_sbar, "0");
 	if (cl_sbar.integer > 3) Cvar_Set (&cl_sbar, "3");
 
+	// add crosshair drawing here because it's drawn over the main view
+	HUD_DrawCrossHair (scr_vrect.x + scr_vrect.width / 2, scr_vrect.y + scr_vrect.height / 2);
+
+	// OSD Items (always draw even if dead)
+	HUD_DrawOSDItems ();
+
+	// always draw the scoreboards if active
 	if ((hud_showscores && !cls.demoplayback) || (hud_showdemoscores && cls.demoplayback) || cl.stats[STAT_HEALTH] <= 0)
 	{
-		// scoreboard
-		if (cl.gametype == GAME_DEATHMATCH)
-			HUD_DeathmatchOverlay ();
-		else HUD_SoloScoreboard ("gfx/ranking.lmp", cl.time);
+		// only show them in-game
+		if (key_dest == key_game)
+		{
+			// scoreboard
+			if (cl.gametype == GAME_DEATHMATCH)
+				HUD_DeathmatchOverlay ();
+			else HUD_SoloScoreboard (gfx_ranking_lmp, cl.time);
+		}
 	}
 
-	// OSD Items
-	HUD_DrawOSDItems ();
+	// only cl_sbar 0 can skip updates
+	if (!sbar_changed && !sbar_frame && !cl_sbar.integer && !fullsbardraw.integer) return;
+
+	// draw any areas not covered by the HUD
+	if (sb_lines)
+	{
+		Draw_TileClear (0, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
+		Draw_TileClear ((vid.width - 320) / 2 + 320, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
+	}
 
 	if (cl.stats[STAT_HEALTH] > 0)
 	{
@@ -1524,19 +1551,28 @@ void HUD_DrawHUD (void)
 		HUD_DrawAmmo (cl.items, cl.stats[STAT_AMMO]);
 
 		// no inventory
-		if (scr_viewsize.value > 101) return;
+		if (!(scr_viewsize.value > 101))
+		{
+			// inventory
+			HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
+			HUD_DrawSigils (cl.items);
+			HUD_DrawKeys (cl.items);
+			HUD_DrawItems (cl.items);
+			HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
 
-		// inventory
-		HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
-		HUD_DrawSigils (cl.items);
-		HUD_DrawKeys (cl.items);
-		HUD_DrawItems (cl.items);
-		HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
-		HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
+			// ammocounts are left till last because they don't batch with everything else
+			HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
 
-		// deathmatch overlay
-		HUD_MiniDeathmatchOverlay ();
+			// deathmatch overlay
+			HUD_MiniDeathmatchOverlay ();
+		}
 	}
+
+	// need to properly handle a double-buffered rendering context
+	if (!sbar_changed) sbar_frame = false;
+
+	// not changed
+	sbar_changed = false;
 }
 
 
@@ -1544,7 +1580,7 @@ void HUD_IntermissionOverlay (void)
 {
 	if (cl.gametype == GAME_DEATHMATCH)
 		HUD_DeathmatchOverlay ();
-	else HUD_SoloScoreboard ("gfx/complete.lmp", cl.completed_time);
+	else HUD_SoloScoreboard (gfx_complete_lmp, cl.completed_time);
 }
 
 
@@ -1552,12 +1588,6 @@ void HUD_FinaleOverlay (void)
 {
 	if (cl.gametype == GAME_DEATHMATCH)
 		HUD_DeathmatchOverlay ();
-	else
-	{
-		qpic_t	*pic;
-
-		pic = Draw_CachePic ("gfx/finale.lmp");
-		Draw_Pic ((vid.width - pic->width) / 2, 16, pic);
-	}
+	else Draw_Pic ((vid.width - gfx_finale_lmp->width) / 2, 16, gfx_finale_lmp);
 }
 

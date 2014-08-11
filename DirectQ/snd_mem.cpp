@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -57,7 +57,7 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 
 	sc->speed = shm->speed;
 
-	if (loadas8bit.integer)
+	if (loadas8bit.integer && 0)
 		sc->width = 1;
 	else sc->width = inwidth;
 

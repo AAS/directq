@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "menu_common.h"
 #include "winquake.h"
+
+extern qpic_t *gfx_p_multi_lmp;
 
 void Draw_Mapshot (char *name, int x, int y);
 extern char *SkillNames[];
@@ -125,16 +127,16 @@ void M_BuildTranslationTable (int top, int bottom)
 
 int Menu_SetupCustomDraw (int y)
 {
-	qpic_t *p;
 	int newy = y;
 
-	p = Draw_CachePic ("gfx/bigbox.lmp");
-	Draw_Pic ((vid.width - p->width) / 2, y, p);
-	newy += p->height + 5;
+	extern qpic_t *gfx_bigbox_lmp;
+	extern qpic_t *gfx_menuplyr_lmp;
 
-	p = Draw_CachePic ("gfx/menuplyr.lmp");
+	Draw_Pic ((vid.width - gfx_bigbox_lmp->width) / 2, y, gfx_bigbox_lmp);
+	newy += gfx_bigbox_lmp->height + 5;
+
 	M_BuildTranslationTable (setup_shirt * 16, setup_pants * 16);
-	Draw_PicTranslate ((vid.width - p->width) / 2, y + 8, p, translationTable, setup_shirt, setup_pants);
+	Draw_PicTranslate ((vid.width - gfx_menuplyr_lmp->width) / 2, y + 8, gfx_menuplyr_lmp, translationTable, setup_shirt, setup_pants);
 
 	// check for an apply change
 	if (setup_shirt != setup_oldshirt || setup_pants != setup_oldpants ||
@@ -240,24 +242,6 @@ char *GameTypes[] = {"Cooperative", "Deathmatch", NULL};
 int gametype_number = 0;
 
 
-int Menu_GameConfigCustomDraw (int y)
-{
-	if ((int) dummy_maxplayers.value == svs.maxclientslimit)
-	{
-		if (svs.maxclientslimit == MAX_SCOREBOARD)
-			Menu_PrintCenter (vid.height - 75, va ("Cannot select more than %i players", svs.maxclientslimit));
-		else
-		{
-			Menu_PrintCenter (vid.height - 75, va ("Running with more than %i players", svs.maxclientslimit));
-			Menu_PrintCenter (vid.height - 65, "Requires using command-line parameters");
-			Menu_PrintCenter (vid.height - 50, "Please see TECHINFO.TXT");
-		}
-	}
-
-	return y;
-}
-
-
 void Menu_FixupSpin (int *spinnum, char **spintext)
 {
 	for (int i = 0;; i++)
@@ -285,7 +269,7 @@ void Menu_GameConfigCustomEnter (void)
 	dummy_teamplay = (int) teamplay.value;
 
 	// bound values so we don't crash or otherwise behave unexpectedly
-	if (dummy_maxplayers.value < 2) dummy_maxplayers.value = 2; else if (dummy_maxplayers.value > svs.maxclientslimit) dummy_maxplayers.value = svs.maxclientslimit;
+	if (dummy_maxplayers.value < 2) dummy_maxplayers.value = 2; else if (dummy_maxplayers.value > MAX_SCOREBOARD) dummy_maxplayers.value = MAX_SCOREBOARD;
 	if (dummy_fraglimit.value < 0) dummy_fraglimit.value = 0; else if (dummy_fraglimit.value > 100) dummy_fraglimit.value = 100;
 	if (dummy_timelimit.value < 0) dummy_timelimit.value = 0; else if (dummy_timelimit.value > 60) dummy_timelimit.value = 60;
 	if (dummy_skill < 0) dummy_skill = 0; else if (dummy_skill > 3) dummy_skill = 3;
@@ -755,26 +739,49 @@ void Menu_CustomNameCustomEnter (void)
 }
 
 
+void Menu_DoMapInfo (int x, int y, int itemnum, bool showcdtrack = true);
+
+int Menu_GameConfigCustomDraw (int y)
+{
+	y += 5;
+	Draw_Mapshot (va ("maps/%s", spinbox_bsps[map_number]), (vid.width - 320) / 2 + 96, y);
+	y += 130;
+	Menu_DoMapInfo (160, y, map_number);
+
+	y += 45;
+
+	return y;
+}
+
+
+#define TAG_TALLSCREEN	64
+
+int Menu_GameConfigCustomDraw1 (int y)
+{
+	// hide the mapshot if we don't have enough vertical real-estate
+	if (vid.height > 500)
+		menu_GameConfig.ShowMenuOptions (TAG_TALLSCREEN);
+	else menu_GameConfig.HideMenuOptions (TAG_TALLSCREEN);
+
+	return y;
+}
+
+
 void Menu_InitMultiplayerMenu (void)
 {
-	// top level menu
-	menu_Multiplayer.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
-	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configure Multiplayer Game Options"));
-	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Join an Existing Multiplayer Game", &menu_TCPIPJoinGame));
-	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Start a New Multiplayer Game", &menu_TCPIPNewGame));
-	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Setup Player Options", &menu_Setup));
+	extern qpic_t *gfx_mp_menu_lmp;
 
-	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_TCPIPJoinGame));
-	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_TCPIPNewGame));
-	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Setup));
-	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuChunkyPic ("gfx/mp_menu.lmp"));
+	// top level menu
+	menu_Multiplayer.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
+	menu_Multiplayer.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Multiplayer.AddOption (new CQMenuCursorSubMenu (&menu_TCPIPJoinGame));
+	menu_Multiplayer.AddOption (new CQMenuCursorSubMenu (&menu_TCPIPNewGame));
+	menu_Multiplayer.AddOption (new CQMenuCursorSubMenu (&menu_Setup));
+	menu_Multiplayer.AddOption (new CQMenuChunkyPic (&gfx_mp_menu_lmp));
 
 	menu_Multiplayer.AddOption (new CQMenuCustomDraw (Menu_MultiplayerCustomDraw));
 
-	menu_FunName.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
+	menu_FunName.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_FunName.AddOption (new CQMenuTitle ("Quake Name Generator"));
 	menu_FunName.AddOption (new CQMenuCustomEnter (Menu_CustomNameCustomEnter));
 	menu_FunName.AddOption (new CQMenuCustomDraw (Menu_CustomNameCustomDraw));
@@ -791,7 +798,7 @@ void Menu_InitMultiplayerMenu (void)
 	menu_FunName.AddOption (new CQMenuCustomKey (K_PGDN, Menu_CustomNameCustomKey));
 
 	// setup menu
-	menu_Setup.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
+	menu_Setup.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_Setup.AddOption (new CQMenuTitle ("Setup Player Options"));
 	menu_Setup.AddOption (new CQMenuCustomEnter (Menu_SetupCustomEnter));
 	menu_Setup.AddOption (new CQMenuCvarTextbox ("Player Name", &dummy_name));
@@ -806,7 +813,7 @@ void Menu_InitMultiplayerMenu (void)
 	menu_Setup.AddOption (TAG_SETUPAPPLY, new CQMenuCommand ("Apply Changes", Menu_SetupApplyFunc));
 
 	// start a new game
-	menu_TCPIPNewGame.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
+	menu_TCPIPNewGame.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_TCPIPNewGame.AddOption (new CQMenuTitle ("Configure TCP/IP Options - New Game"));
 	menu_TCPIPNewGame.AddOption (new CQMenuCustomEnter (Menu_TCPIPCustomEnter));
 	menu_TCPIPNewGame.AddOption (new CQMenuCustomDraw (Menu_TCPIPCustomDraw));
@@ -820,7 +827,7 @@ void Menu_InitMultiplayerMenu (void)
 	menu_TCPIPNewGame.AddOption (new CQMenuCommand ("Continue to Game Options", Menu_TCPIPContinueToGameOptions));
 
 	// join an existing game
-	menu_TCPIPJoinGame.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
+	menu_TCPIPJoinGame.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_TCPIPJoinGame.AddOption (new CQMenuTitle ("Configure TCP/IP Options - Join a Game"));
 	menu_TCPIPJoinGame.AddOption (new CQMenuCustomEnter (Menu_TCPIPCustomEnter));
 	menu_TCPIPJoinGame.AddOption (new CQMenuCustomDraw (Menu_TCPIPCustomDraw));
@@ -835,38 +842,42 @@ void Menu_InitMultiplayerMenu (void)
 	menu_TCPIPJoinGame.AddOption (new CQMenuCustomDraw (Menu_NetErrorCustomDraw));
 
 	// game options
-	menu_GameConfig.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
+	menu_GameConfig.AddOption (new CQMenuCustomDraw (Menu_GameConfigCustomDraw1));
+	menu_GameConfig.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_GameConfig.AddOption (new CQMenuTitle ("Game Configuration Options"));
 	menu_GameConfig.AddOption (new CQMenuCustomEnter (Menu_GameConfigCustomEnter));
 	menu_GameConfig.AddOption (new CQMenuSpinControl ("Game Type", &gametype_number, GameTypes));
 	menu_GameConfig.AddOption (TAG_ID1OPTIONS, new CQMenuSpinControl ("Teamplay", &dummy_teamplay, ID1Teamplay));
 	menu_GameConfig.AddOption (TAG_HIPNOTICOPTIONS, new CQMenuSpinControl ("Teamplay", &dummy_teamplay, ID1Teamplay));
 	menu_GameConfig.AddOption (TAG_ROGUEOPTIONS, new CQMenuSpinControl ("Teamplay", &dummy_teamplay, RogueTeamplay));
-	menu_GameConfig.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_GameConfig.AddOption (new CQMenuSpinControl ("Maximum Players", &dummy_maxplayers, 2, svs.maxclientslimit, 1, NULL, NULL));
-	menu_GameConfig.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_GameConfig.AddOption (new CQMenuSpinControl ("Maximum Players", &dummy_maxplayers, 2, MAX_SCOREBOARD, 1, NULL, NULL));
 	menu_GameConfig.AddOption (new CQMenuSpinControl ("Skill", &dummy_skill, SkillNames));
 	menu_GameConfig.AddOption (new CQMenuSpinControl ("Frag Limit", &dummy_fraglimit, 0, 100, 10, "None", "Frags"));
 	menu_GameConfig.AddOption (new CQMenuSpinControl ("Time Limit", &dummy_timelimit, 0, 60, 5, "None", "Minutes"));
 	menu_GameConfig.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_GameConfig.AddOption (new CQMenuSpacer ("Select a Map"));
-	menu_GameConfig.AddOption (new CQMenuCustomDraw (Menu_GameConfigCustomDraw));
 
 	// generic mapname list (use of char *** is intentional here)
+	menu_GameConfig.AddOption (new CQMenuSpinControl ("Select a Map", &map_number, &spinbox_bsps));
 	menu_GameConfig.AddOption (new CQMenuSpinControl (NULL, &map_number, &spinbox_maps));
+
+	extern cvar_t r_automapshot;
 
 	// add the rest of the options
 	menu_GameConfig.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_GameConfig.AddOption (new CQMenuCommand ("Begin New Multiplayer Game", Menu_GameConfigBeginGame));
+	menu_GameConfig.AddOption (TAG_TALLSCREEN, new CQMenuSpacer (DIVIDER_LINE));
+	menu_GameConfig.AddOption (TAG_TALLSCREEN, new CQMenuCustomDraw (Menu_GameConfigCustomDraw));
+	menu_GameConfig.AddOption (TAG_TALLSCREEN, new CQMenuSpacer (DIVIDER_LINE));
+	menu_GameConfig.AddOption (TAG_TALLSCREEN, new CQMenuCvarToggle ("Enable Mapshots", &r_automapshot, 0, 1));
 
 	// search for games
-	menu_Search.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
+	menu_Search.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_Search.AddOption (new CQMenuTitle ("Search for Local Games"));
 	menu_Search.AddOption (new CQMenuCustomEnter (Menu_SearchCustomEnter));
 	menu_Search.AddOption (new CQMenuCustomDraw (Menu_SearchCustomDraw));
 
 	// server list
-	menu_SList.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
+	menu_SList.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_SList.AddOption (new CQMenuTitle ("Local Quake Server List"));
 	menu_SList.AddOption (new CQMenuCustomEnter (Menu_SListCustomEnter));
 	menu_SList.AddOption (new CQMenuCustomDraw (Menu_SListCustomDraw));

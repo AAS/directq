@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -401,6 +401,46 @@ void CL_BaseMove (usercmd_t *cmd)
 
 
 
+void MSG_WriteAngle16 (sizebuf_t *sb, float f)
+{
+	int val = (int)f*65536/360;
+	MSG_WriteShort (sb, val & 65535);
+	// MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
+}
+
+
+// JPG - support for synthetic lag
+sizebuf_t lag_buff[32]; 
+byte lag_data[32][128];  
+unsigned int lag_head, lag_tail; 
+double lag_sendtime[32]; 
+
+cvar_t	pq_lag ("pq_lag", "0");
+
+void CL_SendLagMove (void)
+{
+	if (cls.demoplayback || cls.state != ca_connected || cls.signon != SIGNONS)
+		return;
+
+	while ((lag_tail < lag_head) && (lag_sendtime[lag_tail & 31] <= realtime))
+	{
+		lag_tail++;
+
+		if (++cl.movemessages <= 2)
+		{
+			lag_head = lag_tail = 0;  // JPG - hack: if cl.movemessages has been reset, we should reset these too
+			continue;	// return -> continue
+		}
+
+		if (NET_SendUnreliableMessage (cls.netcon, &lag_buff[(lag_tail - 1) & 31]) == -1)
+		{
+			Con_Printf ("CL_SendMove: lost server connection\n");
+			CL_Disconnect ();
+		}
+	}
+}
+
+
 /*
 ==============
 CL_SendMove
@@ -410,27 +450,37 @@ void CL_SendMove (usercmd_t *cmd)
 {
 	int		i;
 	int		bits;
-	sizebuf_t	buf;
-	byte	data[256];
+	sizebuf_t	*buf;
 
-	buf.maxsize = 256;
-	buf.cursize = 0;
-	buf.data = data;
-	buf.allowoverflow = false;
-	buf.overflowed = false;
+	if (pq_lag.value < 0) Cvar_Set (&pq_lag, 0.0f);
+	if (pq_lag.value > 400) Cvar_Set (&pq_lag, 400.0f);
+
+	buf = &lag_buff[lag_head & 31];
+	buf->maxsize = 128;
+	buf->cursize = 0;
+	buf->data = lag_data[lag_head & 31]; // JPG - added head index
+	lag_sendtime[lag_head++ & 31] = realtime + (pq_lag.value / 1000.0);
 
 	cl.cmd = *cmd;
 
 	// send the movement message
-    MSG_WriteByte (&buf, clc_move);
-	MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
+    MSG_WriteByte (buf, clc_move);
+	MSG_WriteFloat (buf, cl.mtime[0]);	// so server can get ping times
 
-	for (i = 0; i < 3; i++)
-		MSG_WriteClientAngle (&buf, cl.viewangles[i], false);
+	if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION)
+	{
+		for (i = 0; i < 3; i++)
+			MSG_WriteAngle16 (buf, cl.viewangles[i]);
+	}
+	else
+	{
+		for (i = 0; i < 3; i++)
+			MSG_WriteClientAngle (buf, cl.viewangles[i], false);
+	}
 
-    MSG_WriteShort (&buf, cmd->forwardmove);
-    MSG_WriteShort (&buf, cmd->sidemove);
-    MSG_WriteShort (&buf, cmd->upmove);
+    MSG_WriteShort (buf, cmd->forwardmove);
+    MSG_WriteShort (buf, cmd->sidemove);
+    MSG_WriteShort (buf, cmd->upmove);
 
 	// send button bits
 	bits = 0;
@@ -441,8 +491,8 @@ void CL_SendMove (usercmd_t *cmd)
 	if (in_jump.state & 3) bits |= 2;
 	in_jump.state &= ~2;
 
-    MSG_WriteByte (&buf, bits);
-    MSG_WriteByte (&buf, in_impulse);
+    MSG_WriteByte (buf, bits);
+    MSG_WriteByte (buf, in_impulse);
 
 	if (IsWeaponImpulse (in_impulse))
 	{
@@ -457,13 +507,17 @@ void CL_SendMove (usercmd_t *cmd)
 
 	// allways dump the first two message, because it may contain leftover inputs
 	// from the last level
+	/*
 	if (++cl.movemessages <= 2) return;
 
-	if (NET_SendUnreliableMessage (cls.netcon, &buf) == -1)
+	if (NET_SendUnreliableMessage (cls.netcon, buf) == -1)
 	{
 		Con_Printf ("CL_SendMove: lost server connection\n");
 		CL_Disconnect ();
 	}
+	*/
+
+	CL_SendLagMove ();
 }
 
 

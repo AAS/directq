@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "menu_common.h"
 #include "winquake.h"
+
+extern qpic_t *gfx_p_option_lmp;
 
 // cvars used
 extern cvar_t xi_usecontroller;
@@ -66,7 +68,6 @@ extern cvar_t com_nehahra;
 extern cvar_t scr_centerlog;
 extern cvar_t host_savenamebase;
 extern cvar_t scr_shotnamebase;
-extern cvar_t r_skywarp;
 extern cvar_t r_skybackscroll;
 extern cvar_t r_skyfrontscroll;
 extern cvar_t r_waterwarptime;
@@ -117,6 +118,8 @@ char *SkillNames[] =
 	"NIGHTMARE",
 	NULL
 };
+
+void Menu_FixupSpin (int *spinnum, char **spintext);
 
 // for enabling simple menus
 cvar_t menu_advanced ("menu_advanced", "0", CVAR_ARCHIVE);
@@ -206,30 +209,18 @@ void Menu_MainExitQuake (void)
 
 void Menu_InitMainMenu (void)
 {
-	menu_Main.AddOption (new CQMenuCustomDraw (Menu_MainCustomDraw));
-	menu_Main.AddOption (new CQMenuBanner ("gfx/ttl_main.lmp"));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Select a Submenu"));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Single Player Menu", &menu_Singleplayer));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Multiplayer Menu", &menu_Multiplayer));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Configure Game Options", &menu_Options));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Select Game Directories", &menu_Game));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Load a Map", &menu_Maps));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Run or Record a Demo", &menu_Demo));
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuCommand ("Exit Quake", Menu_MainExitQuake));
+	extern qpic_t *gfx_mainmenu_lmp;
+	extern qpic_t *gfx_ttl_main_lmp;
 
-	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Singleplayer));
-	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Multiplayer));
-	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Options));
-	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Help));
-	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (Menu_MainExitQuake));
-	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuChunkyPic ("gfx/mainmenu.lmp"));
+	menu_Main.AddOption (new CQMenuCustomDraw (Menu_MainCustomDraw));
+	menu_Main.AddOption (new CQMenuBanner (&gfx_ttl_main_lmp));
+	menu_Main.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Main.AddOption (new CQMenuCursorSubMenu (&menu_Singleplayer));
+	menu_Main.AddOption (new CQMenuCursorSubMenu (&menu_Multiplayer));
+	menu_Main.AddOption (new CQMenuCursorSubMenu (&menu_Options));
+	menu_Main.AddOption (new CQMenuCursorSubMenu (&menu_Help));
+	menu_Main.AddOption (new CQMenuCursorSubMenu (Menu_MainExitQuake));
+	menu_Main.AddOption (new CQMenuChunkyPic (&gfx_mainmenu_lmp));
 
 	menu_Main.AddOption (new CQMenuCustomEnter (Menu_MainCustomEnter));
 	menu_Main.AddOption (new CQMenuCustomKey (K_ESCAPE, Menu_ExitMenus));
@@ -569,10 +560,13 @@ int Menu_GameCustomDraw (int y)
 }
 
 
+extern bool WasInGameMenu;
+
 void Menu_GameLoadGames (void)
 {
 	// drop out of the menus
 	key_dest = key_game;
+	WasInGameMenu = true;
 
 	// fire the game change command
 	Cbuf_InsertText (va ("game %s\n", gamedirs[gamedirnum]));
@@ -829,6 +823,12 @@ int hudstyleselection = 0;
 
 #define TAG_HUDALIGN 8192
 #define TAG_HUDALPHA 16384
+#define TAG_FULLSBAR 4096
+
+extern cvar_t fullsbardraw;
+
+char *hud_invshow[] = {"On", "Off", NULL};
+int hud_invshownum = 0;
 
 int Menu_WarpCustomDraw (int y)
 {
@@ -852,10 +852,6 @@ int Menu_WarpCustomDraw (int y)
 		menu_WarpSurf.EnableMenuOptions (TAG_WATERALPHA);
 	}
 
-	// sky warp style
-	r_skywarp.integer = !!r_skywarp.integer;
-	Cvar_Set (&r_skywarp, r_skywarp.integer);
-
 	// water warp
 	if (r_waterwarp.value)
 		menu_WarpSurf.EnableMenuOptions (TAG_WATERWARP);
@@ -865,7 +861,6 @@ int Menu_WarpCustomDraw (int y)
 
 	// hud style
 	Cvar_Get (hudstyle, "cl_sbar");
-
 	Cvar_Set (hudstyle, hudstyleselection);
 
 	switch (hudstyle->integer)
@@ -873,24 +868,25 @@ int Menu_WarpCustomDraw (int y)
 	case 0:
 		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALPHA);
 		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALIGN);
+		menu_EffectsSimple.EnableMenuOptions (TAG_FULLSBAR);
 		break;
 
 	case 1:
 		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALPHA);
 		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALIGN);
+		menu_EffectsSimple.DisableMenuOptions (TAG_FULLSBAR);
 		break;
 
 	default:
 		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALPHA);
 		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALIGN);
+		menu_EffectsSimple.DisableMenuOptions (TAG_FULLSBAR);
 		break;
 	}
 
-	// available options depend on currently selected style
-	// show inventory
-	// inventory position
-	// alpha
-	// center/left sbar
+	if (hud_invshownum)
+		Cvar_Set (&scr_viewsize, 110.0f);
+	else Cvar_Set (&scr_viewsize, 100.0f);
 
 	// keep y
 	return y;
@@ -899,6 +895,10 @@ int Menu_WarpCustomDraw (int y)
 
 void Menu_WarpCustomEnter (void)
 {
+	if (scr_viewsize.integer > 100)
+		hud_invshownum = 1;
+	else hud_invshownum = 0;
+
 	Cvar_Get (hudstyle, "cl_sbar");
 
 	hudstyleselection = hudstyle->integer;
@@ -1090,8 +1090,13 @@ int Menu_FogColourBox (int y)
 char *soundspeedlist[] = {"11025", "22050", "44100", "48000", NULL};
 int soundspeednum = 0;
 
+#define TAG_SOUNDDISABLED 1024
+
 void Menu_SoundCustomEnter (void)
 {
+	menu_Sound.DisableMenuOptions (TAG_SOUNDDISABLED);
+
+	/*
 	switch (s_khz.integer)
 	{
 	case 48:
@@ -1113,11 +1118,13 @@ void Menu_SoundCustomEnter (void)
 		soundspeednum = 0;
 		break;
 	}
+	*/
 }
 
 
 int Menu_SoundCustomDraw (int y)
 {
+	/*
 	switch (soundspeednum)
 	{
 	case 3:
@@ -1136,6 +1143,7 @@ int Menu_SoundCustomDraw (int y)
 		Cvar_Set (&s_khz, 11);
 		break;
 	}
+	*/
 
 	return y;
 }
@@ -1181,13 +1189,18 @@ int Menu_SpeedDrawCheck (int y)
 
 void Menu_InitOptionsMenu (void)
 {
+	extern qpic_t *gfx_ttl_cstm_lmp;
+	extern qpic_t *gfx_vidmodes_lmp;
+
 	// options
 	menu_Options.AddOption (new CQMenuCustomDraw (Menu_OptionsCustomDraw));
 	menu_Options.AddOption (new CQMenuCustomEnter (Menu_SpeedEnterCheck));
 	menu_Options.AddOption (new CQMenuCustomDraw (Menu_SpeedDrawCheck));
-	menu_Options.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
+	menu_Options.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
 	menu_Options.AddOption (new CQMenuTitle ("Configure Game Options"));
 	menu_Options.AddOption (new CQMenuSubMenu ("Customize Controls", &menu_Keybindings));
+	// if you wanted to go to the console, you'd go to the console, not the menu...
+	// (unless you messed up your keybindings, that is...)
 	menu_Options.AddOption (new CQMenuCommand ("Go to Console", Menu_OptionsGoToConsole));
 	menu_Options.AddOption (new CQMenuCommand ("Reset to Defaults", Menu_OptionsResetToDefaults));
 	menu_Options.AddOption (new CQMenuCommand ("Save Current Configuration", Host_WriteConfiguration));
@@ -1209,56 +1222,10 @@ void Menu_InitOptionsMenu (void)
 	menu_Options.AddOption (new CQMenuSubMenu ("Sound Options", &menu_Sound));
 	menu_Options.AddOption (new CQMenuSubMenu ("More Options", &menu_EffectsSimple));
 
-	// fog
-	menu_Fog.AddOption (new CQMenuCustomEnter (Menu_FogCustomEnter));
-	menu_Fog.AddOption (new CQMenuCustomDraw (Menu_FogCustomDraw));
-	menu_Fog.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
-	menu_Fog.AddOption (new CQMenuTitle ("Fog Options"));
-	menu_Fog.AddOption (new CQMenuSpinControl ("Enable Fog", &fogenable, fogenablelist));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpinControl ("Quality", &fogquality, fogqualitylist));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpinControl ("Mode", &fogmode, fogmodelist));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarToggle ("Sky Fog", &gl_fogsky, 0, 1));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Fog.AddOption (TAG_LINEARONLY, new CQMenuCvarSlider ("Fog Start", &gl_fogstart, 10, 4010, 100));
-	menu_Fog.AddOption (TAG_LINEARONLY, new CQMenuCvarSlider ("Fog End", &gl_fogend, 10, 4010, 100));
-	menu_Fog.AddOption (TAG_EXPONLY, new CQMenuCvarSlider ("Fog Density", &gl_fogdensity, 0, 0.01, 0.0005));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarSlider ("Fog Red", &gl_fogred, 0, 1, 0.05));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarSlider ("Fog Green", &gl_foggreen, 0, 1, 0.05));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarSlider ("Fog Blue", &gl_fogblue, 0, 1, 0.05));
-	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Fog.AddOption (new CQMenuCustomDraw (Menu_FogColourBox));
-
-	// warp
-	menu_WarpSurf.AddOption (new CQMenuCustomEnter (Menu_WarpCustomEnter));
-	menu_WarpSurf.AddOption (new CQMenuCustomDraw (Menu_WarpCustomDraw));
-	menu_WarpSurf.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
-	menu_WarpSurf.AddOption (new CQMenuTitle ("Scrolling Sky"));
-	menu_WarpSurf.AddOption (new CQMenuSpinControl ("Style", &r_skywarp.integer, skywarpstyles));
-	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Back Layer Scroll", &r_skybackscroll, 0, 32, 2));
-	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Front Layer Scroll", &r_skyfrontscroll, 0, 32, 2));
-	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Front Layer Alpha", &r_skyalpha, 0, 1, 0.1f));
-	menu_WarpSurf.AddOption (new CQMenuTitle ("Skyboxes"));
-	// note - char *** is intentional here...
-	menu_WarpSurf.AddOption (new CQMenuSpinControl ("Skybox Name", &skybox_menunumber, &skybox_menulist));
-	menu_WarpSurf.AddOption (TAG_SKYBOXAPPLY, new CQMenuCommand ("Load this Skybox", Menu_WarpSkyBoxApply));
-	menu_WarpSurf.AddOption (new CQMenuTitle ("Water And Other Liquids"));
-	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Water Warp Speed", &r_warpspeed, 1, 10, 1));
-	menu_WarpSurf.AddOption (new CQMenuCvarToggle ("Lock Alpha Sliders", &r_lockalpha, 0, 1));
-	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Water Alpha", &r_wateralpha, 0, 1, 0.1));
-	menu_WarpSurf.AddOption (TAG_WATERALPHA, new CQMenuCvarSlider ("Lava Alpha", &r_lavaalpha, 0, 1, 0.1));
-	menu_WarpSurf.AddOption (TAG_WATERALPHA, new CQMenuCvarSlider ("Slime Alpha", &r_slimealpha, 0, 1, 0.1));
-	menu_WarpSurf.AddOption (TAG_WATERALPHA, new CQMenuCvarSlider ("Teleport Alpha", &r_telealpha, 0, 1, 0.1));
-	menu_WarpSurf.AddOption (new CQMenuTitle ("Underwater"));
-	menu_WarpSurf.AddOption (new CQMenuCvarToggle ("Underwater Warp", &r_waterwarp, 0, 1));
-	menu_WarpSurf.AddOption (TAG_WATERWARP, new CQMenuCvarSlider ("Warp Speed", &r_waterwarptime, 0, 8, 1));
-	menu_WarpSurf.AddOption (TAG_WATERWARP, new CQMenuCvarSlider ("Warp Scale", &r_waterwarpscale, 0, 0.25, 0.025));
-
 	// sound
 	menu_Sound.AddOption (new CQMenuCustomEnter (Menu_SoundCustomEnter));
 	menu_Sound.AddOption (new CQMenuCustomDraw (Menu_SoundCustomDraw));
-	menu_Sound.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
+	menu_Sound.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
 	menu_Sound.AddOption (new CQMenuTitle ("Sound Options"));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Music Volume", &bgmvolume, 0, 1, 0.05));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Sound Volume", &volume, 0, 1, 0.05));
@@ -1267,22 +1234,12 @@ void Menu_InitOptionsMenu (void)
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Ambient Level", &ambient_level, 0, 1, 0.05));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Ambient Fade", &ambient_fade, 50, 200, 10));
 	menu_Sound.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Sound.AddOption (new CQMenuSpinControl ("Sound Speed", &soundspeednum, soundspeedlist));
-	menu_Sound.AddOption (new CQMenuCvarToggle ("8-Bit Sounds", &loadas8bit));
-
-	// chase cam - now that it's fixed, let's expose the wee bugger
-	menu_Chase.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
-	menu_Chase.AddOption (new CQMenuTitle ("Chase Camera Options"));
-	menu_Chase.AddOption (new CQMenuCvarToggle ("Chase Active", &chase_active, 0, 1));
-	menu_Chase.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Chase.AddOption (new CQMenuCvarSlider ("Chase Back", &chase_back, 50, 500, 25));
-	menu_Chase.AddOption (new CQMenuCvarSlider ("Chase Up", &chase_up, -64, 256, 16));
-	menu_Chase.AddOption (new CQMenuCvarSlider ("Chase Right", &chase_right, -64, 64, 8));
-	menu_Chase.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Chase.AddOption (new CQMenuCvarSlider ("Smoothness", &chase_scale, 0.2, 1.8, 0.1));
+	menu_Sound.AddOption (new CQMenuSpacer ("(Disabled Options)"));
+	menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuSpinControl ("Sound Speed", &soundspeednum, soundspeedlist));
+	menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuCvarToggle ("8-Bit Sounds", &loadas8bit));
 
 	// input
-	menu_Input.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
+	menu_Input.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
 	menu_Input.AddOption (new CQMenuTitle ("Input Options"));
 	menu_Input.AddOption (new CQMenuSubMenu ("Customize Controls", &menu_Keybindings));
 	menu_Input.AddOption (new CQMenuSubMenu ("Configure XBox 360 Controller", &menu_Controller));
@@ -1305,23 +1262,11 @@ void Menu_InitOptionsMenu (void)
 	menu_Input.AddOption (new CQMenuCvarToggle ("Lookspring", &lookspring, 0, 1));
 	menu_Input.AddOption (new CQMenuCvarToggle ("Lookstrafe", &lookstrafe, 0, 1));
 
-	// effects
-	menu_Effects.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
-	menu_Effects.AddOption (new CQMenuCustomDraw (Menu_EffectsCustomDraw));
-	menu_Effects.AddOption (new CQMenuTitle ("Interpolation"));
-	menu_Effects.AddOption (new CQMenuCvarToggle ("Orientation", &r_lerporient, 0, 1));
-	menu_Effects.AddOption (new CQMenuCvarToggle ("Frame", &r_lerpframe, 0, 1));
-	menu_Effects.AddOption (new CQMenuCvarToggle ("Light Style", &r_lerplightstyle, 0, 1));
-	menu_Effects.AddOption (new CQMenuTitle ("Lighting"));
-	menu_Effects.AddOption (new CQMenuCvarToggle ("Coloured Light", &r_coloredlight, 0, 1));
-	menu_Effects.AddOption (new CQMenuCvarToggle ("Extra DLights", &r_extradlight, 0, 1));
-
-	Cvar_Get (sv_fpsgrav, "sv_gameplayfix_gravityunaffectedbyticrate");
 	Cvar_Get (hudstyle, "cl_sbar");
 
 	menu_EffectsSimple.AddOption (new CQMenuCustomEnter (Menu_WarpCustomEnter));
 	menu_EffectsSimple.AddOption (new CQMenuCustomDraw (Menu_WarpCustomDraw));
-	menu_EffectsSimple.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
+	menu_EffectsSimple.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Interpolation"));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Orientation", &r_lerporient, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Frame", &r_lerpframe, 0, 1));
@@ -1331,16 +1276,17 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Underwater Warp", &r_waterwarp, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Heads-Up Display"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("HUD Style", &hudstyleselection, hudstylelist));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Show Inventory", &hud_invshownum, hud_invshow));
+	menu_EffectsSimple.AddOption (TAG_FULLSBAR, new CQMenuCvarToggle ("Draw Every Frame", &fullsbardraw));
 	menu_EffectsSimple.AddOption (TAG_HUDALIGN, new CQMenuCvarToggle ("Center-align HUD", &scr_centersbar));
 	menu_EffectsSimple.AddOption (TAG_HUDALPHA, new CQMenuCvarSlider ("HUD Alpha", &scr_sbaralpha, 0, 1, 0.1));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Other"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Fast Lightmaps", &fastlmmode, fastlmmodes));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Automatic Mapshots", &r_automapshot, 0, 1));
-	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Gravity Fix", sv_fpsgrav, 0, 1));
 
 	// keybindings
-	menu_Keybindings.AddOption (new CQMenuBanner ("gfx/ttl_cstm.lmp"));
+	menu_Keybindings.AddOption (new CQMenuBanner (&gfx_ttl_cstm_lmp));
 	menu_Keybindings.AddOption (new CQMenuCustomDraw (Menu_KeybindingsCustomDraw));
 
 	// grab every key for these actions
@@ -1351,12 +1297,12 @@ void Menu_InitOptionsMenu (void)
 	// note - the new char *** spinbox style means this isn't actually required any more,
 	// but this style hasn't been let out into the wild yet, so it may have some subtle bugs i'm unaware of
 	// see Menu_VideoCustomEnter in d3d_vidnt.cpp
-	menu_Video.AddOption (new CQMenuBanner ("gfx/vidmodes.lmp"));
+	menu_Video.AddOption (new CQMenuBanner (&gfx_vidmodes_lmp));
 	menu_Video.AddOption (new CQMenuTitle ("Configure Video Modes"));
 	menu_Video.AddOption (new CQMenuCustomEnter (Menu_VideoCustomEnter));
 
 	// gamedir menu
-	menu_Game.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
+	menu_Game.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
 
 	// add in add-ons
 	if (IsGameDir ("Hipnotic") || IsGameDir ("Rogue") || IsGameDir ("Quoth") || IsGameDir ("Nehahra"))
@@ -1384,7 +1330,6 @@ void Menu_InitOptionsMenu (void)
 */
 
 int menu_HelpPage = 0;
-#define	NUM_HELP_PAGES	6
 bool nehdemo = false;
 
 void Menu_HelpCustomEnter (void)
@@ -1425,9 +1370,16 @@ int Menu_HelpCustomDraw (int y)
 	}
 	else
 	{
-		qpic_t *pic = Draw_CachePic (va ("gfx/help%i.lmp", menu_HelpPage));
-		Draw_Pic ((vid.width - pic->width) >> 1, y, pic);
-		return y + pic->height + 10;
+		extern qpic_t *menu_help_lmp[];
+
+		Draw_Pic
+		(
+			(vid.width - menu_help_lmp[menu_HelpPage]->width) >> 1,
+			y,
+			menu_help_lmp[menu_HelpPage]
+		);
+
+		return y + menu_help_lmp[menu_HelpPage]->height + 10;
 	}
 }
 
@@ -1529,7 +1481,7 @@ void Menu_RescanControllers (void)
 void Menu_InitControllerMenu (void)
 {
 	// options
-	menu_Controller.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
+	menu_Controller.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
 	menu_Controller.AddOption (new CQMenuTitle ("XBox 360 Controller Options"));
 	menu_Controller.AddOption (new CQMenuCustomDraw (Menu_ControllerCustomDraw));
 	menu_Controller.AddOption (new CQMenuCommand ("Rescan for Controllers", Menu_RescanControllers));
@@ -1960,6 +1912,13 @@ void Menu_DemoPopulate (void)
 #define TAG_TIMEONLY	16
 #define TAG_SELECTMODE	32
 
+void Menu_DemoCustomEnter (void)
+{
+	// fix up spin controls in case the game has changed and we now have an invalid selection
+	Menu_FixupSpin (&demo_mapnum, spinbox_maps);
+}
+
+
 int Menu_DemoCustomDraw1 (int y)
 {
 	// go direct to record mode if there are no demos
@@ -2213,8 +2172,19 @@ int Menu_DemoCustomDraw2 (int y)
 
 		if (dsi.levelname)
 		{
+			char templevelname[64];
+
+			for (int i = 0; ;i++)
+			{
+				templevelname[i] = dsi.levelname[i];
+
+				// yeah, and fuck you too.
+				if (i == 60) templevelname[i] = 0;
+				if (!templevelname[i]) break;
+			}
+
 			// proper positioning
-			Menu_PrintCenterWhite (y + 10, dsi.levelname);
+			Menu_PrintCenterWhite (y + 10, templevelname);
 			Menu_PrintCenter (y + 25, va ("Maxclients: %i", dsi.maxclients));
 			Menu_PrintCenter (y + 35, dsi.gametype ? "Deathmatch" : (dsi.maxclients > 1 ? "Cooperative" : "Single Player"));
 			Menu_PrintCenter (y + 45, va ("CD Track: %i", dsi.cdtrack));
@@ -2272,20 +2242,97 @@ void Menu_DemoCommand (void)
 }
 
 
+int menumapselectedbsp = 0;
+int menumapsskillnum = 1;
+
+
+char *memumapmodes[] = {"Map", "Changelevel", NULL};
+int menumapmode = 0;
+
+void Menu_MapsCustomEnter (void)
+{
+	// fix up spin controls in case the game has changed and we now have an invalid selection
+	Menu_FixupSpin (&menumapselectedbsp, spinbox_maps);
+	menumapsskillnum = skill.integer;
+}
+
+
+void Menu_RemoveMenu (void);
+
+void Menu_MapCommand (void)
+{
+	// "map 
+	// launch the map command
+	Menu_RemoveMenu ();
+	Cvar_Set (&skill, menumapsskillnum);
+	Cbuf_InsertText (va ("%s %s\n", memumapmodes[menumapmode], menu_mapslist[menumapselectedbsp].bspname));
+	Cbuf_Execute ();
+}
+
+
+int Menu_MapsCustomDraw1 (int y)
+{
+	// same conditions as the changelevel command
+	if (!sv.active || cls.demoplayback)
+		menumapmode = 0;
+
+	return y;
+}
+
+
+int Menu_MapsCustomDraw2 (int y)
+{
+	if (menumapmode == 0)
+		Menu_PrintCenter (y, "Start on the map with default Weapons and Items");
+	else Menu_PrintCenter (y, "Go to the map bringing all your stuff with you");
+
+	return y + 15;
+}
+
+
+int Menu_MapsCustomDraw3 (int y)
+{
+	y += 5;
+	Draw_Mapshot (va ("maps/%s", spinbox_bsps[menumapselectedbsp]), (vid.width - 320) / 2 + 96, y);
+	y += 130;
+	Menu_DoMapInfo (160, y, menumapselectedbsp);
+
+	y += 45;
+
+	return y;
+}
+
+
 void Menu_InitContentMenu (void)
 {
+	extern qpic_t *gfx_p_load_lmp;
+	extern qpic_t *gfx_p_save_lmp;
+
 	// maps
-	menu_Maps.AddOption (new CQMenuBanner ("gfx/p_load.lmp"));
+	menu_Maps.AddOption (new CQMenuBanner (&gfx_p_load_lmp));
 	menu_Maps.AddOption (new CQMenuTitle ("Load a Map"));
-	menu_Maps.AddOption (new CQMenuCustomDraw (Menu_MapsCustomDraw));
-	menu_Maps.AddOption (new CQMenuCustomKey (K_UPARROW, Menu_MapsCustomKey));
-	menu_Maps.AddOption (new CQMenuCustomKey (K_DOWNARROW, Menu_MapsCustomKey));
-	menu_Maps.AddOption (new CQMenuCustomKey (K_ENTER, Menu_MapsCustomKey));
+
+	// allow selection by either map name or bsp name
+	menu_Maps.AddOption (new CQMenuCustomEnter (Menu_MapsCustomEnter));
+	menu_Maps.AddOption (new CQMenuCustomDraw (Menu_MapsCustomDraw1));
+	menu_Maps.AddOption (new CQMenuSpinControl ("Select a Map", &menumapselectedbsp, &spinbox_bsps));
+	menu_Maps.AddOption (new CQMenuSpinControl (NULL, &menumapselectedbsp, &spinbox_maps));
+	menu_Maps.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Maps.AddOption (new CQMenuSpinControl ("Skill", &menumapsskillnum, SkillNames));
+	menu_Maps.AddOption (new CQMenuSpinControl ("Command", &menumapmode, memumapmodes));
+	menu_Maps.AddOption (new CQMenuCustomDraw (Menu_MapsCustomDraw2));
+	menu_Maps.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Maps.AddOption (new CQMenuCommand ("Begin Map", Menu_MapCommand));
+	menu_Maps.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Maps.AddOption (new CQMenuCustomDraw (Menu_MapsCustomDraw3));
+	menu_Maps.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Maps.AddOption (new CQMenuCvarToggle ("Enable Mapshots", &r_automapshot, 0, 1));
 
 	// demos
+	menu_Demo.AddOption (new CQMenuCustomEnter (Menu_DemoCustomEnter));
 	menu_Demo.AddOption (new CQMenuCustomDraw (Menu_DemoCustomDraw1));
-	menu_Demo.AddOption (TAG_PLAYTIME, new CQMenuBanner ("gfx/p_load.lmp"));
-	menu_Demo.AddOption (TAG_RECORD, new CQMenuBanner ("gfx/p_save.lmp"));
+	menu_Demo.AddOption (TAG_PLAYTIME, new CQMenuBanner (&gfx_p_load_lmp));
+	menu_Demo.AddOption (TAG_RECORD, new CQMenuBanner (&gfx_p_save_lmp));
 	menu_Demo.AddOption (TAG_PLAYONLY, new CQMenuTitle ("Run an Existing Demo"));
 	menu_Demo.AddOption (TAG_TIMEONLY, new CQMenuTitle ("Benchmark an Existing Demo"));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuTitle ("Record a New Demo"));
@@ -2293,15 +2340,17 @@ void Menu_InitContentMenu (void)
 	menu_Demo.AddOption (TAG_PLAYTIME, new CQMenuSpinControl ("Demo File Name", &demonum, &demolist));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuCvarTextbox ("New Demo File Name", &dummy_demoname, TBFLAGS_FILENAMEFLAGS));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpacer ("Map to Record From"));
+	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpinControl ("Select a Map", &demo_mapnum, &spinbox_bsps));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpinControl (NULL, &demo_mapnum, &spinbox_maps));
-	menu_Demo.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Demo.AddOption (new CQMenuCustomDraw (Menu_DemoCustomDraw2));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpacer (DIVIDER_LINE));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpinControl ("Skill", &demo_skillnum, SkillNames));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpinControl ("CD Track", &dummy_cdtrack, 2, 11, 1, NULL, NULL));
 	menu_Demo.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Demo.AddOption (TAG_PLAYTIME, new CQMenuCommand ("Begin Playback", Menu_DemoCommand));
 	menu_Demo.AddOption (TAG_RECORDCMD, new CQMenuCommand ("Begin Recording", Menu_DemoCommand));
+	menu_Demo.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Demo.AddOption (new CQMenuCustomDraw (Menu_DemoCustomDraw2));
+	menu_Demo.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Demo.AddOption (new CQMenuCvarToggle ("Enable Mapshots", &r_automapshot, 0, 1));
 }
 

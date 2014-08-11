@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 #include "resource.h"
+#include "d3d_vbo.h"
 
 
 // particles
@@ -202,6 +203,7 @@ particle_type_t *R_NewParticleType (vec3_t spawnorg)
 
 		// no particles yet
 		pt->particles = NULL;
+		pt->numparticles = 0;
 
 		// copy across origin
 		VectorCopy (spawnorg, pt->spawnorg);
@@ -249,6 +251,7 @@ particle_t *R_NewParticle (particle_type_t *pt)
 		// link it in
 		p->next = pt->particles;
 		pt->particles = p;
+		pt->numparticles++;
 
 		// track the number of particles we have
 		r_numparticles++;
@@ -969,6 +972,7 @@ void R_SetupParticleType (particle_type_t *pt)
 			kill->next = free_particles;
 			free_particles = kill;
 			r_numparticles--;
+			pt->numparticles--;
 
 			continue;
 		}
@@ -989,12 +993,21 @@ void R_SetupParticleType (particle_type_t *pt)
 				kill->next = free_particles;
 				free_particles = kill;
 				r_numparticles--;
+				pt->numparticles--;
 
 				continue;
 			}
 
 			break;
 		}
+
+		/*
+		it's faster to just render the bastards
+		int pointcontents = Mod_PointInLeaf (p->org, cl.worldmodel)->contents;
+		
+		if (pointcontents == CONTENTS_SKY) p->die = -1;
+		if (pointcontents == CONTENTS_SOLID) p->die = -1;
+		*/
 	}
 }
 
@@ -1021,6 +1034,7 @@ void D3D_AddParticesToAlphaList (void)
 			// return to the free list
 			active_particle_types = kill->next;
 			kill->next = free_particle_types;
+			kill->numparticles = 0;
 			free_particle_types = kill;
 
 			continue;
@@ -1043,6 +1057,7 @@ void D3D_AddParticesToAlphaList (void)
 			{
 				pt->next = kill->next;
 				kill->next = free_particle_types;
+				kill->numparticles = 0;
 				free_particle_types = kill;
 
 				continue;
@@ -1064,22 +1079,7 @@ void D3D_AddParticesToAlphaList (void)
 // update particles after drawing
 void R_UpdateParticles (void)
 {
-	Cvar_Get (sv_fpsgrav, "sv_gameplayfix_gravityunaffectedbyticrate");
-
-	// fps independent particle gravity
-	static float lastgrav = d3d_RenderDef.frametime * sv_gravity.value * 0.025;
-	float grav;
-	
-	if (sv_fpsgrav->integer)
-	{
-		grav = d3d_RenderDef.frametime * sv_gravity.value * 0.025 + lastgrav;
-		lastgrav = d3d_RenderDef.frametime * sv_gravity.value * 0.025;
-	}
-	else
-	{
-		grav = d3d_RenderDef.frametime * sv_gravity.value * 0.05;
-		lastgrav = d3d_RenderDef.frametime * sv_gravity.value * 0.025;
-	}
+	float grav = d3d_RenderDef.frametime * sv_gravity.value * 0.05;
 
 	for (particle_type_t *pt = active_particle_types; pt; pt = pt->next)
 	{
@@ -1129,38 +1129,47 @@ void R_UpdateParticles (void)
 }
 
 
-cvar_t r_drawparticles ("r_drawparticles", "1");
+cvar_t r_drawparticles ("r_drawparticles", "1", CVAR_ARCHIVE);
+
+void D3DRPart_SetTexture (void *data)
+{
+	d3d_texturechange_t *tc = (d3d_texturechange_t *) data;
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		if (d3d_FXPass == FX_PASS_NOTBEGUN)
+		{
+			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+			D3D_BeginShaderPass (FX_PASS_GENERIC);
+		}
+		else if (d3d_FXPass == FX_PASS_GENERIC)
+		{
+			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+			d3d_FXCommitPending = true;
+		}
+		else
+		{
+			D3D_EndShaderPass ();
+			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+			D3D_BeginShaderPass (FX_PASS_GENERIC);
+		}
+	}
+	else D3D_SetTexture (tc->stage, tc->tex);
+}
+
+
+// made this a global because otherwise multiple particle types don't get batched at all!!!
+LPDIRECT3DTEXTURE9 cachedparticletexture = NULL;
 
 // particles were HUGELY inefficient in the VBO so I've put them back to UserPrimitives
 void R_AddParticleTypeToRender (particle_type_t *pt)
 {
+	if (!pt->particles) return;
 	if (!r_drawparticles.value) return;
-
-	// state setup
-	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
-
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
-	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-	D3D_SetTexCoordIndexes (0);
-
-	D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-
-	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
-
-	int cachedtexture = 0;
 
 	// for rendering
 	vec3_t up, right;
 	float scale;
-	int numverts = 0;
-
-	// set up particle vertex pointer
-	// (the scratch buffer is inactive here because we're finished with visedicts)
-	partverts_t *partverts = (partverts_t *) scratchbuf;
-	partverts_t *verts = partverts;
-	int maxparticleverts = (SCRATCHBUF_SIZE / sizeof (partverts_t)) - 3;
 
 	// walk the list starting at the first active particle
 	for (particle_t *p = pt->particles; p; p = p->next)
@@ -1168,26 +1177,19 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		// final sanity check on colour to avoid array bounds errors
 		if (p->color < 0 || p->color > 255) continue;
 
-		if ((int) p->tex != cachedtexture || numverts >= maxparticleverts)
+		if (p->tex != cachedparticletexture)
 		{
-			// submit everything in the current batch (if there was one)
-			if (numverts)
-			{
-				D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, numverts / 3, partverts, sizeof (partverts_t));
-				verts = partverts;
-				numverts = 0;
-			}
-
-			D3D_SetTexture (0, p->tex);
-			cachedtexture = (int) p->tex;
+			d3d_texturechange_t tc = {0, p->tex};
+			VBO_AddCallback (D3DRPart_SetTexture, &tc, sizeof (d3d_texturechange_t));
+			cachedparticletexture = p->tex;
 		}
 
 		DWORD pc = D3DCOLOR_ARGB 
 		(
 			BYTE_CLAMP (p->alpha),
-			((byte *) &d_8to24table[(int) p->color])[2],
-			((byte *) &d_8to24table[(int) p->color])[1],
-			((byte *) &d_8to24table[(int) p->color])[0]
+			d3d_QuakePalette.standard[(int) p->color].peRed,
+			d3d_QuakePalette.standard[(int) p->color].peGreen,
+			d3d_QuakePalette.standard[(int) p->color].peBlue
 		);
 
 		if (p->scalemod)
@@ -1207,24 +1209,8 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		VectorScale (vup, p->scale, up);
 		VectorScale (vright, p->scale, right);
 
-		// may the good lord one day have mercy on our suffering and grant unto us geometry shaders in d3d9.
-		// until then we have to put up with this crap.  could we avoid the nonsense with a software VBO?
-		verts[0].color = verts[1].color = verts[2].color = pc;
-
-		verts[0].s = verts[0].t = verts[1].t = verts[2].s = 0;
-		verts[1].s = verts[2].t = 1;
-
-		VectorCopy (p->org, verts[0].xyz);
-		VectorMA (p->org, scale, up, verts[1].xyz);
-		VectorMA (p->org, scale, right, verts[2].xyz);
-
-		// more verts
-		numverts += 3;
-		verts += 3;
+		VBO_AddParticle (p->org, scale, up, right, pc);
 	}
-
-	// draw anything left over
-	if (numverts) D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, numverts / 3, partverts, sizeof (partverts_t));
 }
 
 

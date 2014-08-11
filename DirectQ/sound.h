@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,10 +15,8 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
+
 // sound.h -- client sound i/o functions
 
 #ifndef __SOUND__
@@ -114,7 +112,7 @@ void S_StopSound (int entnum, int entchannel);
 void S_StopAllSounds(bool clear);
 void S_ClearBuffer (void);
 void S_Update (vec3_t origin, vec3_t v_forward, vec3_t v_right, vec3_t v_up);
-void S_ExtraUpdate (void);
+void S_EndThread (void);
 
 sfx_t *S_PrecacheSound (char *sample);
 void S_TouchSound (char *sample);
@@ -143,11 +141,11 @@ void SNDDMA_Shutdown(void);
 // User-setable variables
 // ====================================================================
 
-#define	MAX_CHANNELS			512
-#define	MAX_DYNAMIC_CHANNELS	128
+#define	MAX_CHANNELS			65536
+#define	MAX_DYNAMIC_CHANNELS	32768
 
 
-extern	channel_t   channels[MAX_CHANNELS];
+extern	channel_t   *channels[MAX_CHANNELS];
 // 0 to MAX_DYNAMIC_CHANNELS-1	= normal entity sounds
 // MAX_DYNAMIC_CHANNELS to MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS -1 = water, etc
 // MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS to total_channels = static sounds

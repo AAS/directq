@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+#include "d3d_vbo.h"
 
 // use unit scales that are also used in most map editors
 cvar_t r_automapscroll_x ("r_automapscroll_x", -64.0f, CVAR_ARCHIVE);
@@ -161,11 +162,19 @@ bool D3D_Begin3DScene (void);
 void D3D_End3DScene (void);
 void D3D_AutomapReset (void);
 
+void D3D_DrawWaterSurfaces (void);
+void D3D_UpdateOcclusionQueries (void);
+void D3D_RunOcclusionQueries (void);
+
 DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 float d3d_OverbrightModulate = 2.0f;
 
+D3DMATRIX d3d_ViewMatrix;
 D3DMATRIX d3d_WorldMatrix;
+D3DMATRIX d3d_ModelViewProjMatrix;
 D3DMATRIX d3d_ProjMatrix;
+
+extern D3DDISPLAYMODE *d3d_ActiveMode;
 
 // render definition for this frame
 d3d_renderdef_t d3d_RenderDef;
@@ -184,7 +193,6 @@ refdef_t	r_refdef;
 texture_t	*r_notexture_mip;
 
 int		d_lightstylevalue[256];	// 8.8 fraction of base light value
-
 
 cvar_t	r_norefresh ("r_norefresh","0");
 cvar_t	r_drawentities ("r_drawentities","1");
@@ -467,14 +475,11 @@ void R_SetupFrame (void)
 	d3d_RenderDef.brush_polys = 0;
 	d3d_RenderDef.last_alias_polys = d3d_RenderDef.alias_polys;
 	d3d_RenderDef.alias_polys = 0;
-	d3d_RenderDef.numsss = 0;
 
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1) Cvar_Set ("r_fullbright", "0");
 
 	R_AnimateLight ();
-
-	d3d_RenderDef.framecount++;
 
 	// current viewleaf
 	d3d_RenderDef.oldviewleaf = d3d_RenderDef.viewleaf;
@@ -506,33 +511,43 @@ void R_SetupFrame (void)
 }
 
 
-void D3D_RescaleLumas (void);
-
 void D3D_PrepareOverbright (void)
 {
-	extern cvar_t r_overbright;
-
 	// bound 0 to 2 - (float) 0 is required for overload
 	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
-	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
+	if (r_overbright.integer > 1) Cvar_Set (&r_overbright, 1);
 
 	if (r_overbright.integer < 1)
 	{
 		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE;
 		d3d_OverbrightModulate = 1.0f;
 	}
-	else if (r_overbright.integer > 1)
-	{
-		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE4X;
-		d3d_OverbrightModulate = 4.0f;
-	}
 	else
 	{
 		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 		d3d_OverbrightModulate = 2.0f;
 	}
+}
 
-	D3D_RescaleLumas ();
+
+void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf)
+{
+	D3DVIEWPORT9 d3d_Viewport;
+
+	// get dimensions of viewport
+	// hmmm - some kind of rounding error to fix in the height calc
+	// more fp madness?  maybe change the conscale to do multiples of 8, or 32, or something???
+	d3d_Viewport.X = x;
+	d3d_Viewport.Y = y;
+	d3d_Viewport.Width = w;
+	d3d_Viewport.Height = h;
+
+	// set z range
+	d3d_Viewport.MinZ = zn;
+	d3d_Viewport.MaxZ = zf;
+
+	// set the viewport
+	d3d_Device->SetViewport (&d3d_Viewport);
 }
 
 
@@ -567,38 +582,13 @@ void R_SetupD3D (void)
 
 	// always clear the zbuffer
 	DWORD d3d_ClearFlags = D3DCLEAR_ZBUFFER;
-	D3DVIEWPORT9 d3d_3DViewport;
 
 	// if we have a stencil buffer make sure we clear that too otherwise perf will SUFFER
 	if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8) d3d_ClearFlags |= D3DCLEAR_STENCIL;
 
-	// get dimensions of viewport
-	// we do this here so that we can set up the clear rectangle properly
-	d3d_3DViewport.X = r_refdef.vrect.x * d3d_CurrentMode.Width / vid.width;
-	d3d_3DViewport.Width = r_refdef.vrect.width * d3d_CurrentMode.Width / vid.width;
-	d3d_3DViewport.Y = r_refdef.vrect.y * d3d_CurrentMode.Height / vid.height;
-	d3d_3DViewport.Height = r_refdef.vrect.height * d3d_CurrentMode.Height / vid.height;
-
-	// adjust for rounding errors by expanding the viewport by 1 in each direction
-	// if it's smaller than the screen size
-	if (d3d_3DViewport.X > 0) d3d_3DViewport.X--;
-	if (d3d_3DViewport.Y > 0) d3d_3DViewport.Y--;
-	if (d3d_3DViewport.Width < d3d_CurrentMode.Width) d3d_3DViewport.Width++;
-	if (d3d_3DViewport.Height < d3d_CurrentMode.Height) d3d_3DViewport.Height++;
-
-	// set z range
-	d3d_3DViewport.MinZ = 0.0f;
-	d3d_3DViewport.MaxZ = 1.0f;
-
-	// set the viewport
-	d3d_Device->SetViewport (&d3d_3DViewport);
-
 	// keep an identity view matrix at all times; this simplifies the setup and also lets us
 	// skip a matrix multiplication per vertex in our vertex shaders. ;)
-	D3DXMATRIX vm;
-	D3D_LoadIdentity (&vm);
-	d3d_Device->SetTransform (D3DTS_VIEW, &vm);
-
+	D3D_LoadIdentity (&d3d_ViewMatrix);
 	D3D_LoadIdentity (&d3d_WorldMatrix);
 	D3D_LoadIdentity (&d3d_ProjMatrix);
 
@@ -610,20 +600,14 @@ void R_SetupD3D (void)
 		// match winquake's grey if we're noclipping
 		clearcolor = 0xff1f1f1f;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
+		Sbar_Changed ();
 	}
 	else if (r_wireframe.integer)
 	{
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
 		clearcolor = 0xff1f1f1f;
+		Sbar_Changed ();
 	}
-	else if (d3d_RenderDef.oldviewleaf)
-	{
-		// explicitly don't clear the color buffer if we have a contents change
-		if (d3d_RenderDef.viewleaf->contents == d3d_RenderDef.oldviewleaf->contents && gl_clear.value)
-			d3d_ClearFlags |= D3DCLEAR_TARGET;
-	}
-	else if (gl_clear.value)
-		d3d_ClearFlags |= D3DCLEAR_TARGET;
 
 	// projection matrix depends on drawmode
 	if (d3d_RenderDef.automap)
@@ -631,6 +615,7 @@ void R_SetupD3D (void)
 		// change clear color to black and force a clear
 		clearcolor = 0xff000000;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
+		Sbar_Changed ();
 
 		// nothing has been culled yet
 		automap_culls = 0;
@@ -664,16 +649,16 @@ void R_SetupD3D (void)
 	else
 	{
 		// put z going up
-		D3D_RotateMatrix (&d3d_WorldMatrix, 1, 0, 0, -90);
-		D3D_RotateMatrix (&d3d_WorldMatrix, 0, 0, 1, 90);
+		D3D_RotateMatrix (&d3d_ViewMatrix, 1, 0, 0, -90);
+		D3D_RotateMatrix (&d3d_ViewMatrix, 0, 0, 1, 90);
 
 		// rotate camera by angles
-		D3D_RotateMatrix (&d3d_WorldMatrix, 1, 0, 0, -r_refdef.viewangles[2]);
-		D3D_RotateMatrix (&d3d_WorldMatrix, 0, 1, 0, -r_refdef.viewangles[0]);
-		D3D_RotateMatrix (&d3d_WorldMatrix, 0, 0, 1, -r_refdef.viewangles[1]);
+		D3D_RotateMatrix (&d3d_ViewMatrix, 1, 0, 0, -r_refdef.viewangles[2]);
+		D3D_RotateMatrix (&d3d_ViewMatrix, 0, 1, 0, -r_refdef.viewangles[0]);
+		D3D_RotateMatrix (&d3d_ViewMatrix, 0, 0, 1, -r_refdef.viewangles[1]);
 
 		// translate camera by origin
-		D3D_TranslateMatrix (&d3d_WorldMatrix, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
+		D3D_TranslateMatrix (&d3d_ViewMatrix, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 
 		// set projection frustum (infinite projection; the value of r_clipdist is now only used for positioning the sky)
 		float xmax = 4.0f * tan ((d3d_RenderDef.fov_x * D3DX_PI) / 360.0);
@@ -690,12 +675,31 @@ void R_SetupD3D (void)
 		d3d_ProjMatrix._43 = -1;
 	}
 
-	// set basic transforms (these must always be run)
-	d3d_Device->SetTransform (D3DTS_WORLD, &d3d_WorldMatrix);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjMatrix);
+	if (!d3d_GlobalCaps.usingPixelShaders)
+	{
+		// set basic transforms (these must always be run)
+		d3d_Device->SetTransform (D3DTS_VIEW, &d3d_ViewMatrix);
+		d3d_Device->SetTransform (D3DTS_WORLD, &d3d_WorldMatrix);
+		d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjMatrix);
+	}
+
+	// calculate concatenated final matrix for use by shaders
+	// because it's only needed once per frame instead of once per vertex we can save some vs instructions
+	D3D_MultMatrix (&d3d_ModelViewProjMatrix, &d3d_ViewMatrix, &d3d_WorldMatrix);
+	D3D_MultMatrix (&d3d_ModelViewProjMatrix, &d3d_ProjMatrix);
 
 	// we only need to clear if we're rendering 3D
+	// we clear *before* we set the viewport as clearing a subrect of the rendertarget is slower
+	// than just clearing the full thing
 	d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
+
+	// figure the sbar height at the active mode scale
+	int sbheight = sb_lines;
+	sbheight *= d3d_ActiveMode->Height;
+	sbheight /= vid.height;
+
+	// set up the scaled viewport taking account of the status bar area
+	D3D_SetViewport (0, 0, d3d_ActiveMode->Width, d3d_ActiveMode->Height - sbheight, 0, 1);
 
 	// depth testing and writing
 	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
@@ -1044,9 +1048,90 @@ R_RenderView
 r_refdef must be set before the first call
 ================
 */
+void D3DRMain_BeginCallback (void *blah)
+{
+	// begin the underwater warp
+	if (!D3D_Begin3DScene ())
+	{
+		d3d_Device->BeginScene ();
+		d3d_SceneBegun = true;
+	}
+
+	R_SetupD3D ();
+}
+
+
+void D3DRMain_EndCallback (void *blah)
+{
+	// ensure
+	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
+
+	// fixed pipeline fog has been removed from sm3 so don't do it
+#if 0
+	// disable fog (always)
+	D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_NONE);
+	D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
+	D3D_SetRenderState (D3DRS_FOGENABLE, FALSE);
+#endif
+}
+
+
+bool d3d_HLSLBegun = false;
+
+void D3DRMain_HLSLBeginCallback (void *blah)
+{
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		if (!d3d_HLSLBegun)
+		{
+			UINT numpasses;
+
+			d3d_MasterFX->SetTechnique ("MasterRefresh");
+			d3d_MasterFX->Begin (&numpasses, D3DXFX_DONOTSAVESTATE);
+			d3d_MasterFX->SetMatrix ("WorldMatrix", D3D_MakeD3DXMatrix (&d3d_ModelViewProjMatrix));
+			d3d_MasterFX->SetFloat ("Overbright", r_overbright.integer ? 2.0f : 1.0f);
+			d3d_MasterFX->SetFloatArray ("r_origin", r_origin, 3);
+			d3d_FXPass = FX_PASS_NOTBEGUN;
+			d3d_FXCommitPending = false;
+
+			d3d_HLSLBegun = true;
+		}
+	}
+}
+
+
+void D3DRMain_HLSLEndCallback (void *blah)
+{
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		if (d3d_HLSLBegun)
+		{
+			if (d3d_FXPass != FX_PASS_NOTBEGUN)
+				D3D_EndShaderPass ();
+
+			d3d_MasterFX->End ();
+
+			d3d_Device->SetVertexShader (NULL);
+			d3d_Device->SetPixelShader (NULL);
+
+			D3D_SetTexture (0, NULL);
+			D3D_SetTexture (1, NULL);
+			D3D_SetTexture (2, NULL);
+
+			d3d_HLSLBegun = false;
+		}
+	}
+}
+
+
 void R_RenderView (void)
 {
-	int time1, time2;
+	D3D_UpdateOcclusionQueries ();
+
+	// this needs to be updated here instead of in a callback otherwise it will go out of sync
+	d3d_RenderDef.framecount++;
+
+	float time1, time2;
 
 	if (r_norefresh.value) return;
 	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldmodel->brushhdr) return;
@@ -1057,27 +1142,37 @@ void R_RenderView (void)
 	d3d_RenderDef.frametime = cl.time - old_frametime;
 	old_frametime = cl.time;
 
-	if (r_speeds.value) time1 = Sys_DWORDTime ();
+	if (r_speeds.value) time1 = Sys_FloatTime ();
 
-	// setup to render
+	// force sbar updates on the first few frames to get a solid pic in the front buffer and all backbuffers
+	if (d3d_RenderDef.framecount < 5) Sbar_Changed ();
+
+	// initialize stuff
 	R_SetupFrame ();
-	D3D_UpdateContentsColor ();
-
-	// begin the underwater warp
-	if (!D3D_Begin3DScene ())
-	{
-		d3d_Device->BeginScene ();
-		d3d_SceneBegun = true;
-	}
-
 	R_SetFrustum (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y);
-	R_SetupD3D ();
+	D3D_InitializeTurb ();
+	D3D_UpdateContentsColor ();
 	D3D_PrepareOverbright ();
 	D3D_AddExtraInlineModelsToListsForAutomap ();
 
+	// go into the first callback for the frame
+	VBO_AddCallback (D3DRMain_BeginCallback);
+	VBO_AddCallback (D3DRMain_HLSLBeginCallback);
+
 	// setup everything we're going to draw
 	R_SetupEntitiesOnList ();
+
+	// run occlusion queries before drawing water so that crossing a water line
+	// won't cause entities to suddenly pop into view
+	// the same should probably apply to func_illusionary entities but we can't get them on the client side
+	D3D_RunOcclusionQueries ();
+
+	// draw opaque water surfaces here; this includes bmodels and the world merged together;
+	// translucent water surfaces are drawn separately during the alpha surfaces pass
+	D3D_DrawWaterSurfaces ();
+
 	D3D_AddParticesToAlphaList ();
+
 	D3D_RenderAliasModels ();
 
 	// draw all items on the alpha list
@@ -1086,27 +1181,17 @@ void R_RenderView (void)
 	// the viewmodel comes last
 	R_DrawViewModel ();
 
-	// ensure
-	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
-
 	// finish up the underwater warp
 	D3D_End3DScene ();
+	VBO_AddCallback (D3DRMain_EndCallback);
 
 	// update particles
 	R_UpdateParticles ();
 
-	// fixed pipeline fog has been removed from sm3 so don't do it
-#if 0
-	// disable fog (always)
-	D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_NONE);
-	D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
-	D3D_SetRenderState (D3DRS_FOGENABLE, FALSE);
-#endif
-
 	if (r_speeds.value)
 	{
-		time2 = Sys_DWORDTime ();
-		r_speedstime = time2 - time1;
+		time2 = Sys_FloatTime ();
+		r_speedstime = (int) ((time2 - time1) * 1000.0f);
 	}
 	else r_speedstime = -1;
 }

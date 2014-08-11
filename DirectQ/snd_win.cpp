@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -27,6 +27,12 @@ typedef HRESULT (WINAPI *DIRECTSOUNDENUMERATEPROC) (LPDSENUMCALLBACKA, LPVOID);
 
 DIRECTSOUNDCREATE8PROC QDirectSoundCreate8 = NULL;
 DIRECTSOUNDENUMERATEPROC QDirectSoundEnumerate = NULL;
+
+LPDIRECTSOUND8 ds_Device = NULL;
+LPDIRECTSOUNDBUFFER8 ds_SecondaryBuffer8 = NULL;
+DSCAPS ds_DeviceCaps;
+
+cvar_t s_khz ("s_khz", 11, CVAR_ARCHIVE);
 
 void DS_Unload (void)
 {
@@ -56,11 +62,6 @@ bool DS_LoadProcs (void)
 }
 
 
-// 64K is > 1 second at 16-bit, 22050 Hz
-#define	WAV_BUFFERS				64
-#define	WAV_MASK				0x3F
-#define	WAV_BUFFER_SIZE			0x0400
-
 // 1/16 second at 16-bit stereo 44100hz
 #define SECONDARY_BUFFER_SIZE	0x10000
 
@@ -68,8 +69,6 @@ bool dsound_init = false;
 static int	sample16;
 static int	snd_sent, snd_completed;
 bool snd_firsttime = true;
-
-cvar_t s_khz ("s_khz", 11, CVAR_ARCHIVE);
 
 /* 
  * Global variables. Must be visible to window-procedure function 
@@ -81,10 +80,6 @@ HPSTR		lpData;
 DWORD	ds_SoundBufferSize;
 
 MMTIME		mmstarttime;
-
-LPDIRECTSOUND8 ds_Device = NULL;
-LPDIRECTSOUNDBUFFER8 ds_SecondaryBuffer8 = NULL;
-DSCAPS ds_DeviceCaps;
 
 sndinitstat SNDDMA_InitDirect (void);
 
@@ -576,11 +571,21 @@ void Snd_Restart_f (void)
 	S_ClearBuffer ();
 	S_BlockSound (true);
 
+	// clear all channels too
+	for (int i = 0; i < MAX_CHANNELS; i++)
+	{
+		if (!channels[i]) continue;
+		channels[i]->sfx = NULL;
+		channels[i] = NULL;
+	}
+
 	// clear loaded sounds
 	SoundCache->Flush ();
 
 	for (sfx_t *sfx = active_sfx; sfx; sfx = sfx->next)
 		sfx->sndcache = NULL;
+
+	S_ClearSounds ();
 
 	// now restart the sound system
 	S_Shutdown ();
@@ -593,6 +598,8 @@ void Snd_Restart_f (void)
 
 void S_FrameCheck (void)
 {
+	return;
+
 	// initial values
 	static int oldkhz = s_khz.integer;
 	static int oldbits = loadas8bit.integer;
@@ -618,5 +625,5 @@ void S_FrameCheck (void)
 }
 
 
-cmd_t S_Restart_Cmd ("snd_restart", Snd_Restart_f);
+// cmd_t S_Restart_Cmd ("snd_restart", Snd_Restart_f);
 

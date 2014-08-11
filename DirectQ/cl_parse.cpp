@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -210,8 +210,8 @@ so the server doesn't disconnect.
 */
 void CL_KeepaliveMessage (bool showmsg = true)
 {
-	DWORD	time;
-	static DWORD lastmsg;
+	float	time;
+	static float lastmsg = 0;
 	int		ret;
 	sizebuf_t	old;
 	byte		olddata[8192];
@@ -248,9 +248,9 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	Q_MemCpy (net_message.data, olddata, net_message.cursize);
 
 	// check time
-	time = Sys_DWORDTime ();
+	time = Sys_FloatTime ();
 
-	if (time - lastmsg < 5000) return;
+	if (time - lastmsg < 5) return;
 
 	lastmsg = time;
 
@@ -282,7 +282,7 @@ static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 
 	cls.download.percent = PercentDown;
 
-	newtime = Sys_DWORDTime ();
+	newtime = timeGetTime ();
 	time = newtime - oldtime;
 
 	if (lastpercent != thispercent)
@@ -531,7 +531,8 @@ void CL_ParseServerInfo (void)
 			if (sv.active || cls.demoplayback || !cl_web_download.value || !cl_web_download_url.string || !cl_web_download_url.string[0])
 			{
 				// if web download is not being used we don't bother with it
-				Con_Printf ("Model %s not found\n", model_precache[i]);
+				// (note - this is now a Host_Error because with a NULL worldmodel we'll crash hard elsewhere)
+				Host_Error ("Model %s not found\n", model_precache[i]);
 				return;
 			}
 
@@ -665,8 +666,6 @@ void CL_ParseUpdate (int bits)
 	if (ent->msgtime != cl.mtime[1])
 	{
 		// entity was not present on the previous frame
-		// assume it's not occluded until such a time as we prove otherwise
-		ent->occluded = false;
 		forcelink = true;
 	}
 	else forcelink = false;
@@ -724,7 +723,7 @@ void CL_ParseUpdate (int bits)
 	}
 
 	if (bits & U_EFFECTS)
-		ent->effects = MSG_ReadByte();
+		ent->effects = MSG_ReadByte ();
 	else ent->effects = ent->baseline.effects;
 
 	// shift the known values for interpolation
@@ -798,6 +797,7 @@ void CL_ParseUpdate (int bits)
 		ent->model = model;
 
 		// the new model will most likely have different bbox dimensions
+		// so force it to be un-occluded
 		ent->occluded = false;
 
 		// automatic animation (torches, etc) can be either all together
@@ -867,6 +867,10 @@ void CL_ParseBaseline (entity_t *ent, int version)
 	}
 
 	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte () : ENTALPHA_DEFAULT;
+
+	// a new entity is never occluded
+	ent->occluded = false;
+	ent->occlusion = NULL;
 }
 
 
@@ -918,8 +922,10 @@ void CL_ParseClientdata (void)
 			if ( (i & (1<<j)) && !(cl.items & (1<<j)))
 				cl.item_gettime[j] = cl.time;
 		cl.items = i;
+
+		Sbar_Changed ();
 	}
-		
+
 	cl.onground = (bits & SU_ONGROUND) != 0;
 	cl.inwater = (bits & SU_INWATER) != 0;
 
@@ -932,9 +938,11 @@ void CL_ParseClientdata (void)
 		i = MSG_ReadByte ();
 	else
 		i = 0;
+
 	if (cl.stats[STAT_ARMOR] != i)
 	{
 		cl.stats[STAT_ARMOR] = i;
+		Sbar_Changed ();
 	}
 
 	if (bits & SU_WEAPON)
@@ -948,18 +956,21 @@ void CL_ParseClientdata (void)
 	if (cl.stats[STAT_WEAPON] != i)
 	{
 		cl.stats[STAT_WEAPON] = i;
+		Sbar_Changed ();
 	}
 
 	i = MSG_ReadShort ();
 	if (cl.stats[STAT_HEALTH] != i)
 	{
 		cl.stats[STAT_HEALTH] = i;
+		Sbar_Changed ();
 	}
 
 	i = MSG_ReadByte ();
 	if (cl.stats[STAT_AMMO] != i)
 	{
 		cl.stats[STAT_AMMO] = i;
+		Sbar_Changed ();
 	}
 
 	for (i=0; i<4; i++)
@@ -968,6 +979,7 @@ void CL_ParseClientdata (void)
 		if (cl.stats[STAT_SHELLS+i] != j)
 		{
 			cl.stats[STAT_SHELLS+i] = j;
+			Sbar_Changed ();
 		}
 	}
 
@@ -978,6 +990,7 @@ void CL_ParseClientdata (void)
 		if (cl.stats[STAT_ACTIVEWEAPON] != i)
 		{
 			cl.stats[STAT_ACTIVEWEAPON] = i;
+			Sbar_Changed ();
 		}
 	}
 	else
@@ -985,6 +998,7 @@ void CL_ParseClientdata (void)
 		if (cl.stats[STAT_ACTIVEWEAPON] != (1<<i))
 		{
 			cl.stats[STAT_ACTIVEWEAPON] = (1<<i);
+			Sbar_Changed ();
 		}
 	}
 
@@ -1000,6 +1014,23 @@ void CL_ParseClientdata (void)
 	if (bits & SU_WEAPONALPHA)
 		cl.viewent.alphaval = MSG_ReadByte ();
 	else cl.viewent.alphaval = 255;
+
+	// update for flash frames
+	for (i = 0; i < 32; i++)
+	{
+		if (cl.item_gettime[i] - cl.time < 2)
+		{
+			float time = cl.item_gettime[i];
+			int flashon = (int) ((cl.time - time) * 10);
+
+			// > 10 instead of >= so that the final flash off also gets triggered
+			if (flashon > 10)
+				flashon = 0;
+			else flashon = (flashon % 5) + 2;
+
+			if (flashon) Sbar_Changed ();
+		}
+	}
 }
 
 
@@ -1032,8 +1063,6 @@ void CL_ParseStatic (int version)
 	ent->effects = ent->baseline.effects;
 	ent->alphaval = 255;
 	ent->efrag = NULL;
-	ent->occlusion = NULL;
-	ent->occluded = false;
 
 	VectorCopy (ent->baseline.origin, ent->origin);
 	VectorCopy (ent->baseline.angles, ent->angles);
@@ -1257,6 +1286,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatename:
+			Sbar_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1270,6 +1300,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatefrags:
+			Sbar_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1280,9 +1311,11 @@ void CL_ParseServerMessage (void)
 			}
 
 			cl.scores[i].frags = MSG_ReadShort ();
+			Sbar_Changed ();
 			break;			
 
 		case svc_updatecolors:
+			Sbar_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1296,6 +1329,7 @@ void CL_ParseServerMessage (void)
 
 			// make the new translation
 			cl.scores[i].colors = MSG_ReadByte ();
+			Sbar_Changed ();
 			break;
 
 		case svc_particle:

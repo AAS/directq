@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+#include "d3d_vbo.h"
 
 
 bool D3D_DrawAutomap (void);
@@ -355,6 +356,8 @@ extern cvar_t scr_sbaralpha;
 
 static void SCR_CalcRefdef (void)
 {
+	Sbar_Changed ();
+
 	Cvar_Get (conscale, "gl_conscale");
 
 	vid.recalc_refdef = 0;
@@ -394,6 +397,14 @@ static void SCR_CalcRefdef (void)
 		conwidth = 640;
 		conheight = conwidth * d3d_CurrentMode.Height / d3d_CurrentMode.Width;
 	}
+
+	// round
+	conwidth = (conwidth + 7) & ~7;
+	conheight = (conheight + 7) & ~7;
+
+	// clamp
+	if (conwidth > d3d_CurrentMode.Width) conwidth = d3d_CurrentMode.Width;
+	if (conheight > d3d_CurrentMode.Height) conheight = d3d_CurrentMode.Height;
 
 	// set width and height
 	r_refdef.vrect.width = vid.width = (d3d_CurrentMode.Width - conwidth) * conscale->value + conwidth;
@@ -486,9 +497,9 @@ cmd_t SCR_SizeDown_f_Cmd ("sizedown", SCR_SizeDown_f);
 
 void SCR_Init (void)
 {
-	scr_ram = Draw_PicFromWad ("ram");
-	scr_net = Draw_PicFromWad ("net");
-	scr_turtle = Draw_PicFromWad ("turtle");
+	scr_ram = Draw_LoadPic ("ram");
+	scr_net = Draw_LoadPic ("net");
+	scr_turtle = Draw_LoadPic ("turtle");
 
 	scr_initialized = true;
 }
@@ -541,17 +552,12 @@ DrawPause
 */
 void SCR_DrawPause (void)
 {
-	qpic_t	*pic;
+	extern qpic_t *gfx_pause_lmp;
 
-	if (!scr_showpause.value)		// turn off for screenshots
-		return;
+	if (!scr_showpause.value) return;
+	if (!cl.paused) return;
 
-	if (!cl.paused)
-		return;
-
-	pic = Draw_CachePic ("gfx/pause.lmp");
-
-	Draw_Pic ((vid.width - pic->width) / 2, (vid.height - 48 - pic->height) / 2, pic);
+	Draw_Pic ((vid.width - gfx_pause_lmp->width) / 2, (vid.height - 48 - gfx_pause_lmp->height) / 2, gfx_pause_lmp);
 }
 
 
@@ -606,6 +612,9 @@ void SCR_DrawConsole (void)
 	{
 		Con_DrawConsole (scr_con_current, true);
 		clearconsole = 0;
+
+		// hack - if we have drawn the console we must force an sbar update
+		Sbar_Changed ();
 	}
 	else
 	{
@@ -665,7 +674,7 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 		byte *outcolor = NULL;
 
 		if (srcbpp == 8)
-			outcolor = (byte *) &d_8to24table[data[i]];
+			outcolor = (byte *) &d3d_QuakePalette.standard32[data[i]];
 		else outcolor = (byte *) &((unsigned *) data)[i];
 
 		if (dstbpp == 24)
@@ -1097,8 +1106,8 @@ void SCR_DrawLoading (void)
 {
 	if (!scr_drawloading) return;
 
-	qpic_t *pic = Draw_CachePic ("gfx/loading.lmp");
-	Draw_Pic ((vid.width - pic->width) / 2, (vid.height - 48 - pic->height) / 2, pic);
+	extern qpic_t *gfx_loading_lmp;
+	Draw_Pic ((vid.width - gfx_loading_lmp->width) / 2, (vid.height - 48 - gfx_loading_lmp->height) / 2, gfx_loading_lmp);
 }
 
 
@@ -1114,6 +1123,7 @@ void SCR_BeginLoadingPlaque (void)
 	scr_centertime_off = 0;
 	scr_con_current = 0;
 
+	Sbar_Changed ();
 	scr_drawloading = true;
 	SCR_UpdateScreen ();
 	scr_drawloading = false;
@@ -1149,9 +1159,10 @@ char *mbpromts[] =
 };
 
 
-char *scr_notifytext = NULL;
-char *scr_notifycaption = NULL;
+char scr_notifytext[2048];
+char scr_notifycaption[80];
 int scr_notifyflags = 0;
+bool scr_modalmessage = false;
 
 void SCR_DrawNotifyString (char *text, char *caption, int flags)
 {
@@ -1246,17 +1257,25 @@ void ClearAllStates (void);
 
 int SCR_ModalMessage (char *text, char *caption, int flags)
 {
-	scr_notifytext = text;
-	scr_notifycaption = caption;
+	// prevent being called recursively
+	if (scr_modalmessage) return false;
+
+	Q_strncpy (scr_notifytext, text, 2047);
+	Q_strncpy (scr_notifycaption, caption, 79);
 	scr_notifyflags = flags;
 
-	D3D_BeginRendering ();
-	SCR_DrawNotifyString (scr_notifytext, scr_notifycaption, scr_notifyflags);
-	D3D_EndRendering ();
-
-	S_ClearBuffer ();		// so dma doesn't loop current sound
+	// so dma doesn't loop current sound
+	S_ClearBuffer ();
 
 	bool key_accept = false;
+
+	// force a screen update
+	scr_modalmessage = true;
+	SCR_UpdateScreen ();
+	SCR_UpdateScreen ();
+	SCR_UpdateScreen ();
+	SCR_UpdateScreen ();
+	scr_modalmessage = false;
 
 	do
 	{
@@ -1304,61 +1323,6 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 
 
 //=============================================================================
-
-void SCR_SetupToDrawHUD (void)
-{
-	// clear any areas that we need to clear
-	// moved here from HUD.cpp so that we can batch up the state change required for it
-	// these are the same conditions as on drawing the HUD itself so we don't draw this when we shouldn't
-	if (sb_lines && vid.width > 320 && scr_con_current != vid.height && scr_viewsize.value < 120)
-	{
-		// just clear the whole sbar area
-		Draw_TileClear (0, vid.height - sb_lines, vid.width, sb_lines);
-	}
-
-	if (r_refdef.vrect.y > 0)
-	{
-		// top
-		Draw_TileClear
-		(
-			r_refdef.vrect.x,
-			0, 
-			r_refdef.vrect.x + r_refdef.vrect.width, 
-			r_refdef.vrect.y
-		);
-
-		// bottom
-		Draw_TileClear
-		(
-			r_refdef.vrect.x,
-			r_refdef.vrect.y + r_refdef.vrect.height, 
-			r_refdef.vrect.width, 
-			vid.height - sb_lines - (r_refdef.vrect.height + r_refdef.vrect.y)
-		);
-	}
-
-	if (r_refdef.vrect.x > 0)
-	{
-		// left
-		Draw_TileClear
-		(
-			0,
-			0,
-			r_refdef.vrect.x,
-			vid.height - sb_lines
-		);
-
-		// right
-		Draw_TileClear
-		(
-			r_refdef.vrect.x + r_refdef.vrect.width,
-			0, 
-			vid.width - r_refdef.vrect.x + r_refdef.vrect.width, 
-			vid.height - sb_lines
-		);
-	}
-}
-
 
 void SCR_DrawAutomapStats (void)
 {
@@ -1450,6 +1414,13 @@ void M_Draw (void);
 void HUD_IntermissionOverlay (void);
 void HUD_FinaleOverlay (void);
 void SHOWLMP_drawall (void);
+void D3D_UpdateOcclusionQueries (void);
+
+extern bool vid_restarted;
+extern bool d3d_DeviceLost;
+
+void D3DRMain_HLSLBeginCallback (void *blah);
+void D3DRMain_HLSLEndCallback (void *blah);
 
 void SCR_UpdateScreen (void)
 {
@@ -1460,8 +1431,6 @@ void SCR_UpdateScreen (void)
 
 	extern D3DDISPLAYMODE d3d_DesktopMode;
 	extern D3DDISPLAYMODE d3d_CurrentMode;
-
-	extern bool d3d_DeviceLost;
 
 	if (block_drawing) return;
 
@@ -1485,6 +1454,9 @@ void SCR_UpdateScreen (void)
 
 	// if we've just lost the device we're going into recovery mode, so don't draw anything
 	if (d3d_DeviceLost) return;
+
+	// if we needed to restart video skip updating this frame
+	if (vid_restarted) return;
 
 	// see if we are using pixel shaders - this needs to be done after begin rendering in case anything in there
 	// upsets the availability
@@ -1569,6 +1541,8 @@ void SCR_UpdateScreen (void)
 				Draw_String (vid.width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
 				Draw_String (vid.width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
 				Draw_String (vid.width - 100, 50, va ("%5i stream", d3d_RenderDef.numsss));
+				Draw_String (vid.width - 100, 60, va ("%5i lock", d3d_RenderDef.numlocks));
+				Draw_String (vid.width - 100, 70, va ("%5i draw", d3d_RenderDef.numdrawprim));
 			}
 
 			if (scr_showcoords.integer && !con_forcedup)
@@ -1580,6 +1554,15 @@ void SCR_UpdateScreen (void)
 		}
 		else SCR_DrawAutomapStats ();
 	}
+
+	if (scr_modalmessage)
+		SCR_DrawNotifyString (scr_notifytext, scr_notifycaption, scr_notifyflags);
+
+	d3d_RenderDef.numdrawprim = 0;
+	d3d_RenderDef.numsss = 0;
+	d3d_RenderDef.numlocks = 0;
+
+	VBO_AddCallback (D3DRMain_HLSLEndCallback);
 
 	D3D_EndRendering ();
 
@@ -1621,21 +1604,30 @@ void SCR_DrawSlider (int x, int y, int width, int stage, int maxstage)
 
 void SCR_QuakeIsLoading (int stage, int maxstage)
 {
+	// explicitly send this through the fixed path
+	d3d_GlobalCaps.usingPixelShaders = false;
+
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
+	Sbar_Changed ();
 	SCR_CalcRefdef ();
 	D3D_BeginRendering ();
+
+	// if we needed to restart video skip updating this frame
+	if (d3d_DeviceLost) return;
+	if (vid_restarted) return;
+
 	D3D_Set2D ();
 
 	Draw_ConsoleBackground (vid.height);
 
-	qpic_t *pic = Draw_CachePic ("gfx/loading.lmp");
+	extern qpic_t *gfx_loading_lmp;
 
-	int x = (vid.width - pic->width) / 2;
-	int y = (vid.height - 48 - pic->height) / 2;
+	int x = (vid.width - gfx_loading_lmp->width) / 2;
+	int y = (vid.height - 48 - gfx_loading_lmp->height) / 2;
 
-	Draw_Pic (x, y, pic);
+	Draw_Pic (x, y, gfx_loading_lmp);
 
-	SCR_DrawSlider (x + 8, y + pic->height + 8, pic->width - 16, stage, maxstage);
+	SCR_DrawSlider (x + 8, y + gfx_loading_lmp->height + 8, gfx_loading_lmp->width - 16, stage, maxstage);
 
 	D3D_EndRendering ();
 }

@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -19,6 +19,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // net_main.c
 
 #include "quakedef.h"
+
+// joe: rcon from ProQuake
+#define RCON_BUFF_SIZE	8192
+char		rcon_buff[RCON_BUFF_SIZE];
+sizebuf_t	rcon_message = {false, false, (byte *) rcon_buff, RCON_BUFF_SIZE, 0};
+bool	rcon_active = false;
+
+cvar_t	cl_password ("cl_password", "");		// joe: password protection from ProQuake
+cvar_t	rcon_password ("rcon_password", "");		// joe: rcon password from ProQuake
+cvar_t	rcon_server ("rcon_server", "");		// joe: rcon server from ProQuake
 
 qsocket_t	*net_activeSockets = NULL;
 qsocket_t	*net_freeSockets = NULL;
@@ -149,6 +159,29 @@ void NET_FreeQSocket(qsocket_t *sock)
 }
 
 
+void NET_AllocQSockets (int numsockets)
+{
+	static qsocket_t *sockets = NULL;
+	qsocket_t *s;
+
+	if (sockets) MainZone->Free (sockets);
+
+	// add an additional socket for the server
+	net_numsockets = (numsockets + 1);
+	net_activeSockets = NULL;
+	net_freeSockets = NULL;
+	sockets = (qsocket_t *) MainZone->Alloc (net_numsockets * sizeof (qsocket_t));
+
+	for (int i = 0; i < net_numsockets; i++)
+	{
+		s = (qsocket_t *) &sockets[i];
+		s->next = net_freeSockets;
+		net_freeSockets = s;
+		s->disconnected = true;
+	}
+}
+
+
 static void NET_Listen_f (void)
 {
 	if (Cmd_Argc () != 2)
@@ -184,13 +217,13 @@ static void MaxPlayers_f (void)
 		return;
 	}
 
-	n = atoi(Cmd_Argv(1));
+	n = atoi (Cmd_Argv(1));
 
 	if (n < 1) n = 1;
 
-	if (n > svs.maxclientslimit)
+	if (n > MAX_SCOREBOARD)
 	{
-		n = svs.maxclientslimit;
+		n = MAX_SCOREBOARD;
 		Con_Printf ("\"maxplayers\" set to \"%u\"\n", n);
 	}
 
@@ -198,6 +231,13 @@ static void MaxPlayers_f (void)
 	if ((n > 1) && (!listening)) Cbuf_AddText ("listen 1\n");
 
 	svs.maxclients = n;
+
+	// recreate the client structs
+	MainZone->Free (svs.clients);
+	svs.clients = (client_s *) Zone_Alloc (svs.maxclients * sizeof (client_t));
+
+	// realloc sockets
+	NET_AllocQSockets (svs.maxclients);
 
 	if (n == 1)
 		Cvar_Set ("deathmatch", "0");
@@ -512,7 +552,10 @@ int	NET_GetMessage (qsocket_t *sock)
 	int ret;
 
 	if (!sock)
+	{
+		Con_Printf ("NET_GetMessage: NULL socket\n");
 		return -1;
+	}
 
 	if (sock->disconnected)
 	{
@@ -530,10 +573,10 @@ int	NET_GetMessage (qsocket_t *sock)
 		if (net_time - sock->lastMessageTime > net_messagetimeout.value)
 		{
 			NET_Close(sock);
+			Con_Printf ("NET_GetMessage: timed out\n");
 			return -1;
 		}
 	}
-
 
 	if (ret > 0)
 	{
@@ -546,6 +589,9 @@ int	NET_GetMessage (qsocket_t *sock)
 				unreliableMessagesReceived++;
 		}
 	}
+
+	if (ret == -1)
+		Con_Printf ("NET_GetMessage: generic bad vibes\n");
 
 	return ret;
 }
@@ -674,15 +720,12 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 
 	start = Sys_FloatTime();
 
-	int xxx = 0;
-	xxx++;
-
 	while (count)
 	{
 		count = 0;
 		for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 		{
-			if (! state1[i])
+			if (!state1[i])
 			{
 				if (NET_CanSendMessage (host_client->netconnection))
 				{
@@ -697,7 +740,7 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 				continue;
 			}
 
-			if (! state2[i])
+			if (!state2[i])
 			{
 				if (NET_CanSendMessage (host_client->netconnection))
 				{
@@ -734,7 +777,6 @@ void NET_Init (void)
 {
 	int			i;
 	int			controlSocket;
-	qsocket_t	*s;
 
 	i = COM_CheckParm ("-port");
 
@@ -750,28 +792,18 @@ void NET_Init (void)
 
 	net_hostport = DEFAULTnet_hostport;
 
-	if (COM_CheckParm("-listen"))
+	if (COM_CheckParm ("-listen"))
 		listening = true;
 
-	// add an extra socket for the server itself
-	net_numsockets = (svs.maxclientslimit + 1);
-
-	SetNetTime();
-
-	for (i = 0; i < net_numsockets; i++)
-	{
-		s = (qsocket_t *) Zone_Alloc (sizeof (qsocket_t));
-		s->next = net_freeSockets;
-		net_freeSockets = s;
-		s->disconnected = true;
-	}
+	NET_AllocQSockets (1);
+	SetNetTime ();
 
 	// allocate space for network message buffer
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
 
 	// initialize all the drivers
 	for (net_driverlevel=0; net_driverlevel<net_numdrivers; net_driverlevel++)
-		{
+	{
 		controlSocket = net_drivers[net_driverlevel].Init();
 		if (controlSocket == -1)
 			continue;
@@ -779,10 +811,11 @@ void NET_Init (void)
 		net_drivers[net_driverlevel].controlSock = controlSocket;
 		if (listening)
 			net_drivers[net_driverlevel].Listen (true);
-		}
+	}
 
 	if (*my_tcpip_address) Con_DPrintf("TCP/IP address %s\n", my_tcpip_address);
 }
+
 
 /*
 ====================
@@ -790,18 +823,16 @@ NET_Shutdown
 ====================
 */
 
-void		NET_Shutdown (void)
+void NET_Shutdown (void)
 {
 	qsocket_t	*sock;
 
 	SetNetTime();
 
 	for (sock = net_activeSockets; sock; sock = sock->next)
-		NET_Close(sock);
+		NET_Close (sock);
 
-//
-// shutdown the drivers
-//
+	// shutdown the drivers
 	for (net_driverlevel = 0; net_driverlevel < net_numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == true)

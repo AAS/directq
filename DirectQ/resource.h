@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -21,9 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define IDR_PARTICLEDOT				200
 
 // shaders
-#define IDR_LIQUID					420
-#define IDR_SKY						430
-#define IDR_SCREEN					440
+#define IDR_MASTERFX				400
 
 // bitmaps and other images
 #define IDR_SPLASH					600

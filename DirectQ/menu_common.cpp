@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -19,6 +19,52 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "menu_common.h"
+
+qpic_t *menu_dot_lmp[6];
+qpic_t *gfx_qplaque_lmp;
+qpic_t *gfx_sp_menu_lmp;
+qpic_t *gfx_mainmenu_lmp;
+qpic_t *gfx_mp_menu_lmp;
+qpic_t *gfx_bigbox_lmp;
+qpic_t *gfx_menuplyr_lmp;
+qpic_t *menu_help_lmp[NUM_HELP_PAGES];
+qpic_t *gfx_ttl_sgl_lmp;
+qpic_t *gfx_p_save_lmp;
+qpic_t *gfx_p_load_lmp;
+qpic_t *gfx_ttl_main_lmp;
+qpic_t *gfx_p_option_lmp;
+qpic_t *gfx_ttl_cstm_lmp;
+qpic_t *gfx_vidmodes_lmp;
+qpic_t *gfx_p_multi_lmp;
+
+void Menu_InitPics (void)
+{
+	// if NUM_HELP_PAGES ever changes from 6 this will also need to be changed...
+	for (int i = 0; i < 6; i++)
+	{
+		menu_help_lmp[i] = Draw_LoadPic (va ("gfx/help%i.lmp", i));
+		menu_dot_lmp[i] = Draw_LoadPic (va ("gfx/menudot%i.lmp", (i + 1)));
+	}
+
+	gfx_qplaque_lmp = Draw_LoadPic ("gfx/qplaque.lmp");
+	gfx_sp_menu_lmp = Draw_LoadPic ("gfx/sp_menu.lmp");
+
+	if (nehahra)
+		gfx_mainmenu_lmp = Draw_LoadPic ("gfx/gamemenu.lmp");
+	else gfx_mainmenu_lmp = Draw_LoadPic ("gfx/mainmenu.lmp");
+
+	gfx_mp_menu_lmp = Draw_LoadPic ("gfx/mp_menu.lmp");
+	gfx_bigbox_lmp = Draw_LoadPic ("gfx/bigbox.lmp");
+	gfx_menuplyr_lmp = Draw_LoadPic ("gfx/menuplyr.lmp");
+	gfx_ttl_sgl_lmp = Draw_LoadPic ("gfx/ttl_sgl.lmp");
+	gfx_p_save_lmp = Draw_LoadPic ("gfx/p_save.lmp");
+	gfx_p_load_lmp = Draw_LoadPic ("gfx/p_load.lmp");
+	gfx_ttl_main_lmp = Draw_LoadPic ("gfx/ttl_main.lmp");
+	gfx_p_option_lmp = Draw_LoadPic ("gfx/p_option.lmp");
+	gfx_ttl_cstm_lmp = Draw_LoadPic ("gfx/ttl_cstm.lmp");
+	gfx_vidmodes_lmp = Draw_LoadPic ("gfx/vidmodes.lmp");
+	gfx_p_multi_lmp = Draw_LoadPic ("gfx/p_multi.lmp");
+}
 
 
 // our current menu
@@ -925,8 +971,7 @@ void CQMenuCursorSubMenu::Key (int k)
 
 void CQMenuCursorSubMenu::DrawCurrentOptionHighlight (int y)
 {
-	qpic_t *dot = Draw_CachePic (va ("gfx/menudot%i.lmp", ((int) (host_time * 10) % 6) + 1));
-	Draw_Pic (((vid.width - 240) >> 1) + 5, y, dot);
+	Draw_Pic (((vid.width - 240) >> 1) + 5, y, menu_dot_lmp[(int) (realtime * 10) % 6]);
 }
 
 
@@ -1173,22 +1218,18 @@ int CQMenuTitle::GetYAdvance (void)
 =====================================================================================================================================
 */
 
-CQMenuBanner::CQMenuBanner (char *pic)
+CQMenuBanner::CQMenuBanner (qpic_t **pic)
 {
-	this->Pic = (char *) Zone_Alloc (strlen (pic) + 1);
-	strcpy (this->Pic, pic);
+	this->Pic = pic;
 	this->AcceptsInput = false;
 }
 
 
 void CQMenuBanner::Draw (int y)
 {
-	// we can't load this on init as the filesystem may not be up yet
-	qpic_t *pic = Draw_CachePic (this->Pic);
-
 	// draw centered on screen and offset down
-	Draw_Pic ((vid.width - pic->width) >> 1, y, pic);
-	this->Y = pic->height + 10;
+	Draw_Pic ((vid.width - this->Pic[0]->width) >> 1, y, this->Pic[0]);
+	this->Y = this->Pic[0]->height + 10;
 }
 
 
@@ -1206,10 +1247,9 @@ int CQMenuBanner::GetYAdvance (void)
 =====================================================================================================================================
 */
 
-CQMenuChunkyPic::CQMenuChunkyPic (char *pic)
+CQMenuChunkyPic::CQMenuChunkyPic (qpic_t **pic)
 {
-	this->Pic = (char *) Zone_Alloc (strlen (pic) + 1);
-	strcpy (this->Pic, pic);
+	this->Pic = pic;
 	this->AcceptsInput = false;
 }
 
@@ -1219,20 +1259,12 @@ void CQMenuChunkyPic::Draw (int y)
 	// per ID Quake each option is 20 high
 	y -= this->Parent->NumCursorOptions * 20;
 
-	// we can't load this on init as the filesystem may not be up yet
-	qpic_t *pic = Draw_CachePic (this->Pic);
-
-	// hack the pic for nehahra
-	if (nehahra && !stricmp (this->Pic, "gfx/mainmenu.lmp"))
-		pic = Draw_CachePic ("gfx/gamemenu.lmp");
-
 	// quake plaque
-	qpic_t *pla = Draw_CachePic ("gfx/qplaque.lmp");
-	Draw_Pic (((vid.width - 240) >> 1) - 35, y - 15, pla);
+	Draw_Pic (((vid.width - 240) >> 1) - 35, y - 15, gfx_qplaque_lmp);
 
 	// draw centered on screen and offset down
-	Draw_Pic (((vid.width - 240) >> 1) + 25, y, pic);
-	this->Y = pic->height + 10;
+	Draw_Pic (((vid.width - 240) >> 1) + 25, y, this->Pic[0]);
+	this->Y = this->Pic[0]->height + 10;
 }
 
 
@@ -2271,7 +2303,6 @@ void M_Draw (void)
 	if (scr_con_current)
 	{
 		Draw_ConsoleBackground (vid.height);
-		S_ExtraUpdate ();
 
 		// partial alpha
 		Draw_FadeScreen (128);
@@ -2321,9 +2352,6 @@ void M_Draw (void)
 
 	// return to no sounds
 	menu_soundlevel = m_sound_none;
-
-	// run an update so that things don't get stuck
-	S_ExtraUpdate ();
 }
 
 

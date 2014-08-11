@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -29,12 +29,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "menu_common.h"
 
+extern bool WinDWM;
+
+extern cvar_t d3d_depthmode;
+
 char **menu_videomodes = NULL;
 int menu_videomodenum = 0;
+
+char **menu_depthmodes = NULL;
+int menu_depthmodenum = 0;
+extern D3DFORMAT d3d_SupportedDepthFormats[];
 
 char **menu_anisotropicmodes = NULL;
 int menu_anisonum = 0;
 
+extern cvar_t r_smoothcharacters;
 extern cvar_t gl_conscale;
 extern cvar_t scr_fov;
 extern cvar_t scr_fovcompat;
@@ -45,18 +54,31 @@ extern cvar_t g_gamma;
 extern cvar_t b_gamma;
 extern cvar_t r_anisotropicfilter;
 extern cvar_t vid_vsync;
-extern cvar_t gl_triplebuffer;
 extern cvar_t r_hlsl;
+
+char *filtermodes[] = {"None", "Point", "Linear", NULL};
+
+int texfiltermode = 0;
+int mipfiltermode = 0;
 
 // dummy cvars for temp stuff
 int dummy_vsync;
-int dummy_triplebuffer;
 
 bool D3D_ModeIsCurrent (d3d_ModeDesc_t *mode);
 
 extern d3d_ModeDesc_t *d3d_ModeList;
 
 #define TAG_VIDMODEAPPLY	1
+#define TAG_HLSL			32
+#define TAG_CONSCALE		64
+#define TAG_SMOOTHCHAR		128
+#define TAG_WINDOWED_ENABLE		256
+#define TAG_FULLSCREEN_ENABLE	512
+#define TAG_WINDOWED_HIDE	1024
+#define TAG_FULLSCREEN_HIDE	2048
+
+extern int d3d_AllowedRefreshRates[];
+extern int d3d_NumRefreshRates;
 
 // if these are changed they need to be changed in menu_other.cpp as well
 // these need to be kept high enough so that they don't interfere with other options
@@ -68,15 +90,58 @@ extern d3d_ModeDesc_t *d3d_ModeList;
 #define MENU_TAG_FULL			(1 << 31)
 #endif
 
+char **refrlist = NULL;
+int refrnum = 0;
+extern cvar_t vid_refreshrate;
+
+void VID_MenuGetDepthModes (void)
+{
+	// already done
+	if (menu_depthmodes) return;
+
+	menu_depthmodes = (char **) MainZone->Alloc (32 * sizeof (char *));
+
+	for (int i = 0; ; i++)
+	{
+		// ran out of formats
+		if (d3d_SupportedDepthFormats[i] == D3DFMT_UNKNOWN) break;
+
+		// format is good to use now
+		menu_depthmodes[i] = (char *) MainZone->Alloc (32);
+
+		switch (d3d_SupportedDepthFormats[i])
+		{//D3DFMT_D16, D3DFMT_D15S1, D3DFMT_D24S8, D3DFMT_D24X4S4, D3DFMT_D32, D3DFMT_D24X8
+		case D3DFMT_D16:		strcpy (menu_depthmodes[i], "16 bit");			break;
+		case D3DFMT_D15S1:		strcpy (menu_depthmodes[i], "15 bit/1 bit");	break;
+		case D3DFMT_D24S8:		strcpy (menu_depthmodes[i], "24 bit/8 bit");	break;
+		case D3DFMT_D24X4S4:	strcpy (menu_depthmodes[i], "24 bit/4 bit");	break;
+		case D3DFMT_D32:		strcpy (menu_depthmodes[i], "32 bit");			break;
+		case D3DFMT_D24X8:		strcpy (menu_depthmodes[i], "24 bit");			break;
+		default:				strcpy (menu_depthmodes[i], "Unknown");			break;
+		}
+
+		// ensure that the list is NULL terminated
+		menu_depthmodes[i + 1] = NULL;
+	}
+}
+
 
 void VID_ApplyModeChange (void)
 {
-	// the value here has already been forced to correct in the draw func so we just set it
+	// run a screen update after each to make sure they only occur one at a time
 	Cvar_Set (&d3d_mode, menu_videomodenum);
-	Cvar_Set (&vid_vsync, dummy_vsync);
-	Cvar_Set (&gl_triplebuffer, dummy_triplebuffer);
+	SCR_UpdateScreen ();
 
-	// position the selection back at the video mode option
+	Cvar_Set (&vid_vsync, dummy_vsync);
+	SCR_UpdateScreen ();
+
+	Cvar_Set (&d3d_depthmode, menu_depthmodenum);
+	SCR_UpdateScreen ();
+
+	Cvar_Set (&vid_refreshrate, d3d_AllowedRefreshRates[refrnum]);
+	SCR_UpdateScreen ();
+
+	// position the selection back up one as the "apply" option is no longer valid
 	menu_Video.Key (K_UPARROW);
 }
 
@@ -87,48 +152,325 @@ bool Menu_VideoCheckNeedApply (void)
 	// we signal to show the apply option
 	if (menu_videomodenum != d3d_mode.integer) return true;
 	if (vid_vsync.integer != dummy_vsync) return true;
-	if (gl_triplebuffer.integer != dummy_triplebuffer) return true;
+	if (menu_depthmodenum != d3d_depthmode.integer) return true;
+	if (d3d_AllowedRefreshRates[refrnum] != vid_refreshrate.integer) return true;
 
 	// no apply needed
 	return false;
 }
 
 
+void Menu_VideoDecodeTextureFilter (void)
+{
+	switch (d3d_TexFilter)
+	{
+	case D3DTEXF_POINT:
+		texfiltermode = 0;
+		break;
+
+	default:
+		// linear or anisotropic
+		texfiltermode = 1;
+		break;
+	}
+
+	switch (d3d_MipFilter)
+	{
+	case D3DTEXF_NONE:
+		mipfiltermode = 0;
+		break;
+
+	case D3DTEXF_POINT:
+		mipfiltermode = 1;
+		break;
+
+	default:
+		mipfiltermode = 2;
+		break;
+	}
+}
+
+
+void Menu_VideoEncodeTextureFilter (void)
+{
+	switch (texfiltermode)
+	{
+	case 0:
+		d3d_TexFilter = D3DTEXF_POINT;
+		break;
+
+	default:
+		d3d_TexFilter = D3DTEXF_LINEAR;
+
+		break;
+	}
+
+	switch (mipfiltermode)
+	{
+	case 0:
+		d3d_MipFilter = D3DTEXF_NONE;
+		break;
+
+	case 1:
+		d3d_MipFilter = D3DTEXF_POINT;
+		break;
+
+	default:
+		d3d_MipFilter = D3DTEXF_LINEAR;
+		break;
+	}
+}
+
+char **menu_windowedres = NULL;
+char **menu_fullscrnres = NULL;
+
+int menu_windnum = 0;
+int menu_fullnum = 0;
+
+char *bpplist[] = {"16 bpp", "32 bpp", NULL};
+char *modelist[] = {"Windowed", "Fullscreen", NULL};
+
+int bppnum = 0;
+int modetypenum = 0;
+
+extern D3DDISPLAYMODE d3d_DesktopMode;
+
+void Menu_VideoDecodeVideoMode (void)
+{
+	if (menu_windowedres || menu_fullscrnres)
+	{
+		D3DFORMAT findformat = D3DFMT_UNKNOWN;
+		char **findres = NULL;
+
+		// set the correct type
+		if (d3d_CurrentMode.Format == D3DFMT_UNKNOWN || d3d_CurrentMode.RefreshRate == 0)
+		{
+			modetypenum = 0;
+			findformat = d3d_DesktopMode.Format;
+			findres = menu_windowedres;
+		}
+		else
+		{
+			modetypenum = 1;
+			findformat = d3d_CurrentMode.Format;
+			findres = menu_fullscrnres;
+		}
+
+		switch (findformat)
+		{
+		case D3DFMT_R5G6B5:		bppnum = 0; break;
+		case D3DFMT_X1R5G5B5:	bppnum = 0; break;
+		case D3DFMT_A1R5G5B5:	bppnum = 0; break;
+		case D3DFMT_X8R8G8B8:	bppnum = 1; break;
+		case D3DFMT_UNKNOWN:	bppnum = 1; break;
+		default:				bppnum = 1; break;
+		}
+
+		char resbuf[32];
+		int findresnum = 0;
+
+		sprintf (resbuf, "%i x %i", d3d_CurrentMode.Width, d3d_CurrentMode.Height);
+
+		for (int i = 0; ; i++)
+		{
+			if (!findres[i]) break;
+
+			if (!strcmp (resbuf, findres[i]))
+			{
+				findresnum = i;
+				break;
+			}
+		}
+
+		if (modetypenum == 0)
+		{
+			menu_windnum = findresnum;
+			menu_fullnum = 0;
+		}
+		else
+		{
+			menu_windnum = 0;
+			menu_fullnum = findresnum;
+		}
+
+		refrnum = 0;
+
+		for (int i = 0; i < d3d_NumRefreshRates; i++)
+		{
+			if (d3d_AllowedRefreshRates[i] == vid_refreshrate.integer)
+			{
+				refrnum = i;
+				break;
+			}
+		}
+
+		return;
+	}
+
+	// note: on any sane and reasonable driver these will all eval to true
+	// on the kind of crap that *certain* people use they might not...
+	bool allowwindowed = false;
+	bool allowfullscreen = false;
+	bool allow16bpp = false;
+	bool allow32bpp = false;
+
+	char *fullresolutions = (char *) scratchbuf;
+	int numfullresolutions = 0;
+
+	char *windresolutions = (char *) (scratchbuf + SCRATCHBUF_SIZE / 2);
+	int numwindresolutions = 0;
+
+	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	{
+		if (mode->AllowWindowed)
+		{
+			sprintf (windresolutions, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
+			windresolutions += 32;
+			numwindresolutions++;
+			allowwindowed = true;
+		}
+		else
+		{
+			if (mode->BPP == 32)
+			{
+				sprintf (fullresolutions, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
+				fullresolutions += 32;
+				numfullresolutions++;
+				allow32bpp = true;
+			}
+			else allow16bpp = true;
+
+			allowfullscreen = true;
+		}
+	}
+
+	// reset to the start of the buffers
+	fullresolutions = (char *) scratchbuf;
+	windresolutions = (char *) (scratchbuf + SCRATCHBUF_SIZE / 2);
+
+	// add 1 for NULL termination
+	menu_windowedres = (char **) MainZone->Alloc ((numwindresolutions + 1) * sizeof (char *));
+	menu_fullscrnres = (char **) MainZone->Alloc ((numfullresolutions + 1) * sizeof (char *));
+
+	// fill in windowed resolutions
+	for (int i = 0; i < numwindresolutions; i++)
+	{
+		menu_windowedres[i] = (char *) MainZone->Alloc (strlen (windresolutions) + 1);
+		strcpy (menu_windowedres[i], windresolutions);
+		windresolutions += 32;
+	}
+
+	// fill in fullscreen resolutions
+	for (int i = 0; i < numfullresolutions; i++)
+	{
+		menu_fullscrnres[i] = (char *) MainZone->Alloc (strlen (fullresolutions) + 1);
+		strcpy (menu_fullscrnres[i], fullresolutions);
+		fullresolutions += 32;
+	}
+
+	refrlist = (char **) MainZone->Alloc ((d3d_NumRefreshRates + 1) * sizeof (char *));
+
+	// fill in refreshrates
+	for (int i = 0; i < d3d_NumRefreshRates; i++)
+	{
+		refrlist[i] = (char *) MainZone->Alloc (16);
+		sprintf (refrlist[i], "%i Hz", d3d_AllowedRefreshRates[i]);
+		refrlist[i + 1] = NULL;
+	}
+
+	// call recursively to set the selected options
+	Menu_VideoDecodeVideoMode ();
+}
+
+
+void Menu_VideoEncodeVideoMode (void)
+{
+	// pick a safe mode in case we don't find it
+	menu_videomodenum = 0;
+
+	int width = 0;
+	int height = 0;
+
+	// scan the dimensions
+	if (modetypenum == 0)
+		sscanf (menu_windowedres[menu_windnum], "%i x %i", &width, &height);
+	else sscanf (menu_fullscrnres[menu_fullnum], "%i x %i", &width, &height);
+
+	// search through the modes for it
+	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	{
+		// ensure matching dimensions
+		if (mode->d3d_Mode.Width != width) continue;
+		if (mode->d3d_Mode.Height != height) continue;
+
+		// match windowed/fullscreen
+		if (!mode->AllowWindowed && modetypenum == 0) continue;
+		if (mode->AllowWindowed && modetypenum == 1) continue;
+
+		// match bit depth if fullscreen
+		if (modetypenum == 1 && bppnum == 0 && mode->BPP != 16) continue;
+		if (modetypenum == 1 && bppnum == 1 && mode->BPP != 32) continue;
+
+		// this is the mode
+		menu_videomodenum = mode->ModeNum;
+		break;
+	}
+}
+
+
+char *occlusionslist[] = {"Off", "MDL Only", "Brush Only", "Full", NULL};
+int occlusionsnum = 0;
+extern cvar_t r_occlusionqueries;
+
 int Menu_VideoCustomDraw (int y)
 {
+	// encode the selected mode options into a video mode number that we can compare with the current mode
+	Menu_VideoEncodeVideoMode ();
+
+	if (modetypenum == 0)
+	{
+		menu_Video.DisableMenuOptions (TAG_FULLSCREEN_ENABLE);
+		menu_Video.HideMenuOptions (TAG_FULLSCREEN_HIDE);
+		menu_Video.EnableMenuOptions (TAG_WINDOWED_ENABLE);
+		menu_Video.ShowMenuOptions (TAG_WINDOWED_HIDE);
+	}
+	else
+	{
+		menu_Video.EnableMenuOptions (TAG_FULLSCREEN_ENABLE);
+		menu_Video.ShowMenuOptions (TAG_FULLSCREEN_HIDE);
+		menu_Video.DisableMenuOptions (TAG_WINDOWED_ENABLE);
+		menu_Video.HideMenuOptions (TAG_WINDOWED_HIDE);
+	}
+
+	if (occlusionsnum != r_occlusionqueries.integer)
+		Cvar_Set (&r_occlusionqueries, occlusionsnum);
+
 	// check for "Apply" on d3d_mode change
 	if (!Menu_VideoCheckNeedApply ())
 		menu_Video.DisableMenuOptions (TAG_VIDMODEAPPLY);
 	else menu_Video.EnableMenuOptions (TAG_VIDMODEAPPLY);
 
-	d3d_ModeDesc_t *mode;
-	int nummodes;
+	// toggle hlsl access
+	if (!d3d_GlobalCaps.supportPixelShaders)
+		menu_Video.DisableMenuOptions (TAG_HLSL);
+	else menu_Video.EnableMenuOptions (TAG_HLSL);
 
-	// ensure videomode num is valid
-	// (no longer forces an instant change)
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
+	if (d3d_CurrentMode.Width > 640 && d3d_CurrentMode.Height > 480)
 	{
-		if (menu_videomodenum == nummodes)
-		{
-			// store to d3d_mode cvar
-			//d3d_mode.value = nummodes;
-			//Cvar_Set (&d3d_mode, d3d_mode.value);
-			goto do_aniso;
-		}
+		menu_Video.EnableMenuOptions (TAG_CONSCALE);
+
+		if (gl_conscale.value < 1)
+			menu_Video.EnableMenuOptions (TAG_SMOOTHCHAR);
+		else menu_Video.DisableMenuOptions (TAG_SMOOTHCHAR);
+	}
+	else
+	{
+		menu_Video.DisableMenuOptions (TAG_SMOOTHCHAR);
+		menu_Video.DisableMenuOptions (TAG_CONSCALE);
 	}
 
-	// invalid mode in d3d_mode so force it to the current mode
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
-	{
-		if (D3D_ModeIsCurrent (mode))
-		{
-			menu_videomodenum = /*d3d_mode.value =*/ nummodes;
-			//Cvar_Set (&d3d_mode, d3d_mode.value);
-			break;
-		}
-	}
+	Menu_VideoEncodeTextureFilter ();
 
-do_aniso:
 	// no anisotropic filtering available
 	if (d3d_DeviceCaps.MaxAnisotropy < 2) return y;
 
@@ -149,12 +491,38 @@ do_aniso:
 
 void Menu_VideoCustomEnter (void)
 {
+	// create the depth modes on first entry
+	VID_MenuGetDepthModes ();
+
+	// decode the video mode and set currently selected stuff
+	Menu_VideoDecodeVideoMode ();
+
+	// find the correct depth mode number
+	menu_depthmodenum = 0;
+
+	for (int i = 0; ; i++)
+	{
+		if (d3d_SupportedDepthFormats[i] == D3DFMT_UNKNOWN) break;
+
+		if (d3d_SupportedDepthFormats[i] == d3d_GlobalCaps.DepthStencilFormat)
+		{
+			menu_depthmodenum = i;
+			break;
+		}
+	}
+
+	if (r_occlusionqueries.integer < 0) Cvar_Set (&r_occlusionqueries, 0.0f);
+	if (r_occlusionqueries.integer > 3) Cvar_Set (&r_occlusionqueries, 3.0f);
+
+	occlusionsnum = r_occlusionqueries.integer;
+
 	// take it from the d3d_mode cvar
 	menu_videomodenum = (int) d3d_mode.value;
 
+	Menu_VideoDecodeTextureFilter ();
+
 	// store out vsync
 	dummy_vsync = vid_vsync.integer;
-	dummy_triplebuffer = gl_triplebuffer.integer;
 
 	int real_aniso;
 
@@ -185,49 +553,28 @@ void Menu_VideoCustomEnter (void)
 
 void Menu_VideoBuild (void)
 {
-	d3d_ModeDesc_t *mode;
-	int nummodes;
-
-	// get the number of modes
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++);
-
-	// add 1 for terminating NULL
-	menu_videomodes = (char **) Zone_Alloc ((nummodes + 1) * sizeof (char *));
-
-	// now write them in
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
-	{
-		menu_videomodes[nummodes] = (char *) Zone_Alloc (128);
-
-		_snprintf
-		(
-			menu_videomodes[nummodes],
-			128,
-			"%i x %i x %i (%s)",
-			mode->d3d_Mode.Width,
-			mode->d3d_Mode.Height,
-			mode->BPP,
-			mode->ModeDesc
-		);
-
-		// select current mode
-		if (D3D_ModeIsCurrent (mode)) menu_videomodenum = nummodes;
-	}
-
-	// terminate with NULL
-	menu_videomodes[nummodes] = NULL;
-
 	menu_Video.AddOption (new CQMenuCustomDraw (Menu_VideoCustomDraw));
-	menu_Video.AddOption (new CQMenuSpacer ("Select a Video Mode"));
-	menu_Video.AddOption (new CQMenuSpinControl (NULL, &menu_videomodenum, menu_videomodes));
+	menu_Video.AddOption (new CQMenuSpinControl ("Mode Type", &modetypenum, modelist));
+	menu_Video.AddOption (TAG_WINDOWED_HIDE, new CQMenuSpinControl ("Resolution", &menu_windnum, &menu_windowedres));
+	menu_Video.AddOption (TAG_FULLSCREEN_HIDE, new CQMenuSpinControl ("Resolution", &menu_fullnum, &menu_fullscrnres));
+	menu_Video.AddOption (TAG_FULLSCREEN_ENABLE, new CQMenuSpinControl ("Color Depth", &bppnum, bpplist));
+
+	// only allow on vista or higher
+	if (WinDWM && d3d_NumRefreshRates > 1)
+		menu_Video.AddOption (TAG_FULLSCREEN_ENABLE, new CQMenuSpinControl ("Refresh Rate", &refrnum, &refrlist));
+
+	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Video.AddOption (new CQMenuSpinControl ("Depth/Stencil Format", &menu_depthmodenum, &menu_depthmodes));
 	menu_Video.AddOption (new CQMenuIntegerToggle ("Vertical Sync", &dummy_vsync, 0, 1));
-	menu_Video.AddOption (new CQMenuIntegerToggle ("Triple Buffer", &dummy_triplebuffer, 0, 1));
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuCommand ("Apply Video Mode Change", VID_ApplyModeChange));
 
 	// add the rest of the options to ensure that they;re kept in order
 	menu_Video.AddOption (new CQMenuSpacer ());
 	menu_Video.AddOption (new CQMenuTitle ("Configure Video Options"));
+
+	menu_Video.AddOption (new CQMenuSpinControl ("Texture Filter", &texfiltermode, &filtermodes[1]));
+	menu_Video.AddOption (new CQMenuSpinControl ("Mipmapping", &mipfiltermode, filtermodes));
 
 	if (d3d_DeviceCaps.MaxAnisotropy > 1)
 	{
@@ -255,20 +602,18 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
 	}
 
-	if (d3d_GlobalCaps.supportPixelShaders)
-		menu_Video.AddOption (new CQMenuCvarToggle ("Use Pixel Shaders", &r_hlsl, 0, 1));
+	if (d3d_GlobalCaps.supportOcclusion)
+		menu_Video.AddOption (new CQMenuSpinControl ("Occlusion Queries", &occlusionsnum, occlusionslist));
 
-	if (d3d_DeviceCaps.MaxAnisotropy > 1 || d3d_GlobalCaps.supportPixelShaders) menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Video.AddOption (TAG_HLSL, new CQMenuCvarToggle ("Pixel Shaders", &r_hlsl, 0, 1));
+	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 
-	menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
+	// menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
+	menu_Video.AddOption (TAG_CONSCALE, new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
+	menu_Video.AddOption (TAG_SMOOTHCHAR, new CQMenuCvarToggle ("Smooth Characters", &r_smoothcharacters, 0, 1));
+	menu_Video.AddOption (new CQMenuSpacer ());
 	menu_Video.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
 	menu_Video.AddOption (new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Brightness Controls"));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Master Gamma", &v_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Red Gamma", &r_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Green Gamma", &g_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Blue Gamma", &b_gamma, 1.75, 0.25, 0.05));
 }
 
 

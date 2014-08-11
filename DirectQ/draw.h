@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,10 +15,8 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
+
 
 // draw.h -- these are the only functions outside the refresh allowed
 // to touch the vid buffer
@@ -43,9 +41,7 @@ void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alp
 void Draw_FadeScreen (int alpha);
 void Draw_String (int x, int y, char *str, int ofs = 0);
 void Draw_TextBox (int x, int y, int width, int height);
-qpic_t *Draw_PicFromWad (char *name);
-qpic_t *Draw_CachePic (char *path);
+qpic_t *Draw_LoadPic (char *name);
 void Draw_HalfPic (int x, int y, qpic_t *pic);
 void D3D_Set2DShade (float shadecolor);
 void Draw_Pic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic);
-void D3D_EndFlatDraw (void);

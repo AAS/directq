@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,14 +15,14 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
+
 
 // these need to be kept high enough so that they don't interfere with other options
 #define MENU_TAG_SIMPLE			(1 << 28)
 #define MENU_TAG_FULL			(1 << 29)
+
+#define	NUM_HELP_PAGES	6
 
 typedef enum
 {
@@ -320,12 +320,12 @@ private:
 class CQMenuBanner : public CQMenuOption
 {
 public:
-	CQMenuBanner (char *pic);
+	CQMenuBanner (qpic_t **pic);
 	void Draw (int y);
 	int GetYAdvance (void);
 
 private:
-	char *Pic;
+	qpic_t **Pic;
 	int Y;
 };
 
@@ -333,12 +333,12 @@ private:
 class CQMenuChunkyPic : public CQMenuOption
 {
 public:
-	CQMenuChunkyPic (char *pic);
+	CQMenuChunkyPic (qpic_t **pic);
 	void Draw (int y);
 	int GetYAdvance (void);
 
 private:
-	char *Pic;
+	qpic_t **Pic;
 	int Y;
 };
 

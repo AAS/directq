@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -26,19 +26,6 @@ cvar_alias_t *cvar_alias_vars = NULL;
 char *cvar_null_string = "";
 
 cvar_t *Cmd_FindCvar (char *name);
-
-// poxy fucking nehahra cvars
-// and there I was thinking that HIPNOTIC was a collection of vile hacks...
-cvar_t nehx00 ("nehx00", "0", CVAR_NEHAHRA); cvar_t nehx01 ("nehx01", "0", CVAR_NEHAHRA);
-cvar_t nehx02 ("nehx02", "0", CVAR_NEHAHRA); cvar_t nehx03 ("nehx03", "0", CVAR_NEHAHRA);
-cvar_t nehx04 ("nehx04", "0", CVAR_NEHAHRA); cvar_t nehx05 ("nehx05", "0", CVAR_NEHAHRA);
-cvar_t nehx06 ("nehx06", "0", CVAR_NEHAHRA); cvar_t nehx07 ("nehx07", "0", CVAR_NEHAHRA);
-cvar_t nehx08 ("nehx08", "0", CVAR_NEHAHRA); cvar_t nehx09 ("nehx09", "0", CVAR_NEHAHRA); 
-cvar_t nehx10 ("nehx10", "0", CVAR_NEHAHRA); cvar_t nehx11 ("nehx11", "0", CVAR_NEHAHRA);
-cvar_t nehx12 ("nehx12", "0", CVAR_NEHAHRA); cvar_t nehx13 ("nehx13", "0", CVAR_NEHAHRA); 
-cvar_t nehx14 ("nehx14", "0", CVAR_NEHAHRA); cvar_t nehx15 ("nehx15", "0", CVAR_NEHAHRA);
-cvar_t nehx16 ("nehx16", "0", CVAR_NEHAHRA); cvar_t nehx17 ("nehx17", "0", CVAR_NEHAHRA); 
-cvar_t nehx18 ("nehx18", "0", CVAR_NEHAHRA); cvar_t nehx19 ("nehx19", "0", CVAR_NEHAHRA);
 
 /*
 ============
@@ -162,6 +149,14 @@ void Cvar_Set (cvar_t *var, char *value)
 
 		Cvar_SetBroadcast (var);
 	}
+
+	// joe, from ProQuake: rcon (64 doesn't mean anything special,
+	// but we need some extra space because NET_MAXMESSAGE == RCON_BUFF_SIZE)
+	if (rcon_active && (rcon_message.cursize < rcon_message.maxsize - strlen (var->name) - strlen (var->string) - 64))
+	{
+		rcon_message.cursize--;
+		MSG_WriteString (&rcon_message, va ("\"%s\" set to \"%s\"\n", var->name, var->string));
+	}
 }
 
 
@@ -188,6 +183,14 @@ void Cvar_Set (cvar_t *var, float value)
 		strcpy (var->string, valbuf);
 
 		Cvar_SetBroadcast (var);
+	}
+
+	// joe, from ProQuake: rcon (64 doesn't mean anything special,
+	// but we need some extra space because NET_MAXMESSAGE == RCON_BUFF_SIZE)
+	if (rcon_active && (rcon_message.cursize < rcon_message.maxsize - strlen (var->name) - strlen (var->string) - 64))
+	{
+		rcon_message.cursize--;
+		MSG_WriteString (&rcon_message, va ("\"%s\" set to \"%s\"\n", var->name, var->string));
 	}
 }
 

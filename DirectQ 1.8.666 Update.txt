@@ -1,0 +1,50 @@
+DIRECTQ 1.8.666 UPDATE
+----------------------
+(An almost-complete list)
+
+Graphics
+- Added r_ambient cvar; set to above 0 to boost the lighting; default 0, disabled in multiplayer.
+- Fixed gamma ramping for external textures (consistency).
+- Switched skybox render to use a cubemap (performance, simplicity, etc).
+- Optimized all vertex shaders by removing a matrix multiplication op.
+- Rewrote vertex submission paths.
+- Fixed anisotropic filtering and texture filtering in general.
+- Heavily tweaked occlusion queries.
+- Reworked underwater warp for better performance and quality.
+- Added "gl_consolefont" cvar for external charsets (default 0, "charset-1" etc, put them wherever you want).
+
+Multiplayer
+- Added rcon.
+- Increased "say" and "tell" buffers to 2048 (should be enough for anyone; play nice and no console spamming please).
+- Absolute max clients on a DirectQ server is always 16 without needing command-line options.
+
+Net Code
+- Ported ProQuake net_dgrm for more robust NAT fix.
+- Switched qsockets to dynamically allocated for memory saving and maxplayers flexibility.
+
+Physics
+- Corrected bmodel rotation code (ta Baker!)
+- Made FPS-independent gravity actually work right (try it with sv_gameplayfix etc 1 and cl_maxfps 10 and see!).
+
+Sound
+- Restructured sound mixer for future move to multithreaded.
+- Bumped MAX_CHANNELS to 65536 and MAX_DYNAMIC_CHANNELS to 32768.
+- Split out sounds that were previously grouped for better ambience and immersion.
+
+UI
+- Added crosshairsize alias for scr_crosshairscale.
+- Changed default text filtering mode to nearest-neighbour.
+- Added texture filter modes to video options menu.
+- Restored old status bar update/redraw policy.
+- Reworked maps menu.
+
+Unclassified
+- Fixed usage of CW_DEFAULT to CW_USEDEFAULT in window creation.
+- Reworked and cleaned up timer code.
+
+
+
+
+
+
+

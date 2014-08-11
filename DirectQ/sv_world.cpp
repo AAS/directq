@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -31,6 +31,34 @@ line of sight checks trace->crosscontent, but bullets don't
 */
 
 
+// ClearLink is used for new headnodes
+void ClearLink (link_t *l)
+{
+	l->prev = l->next = l;
+}
+
+void RemoveLink (link_t *l)
+{
+	l->next->prev = l->prev;
+	l->prev->next = l->next;
+}
+
+void InsertLinkBefore (link_t *l, link_t *before)
+{
+	l->next = before;
+	l->prev = before->prev;
+	l->prev->next = l;
+	l->next->prev = l;
+}
+void InsertLinkAfter (link_t *l, link_t *after)
+{
+	l->next = after->next;
+	l->prev = after;
+	l->prev->next = l;
+	l->next->prev = l;
+}
+
+
 typedef struct
 {
 	vec3_t		boxmins, boxmaxs;// enclose the test object along entire move
@@ -55,7 +83,7 @@ HULL BOXES
 
 
 static	hull_t		box_hull;
-static	dclipnode_t	box_clipnodes[6];
+static	mclipnode_t	box_clipnodes[6];
 static	mplane_t	box_planes[6];
 
 /*
@@ -76,20 +104,18 @@ void SV_InitBoxHull (void)
 	box_hull.firstclipnode = 0;
 	box_hull.lastclipnode = 5;
 
-	for (i=0; i<6; i++)
+	for (i = 0; i < 6; i++)
 	{
 		box_clipnodes[i].planenum = i;
-		
-		side = i&1;
-		
+		side = i & 1;
 		box_clipnodes[i].children[side] = CONTENTS_EMPTY;
+
 		if (i != 5)
-			box_clipnodes[i].children[side^1] = i + 1;
-		else
-			box_clipnodes[i].children[side^1] = CONTENTS_SOLID;
-		
-		box_planes[i].type = i>>1;
-		box_planes[i].normal[i>>1] = 1;
+			box_clipnodes[i].children[side ^ 1] = i + 1;
+		else box_clipnodes[i].children[side ^ 1] = CONTENTS_SOLID;
+
+		box_planes[i].type = i >> 1;
+		box_planes[i].normal[i >> 1] = 1;
 	}
 	
 }
@@ -348,7 +374,7 @@ loc0:;
 
 		SVProgs->GlobalStruct->self = EDICT_TO_PROG(touch);
 		SVProgs->GlobalStruct->other = EDICT_TO_PROG(ent);
-		SVProgs->GlobalStruct->time = SV_TIME;
+		SVProgs->GlobalStruct->time = sv.time;
 		SVProgs->ExecuteProgram (touch->v.touch);
 
 		SVProgs->GlobalStruct->self = old_self;
@@ -502,33 +528,24 @@ SV_HullPointContents
 int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
 {
 	float		d;
-	dclipnode_t	*node;
+	mclipnode_t	*node;
 	mplane_t	*plane;
-
-	if (num < CONTENTS_CLIP)
-		num += 65536; // Hack for more clipnodes
 
 	while (num >= 0)
 	{
 		if (num < hull->firstclipnode || num > hull->lastclipnode)
-		{
 			Sys_Error ("SV_HullPointContents: bad node number");
-		}
 
 		node = hull->clipnodes + num;
 		plane = hull->planes + node->planenum;
 
 		if (plane->type < 3)
 			d = p[plane->type] - plane->dist;
-		else
-			d = DotProduct (plane->normal, p) - plane->dist;
+		else d = DotProduct (plane->normal, p) - plane->dist;
 
 		if (d < 0)
 			num = node->children[1];
 		else num = node->children[0];
-
-		if (num < CONTENTS_CLIP)
-			num += 65536; // Hack for more clipnodes
 	}
 
 	return num;
@@ -594,7 +611,7 @@ SV_RecursiveHullCheck
 */
 bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace)
 {
-	dclipnode_t	*node;
+	mclipnode_t	*node;
 	mplane_t	*plane;
 	float		t1, t2;
 	float		frac;
@@ -604,9 +621,6 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 	float		midf;
 
 loc0:;
-	if (num < CONTENTS_CLIP)
-		num += 65536; // Hack for more clipnodes
-
 	// check for empty
 	if (num < 0)
 	{
@@ -616,15 +630,16 @@ loc0:;
 
 			if (num == CONTENTS_EMPTY)
 				trace->inopen = true;
-			else
-				trace->inwater = true;
+			else trace->inwater = true;
 		}
-		else
-			trace->startsolid = true;
-		return true;		// empty
+		else trace->startsolid = true;
+
+		// empty
+		return true;
 	}
 
-	if (num < hull->firstclipnode || num > hull->lastclipnode) Sys_Error ("SV_RecursiveHullCheck: bad node number");
+	if (num < hull->firstclipnode || num > hull->lastclipnode)
+		Sys_Error ("SV_RecursiveHullCheck: bad node number");
 
 	// find the point distances
 	node = hull->clipnodes + num;
@@ -660,11 +675,12 @@ loc0:;
 	for (i = 0; i < 3; i++) mid[i] = p1[i] + frac * (p2[i] - p1[i]);
 
 	// move up to the node
-	if (!SV_RecursiveHullCheck (hull, node->children[side], p1f, midf, p1, mid, trace)) return false;
+	if (!SV_RecursiveHullCheck (hull, node->children[side], p1f, midf, p1, mid, trace))
+		return false;
 
 	// go past the node
-	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
-		return SV_RecursiveHullCheck (hull, node->children[side^1], midf, p2f, mid, p2, trace);
+	if (SV_HullPointContents (hull, node->children[side ^ 1], mid) != CONTENTS_SOLID)
+		return SV_RecursiveHullCheck (hull, node->children[side ^ 1], midf, p2f, mid, p2, trace);
 
 	// never got out of the solid area
 	if (trace->allsolid) return false;
@@ -677,7 +693,6 @@ loc0:;
 	}
 	else
 	{
-		// mh - vec3_origin is not evil because i initialized it!
 		VectorSubtract (vec3_origin, plane->normal, trace->plane.normal);
 		trace->plane.dist = -plane->dist;
 	}
@@ -783,9 +798,11 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 			trace.plane.normal[2] = DotProduct (temp, up);
 		}
 	}
-
-	// fix trace up by the offset
-	if (trace.fraction != 1) VectorAdd (trace.endpos, offset, trace.endpos);
+	else
+	{
+		// fix trace up by the offset
+		if (trace.fraction != 1) VectorAdd (trace.endpos, offset, trace.endpos);
+	}
 
 	// did we clip the move?
 	if (trace.fraction < 1 || trace.startsolid) trace.ent = ent;
@@ -936,10 +953,10 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 	moveclip_t	clip;
 	int			i;
 
-	Q_MemSet ( &clip, 0, sizeof ( moveclip_t ) );
+	Q_MemSet (&clip, 0, sizeof (moveclip_t));
 
-// clip to world
-	clip.trace = SV_ClipMoveToEntity ( SVProgs->EdictPointers[0], start, mins, maxs, end );
+	// clip to world
+	clip.trace = SV_ClipMoveToEntity (SVProgs->EdictPointers[0], start, mins, maxs, end);
 
 	clip.start = start;
 	clip.end = end;
@@ -950,7 +967,7 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 
 	if (type == MOVE_MISSILE)
 	{
-		for (i=0; i<3; i++)
+		for (i = 0; i < 3; i++)
 		{
 			clip.mins2[i] = -15;
 			clip.maxs2[i] = 15;
@@ -961,12 +978,12 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 		VectorCopy (mins, clip.mins2);
 		VectorCopy (maxs, clip.maxs2);
 	}
-	
-// create the bounding box of the entire move
-	SV_MoveBounds ( start, clip.mins2, clip.maxs2, end, clip.boxmins, clip.boxmaxs );
 
-// clip to entities
-	SV_ClipToLinks ( sv_areanodes, &clip );
+	// create the bounding box of the entire move
+	SV_MoveBounds (start, clip.mins2, clip.maxs2, end, clip.boxmins, clip.boxmaxs);
+
+	// clip to entities
+	SV_ClipToLinks (sv_areanodes, &clip);
 
 	return clip.trace;
 }

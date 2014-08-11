@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -280,14 +280,35 @@ miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipda
 }
 
 
+// palettes need to be reloaded on every game change so do it here
+// this should really move to vidnt.cpp
+void D3D_MakeQuakePalettes (byte *palette);
+void PaletteFromColormap (byte *pal, byte *map);
+void Check_Gamma (unsigned char *pal);
+
 bool W_LoadPalette (void)
 {
-	if (host_basepal) Zone_Free (host_basepal);
-	if (host_colormap) Zone_Free (host_colormap);
+	// these need to be statics so that they can be freed OK
+	static byte *palette = NULL;
+	static byte *colormap = NULL;
 
-	host_basepal = (byte *) COM_LoadFile ("gfx/palette.lmp");
-	host_colormap = (byte *) COM_LoadFile ("gfx/colormap.lmp");
+	if (palette) Zone_Free (palette);
+	if (colormap) Zone_Free (colormap);
 
-	return (host_basepal && host_colormap);
+	palette = (byte *) COM_LoadFile ("gfx/palette.lmp");
+	colormap = (byte *) COM_LoadFile ("gfx/colormap.lmp");
+
+	if (palette && colormap)
+	{
+		vid.colormap = colormap;
+		PaletteFromColormap (palette, vid.colormap);
+		Check_Gamma (palette);
+		D3D_MakeQuakePalettes (palette);
+
+		return true;
+	}
+
+	// failed to load either
+	return false;
 }
 

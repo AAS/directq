@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -67,15 +67,18 @@ DWORD d3d_TextureStageStates[8][64];
 
 void D3D_SetTextureState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)
 {
-	if (d3d_TextureStageStates[Stage][(int) Type] == Value)
+	if (!d3d_GlobalCaps.usingPixelShaders)
 	{
-		// filter out rendundant changes before they go to the API
-		return;
-	}
-	else
-	{
-		d3d_Device->SetTextureStageState (Stage, Type, Value);
-		d3d_TextureStageStates[Stage][(int) Type] = Value;
+		if (d3d_TextureStageStates[Stage][(int) Type] == Value)
+		{
+			// filter out rendundant changes before they go to the API
+			return;
+		}
+		else
+		{
+			d3d_Device->SetTextureStageState (Stage, Type, Value);
+			d3d_TextureStageStates[Stage][(int) Type] = Value;
+		}
 	}
 }
 
@@ -295,13 +298,16 @@ void D3D_SetAllStates (void)
 		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVMAT01, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT01]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVMAT10, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT10]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVMAT11, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT11]);
-		d3d_Device->SetTextureStageState (s, D3DTSS_TEXCOORDINDEX, d3d_TextureStageStates[s][(int) D3DTSS_TEXCOORDINDEX]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVLSCALE, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVLSCALE]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVLOFFSET, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVLOFFSET]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_TEXTURETRANSFORMFLAGS, d3d_TextureStageStates[s][(int) D3DTSS_TEXTURETRANSFORMFLAGS]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_COLORARG0, d3d_TextureStageStates[s][(int) D3DTSS_COLORARG0]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_ALPHAARG0, d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG0]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_RESULTARG, d3d_TextureStageStates[s][(int) D3DTSS_RESULTARG]);
+
+		// this evil hackery is needed because the defaults read from D3D cause errors
+		d3d_Device->SetTextureStageState (s, D3DTSS_TEXCOORDINDEX, s);
+		d3d_TextureStageStates[s][(int) D3DTSS_TEXCOORDINDEX] = s;
 
 		d3d_StageTextures[s] = NULL;
 	}
@@ -448,6 +454,8 @@ void D3D_GetAllStates (void)
 		d3d_Device->GetTextureStageState (s, D3DTSS_ALPHAARG0, &d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG0]);
 		d3d_Device->GetTextureStageState (s, D3DTSS_RESULTARG, &d3d_TextureStageStates[s][(int) D3DTSS_RESULTARG]);
 
+		d3d_TextureStageStates[s][(int) D3DTSS_TEXCOORDINDEX] = s;
+
 		d3d_StageTextures[s] = NULL;
 	}
 }
@@ -500,41 +508,49 @@ void D3D_BackfaceCull (DWORD D3D_CULLTYPE)
 
 void D3D_SetTexCoordIndexes (DWORD tmu0index, DWORD tmu1index, DWORD tmu2index)
 {
-	D3D_SetTextureState (0, D3DTSS_TEXCOORDINDEX, tmu0index);
-	D3D_SetTextureState (1, D3DTSS_TEXCOORDINDEX, tmu1index);
-	D3D_SetTextureState (2, D3DTSS_TEXCOORDINDEX, tmu2index);
+	if (!d3d_GlobalCaps.usingPixelShaders)
+	{
+		D3D_SetTextureState (0, D3DTSS_TEXCOORDINDEX, tmu0index);
+		D3D_SetTextureState (1, D3DTSS_TEXCOORDINDEX, tmu1index);
+		D3D_SetTextureState (2, D3DTSS_TEXCOORDINDEX, tmu2index);
+	}
 }
 
 
 void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode, DWORD tmu2mode)
 {
-	D3D_SetSamplerState (0, D3DSAMP_ADDRESSU, tmu0mode);
-	D3D_SetSamplerState (0, D3DSAMP_ADDRESSV, tmu0mode);
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		d3d_MasterFX->SetInt ("address0", tmu0mode);
+		d3d_MasterFX->SetInt ("address1", tmu1mode);
+		d3d_MasterFX->SetInt ("address2", tmu2mode);
+		d3d_FXCommitPending = true;
+	}
+	else
+	{
+		D3D_SetSamplerState (0, D3DSAMP_ADDRESSU, tmu0mode);
+		D3D_SetSamplerState (0, D3DSAMP_ADDRESSV, tmu0mode);
 
-	D3D_SetSamplerState (1, D3DSAMP_ADDRESSU, tmu1mode);
-	D3D_SetSamplerState (1, D3DSAMP_ADDRESSV, tmu1mode);
+		D3D_SetSamplerState (1, D3DSAMP_ADDRESSU, tmu1mode);
+		D3D_SetSamplerState (1, D3DSAMP_ADDRESSV, tmu1mode);
 
-	D3D_SetSamplerState (2, D3DSAMP_ADDRESSU, tmu2mode);
-	D3D_SetSamplerState (2, D3DSAMP_ADDRESSV, tmu2mode);
+		D3D_SetSamplerState (2, D3DSAMP_ADDRESSU, tmu2mode);
+		D3D_SetSamplerState (2, D3DSAMP_ADDRESSV, tmu2mode);
+	}
 }
 
 
 void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILTERTYPE desired)
 {
-	D3DTEXTUREFILTERTYPE actual = D3DTEXF_LINEAR;
+	D3DTEXTUREFILTERTYPE actual = desired;
+	extern cvar_t r_anisotropicfilter;
 
+	// check against caps and gracefully degrade
 	switch (type)
 	{
 	case D3DSAMP_MAGFILTER:
 		switch (desired)
 		{
-		case D3DTEXF_ANISOTROPIC:
-			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFANISOTROPIC)
-			{
-				actual = D3DTEXF_ANISOTROPIC;
-				break;
-			}
-
 		case D3DTEXF_LINEAR:
 			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFLINEAR)
 			{
@@ -543,13 +559,7 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 			}
 
 		default:
-			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFPOINT)
-			{
-				actual = D3DTEXF_POINT;
-				break;
-			}
-
-			actual = D3DTEXF_NONE;
+			actual = D3DTEXF_POINT;
 		}
 
 		break;
@@ -557,13 +567,6 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 	case D3DSAMP_MINFILTER:
 		switch (desired)
 		{
-		case D3DTEXF_ANISOTROPIC:
-			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFANISOTROPIC)
-			{
-				actual = D3DTEXF_ANISOTROPIC;
-				break;
-			}
-
 		case D3DTEXF_LINEAR:
 			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFLINEAR)
 			{
@@ -572,13 +575,7 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 			}
 
 		default:
-			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFPOINT)
-			{
-				actual = D3DTEXF_POINT;
-				break;
-			}
-
-			actual = D3DTEXF_NONE;
+			actual = D3DTEXF_POINT;
 		}
 
 		break;
@@ -587,14 +584,16 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 	case D3DSAMP_MIPFILTER:
 		switch (desired)
 		{
-		case D3DTEXF_ANISOTROPIC:
-			// there's no such thing as an anisotropic mip filter
 		case D3DTEXF_LINEAR:
 			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MIPFLINEAR)
 			{
 				actual = D3DTEXF_LINEAR;
 				break;
 			}
+
+		case D3DTEXF_NONE:
+			// corrected no mip filtering
+			break;
 
 		default:
 			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MIPFPOINT)
@@ -612,14 +611,29 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 		return;
 	}
 
-	D3D_SetSamplerState (stage, type, actual);
+	// check for switch to anisotropic
+	if (type != D3DSAMP_MIPFILTER && r_anisotropicfilter.integer > 1 && d3d_DeviceCaps.MaxAnisotropy > 1 && actual == D3DTEXF_LINEAR)
+		actual = D3DTEXF_ANISOTROPIC;
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		// hack - we don't know which stage numbers correspond to which samplers so
+		// we need this farce to set them correctly.
+		if (type == D3DSAMP_MAGFILTER || type == D3DSAMP_MINFILTER)
+			d3d_MasterFX->SetInt (va ("texfilter%i", stage), actual);
+		else d3d_MasterFX->SetInt (va ("mipfilter%i", stage), actual);
+
+		// bleagh.
+		d3d_FXCommitPending = true;
+	}
+	else D3D_SetSamplerState (stage, type, actual);
 }
 
 
-void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE magfilter, D3DTEXTUREFILTERTYPE minfilter, D3DTEXTUREFILTERTYPE mipfilter)
+void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE texfilter, D3DTEXTUREFILTERTYPE mipfilter)
 {
-	D3D_SetTextureFilter (stage, D3DSAMP_MAGFILTER, magfilter);
-	D3D_SetTextureFilter (stage, D3DSAMP_MINFILTER, minfilter);
+	D3D_SetTextureFilter (stage, D3DSAMP_MAGFILTER, texfilter);
+	D3D_SetTextureFilter (stage, D3DSAMP_MINFILTER, texfilter);
 	D3D_SetTextureFilter (stage, D3DSAMP_MIPFILTER, mipfilter);
 }
 
@@ -634,17 +648,41 @@ void D3D_SetTextureMatrixOp (DWORD tmu0op, DWORD tmu1op, DWORD tmu2op)
 
 void D3D_SetTextureColorMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
 {
-	D3D_SetTextureState (stage, D3DTSS_COLOROP, mode);
-	D3D_SetTextureState (stage, D3DTSS_COLORARG1, arg1);
-	D3D_SetTextureState (stage, D3DTSS_COLORARG2, arg2);
+	if (mode == D3DTOP_DISABLE)
+	{
+		for (; stage < d3d_GlobalCaps.NumTMUs; stage++)
+		{
+			D3D_SetTextureState (stage, D3DTSS_COLOROP, mode);
+			D3D_SetTextureState (stage, D3DTSS_COLORARG1, arg1);
+			D3D_SetTextureState (stage, D3DTSS_COLORARG2, arg2);
+		}
+	}
+	else
+	{
+		D3D_SetTextureState (stage, D3DTSS_COLOROP, mode);
+		D3D_SetTextureState (stage, D3DTSS_COLORARG1, arg1);
+		D3D_SetTextureState (stage, D3DTSS_COLORARG2, arg2);
+	}
 }
 
 
 void D3D_SetTextureAlphaMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
 {
-	D3D_SetTextureState (stage, D3DTSS_ALPHAOP, mode);
-	D3D_SetTextureState (stage, D3DTSS_ALPHAARG1, arg1);
-	D3D_SetTextureState (stage, D3DTSS_ALPHAARG2, arg2);
+	if (mode == D3DTOP_DISABLE)
+	{
+		for (; stage < d3d_GlobalCaps.NumTMUs; stage++)
+		{
+			D3D_SetTextureState (stage, D3DTSS_ALPHAOP, mode);
+			D3D_SetTextureState (stage, D3DTSS_ALPHAARG1, arg1);
+			D3D_SetTextureState (stage, D3DTSS_ALPHAARG2, arg2);
+		}
+	}
+	else
+	{
+		D3D_SetTextureState (stage, D3DTSS_ALPHAOP, mode);
+		D3D_SetTextureState (stage, D3DTSS_ALPHAARG1, arg1);
+		D3D_SetTextureState (stage, D3DTSS_ALPHAARG2, arg2);
+	}
 }
 
 

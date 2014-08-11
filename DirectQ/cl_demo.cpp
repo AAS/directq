@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -29,9 +29,6 @@ static HANDLE demohandle = INVALID_HANDLE_VALUE;
 static long demofile_len, demofile_start;
 
 void CL_FinishTimeDemo (void);
-
-// nehahra cutscene - fixme - need to find a way to skip a cutscene while playing
-cvar_t cutscene ("cutscene", "1", CVAR_ARCHIVE);
 
 /*
 ==============================================================================

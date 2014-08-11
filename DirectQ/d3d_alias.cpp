@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -16,12 +16,16 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
+
 // gl_mesh.c: triangle model functions
 
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
 #include "resource.h"
+#include "d3d_vbo.h"
+
+extern cvar_t gl_fullbrights;
 
 void R_LightPoint (entity_t *e, float *c);
 
@@ -82,6 +86,9 @@ void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangl
 
 	// also reserve space for the index remap tables
 	int max_mesh = (SCRATCHBUF_SIZE / (sizeof (aliasmesh_t) + sizeof (DWORD) + sizeof (unsigned short) * 3));
+
+	// clamp it so that we can have a known max transfer
+	if (max_mesh > 8192) max_mesh = 8192;
 
 	// set up holding areas for the remapping
 	d3d_RemapTable = (DWORD *) (scratchbuf + sizeof (aliasmesh_t) * max_mesh);
@@ -209,6 +216,10 @@ void DelerpMuzzleFlashes (aliashdr_t *hdr)
 	// already delerped
 	if (hdr->mfdelerp) return;
 
+	// shrak crashes as it has viewmodels with only one frame
+	// who woulda ever thought!!!
+	if (hdr->numframes < 2) return;
+
 	// done now
 	hdr->mfdelerp = true;
 
@@ -252,26 +263,85 @@ void DelerpMuzzleFlashes (aliashdr_t *hdr)
 extern vec3_t lightspot;
 extern mplane_t *lightplane;
 
-d3d_shader_t d3d_ShadowShader =
+void D3DAlias_ShadowBeginState (void *blah)
 {
+	// state for shadows
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuse);
+
+	if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
 	{
-		// number of stages and type
-		3,
-		VBO_SHADER_TYPE_FIXED
-	},
-	{
-		// color
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
-	},
-	{
-		// alpha
-		{D3DTOP_MODULATE, D3DTA_CURRENT, D3DTA_DIFFUSE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
+		// of course, we all know that Direct3D lacks Stencil Buffer and Polygon Offset support,
+		// so what you're looking at here doesn't really exist.  Those of you who froth at the mouth
+		// and like to think it's still the 1990s had probably better look away now.
+		D3D_SetRenderState (D3DRS_STENCILENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_STENCILFUNC, D3DCMP_EQUAL);
+		D3D_SetRenderState (D3DRS_STENCILREF, 0x00000001);
+		D3D_SetRenderState (D3DRS_STENCILMASK, 0x00000002);
+		D3D_SetRenderState (D3DRS_STENCILWRITEMASK, 0xFFFFFFFF);
+		D3D_SetRenderState (D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
+		D3D_SetRenderState (D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
+		D3D_SetRenderState (D3DRS_STENCILPASS, D3DSTENCILOP_INCRSAT);
 	}
-};
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		if (d3d_FXPass == FX_PASS_NOTBEGUN)
+		{
+			d3d_MasterFX->SetFloat ("AlphaVal", r_shadows.value);
+			D3D_BeginShaderPass (FX_PASS_SHADOW);
+		}
+		else if (d3d_FXPass == FX_PASS_SHADOW)
+		{
+			d3d_MasterFX->SetFloat ("AlphaVal", r_shadows.value);
+			d3d_FXCommitPending = true;
+		}
+		else
+		{
+			D3D_EndShaderPass ();
+			d3d_MasterFX->SetFloat ("AlphaVal", r_shadows.value);
+			D3D_BeginShaderPass (FX_PASS_SHADOW);
+		}
+	}
+	else
+	{
+		D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
+		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+		D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+
+		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_CURRENT, D3DTA_DIFFUSE);
+		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+		D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+	}
+}
+
+
+void D3DAlias_ShadowEndCallback (void *blah)
+{
+	// back to normal
+	if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
+		D3D_SetRenderState (D3DRS_STENCILENABLE, FALSE);
+
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		if (d3d_FXPass == FX_PASS_SHADOW)
+			D3D_EndShaderPass ();
+	}
+	else
+	{
+		D3D_SetTextureState (0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+		D3D_SetTextureState (0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+	}
+}
+
 
 void D3D_DrawAliasShadows (entity_t **ents, int numents)
 {
@@ -281,9 +351,11 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 
 	if (shadealpha < 1) return;
 
+	// only allow intermediate steps if we have a stencil buffer
+	if (d3d_GlobalCaps.DepthStencilFormat != D3DFMT_D24S8) shadealpha = 255;
+
 	bool stateset = false;
 	DWORD shadecolor = D3DCOLOR_ARGB (shadealpha, 0, 0, 0);
-	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (aliaspolyvert_t));
 
 	for (int i = 0; i < numents; i++)
 	{
@@ -301,30 +373,7 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 
 		if (!stateset)
 		{
-			// state for shadows
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-			D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-			D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-			D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-			D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-
-			D3D_SetVertexDeclaration (d3d_VDXyzDiffuse);
-
-			if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
-			{
-				// of course, we all know that Direct3D lacks Stencil Buffer and Polygon Offset support,
-				// so what you're looking at here doesn't really exist.  Those of you who froth at the mouth
-				// and like to think it's still the 1990s had probably better look away now.
-				D3D_SetRenderState (D3DRS_STENCILENABLE, TRUE);
-				D3D_SetRenderState (D3DRS_STENCILFUNC, D3DCMP_EQUAL);
-				D3D_SetRenderState (D3DRS_STENCILREF, 0x00000001);
-				D3D_SetRenderState (D3DRS_STENCILMASK, 0x00000002);
-				D3D_SetRenderState (D3DRS_STENCILWRITEMASK, 0xFFFFFFFF);
-				D3D_SetRenderState (D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
-				D3D_SetRenderState (D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
-				D3D_SetRenderState (D3DRS_STENCILPASS, D3DSTENCILOP_INCRSAT);
-			}
-
+			VBO_AddCallback (D3DAlias_ShadowBeginState);
 			stateset = true;
 		}
 
@@ -340,32 +389,13 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 
 		for (aliaspart_t *part = hdr->parts; part; part = part->next)
 		{
-			// check for overflow
-			D3D_VBOCheckOverflow (part->nummesh, part->numindexes);
-
-			// note the hack here - just sending NULL into the shader won't add it!!! (really should fix this)
-			D3D_VBOAddShader (&d3d_ShadowShader, NULL, d3d_PlayerSkins[0].d3d_Texture);
-
 			// accumulate vert counts
-			D3D_VBOAddShadowVerts (ent, hdr, part, aliasstate, shadecolor);
+			VBO_AddAliasShadow (ent, hdr, part, aliasstate, shadecolor);
 			d3d_RenderDef.alias_polys += hdr->numtris;
 		}
 	}
 
-	// required even if there is nothing so that the buffers will unlock
-	D3D_VBORender ();
-
-	if (stateset)
-	{
-		// back to normal
-		if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
-			D3D_SetRenderState (D3DRS_STENCILENABLE, FALSE);
-
-		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-		D3D_SetTextureState (0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-		D3D_SetTextureState (0, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	}
+	if (stateset) VBO_AddCallback (D3DAlias_ShadowEndCallback);
 }
 
 
@@ -513,7 +543,7 @@ bool D3D_TranslateAliasSkin (entity_t *ent)
 			translate[TOP_RANGE + i] = top + i;
 		else
 			translate[TOP_RANGE + i] = top + 15 - i;
-				
+
 		if (bottom < 128)
 			translate[BOTTOM_RANGE + i] = bottom + i;
 		else translate[BOTTOM_RANGE + i] = bottom + 15 - i;
@@ -551,7 +581,7 @@ bool D3D_TranslateAliasSkin (entity_t *ent)
 		translated,
 		paliashdr->skinwidth,
 		paliashdr->skinheight,
-		IMAGE_MIPMAP | IMAGE_NOCOMPRESS | IMAGE_NOEXTERN | IMAGE_PADDABLE
+		IMAGE_MIPMAP | IMAGE_NOEXTERN | IMAGE_NOCOMPRESS
 	);
 
 	// Con_Printf ("Translated skin to %i\n", ent->playerskin);
@@ -615,6 +645,18 @@ void D3D_SetupAliasModel (entity_t *ent)
 		ent->shadelight[i] = shadelight[i];
 	}
 
+	if (!gl_fullbrights.integer)
+	{
+		if (!stricmp (ent->model->name, "progs/flame2.mdl") || !stricmp (ent->model->name, "progs/flame.mdl"))
+		{
+			for (int i = 0; i < 3; i++)
+			{
+				shadelight[i] = (r_overbright.integer ? 128 : 256);
+				ent->shadelight[i] = shadelight[i];
+			}
+		}
+	}
+
 	// precomputed and pre-interpolated shading dot products
 	aliasstate->shadedots = r_avertexnormal_dots_lerp[((int) (ent->angles[1] * (SHADEDOT_QUANT_LERP / 360.0))) & (SHADEDOT_QUANT_LERP - 1)];
 
@@ -631,154 +673,127 @@ void D3D_SetupAliasModel (entity_t *ent)
 	if (D3D_TranslateAliasSkin (ent))
 	{
 		aliasstate->teximage = &d3d_PlayerSkins[ent->playerskin];
+		aliasstate->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
 		d3d_PlayerSkins[ent->playerskin].LastUsage = 0;
 	}
-	else aliasstate->teximage = hdr->skins[ent->skinnum].texture[anim];
-
-	// fullbright texture (can be NULL)
-	aliasstate->lumaimage = hdr->skins[ent->skinnum].fullbright[anim];
-}
-
-
-bool R_ViewInsideBBox (entity_t *ent)
-{
-	float bbmins[3] =
+	else if (gl_fullbrights.integer == 2 && hdr->skins[ent->skinnum].nolumaimage[anim])
 	{
-		ent->origin[0] + ent->model->mins[0],
-		ent->origin[1] + ent->model->mins[1],
-		ent->origin[2] + ent->model->mins[2]
-	};
-
-	float bbmaxs[3] =
-	{
-		ent->origin[0] + ent->model->maxs[0],
-		ent->origin[1] + ent->model->maxs[1],
-		ent->origin[2] + ent->model->maxs[2]
-	};
-
-	if (r_origin[0] < bbmins[0]) return false;
-	if (r_origin[1] < bbmins[1]) return false;
-	if (r_origin[2] < bbmins[2]) return false;
-
-	if (r_origin[0] > bbmaxs[0]) return false;
-	if (r_origin[1] > bbmaxs[1]) return false;
-	if (r_origin[2] > bbmaxs[2]) return false;
-
-	// inside
-	return true;
-}
-
-
-void R_DrawBBox (entity_t *ent)
-{
-	vec3_t bboxverts[8];
-
-	unsigned short bboxindexes[36] =
-	{
-		0, 2, 6, 0, 6, 4,
-		1, 3, 7, 1, 7, 5,
-		0, 1, 3, 0, 3, 2,
-		4, 5, 7, 4, 7, 6,
-		0, 1, 5, 0, 5, 4,
-		2, 3, 7, 2, 7, 6
-	};
-
-	bboxverts[0][0] = ent->origin[0] + ent->model->mins[0];
-	bboxverts[0][1] = ent->origin[1] + ent->model->mins[1];
-	bboxverts[0][2] = ent->origin[2] + ent->model->mins[2];
-
-	bboxverts[1][0] = ent->origin[0] + ent->model->mins[0];
-	bboxverts[1][1] = ent->origin[1] + ent->model->mins[1];
-	bboxverts[1][2] = ent->origin[2] + ent->model->maxs[2];
-
-	bboxverts[2][0] = ent->origin[0] + ent->model->mins[0];
-	bboxverts[2][1] = ent->origin[1] + ent->model->maxs[1];
-	bboxverts[2][2] = ent->origin[2] + ent->model->mins[2];
-
-	bboxverts[3][0] = ent->origin[0] + ent->model->mins[0];
-	bboxverts[3][1] = ent->origin[1] + ent->model->maxs[1];
-	bboxverts[3][2] = ent->origin[2] + ent->model->maxs[2];
-
-	bboxverts[4][0] = ent->origin[0] + ent->model->maxs[0];
-	bboxverts[4][1] = ent->origin[1] + ent->model->mins[1];
-	bboxverts[4][2] = ent->origin[2] + ent->model->mins[2];
-
-	bboxverts[5][0] = ent->origin[0] + ent->model->maxs[0];
-	bboxverts[5][1] = ent->origin[1] + ent->model->mins[1];
-	bboxverts[5][2] = ent->origin[2] + ent->model->maxs[2];
-
-	bboxverts[6][0] = ent->origin[0] + ent->model->maxs[0];
-	bboxverts[6][1] = ent->origin[1] + ent->model->maxs[1];
-	bboxverts[6][2] = ent->origin[2] + ent->model->mins[2];
-
-	bboxverts[7][0] = ent->origin[0] + ent->model->maxs[0];
-	bboxverts[7][1] = ent->origin[1] + ent->model->maxs[1];
-	bboxverts[7][2] = ent->origin[2] + ent->model->maxs[2];
-
-	D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, 8, 12, bboxindexes, bboxverts, sizeof (vec3_t));
-	d3d_RenderDef.alias_polys++;
-}
-
-
-d3d_shader_t d3d_AliasShaderLuma =
-{
-	{
-		// number of stages and type
-		3,
-		VBO_SHADER_TYPE_FIXED
-	},
-	{
-		// color
-		{D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_DIFFUSE},
-		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3DTOP_DISABLE}
-	},
-	{
-		// alpha
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
+		aliasstate->teximage = hdr->skins[ent->skinnum].nolumaimage[anim];
+		aliasstate->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
 	}
-};
-
-d3d_shader_t d3d_AliasShaderNoLuma =
-{
+	else if (!gl_fullbrights.integer && hdr->skins[ent->skinnum].nolumaimage[anim])
 	{
-		// number of stages and type
-		3,
-		VBO_SHADER_TYPE_FIXED
-	},
-	{
-		// color
-		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
-	},
-	{
-		// alpha
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
+		aliasstate->teximage = hdr->skins[ent->skinnum].nolumaimage[anim];
+		aliasstate->lumaimage = NULL;
 	}
-};
+	else
+	{
+		aliasstate->teximage = hdr->skins[ent->skinnum].teximage[anim];
+		aliasstate->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
+	}
+}
+
+
+void D3DAlias_BeginBatchCallback (void *blah)
+{
+	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
+
+	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
+	D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+
+	if (!d3d_GlobalCaps.usingPixelShaders)
+		D3D_SetTexCoordIndexes (0, 0);
+
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
+}
+
+
+void D3DAlias_SetTextureCallback (void *data)
+{
+	aliasstate_t *aliasstate = (aliasstate_t *) data;
+
+	// need to do all 3 stages as we don't know what's going to follow what in the render
+	if (aliasstate->lumaimage)
+	{
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			if (d3d_FXPass == FX_PASS_NOTBEGUN)
+			{
+				d3d_MasterFX->SetTexture ("tmu0Texture", aliasstate->teximage->d3d_Texture);
+				d3d_MasterFX->SetTexture ("tmu1Texture", aliasstate->lumaimage->d3d_Texture);
+				D3D_BeginShaderPass (FX_PASS_ALIAS_LUMA);
+			}
+			else if (d3d_FXPass == FX_PASS_ALIAS_LUMA)
+			{
+				d3d_MasterFX->SetTexture ("tmu0Texture", aliasstate->teximage->d3d_Texture);
+				d3d_MasterFX->SetTexture ("tmu1Texture", aliasstate->lumaimage->d3d_Texture);
+				d3d_FXCommitPending = true;
+			}
+			else
+			{
+				D3D_EndShaderPass ();
+				d3d_MasterFX->SetTexture ("tmu0Texture", aliasstate->teximage->d3d_Texture);
+				d3d_MasterFX->SetTexture ("tmu1Texture", aliasstate->lumaimage->d3d_Texture);
+				D3D_BeginShaderPass (FX_PASS_ALIAS_LUMA);
+			}
+		}
+		else
+		{
+			D3D_SetTextureColorMode (0, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+			D3D_SetTextureColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
+			D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+
+			D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+
+			D3D_SetTexture (0, aliasstate->teximage->d3d_Texture);
+			D3D_SetTexture (1, aliasstate->lumaimage->d3d_Texture);
+		}
+	}
+	else
+	{
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			if (d3d_FXPass == FX_PASS_NOTBEGUN)
+			{
+				d3d_MasterFX->SetTexture ("tmu0Texture", aliasstate->teximage->d3d_Texture);
+				D3D_BeginShaderPass (FX_PASS_ALIAS_NOLUMA);
+			}
+			else if (d3d_FXPass == FX_PASS_ALIAS_NOLUMA)
+			{
+				d3d_MasterFX->SetTexture ("tmu0Texture", aliasstate->teximage->d3d_Texture);
+				d3d_FXCommitPending = true;
+			}
+			else
+			{
+				D3D_EndShaderPass ();
+				d3d_MasterFX->SetTexture ("tmu0Texture", aliasstate->teximage->d3d_Texture);
+				D3D_BeginShaderPass (FX_PASS_ALIAS_NOLUMA);
+			}
+		}
+		else
+		{
+			D3D_SetTextureColorMode (0, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+			D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+			D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+
+			D3D_SetTexture (0, aliasstate->teximage->d3d_Texture);
+		}
+	}
+}
+
+
+void D3DAlias_EndBatchCallback (void *blah)
+{
+	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
+}
 
 
 void D3D_DrawAliasBatch (entity_t **ents, int numents)
 {
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
-	D3D_SetTexCoordIndexes (0, 0);
-	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-
-	// set correct overbright mode
-	d3d_AliasShaderLuma.ColorDef[1].Op = D3D_OVERBRIGHT_MODULATE;
-	d3d_AliasShaderNoLuma.ColorDef[0].Op = D3D_OVERBRIGHT_MODULATE;
-
-	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
-
-	// begin a new render batch
-	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (aliaspolyvert_t));
+	image_t *lasttexture = NULL;
+	image_t *lastluma = NULL;
+	bool stateset = false;
 
 	for (int i = 0; i < numents; i++)
 	{
@@ -796,6 +811,12 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 		if (!aliasstate->teximage) continue;
 		if (!aliasstate->teximage->d3d_Texture) continue;
 
+		if (!stateset)
+		{
+			VBO_AddCallback (D3DAlias_BeginBatchCallback);
+			stateset = true;
+		}
+
 		// build the transformation for this entity.
 		// we need to run this in software as we are now potentially submitting multiple alias models in a single batch
 		// breaking out to hardware t&l for batches that contain a single ent is actually slower in all cases...
@@ -806,27 +827,25 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 		if (ent->currpose < 0) ent->currpose = 0;
 		if (ent->lastpose < 0) ent->lastpose = 0;
 
+		// update textures if necessary
+		if ((aliasstate->teximage != lasttexture) || (aliasstate->lumaimage != lastluma))
+		{
+			VBO_AddCallback (D3DAlias_SetTextureCallback, aliasstate, sizeof (aliasstate_t));
+
+			lasttexture = aliasstate->teximage;
+			lastluma = aliasstate->lumaimage;
+		}
+
 		for (aliaspart_t *part = hdr->parts; part; part = part->next)
 		{
-			// check for overflow
-			D3D_VBOCheckOverflow (part->nummesh, part->numindexes);
-
-			// add a new shader (note: these self-filter so no worry about doing it each time)
-			if (aliasstate->lumaimage && d3d_GlobalCaps.NumTMUs > 1)
-				D3D_VBOAddShader (&d3d_AliasShaderLuma, aliasstate->lumaimage->d3d_Texture, aliasstate->teximage->d3d_Texture);
-			else D3D_VBOAddShader (&d3d_AliasShaderNoLuma, aliasstate->teximage->d3d_Texture);
-
 			// submit it
-			D3D_VBOAddAliasVerts (ent, hdr, part, aliasstate);
+			VBO_AddAliasPart (ent, part);
 			d3d_RenderDef.alias_polys += hdr->numtris;
 		}
 	}
 
-	// render the alias verts
-	D3D_VBORender ();
-
 	// done
-	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
+	if (stateset) VBO_AddCallback (D3DAlias_EndBatchCallback);
 }
 
 
@@ -837,296 +856,6 @@ int d3d_NumAliasEdicts = 0;
 int D3D_AliasModelSortFunc (entity_t **e1, entity_t **e2)
 {
 	return (int) (e1[0]->model - e2[0]->model);
-}
-
-
-#define QUERY_IDLE		0
-#define QUERY_WAITING	1
-
-// a query is either idle or waiting; makes more sense than d3d's "signalled"/etc nonsense.
-// this struct contains the IDirect3DQuery9 object as well as a flag indicating it's state.  
-typedef struct d3d_occlusionquery_s
-{
-	LPDIRECT3DQUERY9 Query;
-	int State;
-	entity_t *Entity;
-} d3d_occlusionquery_t;
-
-
-CQuakeZone *OcclusionsHeap = NULL;
-d3d_occlusionquery_t **d3d_OcclusionQueries = NULL;
-int d3d_NumOcclusionQueries = 0;
-int numoccluded = 0;
-
-void D3D_RegisterOcclusionQuery (entity_t *ent)
-{
-	// occlusions not supported
-	if (!d3d_GlobalCaps.supportOcclusion) return;
-
-	if (ent->effects & EF_NEVEROCCLUDE) return;
-
-	// already has one
-	if (ent->occlusion)
-	{
-		if (ent->occlusion->Entity != ent)
-		{
-			// if this changes we need to remove the occlusion from the entity
-			ent->occlusion = NULL;
-			ent->occluded = false;
-		}
-
-		// still OK
-		if (ent->occlusion) return;
-	}
-
-	if (!OcclusionsHeap)
-	{
-		OcclusionsHeap = new CQuakeZone ();
-		d3d_OcclusionQueries = (d3d_occlusionquery_t **) OcclusionsHeap->Alloc (MAX_VISEDICTS * sizeof (d3d_occlusionquery_t *));
-		d3d_NumOcclusionQueries = 0;
-	}
-
-	// create a new query
-	d3d_occlusionquery_t *q = (d3d_occlusionquery_t *) OcclusionsHeap->Alloc (sizeof (d3d_occlusionquery_t));
-	ent->occlusion = q;
-	d3d_OcclusionQueries[d3d_NumOcclusionQueries] = ent->occlusion;
-	d3d_NumOcclusionQueries++;
-
-	ent->occlusion->Query = NULL;
-	ent->occlusion->State = QUERY_IDLE;
-	ent->occlusion->Entity = ent;
-
-	// entity is not occluded be default
-	ent->occluded = false;
-}
-
-
-void D3D_ClearOcclusionQueries (void)
-{
-	if (!OcclusionsHeap) return;
-	if (!d3d_GlobalCaps.supportOcclusion) return;
-
-	for (int i = 0; i < d3d_NumOcclusionQueries; i++)
-	{
-		d3d_OcclusionQueries[i]->Entity->occlusion = NULL;
-		d3d_OcclusionQueries[i]->Entity->occluded = false;
-		SAFE_RELEASE (d3d_OcclusionQueries[i]->Query);
-	}
-
-	d3d_OcclusionQueries = NULL;
-	d3d_NumOcclusionQueries = 0;
-	SAFE_DELETE (OcclusionsHeap);
-}
-
-
-void D3D_IssueQuery (entity_t *ent, d3d_occlusionquery_t *q)
-{
-	// create on demand
-	if (!q->Query)
-	{
-		// all queries are created idle (if only the rest of life was like that!)
-		d3d_Device->CreateQuery (D3DQUERYTYPE_OCCLUSION, &q->Query);
-		q->State = QUERY_IDLE;
-	}
-
-	// if this is true then the query is currently busy doing something and cannot be issued
-	if (q->State != QUERY_IDLE) return;
-
-	// issue the query
-	q->Query->Issue (D3DISSUE_BEGIN);
-	R_DrawBBox (ent);
-	q->Query->Issue (D3DISSUE_END);
-
-	// the query is now waiting
-	q->State = QUERY_WAITING;
-}
-
-
-// we need to return -1 because 0 is a valid result and therefore we need
-// another means of signalling that the query is not ready yet
-int D3D_GetQueryResults (d3d_occlusionquery_t *q)
-{
-	// create on demand
-	if (!q->Query)
-	{
-		// all queries are created idle (if only the rest of life was like that!)
-		d3d_Device->CreateQuery (D3DQUERYTYPE_OCCLUSION, &q->Query);
-		q->State = QUERY_IDLE;
-
-		// no valid result to return
-		return -1;
-	}
-
-	// query was not issued
-	if (q->State != QUERY_WAITING) return -1;
-
-	DWORD Visible = 0;
-
-	// peek at the query to get it's result
-	hr = q->Query->GetData ((void *) &Visible, sizeof (DWORD), D3DGETDATA_FLUSH);
-
-	if (hr == S_OK)
-	{
-		// query was completed; go back to idle and return the result
-		q->State = QUERY_IDLE;
-		return (Visible > 1 ? 1 : 0);
-	}
-	else if (hr == S_FALSE)
-	{
-		// still waiting
-		return -1;
-	}
-	else
-	{
-		// something bad happened; destroy the query
-		SAFE_RELEASE (q->Query);
-		return -1;
-	}
-}
-
-
-void D3D_RunOcclusionQueries (entity_t **ents, int numents)
-{
-	if (cls.timedemo) return;
-	if (!d3d_GlobalCaps.supportOcclusion) return;
-
-	bool stateset = false;
-
-	//if (numoccluded) Con_Printf ("occluded %i entities\n", numoccluded);
-
-	numoccluded = 0;
-
-	// if (d3d_NumOcclusionQueries) Con_Printf ("%i occlusion queries\n", d3d_NumOcclusionQueries);
-
-	for (int i = 0; i < numents; i++)
-	{
-		// some ents never get occlusion queries on them
-		if (ents[i]->effects & EF_NEVEROCCLUDE) continue;
-
-		// don't bother if the model is too simple
-		if (ents[i]->model->aliashdr->numtris < 24) continue;
-
-		// if there are a small enough number of entities on screen we don't bother either
-		if (d3d_NumAliasEdicts < 5)
-		{
-			ents[i]->occluded = false;
-			continue;
-		}
-
-		// if the view is inside the bbox don't check for occlusion on the entity
-		if (R_ViewInsideBBox (ents[i]))
-		{
-			// Con_Printf ("view inside bbox for %s\n", ents[i]->model->name);
-			ents[i]->occluded = false;
-			continue;
-		}
-
-		// register a query for the entity
-		D3D_RegisterOcclusionQuery (ents[i]);
-
-		// no occlusion object (should never happen...)
-		if (!ents[i]->occlusion)
-		{
-			// not occluded
-			ents[i]->occluded = false;
-			continue;
-		}
-
-		if (!stateset)
-		{
-			// only change state if we need to
-			D3D_SetVertexDeclaration (d3d_VDXyz);
-			D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
-			D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0);
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-			D3D_SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
-
-			stateset = true;
-		}
-
-		// get the last set of results
-		int blah = D3D_GetQueryResults (ents[i]->occlusion);
-
-		switch (blah)
-		{
-		case 0:
-			// ent is occluded
-			ents[i]->occluded = true;
-			numoccluded++;
-			break;
-
-		case -1:
-			// no results in yet
-			break;
-
-		default:
-			// entity is not occluded
-			ents[i]->occluded = false;
-		}
-
-		// issue this set
-		D3D_IssueQuery (ents[i], ents[i]->occlusion);
-	}
-
-	if (stateset)
-	{
-		D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0x0000000F);
-		D3D_BackfaceCull (D3DCULL_CCW);
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	}
-}
-
-
-void D3D_UpdateOcclusionQueries (void)
-{
-	if (cls.timedemo) return;
-	if (!d3d_GlobalCaps.supportOcclusion) return;
-
-	numoccluded = 0;
-
-	// this is run every pass through the main loop even if other updates are skipped (by Host_FilterTime).
-	// it needs to be run for entities that are also not in the PVS/frustum so that queries which have expired
-	// have the best chance of being available for testing again the next time the entity is visible.
-	for (int i = 0; i < d3d_NumOcclusionQueries; i++)
-	{
-		entity_t *ent = d3d_OcclusionQueries[i]->Entity;
-
-		if (!ent->occlusion) continue;
-		if (ent->effects & EF_NEVEROCCLUDE) continue;
-
-		d3d_occlusionquery_t *q = ent->occlusion;
-
-		// query has not yet been issued
-		if (!q->Query) continue;
-		if (q->State != QUERY_WAITING) continue;
-
-		DWORD Visible;
-
-		// query status but don't flush
-		hr = q->Query->GetData ((void *) &Visible, sizeof (DWORD), 0);
-
-		if (hr == S_OK)
-		{
-			if (Visible)
-				ent->occluded = false;
-			else
-			{
-				ent->occluded = true;
-				numoccluded++;
-			}
-
-			q->State = QUERY_IDLE;
-		}
-		else if (hr == S_FALSE)
-		{
-			// no change
-		}
-		else
-		{
-			// auto-destruct
-			SAFE_RELEASE (q->Query);
-		}
-	}
 }
 
 
@@ -1148,6 +877,7 @@ void D3D_RenderAliasModels (void)
 		D3D_SetupAliasModel (ent);
 
 		if (ent->visframe != d3d_RenderDef.framecount) continue;
+		if (ent->occluded) continue;
 
 		if (ent->alphaval < 255)
 			D3D_AddToAlphaList (ent);
@@ -1167,9 +897,75 @@ void D3D_RenderAliasModels (void)
 	);
 
 	// everything that's needed for occlusion queries
-	D3D_RunOcclusionQueries (d3d_AliasEdicts, d3d_NumAliasEdicts);
 	D3D_DrawAliasBatch (d3d_AliasEdicts, d3d_NumAliasEdicts);
 	D3D_DrawAliasShadows (d3d_AliasEdicts, d3d_NumAliasEdicts);
+}
+
+
+void D3DAlias_SetupCallback (void *blah)
+{
+	// hack the depth range to prevent view model from poking into walls
+	D3D_SetRenderStatef (D3DRS_DEPTHBIAS, -0.3f);
+
+	if ((cl.items & IT_INVISIBILITY) || r_drawviewmodel.value < 0.99f)
+	{
+		// enable blending
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	}
+
+	// adjust projection to a constant y fov for wide-angle views
+	if (d3d_RenderDef.fov_x > 88.741)
+	{
+		D3DXMATRIX fovmatrix;
+		D3D_LoadIdentity (&fovmatrix);
+		QD3DXMatrixPerspectiveFovRH (&fovmatrix, D3DXToRadian (68.038704f), ((float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height), 4, 4096);
+
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			// calculate concatenated final matrix for use by shaders
+			// because it's only needed once per frame instead of once per vertex we can save some vs instructions
+			D3D_MultMatrix (&d3d_ModelViewProjMatrix, &d3d_ViewMatrix, &d3d_WorldMatrix);
+			D3D_MultMatrix (&d3d_ModelViewProjMatrix, &fovmatrix);
+
+			d3d_MasterFX->SetMatrix ("WorldMatrix", D3D_MakeD3DXMatrix (&d3d_ModelViewProjMatrix));
+			d3d_MasterFX->CommitChanges ();
+		}
+		else d3d_Device->SetTransform (D3DTS_PROJECTION, &fovmatrix);
+	}
+}
+
+
+void D3DAlias_TakeDownCallback (void *blah)
+{
+	// restore original projection
+	// (is this even necessary???)
+	if (d3d_RenderDef.fov_x >= 88.741)
+	{
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			// calculate concatenated final matrix for use by shaders
+			// because it's only needed once per frame instead of once per vertex we can save some vs instructions
+			D3D_MultMatrix (&d3d_ModelViewProjMatrix, &d3d_ViewMatrix, &d3d_WorldMatrix);
+			D3D_MultMatrix (&d3d_ModelViewProjMatrix, &d3d_ProjMatrix);
+
+			d3d_MasterFX->SetMatrix ("WorldMatrix", D3D_MakeD3DXMatrix (&d3d_ModelViewProjMatrix));
+			d3d_MasterFX->CommitChanges ();
+		}
+		else d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjMatrix);
+	}
+
+	if (cl.items & IT_INVISIBILITY)
+	{
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+	}
+
+	// restore the hacked depth range
+	D3D_SetRenderStatef (D3DRS_DEPTHBIAS, 0.0f);
 }
 
 
@@ -1193,21 +989,11 @@ void R_DrawViewModel (void)
 	// never check for bbox culling on the viewmodel
 	ent->nocullbox = true;
 
-	// hack the depth range to prevent view model from poking into walls
-	D3D_SetRenderStatef (D3DRS_DEPTHBIAS, -0.3f);
-
 	// delerp muzzleflashes here
 	DelerpMuzzleFlashes (ent->model->aliashdr);
 
 	if ((cl.items & IT_INVISIBILITY) || r_drawviewmodel.value < 0.99f)
 	{
-		// enable blending
-		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-		D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-
 		// initial alpha
 		ent->alphaval = (int) (r_drawviewmodel.value * 255.0f);
 
@@ -1218,32 +1004,16 @@ void R_DrawViewModel (void)
 		ent->alphaval = BYTE_CLAMP (ent->alphaval);
 	}
 
-	// adjust projection to a constant y fov for wide-angle views
-	if (d3d_RenderDef.fov_x > 88.741)
-	{
-		D3DXMATRIX fovmatrix;
-		QD3DXMatrixPerspectiveFovRH (&fovmatrix, D3DXToRadian (68.038704f), ((float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height), 4, 4096);
-		d3d_Device->SetTransform (D3DTS_PROJECTION, &fovmatrix);
-	}
+	VBO_AddCallback (D3DAlias_SetupCallback);
 
 	// add it to the list
 	D3D_SetupAliasModel (ent);
 	D3D_DrawAliasBatch (&ent, 1);
 
-	// restore original projection
-	if (d3d_RenderDef.fov_x >= 90)
-		d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjMatrix);
-
 	if (cl.items & IT_INVISIBILITY)
-	{
-		// disable blending (done)
 		ent->alphaval = 255;
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-	}
 
-	// restore the hacked depth range
-	D3D_SetRenderStatef (D3DRS_DEPTHBIAS, 0.0f);
+	VBO_AddCallback (D3DAlias_TakeDownCallback);
 }
 
 

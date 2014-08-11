@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+#include "d3d_vbo.h"
 
 /*
 =============================================================
@@ -28,13 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 =============================================================
 */
-
-typedef struct sprverts_s
-{
-	float x, y, z;
-	DWORD c;
-	float s, t;
-} sprverts_t;
 
 /*
 ================
@@ -91,23 +85,49 @@ D3D_SetupSpriteModel
 =================
 */
 
-sprverts_t sprverts[6];
 
-__inline void R_MakeSpriteVert (int v, vec3_t origin, float f1, vec3_t p1, float f2, vec3_t p2, float s, float t, float alphaval)
+void D3DSprite_SetState (void *data)
 {
-	vec3_t point;
+	d3d_texturechange_t *tc = (d3d_texturechange_t *) data;
 
-	VectorMA (origin, f1, p1, point);
-	VectorMA (point, f2, p2, point);
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 
-	sprverts[v].x = point[0];
-	sprverts[v].y = point[1];
-	sprverts[v].z = point[2];
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		if (d3d_FXPass == FX_PASS_NOTBEGUN)
+		{
+			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+			D3D_BeginShaderPass (FX_PASS_GENERIC);
+		}
+		else if (d3d_FXPass == FX_PASS_GENERIC)
+		{
+			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+			d3d_FXCommitPending = true;
+		}
+		else
+		{
+			D3D_EndShaderPass ();
+			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+			D3D_BeginShaderPass (FX_PASS_GENERIC);
+		}
+	}
+	else
+	{
+		D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
+		D3D_SetTexCoordIndexes (0);
 
-	sprverts[v].c = D3DCOLOR_ARGB (BYTE_CLAMP (alphaval), 255, 255, 255);
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 
-	sprverts[v].s = s;
-	sprverts[v].t = t;
+		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+
+		D3D_SetTexture (tc->stage, tc->tex);
+	}
 }
 
 
@@ -122,18 +142,6 @@ void D3D_SetupSpriteModel (entity_t *ent)
 	vec3_t		temp;
 	vec3_t		tvec;
 	float		angle, sr, cr;
-
-	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
-
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
-	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-	D3D_SetTexCoordIndexes (0);
-
-	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-
-	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
 
 	// don't even bother culling, because it's just a single
 	// polygon without a surface cache
@@ -212,18 +220,9 @@ void D3D_SetupSpriteModel (entity_t *ent)
 		break;
 	}
 
-	// set texture and begin vertex
-	D3D_SetTexture (0, frame->texture->d3d_Texture);
-
-	R_MakeSpriteVert (0, fixed_origin, frame->down, up, frame->left, right, 0, frame->t, ent->alphaval);
-	R_MakeSpriteVert (1, fixed_origin, frame->up, up, frame->left, right, 0, 0, ent->alphaval);
-	R_MakeSpriteVert (2, fixed_origin, frame->up, up, frame->right, right, frame->s, 0, ent->alphaval);
-
-	R_MakeSpriteVert (3, fixed_origin, frame->down, up, frame->left, right, 0, frame->t, ent->alphaval);
-	R_MakeSpriteVert (4, fixed_origin, frame->up, up, frame->right, right, frame->s, 0, ent->alphaval);
-	R_MakeSpriteVert (5, fixed_origin, frame->down, up, frame->right, right, frame->s, frame->t, ent->alphaval);
-
-	D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, 2, sprverts, sizeof (sprverts_t));
+	d3d_texturechange_t tc = {0, frame->texture->d3d_Texture};
+	VBO_AddCallback (D3DSprite_SetState, &tc, sizeof (d3d_texturechange_t));
+	VBO_AddSprite (frame, fixed_origin, up, right, ent->alphaval);
 }
 
 

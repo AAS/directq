@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -197,8 +197,8 @@ void SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int count)
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
-	if (ch->leftvol > 255) ch->leftvol = 255;
-	if (ch->rightvol > 255) ch->rightvol = 255;
+	if (ch->leftvol > 255) ch->leftvol = 255; else if (ch->leftvol < 0) ch->leftvol = 0;
+	if (ch->rightvol > 255) ch->rightvol = 255; else if (ch->rightvol < 0) ch->rightvol = 0;
 
 	int *lscale = snd_scaletable[ch->leftvol];
 	int *rscale = snd_scaletable[ch->rightvol];
@@ -257,11 +257,12 @@ void S_PaintChannels (int endtime)
 		Q_MemSet (paintbuffer, 0, (end - paintedtime) * sizeof (portable_samplepair_t));
 
 		// paint in the channels.
-		channel_t *ch = channels;
-		sfxcache_t *sc;
-
-		for (int i = 0; i < total_channels; i++, ch++)
+		for (int i = 0; i < total_channels; i++)
 		{
+			channel_t *ch = channels[i];
+			sfxcache_t *sc;
+
+			if (!ch) continue;
 			if (!ch->sfx) continue;
 			if (!ch->leftvol && !ch->rightvol) continue;
 			if (!(sc = S_LoadSound (ch->sfx))) continue;

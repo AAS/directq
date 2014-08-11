@@ -48,7 +48,7 @@
 				Name="VCCLCompilerTool"
 				UseUnicodeResponseFiles="false"
 				Optimization="0"
-				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;GLQUAKE"
+				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;GLQUAKE;D3D_DEBUG_INFO"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				BufferSecurityCheck="false"
@@ -72,6 +72,7 @@
 				AdditionalDependencies="dxguid.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
 				LinkIncremental="1"
+				GenerateManifest="false"
 				EnableUAC="false"
 				UACExecutionLevel="2"
 				IgnoreDefaultLibraryNames=""
@@ -162,6 +163,7 @@
 				AdditionalDependencies="dxguid.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
 				LinkIncremental="1"
+				GenerateManifest="false"
 				EnableUAC="false"
 				UACExecutionLevel="2"
 				SubSystem="2"
@@ -253,7 +255,19 @@
 				>
 			</File>
 			<File
-				RelativePath=".\common.cpp"
+				RelativePath=".\com_common.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\com_filesystem.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\com_game.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\com_messaging.cpp"
 				>
 			</File>
 			<File
@@ -289,6 +303,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\d3d_occlusion.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\d3d_rlight.cpp"
 				>
 			</File>
@@ -309,7 +327,15 @@
 				>
 			</File>
 			<File
+				RelativePath=".\d3d_rtt.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\d3d_screen.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\d3d_sky.cpp"
 				>
 			</File>
 			<File
@@ -325,7 +351,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\d3d_vbo.cpp"
+				RelativePath=".\d3d_vertexbuffer.cpp"
 				>
 			</File>
 			<File
@@ -398,6 +424,10 @@
 			</File>
 			<File
 				RelativePath=".\menu_video.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\nehahra.cpp"
 				>
 			</File>
 			<File
@@ -532,6 +562,10 @@
 			</File>
 			<File
 				RelativePath=".\d3d_quake.h"
+				>
+			</File>
+			<File
+				RelativePath=".\d3d_vbo.h"
 				>
 			</File>
 			<File
@@ -717,15 +751,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\fxLiquid.fx"
-				>
-			</File>
-			<File
-				RelativePath=".\fxQ1Sky.fx"
-				>
-			</File>
-			<File
-				RelativePath=".\fxScreen.fx"
+				RelativePath=".\fxMaster.fx"
 				>
 			</File>
 			<File

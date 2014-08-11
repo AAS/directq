@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,16 +15,13 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
+
 // server.h
 
 typedef struct
 {
 	int			maxclients;
-	int			maxclientslimit;
 	struct client_s	*clients;		// [maxclients]
 	int			serverflags;		// episode completion information
 	bool	changelevel_issued;	// cleared when at SV_SpawnServer
@@ -42,11 +39,10 @@ typedef struct
 	bool	loadgame;			// handle connections specially
 
 	float		time;
-
 	DWORD		dwTime;
+	float		lastchecktime;
 
 	int			lastcheck;			// used by PF_checkclient
-	DWORD		dwLastCheckTime;
 	
 	char		name[64];			// map name
 
@@ -73,10 +69,6 @@ typedef struct
 	int		signondiff;		// Track extra bytes due to >256 model support, kludge
 	int		Protocol;
 } server_t;
-
-// use of accurate DWORD timer wherever possible on the server
-// adjusted for rounding errors
-#define SV_TIME 	(((float) sv.dwTime + 0.5f) / 1000.0f)
 
 
 #define	NUM_PING_TIMES		16
@@ -215,8 +207,6 @@ extern	server_t		sv;					// local server
 extern	client_t	*host_client;
 
 extern	jmp_buf 	host_abortserver;
-
-extern	float		host_time;
 
 extern	edict_t		*sv_player;
 

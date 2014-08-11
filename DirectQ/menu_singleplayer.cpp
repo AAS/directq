@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -73,19 +73,15 @@ void Menu_SPNewGame (void)
 
 void Menu_InitSPMenu (void)
 {
-	menu_Singleplayer.AddOption (new CQMenuBanner ("gfx/ttl_sgl.lmp"));
-	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Single Player Options"));
-	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuCommand ("Start a New Game", Menu_SPNewGame));
-	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Load a Previously Saved Game", &menu_Load));
-	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
-	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Save the Current Game", &menu_Save));
+	extern qpic_t *gfx_sp_menu_lmp;
+	extern qpic_t *gfx_ttl_sgl_lmp;
 
-	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (Menu_SPNewGame));
-	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Load));
-	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Save));
-	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuChunkyPic ("gfx/sp_menu.lmp"));
+	menu_Singleplayer.AddOption (new CQMenuBanner (&gfx_ttl_sgl_lmp));
+	menu_Singleplayer.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Singleplayer.AddOption (new CQMenuCursorSubMenu (Menu_SPNewGame));
+	menu_Singleplayer.AddOption (new CQMenuCursorSubMenu (&menu_Load));
+	menu_Singleplayer.AddOption (new CQMenuCursorSubMenu (&menu_Save));
+	menu_Singleplayer.AddOption (new CQMenuChunkyPic (&gfx_sp_menu_lmp));
 }
 
 
@@ -871,7 +867,10 @@ void Menu_SaveLoadCustomKey (int key)
 
 void Menu_InitSaveLoadMenu (void)
 {
-	menu_Save.AddOption (new CQMenuBanner ("gfx/p_save.lmp"));
+	extern qpic_t *gfx_p_save_lmp;
+	extern qpic_t *gfx_p_load_lmp;
+
+	menu_Save.AddOption (new CQMenuBanner (&gfx_p_save_lmp));
 	menu_Save.AddOption (new CQMenuTitle ("Save the Current Game"));
 	menu_Save.AddOption (new CQMenuCustomEnter (Menu_SaveCustomEnter));
 	menu_Save.AddOption (new CQMenuCustomDraw (Menu_SaveLoadCustomDraw));
@@ -880,7 +879,7 @@ void Menu_InitSaveLoadMenu (void)
 	menu_Save.AddOption (new CQMenuCustomKey (K_DEL, Menu_SaveLoadCustomKey));
 	menu_Save.AddOption (new CQMenuCustomKey (K_ENTER, Menu_SaveLoadCustomKey));
 
-	menu_Load.AddOption (new CQMenuBanner ("gfx/p_load.lmp"));
+	menu_Load.AddOption (new CQMenuBanner (&gfx_p_load_lmp));
 	menu_Load.AddOption (new CQMenuTitle ("Load a Previously Saved Game"));
 	menu_Load.AddOption (new CQMenuCustomEnter (Menu_LoadCustomEnter));
 	menu_Load.AddOption (new CQMenuCustomDraw (Menu_SaveLoadCustomDraw));

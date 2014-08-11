@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -524,6 +524,106 @@ void IN_MouseEvent (int mstate, int numbuttons, bool dinput)
 }
 
 
+#define DI_MAX_CACHE	100
+
+// this is a 20 byte struct so at < 2k we'll just keep it static
+DIDEVICEOBJECTDATA di_CachedEvents[DI_MAX_CACHE];
+int di_NumCachedEvents = 0;
+
+void IN_DIReadMouse (void)
+{
+	extern bool keybind_grab;
+
+	// don't bother reading the mouse in these situations
+	if (!m_directinput.integer || !di_Mouse || !dinput_acquired) return;
+	if ((cls.demoplayback || cls.timedemo || key_dest != key_game) && !keybind_grab) return;
+	if (di_NumCachedEvents == DI_MAX_CACHE) return;
+
+	for (;;)
+	{
+		DWORD dwElements = 1;
+		hr = di_Mouse->GetDeviceData (sizeof (DIDEVICEOBJECTDATA), &di_CachedEvents[di_NumCachedEvents], &dwElements, 0);
+
+		// per sdk: "You should not attempt to reacquire the mouse on getting a DIERR_NOTACQUIRED error. If you do, you could get caught in an infinite loop"
+		if (hr == DIERR_INPUTLOST)
+		{
+			// if we lose the device or if it's not acquired, we just acquire it for the next frame
+			// (the sdk cautions against reacquiring after DIERR_NOTACQUIRED but those circumstances don't apply here)
+			dinput_acquired = true;
+			di_Mouse->Acquire ();
+			IN_FlushDInput ();
+
+			// if we lost the device we try to process any events we did get
+			// flushing above will cause us to lose button events but at least we'll get the movement
+			break;
+		}
+
+		// otherwise pending or not available
+		if (FAILED (hr) || !dwElements) break;
+
+		// next event
+		di_NumCachedEvents++;
+	}
+}
+
+
+void IN_DecodeMouseEvents (POINT *mxy)
+{
+	for (int i = 0; i < di_NumCachedEvents; i++)
+	{
+		DIDEVICEOBJECTDATA *di = &di_CachedEvents[i];
+
+		// look at what we got and see what happened
+		switch (di->dwOfs)
+		{
+		case DIMOFS_X:
+			mxy->x += di->dwData;
+			break;
+
+		case DIMOFS_Y:
+			mxy->y += di->dwData;
+			break;
+
+		case DIMOFS_Z:
+			// interpret mousewheel
+			// note - this is a dword so we need to cast to int for < 0 comparison to work
+			if ((int) di->dwData < 0)
+			{
+				// mwheeldown
+				Key_Event (K_MWHEELDOWN, true);
+				Key_Event (K_MWHEELDOWN, false);
+			}
+			else if ((int) di->dwData > 0)
+			{
+				// mwheelup
+				Key_Event (K_MWHEELUP, true);
+				Key_Event (K_MWHEELUP, false);
+			}
+
+			break;
+
+		default:
+			for (int b = 0; b < NUM_DI_MBUTTONS; b++)
+			{
+				if (di->dwOfs == di_MouseButtons[b])
+				{
+					if (di->dwData & 0x80)
+						mstate_di |= (1 << b);
+					else mstate_di &= ~(1 << b);
+
+					// one is all it can be
+					break;
+				}
+			}
+
+			break;
+		}
+	}
+
+	di_NumCachedEvents = 0;
+}
+
+
 /*
 ===========
 IN_MouseMove
@@ -532,18 +632,24 @@ IN_MouseMove
 void IN_MouseMove (usercmd_t *cmd)
 {
 	int i;
-	int mx = 0;
-	int my = 0;
+	POINT mxy = {0, 0};
 	extern bool keybind_grab;
 
 	RECT cliprect;
 
 	GetWindowRect (d3d_Window, &cliprect);
 
-	if (!mouseactive && !keybind_grab) return;
+	if (!mouseactive && !keybind_grab)
+	{
+		di_NumCachedEvents = 0;
+		return;
+	}
 
-	// ack, it's horrible but we don't want to change the code too much for this version.  we'll do it right in 1.8.4
+	// ack, it's horrible but we don't want to change the code too much for this version.  we'll do it right sometime
 	if (key_dest == key_game) IN_ShowMouse (FALSE);
+
+	// cache events for this frame
+	IN_DIReadMouse ();
 
 	// ensure that we have a device and it's actually acquired!!!
 	if (m_directinput.integer && di_Mouse && dinput_acquired)
@@ -552,85 +658,19 @@ void IN_MouseMove (usercmd_t *cmd)
 		{
 			// in a demo, the menu or the console we just flush the buffers and reset state always
 			IN_FlushDInput ();
+			di_NumCachedEvents = 0;
 			return;
 		}
 
-		// read one element at a time
-		DIDEVICEOBJECTDATA di_MouseBuffer;
-		int NumMouseEvents;
-
-		for (NumMouseEvents = 0;; NumMouseEvents++)
+		if (di_NumCachedEvents)
 		{
-			DWORD dwElements = 1;
-
-			hr = di_Mouse->GetDeviceData (sizeof (DIDEVICEOBJECTDATA), &di_MouseBuffer, &dwElements, 0);
-
-			if ((hr == DIERR_INPUTLOST) || (hr == DIERR_NOTACQUIRED))
-			{
-				// if we lose the device or if it's not acquired, we just acquire it for the next frame
-				// (the sdk cautions against reacquiring after DIERR_NOTACQUIRED but those circumstances don't apply here)
-				dinput_acquired = true;
-				di_Mouse->Acquire ();
-				IN_FlushDInput ();
-
-				// if we lost the device we try to process any events we did get
-				// flushing above will cause us to lose button events but at least we'll get the movement
-				break;
-			}
-
-			// if we otherwise failed to read it or if we ran out of elements we just do nothing
-			if (FAILED (hr) || dwElements == 0) break;
-
-			// look at what we got and see what happened
-			switch (di_MouseBuffer.dwOfs)
-			{
-			case DIMOFS_X:
-				mx += di_MouseBuffer.dwData;
-				break;
-
-			case DIMOFS_Y:
-				my += di_MouseBuffer.dwData;
-				break;
-
-			case DIMOFS_Z:
-				// interpret mousewheel
-				// note - this is a dword so we need to cast to int for < 0 comparison to work
-				if ((int) di_MouseBuffer.dwData < 0)
-				{
-					// mwheeldown
-					Key_Event (K_MWHEELDOWN, true);
-					Key_Event (K_MWHEELDOWN, false);
-				}
-				else if ((int) di_MouseBuffer.dwData > 0)
-				{
-					// mwheelup
-					Key_Event (K_MWHEELUP, true);
-					Key_Event (K_MWHEELUP, false);
-				}
-
-				break;
-
-			default:
-				for (i = 0; i < NUM_DI_MBUTTONS; i++)
-				{
-					if (di_MouseBuffer.dwOfs == di_MouseButtons[i])
-					{
-						if (di_MouseBuffer.dwData & 0x80)
-							mstate_di |= (1 << i);
-						else mstate_di &= ~(1 << i);
-
-						// one is all it can be
-						break;
-					}
-				}
-
-				break;
-			}
+			// Con_Printf ("Cached %i events\n", di_NumCachedEvents);
+			IN_DecodeMouseEvents (&mxy);
+			di_NumCachedEvents = 0;
 		}
-
-		// if we didn't read any events we don't bother updating the command or processing any keys
-		if (!NumMouseEvents)
+		else
 		{
+			// if we didn't read any events we don't bother updating the command or processing any keys
 			// this is needed to prevent freelook from recentering
 			if ((in_mlook.state & 1) || m_look.value) V_StopPitchDrift ();
 
@@ -640,8 +680,8 @@ void IN_MouseMove (usercmd_t *cmd)
 
 		// adjust movement by boost factor
 		// deferred to here so that calcs on DWORDs (above) won't send it all screwy
-		mx *= m_boost.value;
-		my *= m_boost.value;
+		mxy.x *= m_boost.value;
+		mxy.y *= m_boost.value;
 
 		// do up to 8 buttons; most folks won't have this many (and Windows won't support this many without
 		// 3rd party drivers) but it does no harm...
@@ -659,11 +699,12 @@ void IN_MouseMove (usercmd_t *cmd)
 			dinput_acquired = false;
 		}
 
+		di_NumCachedEvents = 0;
 		GetCursorPos (&current_pos);
 
 		// these were right - left and bottom - top causing all sort of havoc when di was disabled or failed to start!!!
-		mx = current_pos.x - (cliprect.left + (cliprect.right - cliprect.left) / 2) + mx_accum;
-		my = current_pos.y - (cliprect.top + (cliprect.bottom - cliprect.top) / 2) + my_accum;
+		mxy.x = current_pos.x - (cliprect.left + (cliprect.right - cliprect.left) / 2) + mx_accum;
+		mxy.y = current_pos.y - (cliprect.top + (cliprect.bottom - cliprect.top) / 2) + my_accum;
 
 		mx_accum = 0;
 		my_accum = 0;
@@ -675,38 +716,38 @@ void IN_MouseMove (usercmd_t *cmd)
 		// add acceleration parameters - per mouse_event MSDN description
 		if (m_accellevel.integer > 0)
 		{
-			int oldmx = mx;
-			int oldmy = my;
+			int oldmx = mxy.x;
+			int oldmy = mxy.y;
 
 			// threshold 1 doubles when movement is > it
-			if (oldmx > m_accelthreshold1.integer) mx *= 2;
-			if (oldmx < -m_accelthreshold1.integer) mx *= 2;
-			if (oldmy > m_accelthreshold1.integer) my *= 2;
-			if (oldmy < -m_accelthreshold1.integer) my *= 2;
+			if (oldmx > m_accelthreshold1.integer) mxy.x *= 2;
+			if (oldmx < -m_accelthreshold1.integer) mxy.x *= 2;
+			if (oldmy > m_accelthreshold1.integer) mxy.y *= 2;
+			if (oldmy < -m_accelthreshold1.integer) mxy.y *= 2;
 
 			if (m_accellevel.integer > 1)
 			{
 				// threshold 2 doubles again when movement is > it
-				if (oldmx > m_accelthreshold2.integer) mx *= 2;
-				if (oldmx < -m_accelthreshold2.integer) mx *= 2;
-				if (oldmy > m_accelthreshold2.integer) my *= 2;
-				if (oldmy < -m_accelthreshold2.integer) my *= 2;
+				if (oldmx > m_accelthreshold2.integer) mxy.x *= 2;
+				if (oldmx < -m_accelthreshold2.integer) mxy.x *= 2;
+				if (oldmy > m_accelthreshold2.integer) mxy.y *= 2;
+				if (oldmy < -m_accelthreshold2.integer) mxy.y *= 2;
 			}
 		}
 
 		if (m_filter.value)
 		{
-			mouse_x = (mx + old_mouse_x) * 0.5;
-			mouse_y = (my + old_mouse_y) * 0.5;
+			mouse_x = (mxy.x + old_mouse_x) * 0.5;
+			mouse_y = (mxy.y + old_mouse_y) * 0.5;
 		}
 		else
 		{
-			mouse_x = mx;
-			mouse_y = my;
+			mouse_x = mxy.x;
+			mouse_y = mxy.y;
 		}
 
-		old_mouse_x = mx;
-		old_mouse_y = my;
+		old_mouse_x = mxy.x;
+		old_mouse_y = mxy.y;
 
 		mouse_x *= sensitivity.value;
 		mouse_y *= sensitivity.value;
@@ -734,7 +775,7 @@ void IN_MouseMove (usercmd_t *cmd)
 	}
 
 	// if the mouse has moved, force it to the center, so there's room to move
-	if (mx || my) SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
+	if (mxy.x || mxy.y) SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 }
 
 

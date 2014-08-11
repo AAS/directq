@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -16,7 +16,6 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
-
 
 #ifndef __MODEL__
 #define __MODEL__
@@ -47,13 +46,26 @@ BRUSH MODELS
 ==============================================================================
 */
 
+typedef struct d3d_texturechange_s
+{
+	DWORD stage;
+	LPDIRECT3DTEXTURE9 tex;
+} d3d_texturechange_t;
+
+
+#define TEXTURECHANGE_LIGHTMAP	0
+#define TEXTURECHANGE_DIFFUSE	1
+#define TEXTURECHANGE_LUMA		2
+
 typedef struct d3d_modelsurf_s
 {
 	struct msurface_s *surf;
 	struct texture_s *tex;
-	D3DMATRIX *matrix;
+	entity_t *ent;
+	d3d_texturechange_t tc[3];
 
 	struct d3d_modelsurf_s *surfchain;
+	struct d3d_modelsurf_s *lightmapchain;
 } d3d_modelsurf_t;
 
 
@@ -75,6 +87,12 @@ typedef struct mvertex_s
 	vec3_t position;
 } mvertex_t;
 
+typedef struct mclipnode_s
+{
+	int			planenum;
+	int			children[2];	// negative numbers are contents
+} mclipnode_t;
+
 // plane_t structure
 // !!! if this is changed, it must be changed in asm_i386.h too !!!
 typedef struct mplane_s
@@ -95,6 +113,7 @@ typedef struct texture_s
 
 	struct image_s *teximage;
 	struct image_s *lumaimage;
+	struct image_s *nolumaimage;
 
 	int			visframe;
 
@@ -143,11 +162,19 @@ typedef struct
 	int			flags;
 } mtexinfo_t;
 
+// note - padding these to make them all the same size makes fuck all difference to speed
 typedef struct warpverts_s
 {
 	float v[3];
 	float st[2];
 } warpverts_t;
+
+
+typedef struct colouredvert_s
+{
+	float xyz[3];
+	D3DCOLOR color;
+} colouredvert_t;
 
 
 typedef struct aliaspolyvert_s
@@ -165,25 +192,11 @@ typedef struct brushpolyvert_s
 
 	union
 	{
-		// warp verts needs to cache the original s/t for non-hlsl updates
+		// warp verts need to cache the original s/t for non-hlsl updates
 		float lm[2];
 		float st2[2];
 	};
 } brushpolyvert_t;
-
-
-typedef struct polyvert_s
-{
-	float *basevert;
-	float st[2];
-
-	union
-	{
-		// warp verts needs to cache the original s/t for non-hlsl updates
-		float lm[2];
-		float st2[2];
-	};
-} polyvert_t;
 
 
 typedef struct msurface_s
@@ -202,7 +215,7 @@ typedef struct msurface_s
 	int			numindexes;
 
 	// subdivision just uses the regular verts and indexes
-	polyvert_t	*verts;
+	brushpolyvert_t	*verts;
 	unsigned short *indexes;
 
 	// for bmodel transforms
@@ -233,6 +246,7 @@ typedef struct msurface_s
 	// overbright factor for surf
 	int			overbright;
 	int			fullbright;
+	int			ambient;
 
 	// extents of the surf in world space
 	float		mins[3];
@@ -313,6 +327,7 @@ typedef struct mleaf_s
 	struct efrag_s	*efrags;
 	int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
+
 	// contents colour for cshifts
 	int *contentscolor;
 } mleaf_t;
@@ -320,7 +335,7 @@ typedef struct mleaf_s
 // !!! if this is changed, it must be changed in asm_i386.h too !!!
 typedef struct
 {
-	dclipnode_t	*clipnodes;
+	mclipnode_t	*clipnodes;
 	mplane_t	*planes;
 	int			firstclipnode;
 	int			lastclipnode;
@@ -416,8 +431,9 @@ typedef struct aliasmesh_s
 
 typedef struct aliasskin_s
 {
-	struct image_s *texture[4];
-	struct image_s *fullbright[4];
+	struct image_s *teximage[4];
+	struct image_s *lumaimage[4];
+	struct image_s *nolumaimage[4];
 	byte				*texels;
 } aliasskin_t;
 
@@ -521,7 +537,7 @@ typedef struct brushheader_s
 	int			*surfedges;
 
 	int			numclipnodes;
-	dclipnode_t	*clipnodes;
+	mclipnode_t	*clipnodes;
 
 	int			nummarksurfaces;
 	msurface_t	**marksurfaces;

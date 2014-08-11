@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -79,6 +79,12 @@ qsocket_t *Loop_Connect (char *host)
 	loop_client->receiveMessageLength = 0;
 	loop_client->sendMessageLength = 0;
 	loop_client->canSend = true;
+	loop_client->client_port = 0;
+
+	// no mod (compatibility)
+	loop_client->mod = MOD_NONE;
+	loop_client->mod_flags = 0;
+	loop_client->mod_version = 0;
 
 	if (!loop_server)
 	{
@@ -89,9 +95,16 @@ qsocket_t *Loop_Connect (char *host)
 		}
 		strcpy (loop_server->address, "LOCAL");
 	}
+
 	loop_server->receiveMessageLength = 0;
 	loop_server->sendMessageLength = 0;
 	loop_server->canSend = true;
+	loop_server->client_port = 0;
+
+	// no mod (compatibility)
+	loop_server->mod = MOD_NONE;
+	loop_server->mod_flags = 0;
+	loop_server->mod_version = 0;
 
 	loop_client->driverdata = (void *)loop_server;
 	loop_server->driverdata = (void *)loop_client;

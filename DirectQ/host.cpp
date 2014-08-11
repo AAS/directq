@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -37,18 +37,19 @@ quakeparms_t host_parms;
 
 bool	host_initialized;		// true if into command execution
 
+// note - this is TREACHEROUS!!!!  susceptible to rounding errors which may accumulate as it's added to other timers
 float		host_frametime;
-float		host_time;
+
+DWORD		dwHostFrameTime;
+
 float		realtime;				// without any filtering or bounding
-float		oldrealtime;			// last frame run
+DWORD		dwRealTime;
+DWORD		dwOldRealTime;
 int			host_framecount;
 
 client_t	*host_client;			// current client
 
 jmp_buf 	host_abortserver;
-
-byte		*host_basepal;
-byte		*host_colormap;
 
 cvar_t	host_framerate ("host_framerate","0");	// set for slow motion
 cvar_t	sys_ticrate ("sys_ticrate", "0.05");
@@ -88,7 +89,7 @@ void Host_EndGame (char *message, ...)
 	_vsnprintf (string,1024,message,argptr);
 	va_end (argptr);
 	Con_DPrintf ("Host_EndGame: %s\n",string);
-	
+
 	if (sv.active)
 		Host_ShutdownServer (false);
 
@@ -158,22 +159,17 @@ void Host_FindMaxClients (void)
 	{
 		if (i != (com_argc - 1))
 			svs.maxclients = atoi (com_argv[i + 1]);
-		else svs.maxclients = 8;
+		else svs.maxclients = MAX_SCOREBOARD;
 	}
 
 	// don't let silly values go in
 	if (svs.maxclients < 1)
-		svs.maxclients = 8;
+		svs.maxclients = 1;
 	else if (svs.maxclients > MAX_SCOREBOARD)
 		svs.maxclients = MAX_SCOREBOARD;
 
-	svs.maxclientslimit = svs.maxclients;
-
-	if (svs.maxclientslimit < 4)
-		svs.maxclientslimit = 4;
-
-	// allocate space for the max clients
-	svs.clients = (client_s *) Zone_Alloc (svs.maxclientslimit * sizeof (client_t));
+	// allocate space for the initial clients
+	svs.clients = (client_s *) Zone_Alloc (svs.maxclients * sizeof (client_t));
 
 	// if we request more than 1 client we set the appropriate game mode
 	if (svs.maxclients > 1)
@@ -192,8 +188,6 @@ void Host_InitLocal (void)
 	Host_InitCommands ();
 
 	Host_FindMaxClients ();
-	
-	host_time = 1.0;		// so a think at time 0 won't get called
 }
 
 
@@ -267,12 +261,12 @@ FIXME: make this just a stuffed echo?
 void SV_ClientPrintf (char *fmt, ...)
 {
 	va_list		argptr;
-	char		string[1024];
-	
+	char		string[2048];
+
 	va_start (argptr,fmt);
-	_vsnprintf (string, 1024,fmt,argptr);
+	_vsnprintf (string, 2048,fmt,argptr);
 	va_end (argptr);
-	
+
 	MSG_WriteByte (&host_client->message, svc_print);
 	MSG_WriteString (&host_client->message, string);
 }
@@ -315,7 +309,7 @@ void Host_ClientCommands (char *fmt, ...)
 	char		string[1024];
 
 	va_start (argptr,fmt);
-	_vsnprintf (string, 1024, fmt,argptr);
+	_vsnprintf (string, 1020, fmt,argptr);
 	va_end (argptr);
 
 	MSG_WriteByte (&host_client->message, svc_stufftext);
@@ -408,7 +402,7 @@ void Host_ShutdownServer(bool crash)
 		CL_Disconnect ();
 
 	// flush any pending messages - like the score!!!
-	DWORD start = Sys_DWORDTime();
+	float start = Sys_FloatTime ();
 
 	do
 	{
@@ -431,7 +425,7 @@ void Host_ShutdownServer(bool crash)
 			}
 		}
 
-		if ((Sys_DWORDTime () - start) > 3000) break;
+		if ((Sys_FloatTime () - start) > 3) break;
 	}
 	while (count);
 
@@ -441,6 +435,7 @@ void Host_ShutdownServer(bool crash)
 	buf.cursize = 0;
 	MSG_WriteByte(&buf, svc_disconnect);
 	count = NET_SendToAll(&buf, 5);
+
 	if (count)
 		Con_Printf ("Host_ShutdownServer: NET_SendToAll failed for %u clients\n", count);
 
@@ -449,8 +444,8 @@ void Host_ShutdownServer(bool crash)
 			SV_DropClient(crash);
 
 	// clear structures
-	Q_MemSet (&sv, 0, sizeof(sv));
-	Q_MemSet (svs.clients, 0, svs.maxclientslimit*sizeof(client_t));
+	Q_MemSet (&sv, 0, sizeof (sv));
+	Q_MemSet (svs.clients, 0, svs.maxclients * sizeof (client_t));
 }
 
 
@@ -528,54 +523,44 @@ cvar_t host_maxfps ("host_maxfps", 72, CVAR_ARCHIVE | CVAR_SERVER);
 cvar_alias_t cl_maxfps ("cl_maxfps", &host_maxfps);
 cvar_alias_t pq_maxfps ("pq_maxfps", &host_maxfps);
 
-DWORD dwRealTime = 0;
-DWORD dwHostFrameTime = 0;
-DWORD dwOldRealTime = 0;
+DWORD fpsspread = 14;
 
-bool Host_FilterTime (DWORD dwTime)
+void Host_FPSSpread (void)
 {
-	dwRealTime += dwTime;
+	// better to run at 71 than at 77...
+	fpsspread = (int) ((1000.0f / host_maxfps.value) + 0.5f);
+}
 
-	// check for integer wraparound
-	if (dwRealTime < dwOldRealTime)
-	{
-		// reset the old realtime to an unwrapped value and get out
-		dwOldRealTime = dwRealTime;
-		return false;
-	}
 
-	// don't update if not enough time has passed
-	if (dwRealTime == dwOldRealTime) return false;
+bool Host_FilterTime (DWORD time)
+{
+	dwRealTime += time;
+	realtime = ((float) dwRealTime / 1000.0f);
 
 	// bound sensibly
-	if (host_maxfps.value < 30) Cvar_Set (&host_maxfps, 30);
-	if (host_maxfps.value > 666) Cvar_Set (&host_maxfps, 666);
+	// with a millisecond timer at > 500 fps we're going to round down to 1 millisecond per frame
+	if (host_maxfps.value < 10) Cvar_Set (&host_maxfps, 10);
+	if (host_maxfps.value > 500) Cvar_Set (&host_maxfps, 500);
 
-	if (!cls.timedemo && (dwRealTime - dwOldRealTime < (1000.0f / host_maxfps.value)))
-		return false;		// framerate is too high
+	// determine the spread of framerates for this value of host_maxfps
+	Host_FPSSpread ();
+
+	if (!cls.timedemo && ((dwRealTime - dwOldRealTime) < fpsspread))
+		return false;
 
 	dwHostFrameTime = dwRealTime - dwOldRealTime;
 	dwOldRealTime = dwRealTime;
 
 	if (host_framerate.value > 0)
-	{
-		dwHostFrameTime = host_framerate.value * 1000.0f;
 		host_frametime = host_framerate.value;
-	}
 	else
 	{
-		// don't allow really long or short frames
+		// fixme - this is nonsensical...
 		if (dwHostFrameTime > 100) dwHostFrameTime = 100;
 		if (dwHostFrameTime < 1) dwHostFrameTime = 1;
 
-		// fixup frametime to FP scale
-		host_frametime = ((float) dwHostFrameTime + 0.5f) / 1000.0f;
+		host_frametime = ((float) dwHostFrameTime / 1000.0f);
 	}
-
-	// fixup frametimers to FP scale
-	// also do old realtime in case we ever want to use it anywhere else
-	realtime = ((float) dwRealTime + 0.5f) / 1000.0f;
-	oldrealtime = ((float) dwOldRealTime + 0.5f) / 1000.0f;
 
 	return true;
 }
@@ -618,8 +603,9 @@ Runs all active servers
 ==================
 */
 
-void D3D_UpdateOcclusionQueries (void);
 void S_FrameCheck (void);
+void IN_DIReadMouse (void);
+void CL_SendLagMove (void);
 
 void Host_Frame (DWORD time)
 {
@@ -632,8 +618,10 @@ void Host_Frame (DWORD time)
 	// decide the simulation time - don't run too fast, or packets will flood out
 	if (!Host_FilterTime (time))
 	{
-		// update occlusion queries always
-		D3D_UpdateOcclusionQueries ();
+		// JPG - if we're not doing a frame, still check for lagged moves to send
+		if (!sv.active && (cl.movemessages > 2))
+			CL_SendLagMove ();
+
 		return;
 	}
 
@@ -666,22 +654,22 @@ void Host_Frame (DWORD time)
 		CL_SendCmd ();
 	}
 
-	host_time += host_frametime;
-
 	// fetch results from server
 	if (cls.state == ca_connected) CL_ReadFromServer ();
+
+	// update sound
+	if (cls.signon == SIGNONS)
+		S_Update (r_origin, vpn, vright, vup);
+	else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 
 	// update display
 	SCR_UpdateScreen ();
 
-	// update dlights (should this move to the end of SCR_UpdateScreen?) and sound
-	if (cls.signon == SIGNONS)
-	{
-		CL_DecayLights ();
-		S_Update (r_origin, vpn, vright, vup);
-	}
-	else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
+	// update dlights (should this move to the end of SCR_UpdateScreen?)
+	if (cls.signon == SIGNONS) CL_DecayLights ();
 
+	// finish sound
+	S_EndThread ();
 	CDAudio_Update ();
 	MediaPlayer_Update ();
 
@@ -701,7 +689,7 @@ void Host_InitVCR (quakeparms_t *parms)
 Host_Init
 ====================
 */
-void D3D_VidInit (byte *palette);
+void D3D_VidInit (void);
 bool full_initialized = false;
 void Menu_CommonInit (void);
 void PR_InitBuiltIns (void);
@@ -762,7 +750,7 @@ void Host_Init (quakeparms_t *parms)
 
 	if (!W_LoadPalette ()) Sys_Error ("Could not locate Quake on your computer");
 
-	D3D_VidInit (host_basepal);
+	D3D_VidInit ();
 
 	Draw_Init (); SCR_QuakeIsLoading (1, 9);
 	SCR_Init (); SCR_QuakeIsLoading (2, 9);

@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,10 +15,8 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
+
 // vid.h -- video driver defs
 
 #define VID_CBITS	6
@@ -46,7 +44,6 @@ typedef struct
 } viddef_t;
 
 extern	viddef_t	vid;				// global video state
-extern	unsigned	d_8to24table[256];
 
 void	VID_Shutdown (void);
 // Called at shutdown

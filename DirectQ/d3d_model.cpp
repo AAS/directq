@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -544,6 +544,8 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 			tx->name[0] = '*';
 		}
 
+		byte *texels = (byte *) (mt + 1);
+
 		// check for water
 		if (mt->name[0] == '*')
 		{
@@ -553,11 +555,11 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 
 			for (j = 0; j < (tx->width * tx->height); j++)
 			{
-				byte *bgra = (byte *) &d_8to24table[((byte *) (mt + 1))[j]];
+				PALETTEENTRY bgra = d3d_QuakePalette.standard[texels[j]];
 
-				tx->contentscolor[0] += bgra[2];
-				tx->contentscolor[1] += bgra[1];
-				tx->contentscolor[2] += bgra[0];
+				tx->contentscolor[0] += bgra.peRed;
+				tx->contentscolor[1] += bgra.peGreen;
+				tx->contentscolor[2] += bgra.peBlue;
 			}
 
 			// bring to approximate scale of the cshifts
@@ -584,14 +586,26 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 		{
 			if (mod->brushhdr->bspversion == Q1_BSPVERSION)
 			{
-				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP);
-				tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA);
+				int texflags = IMAGE_MIPMAP | IMAGE_BSP;
+				int lumaflags = IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA;
+				int nolumaflags = IMAGE_MIPMAP | IMAGE_BSP | IMAGE_NOLUMA;
+
+				// load the luma first so that we know if we have it
+				if ((tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, lumaflags)) != NULL)
+					texflags |= IMAGE_NOCOMPRESS;
+
+				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, texflags);
+
+				if (tx->lumaimage)
+					tx->nolumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, nolumaflags);
+				else tx->nolumaimage = NULL;
 			}
 			else
 			{
 				// no lumas in halflife
-				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP | IMAGE_HALFLIFE);
+				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, IMAGE_MIPMAP | IMAGE_BSP | IMAGE_HALFLIFE);
 				tx->lumaimage = NULL;
+				tx->nolumaimage = NULL;
 			}
 		}
 
@@ -1091,11 +1105,11 @@ void Mod_CalcSurfaceBoundsAndExtents (model_t *mod, msurface_t *surf)
 void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf)
 {
 	// just set these up for now, we generate them in the next step
-	surf->verts = (polyvert_t *) MainHunk->Alloc (surf->numverts * sizeof (polyvert_t));
+	surf->verts = (brushpolyvert_t *) MainHunk->Alloc (surf->numverts * sizeof (brushpolyvert_t));
 
 	// keep code cleaner looking
 	brushhdr_t *hdr = mod->brushhdr;
-	polyvert_t *verts = surf->verts;
+	brushpolyvert_t *verts = surf->verts;
 
 	VectorClear (surf->midpoint);
 
@@ -1104,17 +1118,25 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf)
 	{
 		int lindex = hdr->surfedges[surf->firstedge + i];
 
-		// store a pointer to the base vert so as to cut down on memory usage
 		if (lindex > 0)
-			verts->basevert = hdr->vertexes[hdr->edges[lindex].v[0]].position;
-		else verts->basevert = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+		{
+			verts->xyz[0] = hdr->vertexes[hdr->edges[lindex].v[0]].position[0];
+			verts->xyz[1] = hdr->vertexes[hdr->edges[lindex].v[0]].position[1];
+			verts->xyz[2] = hdr->vertexes[hdr->edges[lindex].v[0]].position[2];
+		}
+		else
+		{
+			verts->xyz[0] = hdr->vertexes[hdr->edges[-lindex].v[1]].position[0];
+			verts->xyz[1] = hdr->vertexes[hdr->edges[-lindex].v[1]].position[1];
+			verts->xyz[2] = hdr->vertexes[hdr->edges[-lindex].v[1]].position[2];
+		}
 
 		// accumulate into midpoint
-		VectorAdd (surf->midpoint, verts->basevert, surf->midpoint);
+		VectorAdd (surf->midpoint, verts->xyz, surf->midpoint);
 
 		// texcoords
-		verts->st[0] = (DotProduct (verts->basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]) / (float) surf->texinfo->texture->width;
-		verts->st[1] = (DotProduct (verts->basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]) / (float) surf->texinfo->texture->height;
+		verts->st[0] = (DotProduct (verts->xyz, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]) / (float) surf->texinfo->texture->width;
+		verts->st[1] = (DotProduct (verts->xyz, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]) / (float) surf->texinfo->texture->height;
 	}
 
 	// get final mindpoint
@@ -1423,89 +1445,56 @@ Mod_LoadClipnodes
 */
 void Mod_LoadClipnodes (model_t *mod, byte *mod_base, lump_t *l)
 {
-	dclipnode_t *in, *out;
+	dclipnode_t *in;
+	mclipnode_t *out;
 	int			i, count;
 	hull_t		*hull;
 
-	in = (dclipnode_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
+	in = (dclipnode_t *) (mod_base + l->fileofs);
+
+	if (l->filelen % sizeof (dclipnode_t))
 		Host_Error ("MOD_LoadBmodel: LUMP_CLIPNODES funny lump size in %s",mod->name);
-	count = l->filelen / sizeof(*in);
-	out = (dclipnode_t *) MainHunk->Alloc (count * sizeof (*out));	
+
+	count = l->filelen / sizeof (dclipnode_t);
+	out = (mclipnode_t *) MainHunk->Alloc (count * sizeof (mclipnode_t));	
 
 	mod->brushhdr->clipnodes = out;
 	mod->brushhdr->numclipnodes = count;
 
-	if (mod->brushhdr->bspversion == Q1_BSPVERSION)
-	{
-		hull = &mod->brushhdr->hulls[1];
-		hull->clipnodes = out;
-		hull->firstclipnode = 0;
-		hull->lastclipnode = count - 1;
-		hull->planes = mod->brushhdr->planes;
-		hull->clip_mins[0] = -16;
-		hull->clip_mins[1] = -16;
-		hull->clip_mins[2] = -24;
-		hull->clip_maxs[0] = 16;
-		hull->clip_maxs[1] = 16;
-		hull->clip_maxs[2] = 32;
+	hull = &mod->brushhdr->hulls[1];
+	hull->clipnodes = out;
+	hull->firstclipnode = 0;
+	hull->lastclipnode = count - 1;
+	hull->planes = mod->brushhdr->planes;
+	hull->clip_mins[0] = -16;
+	hull->clip_mins[1] = -16;
+	hull->clip_mins[2] = -24;
+	hull->clip_maxs[0] = 16;
+	hull->clip_maxs[1] = 16;
+	hull->clip_maxs[2] = 32;
 
-		hull = &mod->brushhdr->hulls[2];
-		hull->clipnodes = out;
-		hull->firstclipnode = 0;
-		hull->lastclipnode = count - 1;
-		hull->planes = mod->brushhdr->planes;
-		hull->clip_mins[0] = -32;
-		hull->clip_mins[1] = -32;
-		hull->clip_mins[2] = -24;
-		hull->clip_maxs[0] = 32;
-		hull->clip_maxs[1] = 32;
-		hull->clip_maxs[2] = 64;
-	}
-	else
-	{
-		hull = &mod->brushhdr->hulls[1];
-		hull->clipnodes = out;
-		hull->firstclipnode = 0;
-		hull->lastclipnode = count - 1;
-		hull->planes = mod->brushhdr->planes;
-		hull->clip_mins[0] = -16;
-		hull->clip_mins[1] = -16;
-		hull->clip_mins[2] = -36;
-		hull->clip_maxs[0] = 16;
-		hull->clip_maxs[1] = 16;
-		hull->clip_maxs[2] = 36;
-
-		hull = &mod->brushhdr->hulls[2];
-		hull->clipnodes = out;
-		hull->firstclipnode = 0;
-		hull->lastclipnode = count - 1;
-		hull->planes = mod->brushhdr->planes;
-		hull->clip_mins[0] = -32;
-		hull->clip_mins[1] = -32;
-		hull->clip_mins[2] = -32;
-		hull->clip_maxs[0] = 32;
-		hull->clip_maxs[1] = 32;
-		hull->clip_maxs[2] = 32;
-
-		hull = &mod->brushhdr->hulls[3];
-		hull->clipnodes = out;
-		hull->firstclipnode = 0;
-		hull->lastclipnode = count - 1;
-		hull->planes = mod->brushhdr->planes;
-		hull->clip_mins[0] = -16;
-		hull->clip_mins[1] = -16;
-		hull->clip_mins[2] = -18;
-		hull->clip_maxs[0] = 16;
-		hull->clip_maxs[1] = 16;
-		hull->clip_maxs[2] = 18;
-	}
+	hull = &mod->brushhdr->hulls[2];
+	hull->clipnodes = out;
+	hull->firstclipnode = 0;
+	hull->lastclipnode = count - 1;
+	hull->planes = mod->brushhdr->planes;
+	hull->clip_mins[0] = -32;
+	hull->clip_mins[1] = -32;
+	hull->clip_mins[2] = -24;
+	hull->clip_maxs[0] = 32;
+	hull->clip_maxs[1] = 32;
+	hull->clip_maxs[2] = 64;
 
 	for (i = 0; i < count; i++, out++, in++)
 	{
 		out->planenum = LittleLong (in->planenum);
-		out->children[0] = LittleShort (in->children[0]);
-		out->children[1] = LittleShort (in->children[1]);
+
+		out->children[0] = (unsigned short) LittleShort (in->children[0]);
+		out->children[1] = (unsigned short) LittleShort (in->children[1]);
+
+		// support > 32k clipnodes
+		if (out->children[0] >= count) out->children[0] -= 65536;
+		if (out->children[1] >= count) out->children[1] -= 65536;
 	}
 }
 
@@ -1519,7 +1508,7 @@ Duplicate the drawing hull structure as a clipping hull
 void Mod_MakeHull0 (model_t *mod)
 {
 	mnode_t		*in, *child;
-	dclipnode_t *out;
+	mclipnode_t *out;
 	int			i, j, count;
 	hull_t		*hull;
 	
@@ -1527,23 +1516,24 @@ void Mod_MakeHull0 (model_t *mod)
 	
 	in = mod->brushhdr->nodes;
 	count = mod->brushhdr->numnodes;
-	out = (dclipnode_t *) MainHunk->Alloc (count*sizeof(*out));	
+	out = (mclipnode_t *) MainHunk->Alloc (count * sizeof (mclipnode_t));
 
 	hull->clipnodes = out;
 	hull->firstclipnode = 0;
-	hull->lastclipnode = count-1;
+	hull->lastclipnode = count - 1;
 	hull->planes = mod->brushhdr->planes;
 
-	for (i=0; i<count; i++, out++, in++)
+	for (i = 0; i < count; i++, out++, in++)
 	{
 		out->planenum = in->plane - mod->brushhdr->planes;
-		for (j=0; j<2; j++)
+
+		for (j = 0; j < 2; j++)
 		{
 			child = in->children[j];
+
 			if (child->contents < 0)
 				out->children[j] = child->contents;
-			else
-				out->children[j] = child - mod->brushhdr->nodes;
+			else out->children[j] = child - mod->brushhdr->nodes;
 		}
 	}
 }
@@ -1899,7 +1889,6 @@ typedef struct
 	short		x, y;
 } floodfill_t;
 
-extern unsigned d_8to24table[];
 
 // must be a power of 2
 #define FLOODFILL_FIFO_SIZE 0x1000
@@ -1925,20 +1914,9 @@ void Mod_FloodFillSkin (byte *skin, int skinwidth, int skinheight)
 	int					i;
 
 	// this will always be true
-	if (filledcolor == -1)
-	{
-		filledcolor = 0;
-
-		// attempt to find opaque black
-		for (i = 0; i < 256; i++)
-		{
-			if (d_8to24table[i] == (255 << 0)) // alpha 1.0
-			{
-				filledcolor = i;
-				break;
-			}
-		}
-	}
+	// opaque black doesn't exist in the gamma scaled palette (this is also true of GLQuake)
+	// so just use the darkest colour in the palette instead
+	if (filledcolor == -1) filledcolor = d3d_QuakePalette.darkindex;
 
 	// can't fill to filled color or to transparent color (used as visited marker)
 	if ((fillcolor == filledcolor) || (fillcolor == 255))
@@ -1989,6 +1967,9 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 	pheader->skins = (aliasskin_t *) MainCache->Alloc (pheader->numskins * sizeof (aliasskin_t));
 	s = pheader->skinwidth * pheader->skinheight;
 
+	image_s *tex, *luma, *noluma;
+	byte *texels;
+
 	// don't remove the extension here as Q1 has s_light.mdl and s_light.spr, so we need to differentiate them
 	// dropped skin padding because there are too many special cases
 	for (i = 0; i < pheader->numskins; i++)
@@ -2012,30 +1993,25 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 
 			_snprintf (name, 32, "%s_%i", mod->name, i);
 
-			pheader->skins[i].texture[0] =
-			pheader->skins[i].texture[1] =
-			pheader->skins[i].texture[2] =
-			pheader->skins[i].texture[3] = D3D_LoadTexture
-			(
-				name,
-				pheader->skinwidth, 
-				pheader->skinheight,
-				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS
-			);
+			texels = (byte *) (pskintype + 1);
+
+			int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
+			int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
+			int nolumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_NOLUMA;
+
+			if ((luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags)) != NULL)
+			{
+				texflags |= IMAGE_NOCOMPRESS;
+				noluma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, nolumaflags);
+			}
+			else noluma = NULL;
+
+			tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
 
 			// load fullbright
-			pheader->skins[i].fullbright[0] =
-			pheader->skins[i].fullbright[1] =
-			pheader->skins[i].fullbright[2] =
-			pheader->skins[i].fullbright[3] = D3D_LoadTexture
-			(
-				name,
-				pheader->skinwidth, 
-				pheader->skinheight,
-				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
-			);
+			pheader->skins[i].lumaimage[0] = pheader->skins[i].lumaimage[1] = pheader->skins[i].lumaimage[2] = pheader->skins[i].lumaimage[3] = luma;
+			pheader->skins[i].nolumaimage[0] = pheader->skins[i].nolumaimage[1] = pheader->skins[i].nolumaimage[2] = pheader->skins[i].nolumaimage[3] = noluma;
+			pheader->skins[i].teximage[0] = pheader->skins[i].teximage[1] = pheader->skins[i].teximage[2] = pheader->skins[i].teximage[3] = tex;
 
 			pskintype = (daliasskintype_t *) ((byte *) (pskintype + 1) + s);
 		}
@@ -2064,26 +2040,25 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 
 				_snprintf (name, 32, "%s_%i_%i", mod->name, i, j);
 
+				texels = (byte *) (pskintype);
+
+				int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
+				int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
+				int nolumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_NOLUMA;
+
+				if ((luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags)) != NULL)
+				{
+					texflags |= IMAGE_NOCOMPRESS;
+					noluma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, nolumaflags);
+				}
+				else noluma = NULL;
+
+				tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
+
 				// this tries to catch models with > 4 group skins
-				pheader->skins[i].texture[j & 3] = D3D_LoadTexture 
-				(
-					name,
-					pheader->skinwidth, 
-					pheader->skinheight,
-					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS
-				);
-
-				// so does this
-				pheader->skins[i].fullbright[j & 3] = D3D_LoadTexture 
-				(
-					name,
-					pheader->skinwidth, 
-					pheader->skinheight,
-					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
-				);
-
+				pheader->skins[i].teximage[j & 3] = tex;
+				pheader->skins[i].lumaimage[j & 3] = luma;
+				pheader->skins[i].nolumaimage[j & 3] = noluma;
 				pskintype = (daliasskintype_t *) ((byte *) (pskintype) + s);
 			}
 
@@ -2092,8 +2067,9 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 			// fill in any skins that weren't loaded
 			for (; j < 4; j++)
 			{
-				pheader->skins[i].texture[j & 3] = pheader->skins[i].texture[j - k]; 
-				pheader->skins[i].fullbright[j & 3] = pheader->skins[i].fullbright[j - k]; 
+				pheader->skins[i].teximage[j & 3] = pheader->skins[i].teximage[j - k]; 
+				pheader->skins[i].lumaimage[j & 3] = pheader->skins[i].lumaimage[j - k]; 
+				pheader->skins[i].nolumaimage[j & 3] = pheader->skins[i].nolumaimage[j - k]; 
 			}
 		}
 	}

@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -16,6 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
+
 // client.h
 
 typedef struct
@@ -207,9 +208,13 @@ typedef struct
 	int			completed_time;	// latched at intermission start
 	
 	float		mtime[2];		// the timestamp of last two messages	
+
 	float		time;			// clients view of time, should be between
 								// servertime and oldservertime to generate
 								// a lerp point for other data
+
+	DWORD		dwTime;
+
 	float		oldtime;		// previous cl.time, time-oldtime is used
 								// to decay light values and smooth step ups
 	

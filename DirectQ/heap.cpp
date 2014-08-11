@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -36,6 +36,8 @@ int TotalReserved = 0;
 
 	memcmp is only used twice in DQ so it remains CRT.
 
+	Q_MemCpy is also suitable for fast dma block transfers to vertex buffers etc.
+
 ========================================================================================================================
 */
 
@@ -43,30 +45,110 @@ void *Q_MemCpy (void *dst, void *src, int size)
 {
 	void *ret = dst;
 
-	if (size >= 4)
+	int isize = size / 4;
+
+	// going to 32 slows it down so this seems to be the optimal transfer block size
+	while (isize > 16)
 	{
 		int *d = (int *) dst;
 		int *s = (int *) src;
 
-		for (int i = 0, sz = size >> 2; i < sz; i++)
-			*d++ = *s++;
+		d[0] = s[0];
+		d[1] = s[1];
+		d[2] = s[2];
+		d[3] = s[3];
+		d[4] = s[4];
+		d[5] = s[5];
+		d[6] = s[6];
+		d[7] = s[7];
+		d[8] = s[8];
+		d[9] = s[9];
+		d[10] = s[10];
+		d[11] = s[11];
+		d[12] = s[12];
+		d[13] = s[13];
+		d[14] = s[14];
+		d[15] = s[15];
 
-		dst = d;
-		src = s;
-		size -= (size >> 2) << 2;
+		isize -= 16;
+		size -= 64;
+
+		dst = d + 16;
+		src = s + 16;
 	}
 
-	if (size >= 2)
+	while (isize > 8)
 	{
-		short *d = (short *) dst;
-		short *s = (short *) src;
+		int *d = (int *) dst;
+		int *s = (int *) src;
 
-		for (int i = 0, sz = size >> 1; i < sz; i++)
-			*d++ = *s++;
+		d[0] = s[0];
+		d[1] = s[1];
+		d[2] = s[2];
+		d[3] = s[3];
+		d[4] = s[4];
+		d[5] = s[5];
+		d[6] = s[6];
+		d[7] = s[7];
 
-		dst = d;
-		src = s;
-		size -= (size >> 1) << 1;
+		isize -= 8;
+		size -= 32;
+
+		dst = d + 8;
+		src = s + 8;
+	}
+
+	while (isize > 4)
+	{
+		int *d = (int *) dst;
+		int *s = (int *) src;
+
+		d[0] = s[0];
+		d[1] = s[1];
+		d[2] = s[2];
+		d[3] = s[3];
+
+		isize -= 4;
+		size -= 16;
+
+		dst = d + 4;
+		src = s + 4;
+	}
+
+	while (size > 8)
+	{
+		byte *d = (byte *) dst;
+		byte *s = (byte *) src;
+
+		d[0] = s[0];
+		d[1] = s[1];
+		d[2] = s[2];
+		d[3] = s[3];
+		d[4] = s[4];
+		d[5] = s[5];
+		d[6] = s[6];
+		d[7] = s[7];
+
+		size -= 8;
+
+		dst = d + 8;
+		src = s + 8;
+	}
+
+	while (size > 4)
+	{
+		byte *d = (byte *) dst;
+		byte *s = (byte *) src;
+
+		d[0] = s[0];
+		d[1] = s[1];
+		d[2] = s[2];
+		d[3] = s[3];
+
+		size -= 4;
+
+		dst = d + 4;
+		src = s + 4;
 	}
 
 	if (size)
@@ -74,8 +156,30 @@ void *Q_MemCpy (void *dst, void *src, int size)
 		byte *d = (byte *) dst;
 		byte *s = (byte *) src;
 
-		for (int i = 0; i < size; i++)
-			*d++ = *s++;
+		switch (size)
+		{
+		case 1:
+			d[0] = s[0];
+			break;
+
+		case 2:
+			d[0] = s[0];
+			d[1] = s[1];
+			break;
+
+		case 3:
+			d[0] = s[0];
+			d[1] = s[1];
+			d[2] = s[2];
+			break;
+
+		case 4:
+			d[0] = s[0];
+			d[1] = s[1];
+			d[2] = s[2];
+			d[3] = s[3];
+			break;
+		}
 	}
 
 	return ret;

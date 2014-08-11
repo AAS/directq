@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -17,62 +17,20 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-// new vbo interface
-#define VBO_SHADER_TYPE_FIXED		1
-#define VBO_SHADER_TYPE_HLSL		2
-
-typedef struct d3d_fixed_shader_texture_s
+// palette hackery
+typedef struct palettedef_s
 {
-	DWORD Op;
-	DWORD Arg1;
-	DWORD Arg2;
-} d3d_fixed_shader_texture_t;
+	PALETTEENTRY noluma[256];
+	PALETTEENTRY luma[256];
+	PALETTEENTRY standard[256];
 
-typedef struct d3d_shaderdef_s
-{
-	int NumStages;
-	int Type;
-} d3d_shaderdef_t;
+	D3DCOLOR standard32[256];
+	int darkindex;
+} palettedef_t;
 
-typedef struct d3d_shader_s
-{
-	d3d_shaderdef_t ShaderDef;
-	d3d_fixed_shader_texture_t ColorDef[3];
-	d3d_fixed_shader_texture_t AlphaDef[3];
-} d3d_shader_t;
+extern palettedef_t d3d_QuakePalette;
 
-
-#define D3D_EmitSingleSurfaceVert(src,dst,m) {\
-if ((m)) \
-{ \
-	(dst)[0] = (src)[0] * (m)->_11 + (src)[1] * (m)->_21 + (src)[2] * (m)->_31 + (m)->_41; \
-	(dst)[1] = (src)[0] * (m)->_12 + (src)[1] * (m)->_22 + (src)[2] * (m)->_32 + (m)->_42; \
-	(dst)[2] = (src)[0] * (m)->_13 + (src)[1] * (m)->_23 + (src)[2] * (m)->_33 + (m)->_43; \
-} \
-else \
-{ \
-	(dst)[0] = (src)[0]; \
-	(dst)[1] = (src)[1]; \
-	(dst)[2] = (src)[2]; \
-}}
-
-#define D3D_EmitSingleSurfaceTexCoord(src,dst) {\
-	(dst)[0] = (src)[0]; \
-	(dst)[1] = (src)[1]; \
-}
-
-void D3D_VBOBegin (D3DPRIMITIVETYPE PrimitiveType, int Stride);
-void D3D_VBOAddShader (d3d_shader_t *Shader, LPDIRECT3DTEXTURE9 Stage0Tex, LPDIRECT3DTEXTURE9 Stage1Tex = NULL, LPDIRECT3DTEXTURE9 Stage2Tex = NULL);
-void D3D_VBOAddSurfaceVerts (msurface_t *surf);
-void D3D_VBOEmitIndexes (unsigned short *src, unsigned short *dst, int num, int base);
-void D3D_VBORender (void);
-void D3D_VBOCheckOverflow (int numverts, int numindexes);
-void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, aliasstate_t *aliasstate);
-void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, aliasstate_t *aliasstate, DWORD shadecolor);
-void D3D_VBOSetVBOStream (LPDIRECT3DVERTEXBUFFER9 vbo, LPDIRECT3DINDEXBUFFER9 ibo = NULL, int stride = 0);
-void D3D_DrawUserPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride);
-void D3D_DrawUserPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT NumVertices, UINT PrimitiveCount, CONST void *pIndexData, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride);
-
+#define MAX_CHAR_TEXTURES	50
 
 // dynamic linking
 typedef IDirect3D9 *(WINAPI *DIRECT3DCREATE9PROC) (UINT);
@@ -98,6 +56,9 @@ typedef HRESULT (WINAPI *D3DXCREATERENDERTOSURFACEPROC) (LPDIRECT3DDEVICE9, UINT
 typedef HRESULT (WINAPI *D3DXDDECLARATORFROMFVFPROC) (DWORD FVF, D3DVERTEXELEMENT9 *);
 typedef HRESULT (WINAPI *D3DXOPTIMIZEFACEVERTPROC) (LPCVOID, UINT, UINT, BOOL, DWORD *);
 typedef HRESULT (WINAPI *D3DXCREATEMESHFVFPROC) (DWORD, DWORD, DWORD, DWORD, LPDIRECT3DDEVICE9, LPD3DXMESH *);
+typedef HRESULT (WINAPI *D3DXLOADSURFACEFROMFILEINMEMORYPROC) (LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, LPCVOID, UINT, CONST RECT *, DWORD, D3DCOLOR, D3DXIMAGE_INFO *);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXINVERSEPROC) (D3DXMATRIX *, FLOAT *, CONST D3DXMATRIX *);
+
 
 extern HINSTANCE hInstD3D9;
 extern HINSTANCE hInstD3DX;
@@ -126,6 +87,8 @@ extern D3DXDDECLARATORFROMFVFPROC QD3DXDeclaratorFromFVF;
 extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeFaces;
 extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeVertices;
 extern D3DXCREATEMESHFVFPROC QD3DXCreateMeshFVF;
+extern D3DXLOADSURFACEFROMFILEINMEMORYPROC QD3DXLoadSurfaceFromFileInMemory;
+extern D3DXMATRIXINVERSEPROC QD3DXMatrixInverse;
 
 // for render to texture
 extern bool d3d_SceneBegun;
@@ -141,7 +104,9 @@ BOOL D3D_AreBuffersFull (int numverts, int numindexes);
 
 
 // this is our matrix interface now
+extern D3DMATRIX d3d_ViewMatrix;
 extern D3DMATRIX d3d_WorldMatrix;
+extern D3DMATRIX d3d_ModelViewProjMatrix;
 extern D3DMATRIX d3d_ProjMatrix;
 
 void D3D_TranslateMatrix (D3DMATRIX *matrix, float x, float y, float z);
@@ -150,9 +115,12 @@ void D3D_RotateMatrix (D3DMATRIX *matrix, float x, float y, float z, float angle
 D3DMATRIX *D3D_LoadIdentity (D3DMATRIX *matrix);
 D3DXMATRIX *D3D_LoadIdentity (D3DXMATRIX *matrix);
 void D3D_MultMatrix (D3DMATRIX *matrix1, D3DMATRIX *matrix2);
+void D3D_MultMatrix (D3DMATRIX *matrixout, D3DMATRIX *matrix1, D3DMATRIX *matrix2);
 D3DXMATRIX *D3D_MakeD3DXMatrix (D3DMATRIX *matrix);
 
 extern HRESULT hr;
+
+extern cvar_t r_overbright;
 
 // hlsl
 extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex1;
@@ -161,9 +129,29 @@ extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyz;
 extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuseTex1;
 extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuse;
 
-extern LPD3DXEFFECT d3d_LiquidFX;
-extern LPD3DXEFFECT d3d_SkyFX;
-extern LPD3DXEFFECT d3d_ScreenFX;
+extern bool d3d_FXCommitPending;
+extern LPD3DXEFFECT d3d_MasterFX;
+
+void D3D_BeginShaderPass (int passnum);
+void D3D_EndShaderPass (void);
+
+#define FX_PASS_NOTBEGUN		-1
+#define FX_PASS_ALIAS_NOLUMA	0
+#define FX_PASS_ALIAS_LUMA		1
+#define FX_PASS_GENERIC			2
+#define FX_PASS_LIQUID			3
+#define FX_PASS_SHADOW			4
+#define FX_PASS_WORLD_NOLUMA	5
+#define FX_PASS_WORLD_LUMA		6
+#define FX_PASS_RTT				7
+#define FX_PASS_SKYWARP			8
+#define FX_PASS_DRAWTEXTURED	9
+#define FX_PASS_DRAWCOLORED		10
+#define FX_PASS_SKYBOX			11
+#define FX_PASS_WORLD_LUMA_NO_LUMA	12
+#define FX_PASS_ALIAS_LUMA_NO_LUMA	13
+
+extern int d3d_FXPass;
 
 void D3D_InitHLSL (void);
 void D3D_ShutdownHLSL (void);
@@ -231,6 +219,9 @@ public:
 	void RecoverDefaultTexture (void);
 	void EnsureSurfaceTexture (msurface_t *surf);
 
+	void ChainModelSurf (struct d3d_modelsurf_s *ms);
+	void DrawSurfaceChain (bool luma);
+
 private:
 	bool modified;
 	int width;
@@ -241,6 +232,9 @@ private:
 	LPDIRECT3DTEXTURE9 d3d_BackupTexture;
 	bool lost;
 	RECT DirtyRect;
+
+	// chained modelsurfs for by-lightmap sorting
+	struct d3d_modelsurf_s *lightmapchain;
 
 	// next lightmap in the chain
 	CD3DLightmap *next;
@@ -267,26 +261,32 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode);
 void D3D_ShutdownDirect3D (void);
 void D3D_BeginRendering (void);
 void D3D_EndRendering (void);
+void D3D_Finish (void);
 
 extern D3DDISPLAYMODE d3d_CurrentMode;
+void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf);
 
 
 // textures
-#define IMAGE_MIPMAP		1
-#define IMAGE_ALPHA			2
-#define IMAGE_32BIT			4
-#define IMAGE_PRESERVE		8
-#define IMAGE_LIQUID		16
-#define IMAGE_BSP			32
-#define IMAGE_ALIAS			64
-#define IMAGE_SPRITE		128
-#define IMAGE_LUMA			256
-#define IMAGE_NOCOMPRESS	512
-#define IMAGE_NOEXTERN		2048
-#define IMAGE_HALFLIFE		4096
-#define IMAGE_KEEPPATH		8192
-#define IMAGE_PADDABLE		16384
-#define IMAGE_PADDED		32768
+#define IMAGE_MIPMAP		(1 << 1)
+#define IMAGE_ALPHA			(1 << 2)
+#define IMAGE_32BIT			(1 << 3)
+#define IMAGE_PRESERVE		(1 << 4)
+#define IMAGE_LIQUID		(1 << 5)
+#define IMAGE_BSP			(1 << 6)
+#define IMAGE_ALIAS			(1 << 7)
+#define IMAGE_SPRITE		(1 << 8)
+#define IMAGE_LUMA			(1 << 9)
+#define IMAGE_EXTERNAL		(1 << 10)
+#define IMAGE_NOEXTERN		(1 << 11)
+#define IMAGE_HALFLIFE		(1 << 12)
+#define IMAGE_KEEPPATH		(1 << 13)
+#define IMAGE_PADDABLE		(1 << 14)
+#define IMAGE_PADDED		(1 << 15)
+#define IMAGE_NOCOMPRESS	(1 << 16)
+#define IMAGE_SYSMEM		(1 << 17)
+#define IMAGE_SCRAP			(1 << 18)
+#define IMAGE_NOLUMA		(1 << 19)
 
 int D3D_PowerOf2Size (int size);
 
@@ -338,11 +338,10 @@ typedef struct d3d_global_caps_s
 	bool supportDXT5;
 	bool supportPixelShaders;
 	bool usingPixelShaders;
-	bool supportTripleBuffer;
 	bool supportHardwareTandL;
 	bool supportOcclusion;
+	bool supportVertexBuffers;
 	DWORD deviceCreateFlags;
-	int videoRAMMB;
 	int NumTMUs;
 } d3d_global_caps_t;
 
@@ -361,6 +360,8 @@ typedef struct d3d_renderdef_s
 	int last_alias_polys;
 	int alias_polys;
 	int numsss;
+	int numlocks;
+	int numdrawprim;
 
 	mleaf_t *viewleaf;
 	mleaf_t *oldviewleaf;
@@ -384,6 +385,7 @@ extern d3d_renderdef_t d3d_RenderDef;
 typedef struct particle_type_s
 {
 	struct particle_s *particles;
+	int numparticles;
 	vec3_t spawnorg;
 	struct particle_type_s *next;
 } particle_type_t;
@@ -395,9 +397,8 @@ void D3D_RenderAlphaList (void);
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
-extern D3DTEXTUREFILTERTYPE d3d_3DFilterMin;
-extern D3DTEXTUREFILTERTYPE d3d_3DFilterMag;
-extern D3DTEXTUREFILTERTYPE d3d_3DFilterMip;
+extern D3DTEXTUREFILTERTYPE d3d_TexFilter;
+extern D3DTEXTUREFILTERTYPE d3d_MipFilter;
 
 // state management functions
 // these are wrappers around the real call that check the previous value for a change before issuing the API call
@@ -418,10 +419,12 @@ void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor);
 void D3D_DisableAlphaBlend (void);
 void D3D_SetTexCoordIndexes (DWORD tmu0index, DWORD tmu1index = 1, DWORD tmu2index = 2);
 void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode = D3DTADDRESS_WRAP, DWORD tmu2mode = D3DTADDRESS_WRAP);
-void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE magfilter, D3DTEXTUREFILTERTYPE minfilter, D3DTEXTUREFILTERTYPE mipfilter = D3DTEXF_NONE);
+void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE texfilter, D3DTEXTUREFILTERTYPE mipfilter = D3DTEXF_NONE);
 void D3D_SetTextureMatrixOp (DWORD tmu0op, DWORD tmu1op = D3DTTFF_DISABLE, DWORD tmu2op = D3DTTFF_DISABLE);
 void D3D_SetTextureColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
 void D3D_SetTextureAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
+
+void D3D_AlignCubeMapFaceTexels (LPDIRECT3DSURFACE9 surf, D3DCUBEMAP_FACES face);
 
 bool R_CullBox (mnode_t *node);
 bool R_CullBox (vec3_t mins, vec3_t maxs);

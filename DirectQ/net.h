@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,10 +15,8 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
+
 // net.h -- quake's interface to the networking layer
 
 struct qsockaddr
@@ -111,20 +109,28 @@ struct qsockaddr
 #define CCREQ_SERVER_INFO	0x02
 #define CCREQ_PLAYER_INFO	0x03
 #define CCREQ_RULE_INFO		0x04
+#define CCREQ_RCON		0x05
 
 #define CCREP_ACCEPT		0x81
 #define CCREP_REJECT		0x82
 #define CCREP_SERVER_INFO	0x83
 #define CCREP_PLAYER_INFO	0x84
 #define CCREP_RULE_INFO		0x85
+#define CCREP_RCON		0x86
 
 // JPG - support for mods
 #define MOD_NONE			0x00
-#define MOD_PROQUAKE		0x01
+#define	MOD_PROQUAKE		0x01
 #define MOD_QSMACK			0x02
 
 // JPG 3.20 - flags
 #define PQF_CHEATFREE		1
+#define JQF_CHEATFREE		1
+
+// joe: rcon from ProQuake
+extern sizebuf_t	rcon_message;
+extern bool			rcon_active;
+
 
 typedef struct qsocket_s
 {
@@ -156,6 +162,13 @@ typedef struct qsocket_s
 	struct qsockaddr	addr;
 	char				address[NET_NAMELEN];
 
+	// JPG - new stuff here (must be after address for crmod compatibility)
+	byte			mod;
+	byte			mod_version;	// = floor(version * 10) (must fit in one byte)
+	byte			mod_flags;
+	int				client_port;
+	bool			net_wait;		// JPG 3.40 - wait for the client to send a packet to the private port
+	byte			encrypt;		// JPG 3.50
 } qsocket_t;
 
 extern qsocket_t	*net_activeSockets;

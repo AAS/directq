@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include "shlobj.h"
 
-HHOOK hKeyboardHook = NULL;
 bool bWindowActive = false;
 void AllowAccessibilityShortcutKeys (bool bAllowKeys);
 
@@ -47,7 +46,8 @@ HRESULT hr = S_OK;
 #define NOT_FOCUS_SLEEP	20				// sleep time when not focus
 
 bool	ActiveApp, Minimized;
-bool	WinNT;
+bool	WinNT = false;
+bool	WinDWM = false;
 
 static HANDLE	hFile;
 static HANDLE	heventParent;
@@ -224,9 +224,57 @@ void Sys_Quit (void)
 {
 	Host_Shutdown ();
 	timeEndPeriod (sys_time_period);
-	UnhookWindowsHookEx (hKeyboardHook);
 	AllowAccessibilityShortcutKeys (true);
 	exit (0);
+}
+
+
+// #define USE_QPC
+
+int lowshift = 0;
+float pfreq = 0;
+
+float Sys_GetNextTime (void)
+{
+#ifdef USE_QPC
+	LARGE_INTEGER pc;
+
+	QueryPerformanceCounter (&pc);
+
+	unsigned int temp = ((unsigned int) pc.LowPart >> lowshift) |
+		   ((unsigned int) pc.HighPart << (32 - lowshift));
+
+	return ((float) temp * pfreq);
+#else
+	return ((float) timeGetTime () / 1000.0f);
+#endif
+}
+
+
+float Sys_GetFirstTime (void)
+{
+#ifdef USE_QPC
+	LARGE_INTEGER pc;
+
+	QueryPerformanceFrequency (&pc);
+
+	unsigned int lowpart = (unsigned int) pc.LowPart;
+	unsigned int highpart = (unsigned int) pc.HighPart;
+
+	while (highpart || (lowpart > 2000000.0))
+	{
+		lowshift++;
+		lowpart >>= 1;
+		lowpart |= (highpart & 1) << 31;
+		highpart >>= 1;
+	}
+
+	pfreq = 1.0f / (float) lowpart;
+
+	return Sys_GetNextTime ();
+#else
+	return ((float) timeGetTime () / 1000.0f);
+#endif
 }
 
 
@@ -234,29 +282,30 @@ void Sys_Quit (void)
 ================
 Sys_FloatTime
 
-unfortunately this code is STILL used throughout the engine
 ================
 */
 float Sys_FloatTime (void)
 {
-	// adjust for rounding errors
-	return ((float) Sys_DWORDTime () + 0.5f) / 1000.0f;
-}
+#ifdef USE_QPC
+	static float starttime = Sys_GetFirstTime ();
 
+	float now = Sys_GetNextTime ();
 
-DWORD Sys_DWORDTime (void)
-{
-	static LONGLONG starttime = timeGetTime ();
+	return (now - starttime);
+#else
+	static DWORD starttime = timeGetTime ();
 
-	LONGLONG now = timeGetTime ();
+	DWORD now = timeGetTime ();
 
 	while (now < starttime)
 	{
-		now += 0xffffffff;
-		now += 1;
+		// handle DWORD wraparound by causing them to re-wrap so that now > starttime
+		now += 65536;
+		starttime += 65536;
 	}
 
-	return (DWORD) (now - starttime);
+	return ((float) (now - starttime) / 1000.0f);
+#endif
 }
 
 
@@ -634,10 +683,9 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 
-	case WM_PAINT:
-		// minimal WM_PAINT processing
-		ValidateRect (hWnd, NULL);
-		break;
+	//case WM_PAINT:
+		//SCR_UpdateScreen ();
+		//break;
 
 	case WM_ERASEBKGND:
 		// don't let windows handle background erasures
@@ -746,40 +794,38 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 
 
-LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
+void Host_Frame (DWORD time);
+void D3D_CreateShadeDots (void);
+void VID_DefaultMonitorGamma_f (void);
+
+// fixme - run shutdown through here (or else consolidate the restoration stuff in a separate function)
+LONG WINAPI TildeDirectQ (LPEXCEPTION_POINTERS toast)
 {
-	// do not process message
-	if (nCode < 0 || nCode != HC_ACTION)
-		return CallNextHookEx (hKeyboardHook, nCode, wParam, lParam);
+	// restore monitor gamma
+	VID_DefaultMonitorGamma_f ();
 
-	bool bEatKeystroke = false;
-	KBDLLHOOKSTRUCT *p = (KBDLLHOOKSTRUCT *) lParam;
+	// restore default timer
+	timeEndPeriod (sys_time_period);
 
-	switch (wParam)
-	{
-	case WM_KEYDOWN:
-	case WM_KEYUP:
-		bEatKeystroke = (bWindowActive && ((p->vkCode == VK_LWIN) || (p->vkCode == VK_RWIN)));
-		break;
+#ifdef _DEBUG
+		// prevent an exception in release builds
+		assert (false);
+#else
+	MessageBox (NULL, "Something bad happened and DirectQ is now toast.\n"
+		"Please visit http://mhquake.blogspot.com and report this crash.",
+		"An error has occurred",
+		MB_OK | MB_ICONSTOP);
+#endif
 
-	default:
-		break;
-	}
-
-	if (bEatKeystroke)
-		return 1;
-	else return CallNextHookEx (hKeyboardHook, nCode, wParam, lParam);
+	// down she goes
+	return EXCEPTION_EXECUTE_HANDLER;
 }
 
 
-void Host_Frame (DWORD time);
-void D3D_CreateShadeDots (void);
-
 int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-	//MessageBox (NULL, "boo", "boo", MB_OK);
-
 	InitCommonControls ();
+	SetUnhandledExceptionFilter (TildeDirectQ);
 
 	// set up and register the window class (d3d doesn't need CS_OWNDC)
 	// do this before anything else so that we'll have it available for the splash too
@@ -790,7 +836,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	wc.lpfnWndProc = (WNDPROC) DefWindowProc;
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
-	wc.hInstance = GetModuleHandle (NULL);
+	wc.hInstance = hInstance;
 	wc.hIcon = 0;
 	wc.hCursor = LoadCursor (NULL,IDC_ARROW);
 	wc.hbrBackground = NULL;
@@ -810,11 +856,11 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		D3D_WINDOW_CLASS_NAME,
 		va ("DirectQ Release %s", DIRECTQ_VERSION),
 		0,
-		CW_DEFAULT, CW_DEFAULT,
-		CW_DEFAULT, CW_DEFAULT,
+		CW_USEDEFAULT, CW_USEDEFAULT,
+		CW_USEDEFAULT, CW_USEDEFAULT,
 		GetDesktopWindow (),
 		NULL,
-		GetModuleHandle (NULL),
+		hInstance,
 		NULL
 	);
 
@@ -853,12 +899,30 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		WinNT = true;
 	else WinNT = false;
 
+	// see if we're on vista or higher
+	if (vinfo.dwMajorVersion >= 6)
+		WinDWM = true;
+	else WinDWM = false;
+
 	quakeparms_t parms;
 	char cwd[MAX_PATH];
 
-	// previous instances do not exist in Win32
-	// this is stupid as is can't be anothing but NULL...
-	if (hPrevInstance) return 0;
+	// attempt to get the path that the executable is in
+	// if it doesn't work we just don't do it
+	if (GetModuleFileName (NULL, cwd, 1023))
+	{
+		for (int i = strlen (cwd); i; i--)
+		{
+			if (cwd[i] == '/' || cwd[i] == '\\')
+			{
+				cwd[i] = 0;
+				break;
+			}
+		}
+
+		// attempt to set that path as the current working directory
+		SetCurrentDirectory (cwd);
+	}
 
 	// Declare this process to be high DPI aware, and prevent automatic scaling
 	HINSTANCE hUser32 = LoadLibrary ("user32.dll");
@@ -930,8 +994,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// initialize the splash screen
 	Splash_Init ();
 
-	DWORD time, oldtime, newtime;
-
     // Save the current sticky/toggle/filter key settings so they can be restored them later
     SystemParametersInfo (SPI_GETSTICKYKEYS, sizeof (STICKYKEYS), &StartupStickyKeys, 0);
     SystemParametersInfo (SPI_GETTOGGLEKEYS, sizeof (TOGGLEKEYS), &StartupToggleKeys, 0);
@@ -940,12 +1002,10 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
     // Disable when full screen
     AllowAccessibilityShortcutKeys (false);
 
-	// Initialization
-    hKeyboardHook = SetWindowsHookEx (WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle (NULL), 0);
-
 	Sys_Init ();
 	Host_Init (&parms);
-	oldtime = timeGetTime ();
+
+	DWORD oldtime = timeGetTime ();
 
 	// main window message loop
 	while (1)
@@ -961,21 +1021,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 			else Sleep (NOT_FOCUS_SLEEP);
 		}
 
-		newtime = timeGetTime ();
-
-		// check for integer wraparound
-		if (newtime < oldtime)
-		{
-			oldtime = newtime;
-			continue;
-		}
+		DWORD newtime = timeGetTime ();
 
 		// don't update if no time has passed
 		if (newtime == oldtime) continue;
 
-		time = newtime - oldtime;
-
-		Host_Frame (time);
+		Host_Frame (newtime - oldtime);
 		oldtime = newtime;
 	}
 

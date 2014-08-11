@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -525,7 +525,7 @@ void Host_DoSavegame (char *savename)
 		fprintf (f, "%f\n", svs.clients->spawn_parms[i]);
 	fprintf (f, "%d\n", current_skill);
 	fprintf (f, "%s\n", sv.name);
-	fprintf (f, "%f\n", SV_TIME);
+	fprintf (f, "%f\n", sv.time);
 
 	// write the light styles
 	for (i = 0; i < MAX_LIGHTSTYLES; i++)
@@ -767,7 +767,8 @@ void Host_Loadgame_f (void)
 	}
 	
 	SVProgs->NumEdicts = entnum;
-	sv.dwTime = time * 1000;
+	sv.time = time;
+	sv.dwTime = (DWORD) (time * 1000.0f);
 
 	fclose (f);
 
@@ -887,13 +888,15 @@ void Host_Please_f (void)
 #endif
 
 
-void Host_Say(bool teamonly)
+#define SAY_BUF_LEN 2048
+
+void Host_Say (bool teamonly)
 {
 	client_t *client;
 	client_t *save;
 	int		j;
 	char	*p;
-	char	text[64];
+	char	text[SAY_BUF_LEN + 2];
 	bool	fromServer = false;
 
 	if (cmd_source == src_command)
@@ -907,22 +910,23 @@ void Host_Say(bool teamonly)
 
 	save = host_client;
 
-	p = Cmd_Args();
-// remove quotes if present
+	p = Cmd_Args ();
+
+	// remove quotes if present
 	if (*p == '"')
 	{
 		p++;
-		p[strlen(p)-1] = 0;
+		p[strlen (p) - 1] = 0;
 	}
 
-// turn on color set 1
+	// turn on color set 1
 	if (!fromServer)
-		_snprintf (text, 64, "%c%s: ", 1, save->name);
-	else
-		_snprintf (text, 64, "%c<%s> ", 1, hostname.string);
+		_snprintf (text, SAY_BUF_LEN, "%c%s: ", 1, save->name);
+	else _snprintf (text, SAY_BUF_LEN, "%c<%s> ", 1, hostname.string);
 
-	j = sizeof(text) - 2 - strlen(text);  // -2 for /n and null terminator
-	if (strlen(p) > j)
+	j = sizeof (text) - 2 - strlen (text);  // -2 for /n and null terminator
+
+	if (strlen (p) > j)
 		p[j] = 0;
 
 	strcat (text, p);
@@ -935,7 +939,7 @@ void Host_Say(bool teamonly)
 		if (teamplay.value && teamonly && client->edict->v.team != save->edict->v.team)
 			continue;
 		host_client = client;
-		SV_ClientPrintf("%s", text);
+		SV_ClientPrintf ("%s", text);
 	}
 
 	host_client = save;
@@ -960,7 +964,7 @@ void Host_Tell_f(void)
 	client_t *save;
 	int		j;
 	char	*p;
-	char	text[64];
+	char	text[SAY_BUF_LEN + 2];
 
 	if (cmd_source == src_command)
 	{
@@ -976,14 +980,14 @@ void Host_Tell_f(void)
 
 	p = Cmd_Args();
 
-// remove quotes if present
+	// remove quotes if present
 	if (*p == '"')
 	{
 		p++;
 		p[strlen(p)-1] = 0;
 	}
 
-// check length & truncate if necessary
+	// check length & truncate if necessary
 	j = sizeof(text) - 2 - strlen(text);  // -2 for /n and null terminator
 	if (strlen(p) > j)
 		p[j] = 0;
@@ -1076,7 +1080,7 @@ void Host_Kill_f (void)
 		return;
 	}
 	
-	SVProgs->GlobalStruct->time = SV_TIME;
+	SVProgs->GlobalStruct->time = sv.time;
 	SVProgs->GlobalStruct->self = EDICT_TO_PROG(sv_player);
 	SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientKill);
 }
@@ -1192,7 +1196,7 @@ void Host_Spawn_f (void)
 
 		// call the spawn function
 
-		SVProgs->GlobalStruct->time = SV_TIME;
+		SVProgs->GlobalStruct->time = sv.time;
 		SVProgs->GlobalStruct->self = EDICT_TO_PROG(sv_player);
 		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientConnect);
 		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->PutClientInServer);	
@@ -1203,7 +1207,7 @@ void Host_Spawn_f (void)
 
 	// send time of update
 	MSG_WriteByte (&host_client->message, svc_time);
-	MSG_WriteFloat (&host_client->message, SV_TIME);
+	MSG_WriteFloat (&host_client->message, sv.time);
 
 	for (i=0, client = svs.clients; i<svs.maxclients; i++, client++)
 	{
@@ -1495,6 +1499,42 @@ void Host_Give_f (void)
 			}
 		}
         break;
+
+	case 'a':
+		// remove all current armor
+		if (rogue)
+			sv_player->v.items = ((int) sv_player->v.items) & ~(RIT_ARMOR1 | RIT_ARMOR2 | RIT_ARMOR3);
+		else sv_player->v.items = ((int) sv_player->v.items) & ~(IT_ARMOR1 | IT_ARMOR2 | IT_ARMOR3);
+
+		// the types here came from id1 qc and may not be fully accurate for mods
+		// who knows? who cares?  it's cheating anyway!!!
+		if (v <= 100)
+		{
+			if (rogue)
+				sv_player->v.items = ((int) sv_player->v.items) | RIT_ARMOR1;
+			else sv_player->v.items = ((int) sv_player->v.items) | IT_ARMOR1;
+
+			if (sv_player->v.armortype < 0.3f) sv_player->v.armortype = 0.3f;
+		}
+		else if (v <= 150)
+		{
+			if (rogue)
+				sv_player->v.items = ((int) sv_player->v.items) | RIT_ARMOR2;
+			else sv_player->v.items = ((int) sv_player->v.items) | IT_ARMOR2;
+
+			if (sv_player->v.armortype < 0.6f) sv_player->v.armortype = 0.6f;
+		}
+		else
+		{
+			if (rogue)
+				sv_player->v.items = ((int) sv_player->v.items) | RIT_ARMOR3;
+			else sv_player->v.items = ((int) sv_player->v.items) | IT_ARMOR3;
+
+			if (sv_player->v.armortype < 0.8f) sv_player->v.armortype = 0.8f;
+		}
+
+		sv_player->v.armorvalue = v;
+		break;
 
     case 'h':
 		// don't die!

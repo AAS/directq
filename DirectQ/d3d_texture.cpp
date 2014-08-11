@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -24,12 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 
 
-// leave this at 1 cos texture caching will resolve loading time issues
-cvar_t gl_compressedtextures ("gl_texture_compression", 1, CVAR_ARCHIVE);
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
-cvar_t r_lumatextures ("r_lumaintensity", "1", CVAR_ARCHIVE);
-cvar_alias_t gl_fullbrights ("gl_fullbrights", &r_lumatextures);
-extern cvar_t r_overbright;
 
 LPDIRECT3DTEXTURE9 d3d_CurrentTexture[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 
@@ -46,14 +41,74 @@ void D3D_Kill3DSceneTexture (void);
 
 // other textures we use
 extern LPDIRECT3DTEXTURE9 char_texture;
+extern LPDIRECT3DTEXTURE9 char_textures[];
 extern LPDIRECT3DTEXTURE9 solidskytexture;
 extern LPDIRECT3DTEXTURE9 alphaskytexture;
-extern LPDIRECT3DTEXTURE9 simpleskytexture;
 LPDIRECT3DTEXTURE9 yahtexture;
 
-// for palette hackery
-PALETTEENTRY *texturepal = NULL;
-extern PALETTEENTRY lumapal[];
+// palette hackery
+palettedef_t d3d_QuakePalette;
+
+
+void D3D_MakeQuakePalettes (byte *palette)
+{
+	int dark = 21024;
+	int darkindex = 0;
+
+	for (int i = 0; i < 256; i++)
+	{
+		// on disk palette has 3 components
+		byte *rgb = palette;
+		palette += 3;
+
+		if (i < 255)
+		{
+			int darkness = ((int) rgb[0] + (int) rgb[1] + (int) rgb[2]) / 3;
+
+			if (darkness < dark)
+			{
+				dark = darkness;
+				darkindex = i;
+			}
+		}
+
+		// set correct alpha colour
+		byte alpha = (i < 255) ? 255 : 0;
+
+		// per doc, peFlags is used for alpha
+		// invert again so that the layout will be correct
+		d3d_QuakePalette.standard[i].peRed = rgb[0];
+		d3d_QuakePalette.standard[i].peGreen = rgb[1];
+		d3d_QuakePalette.standard[i].peBlue = rgb[2];
+		d3d_QuakePalette.standard[i].peFlags = alpha;
+
+		PALETTEENTRY *keepcolor = &d3d_QuakePalette.noluma[i];
+		PALETTEENTRY *discardcolor = &d3d_QuakePalette.luma[i];
+
+		if (vid.fullbright[i])
+		{
+			keepcolor = &d3d_QuakePalette.luma[i];
+			discardcolor = &d3d_QuakePalette.noluma[i];
+		}
+
+		keepcolor->peRed = rgb[0];
+		keepcolor->peGreen = rgb[1];
+		keepcolor->peBlue = rgb[2];
+		keepcolor->peFlags = alpha;
+
+		discardcolor->peRed = discardcolor->peGreen = discardcolor->peBlue = 0;
+		discardcolor->peFlags = alpha;
+
+		d3d_QuakePalette.standard32[i] = D3DCOLOR_XRGB (rgb[0], rgb[1], rgb[2]);
+	}
+
+	// correct alpha colour
+	d3d_QuakePalette.standard32[255] = 0;
+
+	// set index of darkest colour
+	d3d_QuakePalette.darkindex = darkindex;
+}
+
 
 int D3D_PowerOf2Size (int size)
 {
@@ -77,73 +132,37 @@ void D3D_HashTexture (byte *hash, int width, int height, void *data, int flags)
 }
 
 
-D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
+D3DFORMAT D3D_GetTextureFormat (int flags)
 {
-	// cut down on storage for luma textures.  we could just use L8 but we need the extra 8
-	// bits for storing the original value in so that we can refresh it properly if the overbright mode changes.
-	if (flags & IMAGE_LUMA)
+	if (flags & IMAGE_ALPHA)
 	{
-		if (d3d_GlobalCaps.supportA8L8)
-			return D3DFMT_A8L8;
+		if ((flags & IMAGE_LUMA) || (flags & IMAGE_NOCOMPRESS))
+			return D3DFMT_A8R8G8B8;
+		else if ((flags & IMAGE_MIPMAP) && (d3d_GlobalCaps.supportDXT5))
+			return D3DFMT_DXT5;
+		else if ((flags & IMAGE_MIPMAP) && (d3d_GlobalCaps.supportDXT3))
+			return D3DFMT_DXT3;
 		else return D3DFMT_A8R8G8B8;
 	}
 
-	D3DFORMAT TextureFormat = d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
-
-	// disable compression
-	if (!gl_compressedtextures.value) flags |= IMAGE_NOCOMPRESS;
-	if (!(flags & IMAGE_MIPMAP)) flags |= IMAGE_NOCOMPRESS;
-
-	if (flags & IMAGE_ALPHA)
-	{
-		if (flags & IMAGE_NOCOMPRESS)
-			return D3DFMT_A8R8G8B8;
-
-		if (flags & IMAGE_32BIT)
-		{
-			// 32 bit textures should never use dxt1
-			if (d3d_GlobalCaps.supportDXT3)
-				TextureFormat = D3DFMT_DXT3;
-			else if (d3d_GlobalCaps.supportDXT5)
-				TextureFormat = D3DFMT_DXT5;
-			else TextureFormat = D3DFMT_A8R8G8B8;
-		}
-		else
-		{
-			// 8 bit textures can use dxt1 as they only need one bit of alpha
-			if (d3d_GlobalCaps.supportDXT1)
-				TextureFormat = D3DFMT_DXT1;
-			else if (d3d_GlobalCaps.supportDXT3)
-				TextureFormat = D3DFMT_DXT3;
-			else if (d3d_GlobalCaps.supportDXT5)
-				TextureFormat = D3DFMT_DXT5;
-			else TextureFormat = D3DFMT_A8R8G8B8;
-		}
-	}
-	else
-	{
-		if (flags & IMAGE_NOCOMPRESS)
-			return d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
-
-		// prefer dxt1 but allow other compression formats if available
-		if (d3d_GlobalCaps.supportDXT1)
-			TextureFormat = D3DFMT_DXT1;
-		else if (d3d_GlobalCaps.supportDXT3)
-			TextureFormat = D3DFMT_DXT3;
-		else if (d3d_GlobalCaps.supportDXT5)
-			TextureFormat = D3DFMT_DXT5;
-		else if (d3d_GlobalCaps.supportXRGB)
-			TextureFormat = D3DFMT_X8R8G8B8;
-		else TextureFormat = D3DFMT_A8R8G8B8;
-	}
-
-	return TextureFormat;
+	if ((flags & IMAGE_LUMA) || (flags & IMAGE_NOCOMPRESS))
+		return d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
+	else if ((flags & IMAGE_MIPMAP) && (d3d_GlobalCaps.supportDXT1))
+		return D3DFMT_DXT1;
+	else return d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
 }
 
 bool d3d_ImagePadded = false;
 
 void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags)
 {
+	if ((flags & IMAGE_SCRAP) && !(flags & IMAGE_32BIT))// && width < 64 && height < 64)
+	{
+		// load little ones into the scrap
+		texture[0] = NULL;
+		return;
+	}
+
 	// scaled image
 	image_t scaled;
 	byte *padbytes = NULL;
@@ -160,9 +179,9 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	if (scaled.width > d3d_DeviceCaps.MaxTextureWidth) scaled.width = d3d_DeviceCaps.MaxTextureWidth;
 	if (scaled.height > d3d_DeviceCaps.MaxTextureHeight) scaled.height = d3d_DeviceCaps.MaxTextureHeight;
 
-	// d3d specifies that compressed formats should be a multiple of 4
-	// would you believe marcher has a 1x1 texture in it?
-	if ((scaled.width & 3) || (scaled.height & 3)) flags |= IMAGE_NOCOMPRESS;
+	// don't compress if not a multiple of 4 (marcher gets this)
+	if (scaled.width & 3) flags |= IMAGE_NOCOMPRESS;
+	if (scaled.height & 3) flags |= IMAGE_NOCOMPRESS;
 
 	// create the texture at the scaled size
 	hr = d3d_Device->CreateTexture
@@ -171,15 +190,16 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 		scaled.height,
 		(flags & IMAGE_MIPMAP) ? 0 : 1,
 		0,
-		D3D_GetTextureFormatForFlags (flags),
-		D3DPOOL_MANAGED,
+		D3D_GetTextureFormat (flags),
+		(flags & IMAGE_SYSMEM) ? D3DPOOL_SYSTEMMEM : D3DPOOL_MANAGED,
 		texture,
 		NULL
 	);
 
 	if (FAILED (hr))
 	{
-		Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed");
+		UINT blah = d3d_Device->GetAvailableTextureMem ();
+		Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with %i vram", (blah / 1024) / 1024);
 		return;
 	}
 
@@ -242,27 +262,25 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 		height = scaled.height;
 	}
 
-	if (!texturepal)
-	{
-		texturepal = (PALETTEENTRY *) Zone_Alloc (256 * sizeof (PALETTEENTRY));
-
-		for (int i = 0; i < 256; i++)
-		{
-			// per doc, peFlags is used for alpha
-			// invert again so that the layout will be correct
-			texturepal[i].peRed = ((byte *) &d_8to24table[i])[2];
-			texturepal[i].peGreen = ((byte *) &d_8to24table[i])[1];
-			texturepal[i].peBlue = ((byte *) &d_8to24table[i])[0];
-			texturepal[i].peFlags = ((byte *) &d_8to24table[i])[3];
-		}
-	}
-
 	// default to the standard palette
-	PALETTEENTRY *activepal = texturepal;
+	PALETTEENTRY *activepal = d3d_QuakePalette.standard;
 
 	// switch the palette
 //	if (flags & IMAGE_HALFLIFE) activepal = (PALETTEENTRY *) palette;
-	if (flags & IMAGE_LUMA) activepal = lumapal;
+
+	// sky has flags & IMAGE_32BIT so it doesn't get paletteized
+	// (not always - solid sky goes up as 8 bits.  it doesn't have IMAGE_BSP however so all is good
+	if ((flags & IMAGE_BSP) || (flags & IMAGE_ALIAS))
+	{
+		if (flags & IMAGE_LIQUID)
+			activepal = d3d_QuakePalette.standard;
+		else if (flags & IMAGE_NOLUMA)
+			activepal = d3d_QuakePalette.standard;
+		else if (flags & IMAGE_LUMA)
+			activepal = d3d_QuakePalette.luma;
+		else activepal = d3d_QuakePalette.noluma;
+	}
+	else activepal = d3d_QuakePalette.standard;
 
 	hr = QD3DXLoadSurfaceFromMemory
 	(
@@ -294,71 +312,6 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 
 	// tell Direct 3D that we're going to be needing to use this managed resource shortly
 	texture[0]->PreLoad ();
-}
-
-
-byte D3D_ScaleLumaTexel (int lumain)
-{
-	return BYTE_CLAMP (((int) ((float) lumain * r_lumatextures.value)) >> r_overbright.integer);
-}
-
-
-bool D3D_MakeLumaTexture (LPDIRECT3DTEXTURE9 tex)
-{
-	// bound 0 to 2 - (float) 0 is required for overload
-	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
-	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
-
-	D3DSURFACE_DESC Level0Desc;
-	D3DLOCKED_RECT Level0Rect;
-
-	// because we're using A8L8 for lumas we can now lock the rect directly instead of having to go through an intermediate surface
-	tex->GetLevelDesc (0, &Level0Desc);
-	tex->LockRect (0, &Level0Rect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
-
-	bool isrealluma = false;
-
-	if (d3d_GlobalCaps.supportA8L8)
-	{
-		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
-		{
-			// A8L8 maps to unsigned short
-			byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
-
-			// store the original value in the alpha channel
-			a8l8[1] = a8l8[0];
-
-			// check for if it's really a luma
-			if (a8l8[1]) isrealluma = true;
-
-			// scale for overbrights
-			a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
-		}
-	}
-	else
-	{
-		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
-		{
-			// A8R8G8B8 maps to unsigned int
-			byte *argb = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
-
-			// store the original value in the alpha channel
-			argb[3] = argb[0];
-
-			// check for if it's really a luma
-			if (argb[3]) isrealluma = true;
-
-			// scale for overbrights
-			argb[0] = argb[1] = argb[2] = D3D_ScaleLumaTexel (argb[3]);
-		}
-	}
-
-	// unlock and rebuild the mipmap chain
-	tex->UnlockRect (0);
-	QD3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
-	tex->AddDirtyRect (NULL);
-
-	return isrealluma;
 }
 
 
@@ -427,19 +380,20 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			continue;
 		}
 
-		// it's not beyond the bounds of possibility that we might have 2 textures with the same
-		// data but different usage, so here we check for it and accomodate it (this will happen with lumas
-		// where the hash will match, so it remains a valid check)
-		if (flags != d3dtex->texture->flags) continue;
-
 		// compare the hash and reuse if it matches
 		if (COM_CheckHash (texhash, d3dtex->texture->hash))
 		{
-			// set last usage to 0
-			d3dtex->texture->LastUsage = 0;
+			// check for luma match as the incoming luma will get the same hash as it's base
+			if ((flags & (IMAGE_LUMA | IMAGE_NOLUMA)) == (d3dtex->texture->flags & (IMAGE_LUMA | IMAGE_NOLUMA)))
+			{
+				// set last usage to 0
+				d3dtex->texture->LastUsage = 0;
 
-			// return it
-			return d3dtex->texture;
+				// Con_Printf ("reused %s%s\n", identifier, (flags & IMAGE_LUMA) ? "_luma" : "");
+
+				// return it
+				return d3dtex->texture;
+			}
 		}
 	}
 
@@ -521,6 +475,9 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			return NULL;
 		}
 
+		// don't apply compression to native Quake textures
+		tex->flags |= IMAGE_NOCOMPRESS;
+
 		// upload through direct 3d
 		D3D_UploadTexture
 		(
@@ -530,23 +487,20 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			tex->height,
 			tex->flags
 		);
-	}
 
-	// make the luma representation of the texture
-	if (flags & IMAGE_LUMA)
-	{
-		// if it's not really a luma (should never happen...) clear it and return NULL
-		if (!D3D_MakeLumaTexture (tex->d3d_Texture))
+		if (!tex->d3d_Texture && (flags & IMAGE_SCRAP))
 		{
-			tex->LastUsage = 666;
-			SAFE_RELEASE (tex->d3d_Texture);
-			Q_MemCpy (tex->hash, no_match_hash, 16);
 			return NULL;
 		}
 	}
 
+	// Con_Printf ("created %s%s\n", identifier, (flags & IMAGE_LUMA) ? "_luma" : "");
+
 	// notify that we padded the image
 	if (d3d_ImagePadded) tex->flags |= IMAGE_PADDED;
+
+	// notify that we got an external texture
+	if (externalloaded) tex->flags |= IMAGE_EXTERNAL;
 
 	// return the texture we got
 	return tex;
@@ -580,16 +534,22 @@ unsigned int *D3D_MakeTexturePalette (miptex_t *mt)
 
 void R_ReleaseResourceTextures (void);
 void D3D_ShutdownHLSL (void);
+void R_UnloadSkybox (void);
+void Scrap_Destroy (void);
 
+// fixme - this needs to fully go through the correct shutdown paths so that aux data is also cleared
 void D3D_ReleaseTextures (void)
 {
+	Scrap_Destroy ();
+
 	D3D_ShutdownHLSL ();
+
+	R_UnloadSkybox ();
 
 	// other textures we need to release that we don't define globally
 	extern LPDIRECT3DTEXTURE9 d3d_MapshotTexture;
-	extern LPDIRECT3DTEXTURE9 R_PaletteTexture;
-	extern LPDIRECT3DTEXTURE9 r_blacktexture;
 	extern LPDIRECT3DTEXTURE9 skyboxtextures[];
+	extern LPDIRECT3DCUBETEXTURE9 skyboxcubemap;
 	extern image_t d3d_PlayerSkins[];
 
 	// release cached textures
@@ -610,9 +570,7 @@ void D3D_ReleaseTextures (void)
 	for (int i = 0; i < 6; i++)
 		SAFE_RELEASE (skyboxtextures[i]);
 
-	// VBOs
-	// VBOs aren't textures but - hey! - what's mutual incompatibility when we're such fantastic friends?
-	D3D_VBOReleaseBuffers ();
+	SAFE_RELEASE (skyboxcubemap);
 
 	// standard lightmaps
 	SAFE_DELETE (d3d_Lightmaps);
@@ -622,15 +580,20 @@ void D3D_ReleaseTextures (void)
 	// resource textures
 	R_ReleaseResourceTextures ();
 
+	char_texture = NULL;
+
 	// other textures
-	SAFE_RELEASE (char_texture);
+	for (int i = 0; i < MAX_CHAR_TEXTURES; i++)
+		SAFE_RELEASE (char_textures[i]);
+
+	// ensure that we don't attempt to use this one
+	char_texture = NULL;
+
 	SAFE_RELEASE (solidskytexture);
 	SAFE_RELEASE (alphaskytexture);
-	SAFE_RELEASE (simpleskytexture);
 	SAFE_RELEASE (d3d_MapshotTexture);
-	SAFE_RELEASE (R_PaletteTexture);
-	SAFE_RELEASE (r_blacktexture);
 	SAFE_RELEASE (r_notexture);
+	SAFE_RELEASE (yahtexture);
 }
 
 
@@ -696,7 +659,7 @@ void D3D_FlushTextures (void)
 bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
 {
 	// test texture
-	LPDIRECT3DTEXTURE9 tex;
+	LPDIRECT3DTEXTURE9 tex = NULL;
 
 	// check for compressed texture formats
 	// rather than using CheckDeviceFormat we actually try to create one and see what happens
@@ -716,6 +679,7 @@ bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
 	{
 		// done with the texture
 		tex->Release ();
+		tex = NULL;
 
 		if (!mandatory)
 			Con_Printf ("Allowing %s Texture Format\n", D3DTypeToString (textureformat));
@@ -730,78 +694,376 @@ bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
 }
 
 
-void D3D_RescaleIndividualLuma (LPDIRECT3DTEXTURE9 tex)
+/*
+======================================================================================================================================================
+
+		EXTERNAL TEXTURE LOADING/ETC/BLAH/YADDA YADDA YADDA
+
+	These need to be in common as they need access to the search paths
+
+======================================================================================================================================================
+*/
+
+
+typedef struct d3d_externaltexture_s
 {
-	// bound 0 to 2 - (float) 0 is required for overload
-	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
-	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
+	char basename[256];
+	char texpath[256];
+} d3d_externaltexture_t;
 
-	D3DSURFACE_DESC Level0Desc;
-	D3DLOCKED_RECT Level0Rect;
 
-	// because we're using A8L8 for lumas we can now lock the rect directly instead of having to go through an intermediate surface
-	tex->GetLevelDesc (0, &Level0Desc);
-	tex->LockRect (0, &Level0Rect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+d3d_externaltexture_t **d3d_ExternalTextures = NULL;
+int d3d_MaxExternalTextures = 0;
+int d3d_NumExternalTextures = 0;
 
-	if (d3d_GlobalCaps.supportA8L8)
+// gotcha!
+int d3d_ExternalTextureTable[257] = {-1};
+
+// hmmm - can be used for both bsearch and qsort
+// clever boy, bill!
+int D3D_ExternalTextureCompareFunc (const void *a, const void *b)
+{
+	d3d_externaltexture_t *t1 = *(d3d_externaltexture_t **) a;
+	d3d_externaltexture_t *t2 = *(d3d_externaltexture_t **) b;
+
+	return stricmp (t1->basename, t2->basename);
+}
+
+
+char *D3D_FindExternalTexture (char *basename)
+{
+	// find the first texture
+	int texnum = d3d_ExternalTextureTable[basename[0]];
+
+	// no textures
+	if (texnum == -1) return NULL;
+
+	for (int i = texnum; i < d3d_NumExternalTextures; i++)
 	{
-		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
-		{
-			// A8L8 maps to unsigned short
-			byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
+		// retrieve texture def
+		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
 
-			// scale for overbrights
-			a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
+		// first char changes
+		if (et->basename[0] != basename[0]) break;
+
+		// if it came from a screenshot we ignore it
+		if (strstr (et->texpath, "/screenshot/")) continue;
+
+		// if basenames match return the path at which it can be found
+		if (!stricmp (et->basename, basename)) return et->texpath;
+	}
+
+	// not found
+	return NULL;
+}
+
+
+void D3D_RegisterExternalTexture (char *texname)
+{
+	char *texext = NULL;
+	bool goodext = false;
+
+	// find the extension
+	for (int i = strlen (texname); i; i--)
+	{
+		if (texname[i] == '/') break;
+		if (texname[i] == '\\') break;
+
+		if (texname[i] == '.')
+		{
+			texext = &texname[i + 1];
+			break;
+		}
+	}
+
+	// didn't find an extension
+	if (!texext) return;
+
+	// check for supported types
+	if (!stricmp (texext, "link")) goodext = true;
+	if (!stricmp (texext, "dds")) goodext = true;
+	if (!stricmp (texext, "tga")) goodext = true;
+	if (!stricmp (texext, "bmp")) goodext = true;
+	if (!stricmp (texext, "png")) goodext = true;
+	if (!stricmp (texext, "jpg")) goodext = true;
+	if (!stricmp (texext, "jpeg")) goodext = true;
+	if (!stricmp (texext, "pcx")) goodext = true;
+
+	// not a supported type
+	if (!goodext) return;
+	if (d3d_NumExternalTextures == d3d_MaxExternalTextures) return;
+
+	char *typefilter = NULL;
+	bool passedext = false;
+
+	for (int i = strlen (texname); i; i--)
+	{
+		if (texname[i] == '/') break;
+		if (texname[i] == '\\') break;
+		if (texname[i] == '.' && passedext) break;
+		if (texname[i] == '.' && !passedext) passedext = true;
+
+		if (texname[i] == '_' && passedext)
+		{
+			typefilter = &texname[i + 1];
+			break;
+		}
+	}
+
+	// filter out types unsupported by DirectQ so that the likes of Rygel's pack
+	// won't overflow the max textures allowed (will need to get the full list of types from DP)
+	// although with space for 65536 textures that should never happen...
+	if (typefilter)
+	{
+		if (!strnicmp (typefilter, "gloss.", 6)) return;
+		if (!strnicmp (typefilter, "norm.", 5)) return;
+		if (!strnicmp (typefilter, "normal.", 7)) return;
+		if (!strnicmp (typefilter, "bump.", 5)) return;
+	}
+
+	// register a new external texture
+	d3d_externaltexture_t *et = (d3d_externaltexture_t *) GameZone->Alloc (sizeof (d3d_externaltexture_t));
+	d3d_ExternalTextures[d3d_NumExternalTextures] = et;
+	d3d_NumExternalTextures++;
+
+	// fill in the path (also copy to basename in case the next stage doesn't get it)
+	Q_strncpy (et->texpath, texname, 255);
+	Q_strncpy (et->basename, texname, 255);
+	strlwr (et->texpath);
+
+	if (strstr (et->texpath, "\\crosshairs\\"))
+	{
+		d3d_NumExternalTextures = d3d_NumExternalTextures;
+	}
+
+	// check for special handling of some types
+	char *checkstuff = strstr (et->texpath, "\\save\\");
+
+	if (!checkstuff) checkstuff = strstr (et->texpath, "\\maps\\");
+	if (!checkstuff) checkstuff = strstr (et->texpath, "\\screenshot\\");
+
+	// ignoring textures in maps, save and screenshot
+	if (!checkstuff)
+	{
+		// base name is the path without directories or extension; first remove directories.
+		// we leave extension alone for now so that we can sort on basename properly
+		for (int i = strlen (et->texpath); i; i--)
+		{
+			if (et->texpath[i] == '/' || et->texpath[i] == '\\')
+			{
+				Q_strncpy (et->basename, &et->texpath[i + 1], 255);
+				break;
+			}
 		}
 	}
 	else
 	{
-		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+		for (checkstuff = checkstuff - 1;; checkstuff--)
 		{
-			// A8R8G8B8 maps to unsigned short
-			byte *argb = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
+			if (checkstuff[0] == ':') break;
 
-			// scale for overbrights
-			argb[0] = argb[1] = argb[2] = D3D_ScaleLumaTexel (argb[3]);
+			if (checkstuff[0] == '/' || checkstuff[0] == '\\')
+			{
+				Q_strncpy (et->basename, &checkstuff[1], 255);
+				break;
+			}
 		}
 	}
 
-	// unlock and rebuild the mipmap chain
-	tex->UnlockRect (0);
-	QD3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
-	tex->AddDirtyRect (NULL);
-}
+	// switch basename to lower case
+	strlwr (et->basename);
 
-
-void D3D_RescaleLumas (void)
-{
-	static int r_oldoverbright = r_overbright.integer;
-	static int r_oldlumatextures = (int) (r_lumatextures.value * 10);
-
-	// restrict cvar values to supported modes
-	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_MODULATE4X) && r_overbright.integer > 1) Cvar_Set (&r_overbright, 1);
-	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_MODULATE2X) && r_overbright.integer > 0) Cvar_Set (&r_overbright, (float) 0);
-
-	// forbid use of the 3 TMU path if we only have 2 TMUs
-	if (d3d_DeviceCaps.MaxTextureBlendStages < 3) Cvar_Set (&r_lumatextures, (float) 0);
-
-	// bound 0 to 2 - (float) 0 is required for overload
-	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
-	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
-
-	if (r_oldoverbright != r_overbright.integer || r_oldlumatextures != (int) (r_lumatextures.value * 10))
+	// make path seperators consistent
+	for (int i = 0;; i++)
 	{
-		r_oldoverbright = r_overbright.integer;
-		r_oldlumatextures = (int) (r_lumatextures.value * 10);
+		if (!et->basename[i]) break;
+		if (et->basename[i] == '/') et->basename[i] = '\\';
+	}
 
-		for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
+	// switch extension to a dummy to establish the preference sort order; this is for
+	// cases where a texture may be present more than once in different formats.
+	// we'll remove it after we've sorted
+	texext = NULL;
+
+	// find the extension
+	for (int i = strlen (et->basename); i; i--)
+	{
+		if (et->basename[i] == '/') break;
+		if (et->basename[i] == '\\') break;
+
+		if (et->basename[i] == '.')
 		{
-			if (!tex->texture->d3d_Texture) continue;
-			if (!(tex->texture->flags & IMAGE_LUMA)) continue;
-
-			D3D_RescaleIndividualLuma (tex->texture->d3d_Texture);
+			texext = &et->basename[i + 1];
+			break;
 		}
 	}
+
+	// didn't find an extension (should never happen at this stage)
+	if (!texext) return;
+
+	// check for supported types and replace the extension to get the sort order
+	if (!stricmp (texext, "link")) {strcpy (texext, "111"); return;}
+	if (!stricmp (texext, "dds")) {strcpy (texext, "222"); return;}
+	if (!stricmp (texext, "tga")) {strcpy (texext, "333"); return;}
+	if (!stricmp (texext, "bmp")) {strcpy (texext, "444"); return;}
+	if (!stricmp (texext, "png")) {strcpy (texext, "555"); return;}
+	if (!stricmp (texext, "jpg")) {strcpy (texext, "666"); return;}
+	if (!stricmp (texext, "jpeg")) {strcpy (texext, "777"); return;}
+	if (!stricmp (texext, "pcx")) {strcpy (texext, "888"); return;}
 }
 
+
+void D3D_ExternalTextureDirectoryRecurse (char *dirname)
+{
+	WIN32_FIND_DATA FindFileData;
+	HANDLE hFind = INVALID_HANDLE_VALUE;
+	char find_filter[MAX_PATH];
+
+	_snprintf (find_filter, 260, "%s/*.*", dirname);
+
+	for (int i = 0;; i++)
+	{
+		if (find_filter[i] == 0) break;
+		if (find_filter[i] == '/') find_filter[i] = '\\';
+	}
+
+	hFind = FindFirstFile (find_filter, &FindFileData);
+
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		// found no files
+		FindClose (hFind);
+		return;
+	}
+
+	do
+	{
+		// not interested
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
+
+		// never these
+		if (!strcmp (FindFileData.cFileName, ".")) continue;
+		if (!strcmp (FindFileData.cFileName, "..")) continue;
+
+		// make the new directory or texture name
+		char newname[256];
+
+		_snprintf (newname, 255, "%s\\%s", dirname, FindFileData.cFileName);
+
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			// prefix dirs with _ to skip them
+			if (FindFileData.cFileName[0] != '_')
+				D3D_ExternalTextureDirectoryRecurse (newname);
+
+			continue;
+		}
+
+		// register the texture
+		D3D_RegisterExternalTexture (newname);
+	} while (FindNextFile (hFind, &FindFileData));
+
+	// done
+	FindClose (hFind);
+}
+
+
+void D3D_EnumExternalTextures (void)
+{
+	// explicitly none to start with
+	d3d_ExternalTextures = (d3d_externaltexture_t **) scratchbuf;
+	d3d_MaxExternalTextures = SCRATCHBUF_SIZE / sizeof (d3d_externaltexture_t *);
+	d3d_NumExternalTextures = 0;
+
+	// we need 256 of these because textures can - in theory - begin with any allowable byte value
+	// add the extra 1 to allow the list to be NULL terminated
+	// as for unicode - let's not even go there.
+	for (int i = 0; i < 257; i++) d3d_ExternalTextureTable[i] = -1;
+
+	for (searchpath_t *search = com_searchpaths; search; search = search->next)
+	{
+		if (search->pack)
+		{
+			pack_t *pak = search->pack;
+
+			for (int i = 0; i < pak->numfiles; i++)
+			{
+				D3D_RegisterExternalTexture (pak->files[i].name);
+			}
+		}
+		else if (search->pk3)
+		{
+			pk3_t *pak = search->pk3;
+
+			for (int i = 0; i < pak->numfiles; i++)
+			{
+				D3D_RegisterExternalTexture (pak->files[i].name);
+			}
+		}
+		else D3D_ExternalTextureDirectoryRecurse (search->filename);
+	}
+
+	// no external textures were found
+	if (!d3d_NumExternalTextures)
+	{
+		d3d_ExternalTextures = NULL;
+		return;
+	}
+
+	// alloc them for real
+	d3d_ExternalTextures = (d3d_externaltexture_t **) GameZone->Alloc (d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
+	Q_MemCpy (d3d_ExternalTextures, scratchbuf, d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
+
+	for (int i = 0; i < d3d_NumExternalTextures; i++)
+	{
+		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
+
+		for (int j = 0;; j++)
+		{
+			if (!et->texpath[j]) break;
+			if (et->texpath[j] == '\\') et->texpath[j] = '/';
+		}
+
+		// restore drive signifier
+		if (et->texpath[1] == ':' && et->texpath[2] == '/') et->texpath[2] = '\\';
+		strlwr (et->texpath);
+	}
+
+	// sort the list
+	qsort
+	(
+		d3d_ExternalTextures,
+		d3d_NumExternalTextures,
+		sizeof (d3d_externaltexture_t *),
+		D3D_ExternalTextureCompareFunc
+	);
+
+	// set up byte pointers and remove dummy sort order extensions
+	for (int i = 0; i < d3d_NumExternalTextures; i++)
+	{
+		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
+
+		// swap non-printing chars
+		if (et->basename[0] == '#') et->basename[0] = '*';
+
+		// set up the table pointer
+		if (d3d_ExternalTextureTable[et->basename[0]] == -1)
+			d3d_ExternalTextureTable[et->basename[0]] = i;
+
+		// remove the extension
+		for (int e = strlen (et->basename); e; e--)
+		{
+			if (et->basename[e] == '.')
+			{
+				et->basename[e] = 0;
+				break;
+			}
+		}
+
+		// Con_SafePrintf ("registered %s\n", et->basename);
+	}
+}
 

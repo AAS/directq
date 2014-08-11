@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -445,6 +445,7 @@ float CL_LerpPoint (void)
 	if (!f || cl_nolerp.value || cls.timedemo || sv.active)
 	{
 		cl.time = cl.mtime[0];
+		cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
 		return 1;
 	}
 
@@ -460,14 +461,20 @@ float CL_LerpPoint (void)
 	if (frac < 0)
 	{
 		if (frac < -0.01)
+		{
 			cl.time = cl.mtime[1];
+			cl.dwTime = (DWORD) (cl.mtime[1] * 1000.0f);
+		}
 
 		frac = 0;
 	}
 	else if (frac > 1)
 	{
 		if (frac > 1.01)
+		{
 			cl.time = cl.mtime[0];
+			cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
+		}
 
 		frac = 1;
 	}
@@ -632,8 +639,6 @@ void CL_RelinkEntities (void)
 			// clear it's interpolation data too
 			CL_ClearInterpolation (ent);
 			ent->model = NULL;
-			ent->occluded = false;
-			ent->effects &= ~EF_NEVEROCCLUDE;
 			continue;
 		}
 
@@ -895,7 +900,10 @@ int CL_ReadFromServer (void)
 	int		ret;
 
 	cl.oldtime = cl.time;
-	cl.time += host_frametime;
+
+	// keep client timings millisecond steady
+	cl.dwTime += dwHostFrameTime;
+	cl.time = ((float) cl.dwTime / 1000.0f);
 
 	do
 	{

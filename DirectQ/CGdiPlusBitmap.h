@@ -1,3 +1,22 @@
+/*
+Copyright (C) 1996-1997 Id Software, Inc.
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 3
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+
+See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+*/
+
 // hungarian notation must burn in HELL!
 #pragma once
 
@@ -99,8 +118,8 @@ inline void CGdiPlusBitmapResource::Empty (void)
 
 	if (this->TheBuffer)
 	{
-		::GlobalUnlock (this->TheBuffer);
-		::GlobalFree (this->TheBuffer);
+		GlobalUnlock (this->TheBuffer);
+		GlobalFree (this->TheBuffer);
 		this->TheBuffer = NULL;
 	} 
 }
@@ -109,23 +128,23 @@ inline bool CGdiPlusBitmapResource::Load (LPCTSTR Name, LPCTSTR Type, HMODULE hI
 {
 	this->Empty ();
 
-	HRSRC hResource = ::FindResource (hInst, Name, Type);
+	HRSRC hResource = FindResource (hInst, Name, Type);
 
 	if (!hResource) return false;
 
-	DWORD imageSize = ::SizeofResource (hInst, hResource);
+	DWORD imageSize = SizeofResource (hInst, hResource);
 
 	if (!imageSize) return false;
 
-	const void *ResourceData = ::LockResource (::LoadResource (hInst, hResource));
+	const void *ResourceData = LockResource (LoadResource (hInst, hResource));
 
 	if (!ResourceData) return false;
 
-	this->TheBuffer = ::GlobalAlloc (GMEM_MOVEABLE, imageSize);
+	this->TheBuffer = GlobalAlloc (GMEM_MOVEABLE, imageSize);
 
 	if (this->TheBuffer)
 	{
-		void *TempBuffer = ::GlobalLock (this->TheBuffer);
+		void *TempBuffer = GlobalLock (this->TheBuffer);
 
 		if (TempBuffer)
 		{
@@ -133,7 +152,7 @@ inline bool CGdiPlusBitmapResource::Load (LPCTSTR Name, LPCTSTR Type, HMODULE hI
 
 			IStream *TheStream = NULL;
 
-			if (::CreateStreamOnHGlobal (this->TheBuffer, FALSE, &TheStream) == S_OK)
+			if (CreateStreamOnHGlobal (this->TheBuffer, FALSE, &TheStream) == S_OK)
 			{
 				this->TheBitmap = Gdiplus::Bitmap::FromStream (TheStream);
 				TheStream->Release ();
@@ -148,10 +167,10 @@ inline bool CGdiPlusBitmapResource::Load (LPCTSTR Name, LPCTSTR Type, HMODULE hI
 				}
 			}
 
-			::GlobalUnlock (this->TheBuffer);
+			GlobalUnlock (this->TheBuffer);
 		}
 
-		::GlobalFree (this->TheBuffer);
+		GlobalFree (this->TheBuffer);
 		this->TheBuffer = NULL;
 	}
 

@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -63,7 +63,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *r_norefresh_compat = new cvar_t ("r_norefresh", "0", CVAR_COMPAT);
 	cvar_t *r_drawentities_compat = new cvar_t ("r_drawentities", "0", CVAR_COMPAT);
 	cvar_t *r_drawviewmodel_compat = new cvar_t ("r_drawviewmodel", "0", CVAR_COMPAT);
-	cvar_t *r_speeds_compat = new cvar_t ("r_speeds", "0", CVAR_COMPAT);
 	cvar_t *r_fullbright_compat = new cvar_t ("r_fullbright", "0", CVAR_COMPAT);
 	cvar_t *r_lightmap_compat = new cvar_t ("r_lightmap", "0", CVAR_COMPAT);
 	cvar_t *r_shadows_compat = new cvar_t ("r_shadows", "0", CVAR_COMPAT);
@@ -72,7 +71,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *r_dynamic_compat = new cvar_t ("r_dynamic", "0", CVAR_COMPAT);
 	cvar_t *r_novis_compat = new cvar_t ("r_novis", "0", CVAR_COMPAT);
 	cvar_t *gl_finish_compat = new cvar_t ("gl_finish", "0", CVAR_COMPAT);
-	cvar_t *gl_clear_compat = new cvar_t ("gl_clear", "0", CVAR_COMPAT);
 	cvar_t *gl_cull_compat = new cvar_t ("gl_cull", "0", CVAR_COMPAT);
 	cvar_t *gl_texsort_compat = new cvar_t ("gl_texsort", "0", CVAR_COMPAT);
 	cvar_t *gl_smoothmodels_compat = new cvar_t ("gl_smoothmodels", "0", CVAR_COMPAT);
@@ -92,7 +90,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *scr_showturtle_compat = new cvar_t ("showturtle", "0", CVAR_COMPAT);
 	cvar_t *scr_showpause_compat = new cvar_t ("showpause", "0", CVAR_COMPAT);
 	cvar_t *scr_printspeed_compat = new cvar_t ("scr_printspeed", "0", CVAR_COMPAT);
-	cvar_t *gl_triplebuffer_compat = new cvar_t ("gl_triplebuffer", "0", CVAR_COMPAT);
 	cvar_t *gl_ztrick_compat = new cvar_t ("gl_ztrick", "0", CVAR_COMPAT);
 	cvar_t *vid_mode_compat = new cvar_t ("vid_mode", "0", CVAR_COMPAT);
 	cvar_t *_vid_default_mode_compat = new cvar_t ("_vid_default_mode", "0", CVAR_COMPAT);
@@ -181,7 +178,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *volume_compat = new cvar_t ("volume", "0", CVAR_COMPAT);
 	cvar_t *nosound_compat = new cvar_t ("nosound", "0", CVAR_COMPAT);
 	cvar_t *precache_compat = new cvar_t ("precache", "0", CVAR_COMPAT);
-	cvar_t *loadas8bit_compat = new cvar_t ("loadas8bit", "0", CVAR_COMPAT);
 	cvar_t *bgmbuffer_compat = new cvar_t ("bgmbuffer", "0", CVAR_COMPAT);
 	cvar_t *ambient_level_compat = new cvar_t ("ambient_level", "0", CVAR_COMPAT);
 	cvar_t *ambient_fade_compat = new cvar_t ("ambient_fade", "0", CVAR_COMPAT);

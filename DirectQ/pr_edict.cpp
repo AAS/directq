@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -101,8 +101,6 @@ void ED_ClearEdict (CProgsDat *Progs, edict_t *e)
 {
 	Q_MemSet (&e->v, 0, SVProgs->QC->entityfields * 4);
 	e->tracetimer = -1;
-	e->gravframe = -1;
-	e->lastgrav = 0;
 	e->free = false;
 }
 
@@ -132,7 +130,7 @@ edict_t *ED_Alloc (CProgsDat *Progs)
 
 		// the first couple seconds of server time can involve a lot of
 		// freeing and allocating, so relax the replacement policy
-		if (e->free && (e->dwFreeTime < 2000 || sv.dwTime - e->dwFreeTime > 500))
+		if (e->free && (e->freetime < 2.0f || sv.time - e->freetime > 0.5f))
 		{
 			ED_ClearEdict (Progs, e);
 			return e;
@@ -142,17 +140,17 @@ edict_t *ED_Alloc (CProgsDat *Progs)
 	if (i >= MAX_EDICTS)
 	{
 		// if we hit the absolute upper limit just pick the one with the lowest free time
-		DWORD bestfree = sv.dwTime;
+		float bestfree = sv.time;
 		int bestedict = -1;
 
 		for (i = svs.maxclients + 1; i < SVProgs->NumEdicts; i++)
 		{
 			e = GetEdictForNumber (i);
 
-			if (e->free && e->dwFreeTime < bestfree)
+			if (e->free && e->freetime < bestfree)
 			{
 				bestedict = i;
-				bestfree = e->dwFreeTime;
+				bestfree = e->freetime;
 			}
 		}
 
@@ -191,8 +189,6 @@ void ED_Free (edict_t *ed)
 	SV_UnlinkEdict (ed);		// unlink from world bsp
 
 	ed->free = true;
-	ed->gravframe = -1;
-	ed->lastgrav = 0;
 	ed->v.model = 0;
 	ed->v.takedamage = 0;
 	ed->v.modelindex = 0;
@@ -204,7 +200,7 @@ void ED_Free (edict_t *ed)
 	ed->v.nextthink = -1;
 	ed->v.solid = 0;
 
-	ed->dwFreeTime = sv.dwTime;
+	ed->freetime = sv.time;
 }
 
 //===========================================================================
@@ -891,6 +887,9 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 	if (ent != SVProgs->EdictPointers[0])	// hack
 		Q_MemSet (&ent->v, 0, SVProgs->QC->entityfields * 4);
 
+	// clear alpha
+	ent->alpha = 255;
+
 	// go through all the dictionary pairs
 	while (1)
 	{	
@@ -1154,7 +1153,7 @@ void ED_LoadFromFile (char *data)
 
 	ent = NULL;
 	inhibit = 0;
-	SVProgs->GlobalStruct->time = SV_TIME;
+	SVProgs->GlobalStruct->time = sv.time;
 
 	int ed_warning = 0;
 	int ed_number = 0;
@@ -1200,8 +1199,8 @@ void ED_LoadFromFile (char *data)
 		// immediately call spawn function
 		if (!ent->v.classname)
 		{
-			// made the console spamming developer only...
-			Con_DPrintf ("No classname for:\n");
+			// reverted this back to a user print because it's a useful signal that you've got things set up wrong
+			Con_Printf ("No classname for:\n");
 			ed_warning++;
 			if (developer.value) ED_Print (ent);
 			ED_Free (ent);

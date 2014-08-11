@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -936,36 +936,38 @@ void PF_checkclient (void)
 	mleaf_t	*leaf;
 	int		l;
 	vec3_t	view;
-	
-// find a new check if on a new frame
-	if (sv.dwTime - sv.dwLastCheckTime >= 100)
+
+	// find a new check if on a new frame
+	if (sv.time - sv.lastchecktime >= 0.1f)
 	{
 		sv.lastcheck = PF_newcheckclient (sv.lastcheck);
-		sv.dwLastCheckTime = sv.dwTime;
+		sv.lastchecktime = sv.time;
 	}
 
-// return check if it might be visible	
-	ent = GetEdictForNumber(sv.lastcheck);
+	// return check if it might be visible	
+	ent = GetEdictForNumber (sv.lastcheck);
+
 	if (ent->free || ent->v.health <= 0)
 	{
 		RETURN_EDICT(SVProgs->EdictPointers[0]);
 		return;
 	}
 
-// if current entity can't possibly see the check entity, return 0
+	// if current entity can't possibly see the check entity, return 0
 	self = PROG_TO_EDICT(SVProgs->GlobalStruct->self);
 	VectorAdd (self->v.origin, self->v.view_ofs, view);
 	leaf = Mod_PointInLeaf (view, sv.worldmodel);
 	l = (leaf - sv.worldmodel->brushhdr->leafs) - 1;
-	if ( (l<0) || !(checkpvs[l>>3] & (1<<(l&7)) ) )
+
+	if ((l < 0) || !(checkpvs[l >> 3] & (1 << (l & 7))))
 	{
-c_notvis++;
+		c_notvis++;
 		RETURN_EDICT(SVProgs->EdictPointers[0]);
 		return;
 	}
 
-// might be able to see it
-c_invis++;
+	// might be able to see it
+	c_invis++;
 	RETURN_EDICT(ent);
 }
 
@@ -981,6 +983,8 @@ Sends text over to the client's execution buffer
 stuffcmd (clientent, value)
 =================
 */
+cvar_t pr_show_stuffcmd ("pr_show_stuffcmd", "0");
+
 void PF_stuffcmd (void)
 {
 	int		entnum;
@@ -993,6 +997,9 @@ void PF_stuffcmd (void)
 		SVProgs->RunError ("Parm 0 not a client");
 
 	str = G_STRING (OFS_PARM1);	
+
+	if (pr_show_stuffcmd.integer)
+		Con_Printf ("stuffcmd: %s\n", str);
 
 	old = host_client;
 	host_client = &svs.clients[entnum-1];

@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -56,12 +56,13 @@ cvar_t	v_ipitch_level ("v_ipitch_level", "0.3");
 
 cvar_t	v_idlescale ("v_idlescale", "0");
 
-cvar_t	crosshair ("crosshair", "0", CVAR_ARCHIVE);
+cvar_t	crosshair ("crosshair", "3", CVAR_ARCHIVE);
 cvar_t	cl_crossx ("cl_crossx", "0", CVAR_ARCHIVE);
 cvar_t	cl_crossy ("cl_crossy", "0", CVAR_ARCHIVE);
 cvar_t	scr_crosshairscale ("scr_crosshairscale", 1, CVAR_ARCHIVE);
 cvar_t	scr_crosshaircolor ("scr_crosshaircolor", "0", CVAR_ARCHIVE);
 cvar_alias_t	crosshaircolor ("crosshaircolor", &scr_crosshaircolor);
+cvar_alias_t	crosshairsize ("crosshairsize", &scr_crosshairscale);
 
 cvar_t	gl_cshiftpercent ("gl_cshiftpercent", "100");
 
@@ -784,7 +785,7 @@ void V_CalcRefdef (void)
 	// note - default equates to glquakes "viewsize 100" position.
 	// fudging was only needed in software...
 	// set to 0 to replicate darkplaces/fitzquake style
-	view->origin[2] += v_gunangle.integer * 0.75f;
+	view->origin[2] += v_gunangle.value * 0.75f;
 
 	view->model = cl.model_precache[cl.stats[STAT_WEAPON]];
 	view->frame = cl.stats[STAT_WEAPONFRAME];

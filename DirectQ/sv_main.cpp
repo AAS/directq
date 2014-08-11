@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -754,12 +754,27 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		// Nehahra: Model Alpha
 		eval_t  *val;
 
-		if (val = GETEDICTFIELDVALUEFAST (ent, ed_alpha))
-			alpha = val->_float;
-		else alpha = 1;
+		if (ed_alpha)
+		{
+			// if we have an alpha field in the progs we use it
+			if (val = GETEDICTFIELDVALUEFAST (ent, ed_alpha))
+				alpha = val->_float;
+			else alpha = 1.0f;
+		}
+		else
+		{
+			// if we don't have one we take it from the ent
+			if (ent->alpha < 255)
+				alpha = (float) ent->alpha / 255.0f;
+			else alpha = 1.0f;
+		}
 
-		if (val = GETEDICTFIELDVALUEFAST (ent, ed_fullbright))
-			fullbright = val->_float;
+		if (ed_fullbright)
+		{
+			if (val = GETEDICTFIELDVALUEFAST (ent, ed_fullbright))
+				fullbright = val->_float;
+			else fullbright = 0;
+		}
 		else fullbright = 0;
 
 		// only send if not protocol 15 - note - FUCKING nehahra uses protocol 15 but sends non-standard messages - FUCK FUCK FUCK
@@ -821,7 +836,7 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		if (bits & U_ALPHA) MSG_WriteByte (msg, ent->alpha);
 		if (bits & U_FRAME2) MSG_WriteByte (msg, (int) ent->v.frame >> 8);
 		if (bits & U_MODEL2) MSG_WriteByte (msg, (int) ent->v.modelindex >> 8);
-		if (bits & U_LERPFINISH) MSG_WriteByte (msg, (byte) (Q_rint ((ent->v.nextthink - SV_TIME) * 255)));
+		if (bits & U_LERPFINISH) MSG_WriteByte (msg, (byte) (Q_rint ((ent->v.nextthink - sv.time) * 255)));
 
 		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION) && (sv.Protocol != PROTOCOL_VERSION_FITZ))
 		{
@@ -1014,7 +1029,7 @@ bool SV_SendClientDatagram (client_t *client)
 	msg.cursize = 0;
 
 	MSG_WriteByte (&msg, svc_time);
-	MSG_WriteFloat (&msg, SV_TIME);
+	MSG_WriteFloat (&msg, sv.time);
 
 	// add the client specific data to the datagram
 	SV_WriteClientdataToMessage (client->edict, &msg);
@@ -1135,6 +1150,10 @@ void SV_SendClientMessages (void)
 				continue;	// don't send out non-signon messages
 			}
 		}
+
+		// joe: NAT fix from ProQuake
+		if (host_client->netconnection->net_wait)
+			continue;
 
 		// check for an overflowed message.  Should only happen
 		// on a very fucked up connection that backs up a lot, then
@@ -1460,6 +1479,7 @@ void SV_SpawnServer (char *server)
 
 	sv.state = ss_loading;
 	sv.paused = false;
+	sv.time = 1.0f;
 	sv.dwTime = 1000;
 	sv.models[1] = sv.worldmodel;
 

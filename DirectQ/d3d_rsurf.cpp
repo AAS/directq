@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
+as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -21,14 +21,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+#include "d3d_vbo.h"
 
 void R_PushDlights (mnode_t *headnode);
-void D3D_AddSkySurfaceToRender (msurface_t *surf, D3DMATRIX *m);
+void D3D_AddSkySurfaceToRender (msurface_t *surf, entity_t *ent);
 void D3D_DrawWaterSurfaces (void);
 void D3D_FinalizeSky (void);
 void R_MarkLeaves (void);
+void D3D_EmitModelSurfToAlpha (d3d_modelsurf_t *modelsurf);
 
 cvar_t r_lockpvs ("r_lockpvs", "0");
+cvar_t gl_fullbrights ("gl_fullbrights", "1");
 
 void D3D_RotateForEntity (entity_t *e);
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
@@ -59,7 +62,7 @@ void D3D_ModelSurfsBeginMap (void)
 }
 
 
-void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, D3DMATRIX *matrix)
+void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, entity_t *ent)
 {
 	// ensure that there is space
 	if (d3d_NumModelSurfs >= MAX_MODELSURFS) return;
@@ -71,119 +74,193 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, D3DMATRIX *matrix)
 	// take the next modelsurf
 	d3d_modelsurf_t *ms = d3d_ModelSurfs[d3d_NumModelSurfs++];
 
-	ms->surf = surf;
-	ms->tex = tex;
-	ms->matrix = matrix;
-}
+	if (surf->d3d_Lightmap)
+	{
+		// ensure that the surface lightmap texture is correct (it may not be if we lost the device)
+		surf->d3d_Lightmap->EnsureSurfaceTexture (surf);
 
-
-d3d_shader_t d3d_BrushShader3TMULuma =
-{
-	{
-		// number of stages and type
-		3,
-		VBO_SHADER_TYPE_FIXED
-	},
-	{
-		// color
-		{D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT}
-	},
-	{
-		// alpha
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
-	}
-};
-
-d3d_shader_t d3d_BrushShader2TMULumaPass1 =
-{
-	{
-		// number of stages and type
-		3,
-		VBO_SHADER_TYPE_FIXED
-	},
-	{
-		// color
-		{D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3DTOP_DISABLE}
-	},
-	{
-		// alpha
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
-	}
-};
-
-d3d_shader_t d3d_BrushShader2TMULumaPass2 =
-{
-	{
-		// number of stages and type
-		3,
-		VBO_SHADER_TYPE_FIXED
-	},
-	{
-		// color
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
-	},
-	{
-		// alpha
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
-	}
-};
-
-d3d_shader_t d3d_BrushShaderNoLuma =
-{
-	{
-		// number of stages and type
-		3,
-		VBO_SHADER_TYPE_FIXED
-	},
-	{
-		// color
-		{D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT},
-		{D3DTOP_DISABLE}
-	},
-	{
-		// alpha
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE},
-		{D3DTOP_DISABLE}
-	}
-};
-
-void D3D_DrawModelSurfs (bool fbon, bool pass2 = false)
-{
-	// set up overbright modes in shaders
-	if (D3D_OVERBRIGHT_MODULATE == D3DTOP_MODULATE4X)
-	{
-		// if we're doing 4x overbright we need to double the texture intensity.
-		// not certain how legal this hack is...
-		d3d_BrushShader2TMULumaPass2.ColorDef[0].Op = D3DTOP_ADD;
-		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg1 = D3DTA_TEXTURE;
-		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg2 = D3DTA_TEXTURE;
+		// cache the lightmap texture change
+		ms->tc[TEXTURECHANGE_LIGHTMAP].stage = 0;
+		ms->tc[TEXTURECHANGE_LIGHTMAP].tex = surf->d3d_LightmapTex;
 	}
 	else
 	{
-		d3d_BrushShader2TMULumaPass2.ColorDef[0].Op = D3DTOP_SELECTARG1;
-		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg1 = D3DTA_TEXTURE;
-		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg2 = D3DTA_CURRENT;
+		// no lightmap
+		ms->tc[TEXTURECHANGE_LIGHTMAP].stage = 0;
+		ms->tc[TEXTURECHANGE_LIGHTMAP].tex = NULL;
 	}
 
-	d3d_BrushShaderNoLuma.ColorDef[1].Op = D3D_OVERBRIGHT_MODULATE;
-	d3d_BrushShader3TMULuma.ColorDef[2].Op = D3D_OVERBRIGHT_MODULATE;
+	if (tex->lumaimage && gl_fullbrights.integer)
+	{
+		// cache the luma texture change
+		ms->tc[TEXTURECHANGE_LUMA].stage = d3d_GlobalCaps.NumTMUs > 2 ? 2 : 0;
+		ms->tc[TEXTURECHANGE_LUMA].tex = tex->lumaimage->d3d_Texture;
+	}
+	else
+	{
+		// no luma cached
+		ms->tc[TEXTURECHANGE_LUMA].stage = 0;
+		ms->tc[TEXTURECHANGE_LUMA].tex = NULL;
+	}
 
-	bool stateset = false;
-	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (brushpolyvert_t));
+	if (tex->nolumaimage && gl_fullbrights.integer == 2)
+	{
+		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
+		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->nolumaimage->d3d_Texture;
+	}
+	else if (tex->teximage && gl_fullbrights.integer)
+	{
+		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
+		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->teximage->d3d_Texture;
+	}
+	else if (tex->nolumaimage && !gl_fullbrights.integer)
+	{
+		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
+		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->nolumaimage->d3d_Texture;
+	}
+	else if (tex->teximage)
+	{
+		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
+		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->teximage->d3d_Texture;
+	}
+	else if (tex->nolumaimage)
+	{
+		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
+		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->nolumaimage->d3d_Texture;
+	}
+	else
+	{
+		// sky doesn't have diffuse
+		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 0;
+		ms->tc[TEXTURECHANGE_DIFFUSE].tex = NULL;
+	}
+
+	ms->surf = surf;
+	ms->tex = tex;
+	ms->ent = ent;
+}
+
+
+void D3DSurf_LumaEndCallback (void *blah)
+{
+	// disable blend mode
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+}
+
+
+void D3DSurf_Luma3Callback (void *blah)
+{
+	D3D_SetVertexDeclaration (d3d_VDXyzTex2);
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+		D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_NONE);
+		D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+		D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
+
+		if (d3d_FXPass == FX_PASS_NOTBEGUN)
+			D3D_BeginShaderPass (FX_PASS_WORLD_LUMA);
+		else if (d3d_FXPass != FX_PASS_WORLD_LUMA)
+		{
+			D3D_EndShaderPass ();
+			D3D_BeginShaderPass (FX_PASS_WORLD_LUMA);
+		}
+	}
+	else
+	{
+		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+		D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_NONE);
+		D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+		D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
+
+		D3D_SetTexCoordIndexes (1, 0, 0);
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
+		D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+		D3D_SetTextureColorMode (2, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
+	}
+}
+
+
+void D3DSurf_Luma2Callback (void *blah)
+{
+	// enable blend mode for 2nd pass
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_ONE);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_ONE);
+
+	// set correct filtering and indexing
+	D3D_SetVertexDeclaration (d3d_VDXyzTex1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
+	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
+
+	D3D_SetTexCoordIndexes (0);
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
+	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+}
+
+
+void D3DSurf_NoLumaCallback (void *blah)
+{
+	D3D_SetVertexDeclaration (d3d_VDXyzTex2);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP);
+	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		if (d3d_FXPass == FX_PASS_NOTBEGUN)
+			D3D_BeginShaderPass (FX_PASS_WORLD_NOLUMA);
+		else if (d3d_FXPass != FX_PASS_WORLD_NOLUMA)
+		{
+			D3D_EndShaderPass ();
+			D3D_BeginShaderPass (FX_PASS_WORLD_NOLUMA);
+		}
+	}
+	else
+	{
+		D3D_SetTexCoordIndexes (1, 0);
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
+		D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+		D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+	}
+}
+
+
+D3DXHANDLE shaderstages[] = {"tmu0Texture", "tmu1Texture", "tmu2Texture"};
+
+int lumaremap[] = {0, 1, 2};
+int lumanolumaremap[] = {2, 0, 1};
+int *maptable;
+
+void D3DSurf_TextureChangeCallback (void *data)
+{
+	d3d_texturechange_t *tc = (d3d_texturechange_t *) data;
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		d3d_MasterFX->SetTexture (shaderstages[tc->stage], tc->tex);
+		d3d_FXCommitPending = true;
+	}
+	else D3D_SetTexture (tc->stage, tc->tex);
+}
+
+
+void D3D_DrawModelSurfs (bool luma)
+{
+	// set correct texture blend modes
+	if (luma && d3d_GlobalCaps.NumTMUs > 2)
+		VBO_AddCallback (D3DSurf_Luma3Callback);
+	else if (luma)
+		VBO_AddCallback (D3DSurf_Luma2Callback);
+	else VBO_AddCallback (D3DSurf_NoLumaCallback);
 
 	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
 	{
@@ -195,164 +272,150 @@ void D3D_DrawModelSurfs (bool fbon, bool pass2 = false)
 		if (rt->surfchain->surf->flags & SURF_DRAWSKY) continue;
 		if (rt->surfchain->surf->flags & SURF_DRAWTURB) continue;
 
-		if (fbon && !rt->texture->lumaimage) continue;
-		if (!fbon && rt->texture->lumaimage) continue;
-
-		if (!stateset)
-		{
-			if (pass2)
-			{
-				// enable blend mode for 2nd pass
-				D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-				D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-				D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-
-				if (D3D_OVERBRIGHT_MODULATE == D3DTOP_MODULATE)
-				{
-					// GLQuake style non-overbright blending
-					D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
-					D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_ZERO);
-				}
-				else
-				{
-					// overbright blending; unfortunately we can't differentiate between 2x and 4x
-					// too well here, so we need an evil hack further down below...
-					D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
-					D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR);
-				}
-
-				// set correct filtering and indexing
-				D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-				D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
-				D3D_SetTexCoordIndexes (0);
-			}
-
-			stateset = true;
-		}
-
 		texture_t *tex = rt->texture;
+		d3d_texturechange_t *tc = rt->surfchain->tc;
+		msurface_t *surf;
+
+		// take it from the texture change so that we can modify the textures used at runtime
+		if (luma && !tc[TEXTURECHANGE_LUMA].tex) continue;
+		if (!luma && tc[TEXTURECHANGE_LUMA].tex && d3d_GlobalCaps.NumTMUs > 2) continue;
+
+		// a texture change always invalidates the current set
+		if (luma && d3d_GlobalCaps.NumTMUs < 3)
+			VBO_AddCallback (D3DSurf_TextureChangeCallback, &tc[TEXTURECHANGE_LUMA], sizeof (d3d_texturechange_t));
+		else if (luma)
+		{
+			VBO_AddCallback (D3DSurf_TextureChangeCallback, &tc[TEXTURECHANGE_DIFFUSE], sizeof (d3d_texturechange_t));
+			VBO_AddCallback (D3DSurf_TextureChangeCallback, &tc[TEXTURECHANGE_LUMA], sizeof (d3d_texturechange_t));
+		}
+		else VBO_AddCallback (D3DSurf_TextureChangeCallback, &tc[TEXTURECHANGE_DIFFUSE], sizeof (d3d_texturechange_t));
 
 		for (d3d_modelsurf_t *modelsurf = rt->surfchain; modelsurf; modelsurf = modelsurf->surfchain)
 		{
-			msurface_t *surf = modelsurf->surf;
+			if (!(surf = modelsurf->surf)->verts) continue;
+			if (!surf->d3d_Lightmap) continue;
 
-			// VBO overflow check
-			D3D_VBOCheckOverflow (surf->numverts, surf->numindexes);
-
-			// ensure that the surface lightmap texture is correct
-			surf->d3d_Lightmap->EnsureSurfaceTexture (surf);
-
-			// set the appropriate shader
-			if (tex->lumaimage && d3d_GlobalCaps.NumTMUs > 2)
-				D3D_VBOAddShader (&d3d_BrushShader3TMULuma, surf->d3d_LightmapTex, tex->lumaimage->d3d_Texture, tex->teximage->d3d_Texture);
-			else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && !pass2)
-				D3D_VBOAddShader (&d3d_BrushShader2TMULumaPass1, surf->d3d_LightmapTex, tex->lumaimage->d3d_Texture);
-			else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && pass2)
-				D3D_VBOAddShader (&d3d_BrushShader2TMULumaPass2, tex->teximage->d3d_Texture);
-			else D3D_VBOAddShader (&d3d_BrushShaderNoLuma, surf->d3d_LightmapTex, tex->teximage->d3d_Texture);
-
-			// add it to the VBO
-			surf->matrix = modelsurf->matrix;
-			D3D_VBOAddSurfaceVerts (surf);
-			surf->matrix = NULL;
-			d3d_RenderDef.brush_polys++;
+			// chain the surfs in lightmap order; this will also do the
+			// final reversal of surf order so that we get proper f2b.
+			surf->d3d_Lightmap->ChainModelSurf (modelsurf);
 		}
+
+		// draw all chained surfs in lightmap order
+		d3d_Lightmaps->DrawSurfaceChain (luma);
 	}
 
-	D3D_VBORender ();
-
-	if (stateset)
-	{
-		if (pass2)
-		{
-			// disable blend mode
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-			D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-			D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-			D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-			D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-		}
-	}
+	if (luma && d3d_GlobalCaps.NumTMUs < 3) VBO_AddCallback (D3DSurf_LumaEndCallback);
 }
 
 
-void D3D_SetBrushCommonState (int alphaval)
+void D3DSurf_CommonCallback (void *data)
 {
+	// decode alpha val
+	int alphaval = ((int *) data)[0];
+
+	// to do - decode blah to alpha and move the whole crap to here
 	D3D_SetVertexDeclaration (d3d_VDXyzTex2);
 
-	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
-	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-	D3D_SetTextureMipmap (2, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
-	D3D_SetTexCoordIndexes (1, 0, 0);
-
-	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
-	D3D_SetTextureColorMode (1, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_CURRENT);
-
-	// stage 0 is the lightmap (and may be modulated with alpha)
-	if (alphaval < 255)
+	if (d3d_GlobalCaps.usingPixelShaders)
 	{
-		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_TFACTOR);
-		D3D_SetRenderState (D3DRS_TEXTUREFACTOR, D3DCOLOR_ARGB (BYTE_CLAMP (alphaval), 255, 255, 255));
-	}
-	else D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+		if (d3d_FXPass != FX_PASS_NOTBEGUN)
+			D3D_EndShaderPass ();
 
-	// no alpha ops here irrespective
-	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
-	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+		d3d_MasterFX->SetFloat ("AlphaVal", (float) alphaval / 255.0f);
+	}
+	else
+	{
+		// stage 0 is the lightmap (and may be modulated with alpha)
+		if (alphaval < 255)
+		{
+			// fixme - this seems incorrect
+			D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_TFACTOR);
+			D3D_SetRenderState (D3DRS_TEXTUREFACTOR, D3DCOLOR_ARGB (BYTE_CLAMP (alphaval), 255, 255, 255));
+		}
+		else
+		{
+			D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+			D3D_SetRenderState (D3DRS_TEXTUREFACTOR, 0xffffffff);
+		}
+
+		// no alpha ops here irrespective
+		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+	}
 }
 
 
-void D3D_EmitModelSurfToAlpha (d3d_modelsurf_t *modelsurf);
+void D3DSurf_TakeDownCallback (void *blah)
+{
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		// end and do the usual thing of disabling shaders fully
+		if (d3d_FXPass != FX_PASS_NOTBEGUN)
+			D3D_EndShaderPass ();
+	}
+}
 
-void D3D_AddWorldSurfacesToRender (void)
+
+void D3D_AddSurfacesToRender (int alpha)
 {
 	// this should only ever happen if the scene is filled with water or sky
 	if (!d3d_NumModelSurfs) return;
 
-	// common
-	D3D_SetBrushCommonState (255);
+	bool drawluma = false;
+	bool drawnoluma = false;
+	bool drawsky = false;
 
-	// reverse the order to get correct front to back ordering and
-	// merge the modelsurfs into the final texture order
-	for (int i = 0, m = d3d_NumModelSurfs - 1; i < d3d_NumModelSurfs; i++, m--)
+	// output to texturechains in back-to-front order; the final per-lightmap chaining will
+	// reverse this again to front-to-back giving the correct order.  order doesn't matter for sky.
+	for (int i = 0; i < d3d_NumModelSurfs; i++)
 	{
-		d3d_modelsurf_t *modelsurf = d3d_ModelSurfs[m];
+		d3d_modelsurf_t *modelsurf = d3d_ModelSurfs[i];
+		msurface_t *surf = modelsurf->surf;
 
 		// a bmodel will have already been added to the alpha list
-		// turb surfaces need to be added at this time
-		if (modelsurf->surf->alphaval < 255)
+		if (surf->flags & SURF_DRAWSKY)
 		{
-			if (modelsurf->surf->flags & SURF_DRAWTURB)
-				D3D_EmitModelSurfToAlpha (modelsurf);
-
+			// sky is rendered immediately as it passes
+			D3D_AddSkySurfaceToRender (modelsurf->surf, modelsurf->ent);
+			drawsky = true;
 			continue;
 		}
 
+		if (surf->flags & SURF_DRAWTURB)
+		{
+			if (surf->alphaval < 255)
+			{
+				// this surface goes on the alpha list instead
+				D3D_EmitModelSurfToAlpha (modelsurf);
+				continue;
+			}
+		}
+
+		// now we handle the standard solid surf
 		d3d_registeredtexture_t *rt = modelsurf->tex->registration;
 
+		// flag if we're doing lumas here
+		if (rt->texture->lumaimage && gl_fullbrights.integer)
+			drawluma = true;
+		else drawnoluma = true;
+
+		// chain the texture
 		modelsurf->surfchain = rt->surfchain;
 		rt->surfchain = modelsurf;
 	}
 
+	// everything that is drawn is conditional
+	// some sky modes require extra stuff to be added after the sky surfs so handle those now
+	if (drawsky) D3D_FinalizeSky ();
+
+	// common solid brush state
+	if (drawluma || drawnoluma) VBO_AddCallback (D3DSurf_CommonCallback, &alpha, sizeof (int));
+
 	// now emit from the list of registered textures in two passes for fb/no fb
-	D3D_DrawModelSurfs (false);
+	if (drawnoluma) D3D_DrawModelSurfs (false);
+	if (drawluma) D3D_DrawModelSurfs (true);
 
-	if (d3d_GlobalCaps.NumTMUs < 3)
-	{
-		// with only 2 TMUs available we need to draw in 2 passes
-		// first pass is the regular to establish the baseline
-		D3D_DrawModelSurfs (true);
-
-		// second pass draws the texture at the correct modulation scale
-		D3D_DrawModelSurfs (true, true);
-	}
-	else D3D_DrawModelSurfs (true);
-
-	// draw opaque water here
-	D3D_DrawWaterSurfaces ();
+	// common solid brush state
+	if (drawluma || drawnoluma) VBO_AddCallback (D3DSurf_TakeDownCallback);
 }
 
 
@@ -485,18 +548,13 @@ rrwnnofront:;
 			// (they may pick it up from the value of r_wateralpha)
 			surf->alphaval = 255;
 
-			if (surf->flags & SURF_DRAWSKY)
-				D3D_AddSkySurfaceToRender (surf, NULL);
-			else
-			{
-				// check for lightmap modifications
-				if (surf->d3d_Lightmap) surf->d3d_Lightmap->CheckSurfaceForModification (surf);
+			// check for lightmap modifications
+			if (surf->d3d_Lightmap) surf->d3d_Lightmap->CheckSurfaceForModification (surf);
 
-				texture_t *tex = R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture);
+			texture_t *tex = R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture);
 
-				// this only ever comes from the world so matrix is always NULL
-				D3D_AllocModelSurf (surf, tex, NULL);
-			}
+			// this only ever comes from the world so entity is always NULL
+			D3D_AllocModelSurf (surf, tex, NULL);
 
 			// in case a bad BSP overlaps the surfs in it's nodes
 			surf->visframe = -1;
@@ -604,20 +662,36 @@ void R_AutomapSurfaces (void)
 			// (they may pick it up from the value of r_wateralpha)
 			surf->alphaval = 255;
 
-			if (surf->flags & SURF_DRAWSKY)
-				D3D_AddSkySurfaceToRender (surf, NULL);
-			else
-			{
-				// check for lightmap modifications
-				if (surf->d3d_Lightmap) surf->d3d_Lightmap->CheckSurfaceForModification (surf);
+			// check for lightmap modifications
+			if (surf->d3d_Lightmap) surf->d3d_Lightmap->CheckSurfaceForModification (surf);
 
-				texture_t *tex = R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture);
+			texture_t *tex = R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture);
 
-				// this only ever comes from the world so matrix is always NULL
-				D3D_AllocModelSurf (surf, tex, NULL);
-			}
+			// this only ever comes from the world so matrix is always NULL
+			D3D_AllocModelSurf (surf, tex, NULL);
 		}
 	}
+}
+
+
+void R_BeginSurfaces (model_t *mod)
+{
+	// clear surface chains
+	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
+		d3d_RegisteredTextures[i]->surfchain = NULL;
+
+	// clear texture chains
+	for (int i = 0; i < mod->brushhdr->numtextures; i++)
+	{
+		texture_t *tex = mod->brushhdr->textures[i];
+		if (!tex) continue;
+
+		// these are only used for lightmap building???
+		tex->texturechain = NULL;
+	}
+
+	// no modelsurfs yet
+	d3d_NumModelSurfs = 0;
 }
 
 
@@ -631,12 +705,12 @@ void D3D_DrawAlphaBrushModel (entity_t *ent)
 	if (!ent->model->brushhdr) return;
 	if (ent->model->type != mod_brush) return;
 
-	// we ensured that the entity would only get added if it had appropriate surfs so this is quite safe
-	D3D_SetBrushCommonState (ent->alphaval);
-
 	model_t *mod = ent->model;
 	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
 	D3DMATRIX *m = &ent->matrix;
+
+	// begin a new batch of surfaces
+	R_BeginSurfaces (mod);
 
 	// don't bother with ordering these for now; to be honest i'm quite sick of this code at the moment
 	// and not yet ready to give it the restructuring it needs.  i'm going to be maintaining it going forward
@@ -647,64 +721,12 @@ void D3D_DrawAlphaBrushModel (entity_t *ent)
 		if (surf->flags & SURF_DRAWSKY) continue;
 		if (surf->flags & SURF_DRAWTURB) continue;
 
-		// this doesn't use the optimal rendering path just yet;
-		// someday somebody's gonna make a huge towering edifice of glass as a bmodel and i'll need to do it...
-		texture_t *tex = R_TextureAnimation (ent, surf->texinfo->texture);
-
-		// these surfs aren't backfaced
-		if (tex->lumaimage && d3d_GlobalCaps.NumTMUs > 2)
-		{
-			// only with 3+ TMU cards; we don't bother with fullbrights on alpha surfs if we have less
-			// (hopefully they will be rare enough...)
-			D3D_SetTextureColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
-			D3D_SetTextureColorMode (2, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
-
-			D3D_SetTexture (1, tex->lumaimage->d3d_Texture);
-			D3D_SetTexture (2, tex->teximage->d3d_Texture);
-		}
-		else
-		{
-			D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
-			D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-
-			D3D_SetTexture (1, tex->teximage->d3d_Texture);
-		}
-
-		D3D_SetTexture (0, surf->d3d_LightmapTex);
-
-		// get space for the verts - we assume that a surf will never have more than ~10,000 verts!
-		// (the scratch buffer is inactive here because we're finished with visedicts)
-		brushpolyvert_t *verts = (brushpolyvert_t *) scratchbuf;
-
-		polyvert_t *src = surf->verts;
-		brushpolyvert_t *dest = verts;
-
-		for (int i = 0; i < surf->numverts; i++, src++, dest++)
-		{
-			if (m)
-			{
-				dest->xyz[0] = src->basevert[0] * m->_11 + src->basevert[1] * m->_21 + src->basevert[2] * m->_31 + m->_41;
-				dest->xyz[1] = src->basevert[0] * m->_12 + src->basevert[1] * m->_22 + src->basevert[2] * m->_32 + m->_42;
-				dest->xyz[2] = src->basevert[0] * m->_13 + src->basevert[1] * m->_23 + src->basevert[2] * m->_33 + m->_43;
-			}
-			else
-			{
-				dest->xyz[0] = src->basevert[0];
-				dest->xyz[1] = src->basevert[1];
-				dest->xyz[2] = src->basevert[2];
-			}
-
-			dest->st[0] = src->st[0];
-			dest->st[1] = src->st[1];
-
-			dest->lm[0] = src->lm[0];
-			dest->lm[1] = src->lm[1];
-		}
-
-		// triangle fans are evil, but hey!
-		D3D_DrawUserPrimitive (D3DPT_TRIANGLEFAN, surf->numverts - 2, verts, sizeof (brushpolyvert_t));
-		d3d_RenderDef.brush_polys++;
+		// add to the new modelsurfs list
+		D3D_AllocModelSurf (surf, R_TextureAnimation (ent, surf->texinfo->texture), ent);
 	}
+
+	// add the new modelsurfs list to the render list
+	D3D_AddSurfacesToRender (ent->alphaval);
 }
 
 
@@ -742,8 +764,14 @@ void D3D_SetupBrushModel (entity_t *ent)
 		return;
 	}
 
+	// visible this frame now
+	ent->visframe = d3d_RenderDef.framecount;
+
 	// flag the model as having been previously seen
 	ent->model->wasseen = true;
+
+	// wait until after the bbox check before flagging this otherwise visframe will never be set
+	if (ent->occluded) return;
 
 	// store transform for model - we need to run this in software as we are potentially submitting
 	// multiple brush models in a single batch, all of which will be merged with the world render.
@@ -828,9 +856,12 @@ void D3D_SetupBrushModel (entity_t *ent)
 			// sky surfaces need to be added immediately
 			// other surface types either go on the main list or the alpha list
 			if (surf->flags & SURF_DRAWSKY)
-				D3D_AddSkySurfaceToRender (surf, &ent->matrix);
+				D3D_AllocModelSurf (surf, surf->texinfo->texture, ent);
 			else if (surf->flags & SURF_DRAWTURB)
-				D3D_AllocModelSurf (surf, surf->texinfo->texture, &ent->matrix);
+			{
+				surf->alphaval = ent->alphaval;
+				D3D_AllocModelSurf (surf, surf->texinfo->texture, ent);
+			}
 			else
 			{
 				if (mod->name[0] == '*' && surf->d3d_Lightmap)
@@ -844,7 +875,7 @@ void D3D_SetupBrushModel (entity_t *ent)
 				else
 				{
 					// add to the modelsurfs list
-					D3D_AllocModelSurf (surf, R_TextureAnimation (ent, surf->texinfo->texture), &ent->matrix);
+					D3D_AllocModelSurf (surf, R_TextureAnimation (ent, surf->texinfo->texture), ent);
 				}
 			}
 		}
@@ -859,8 +890,7 @@ void D3D_SetupBrushModel (entity_t *ent)
 }
 
 
-void R_BuildNodeArrays (void);
-void R_RenderNodeArrays (void);
+int lmuploads = 0;
 
 void D3D_BuildWorld (void)
 {
@@ -870,22 +900,7 @@ void D3D_BuildWorld (void)
 	// mark visible leafs
 	R_MarkLeaves ();
 
-	// clear surface chains
-	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
-		d3d_RegisteredTextures[i]->surfchain = NULL;
-
-	// clear texture chains
-	for (int i = 0; i < cl.worldmodel->brushhdr->numtextures; i++)
-	{
-		texture_t *tex = cl.worldmodel->brushhdr->textures[i];
-		if (!tex) continue;
-
-		// these are only used for lightmap building???
-		tex->texturechain = NULL;
-	}
-
-	// no modelsurfs yet
-	d3d_NumModelSurfs = 0;
+	R_BeginSurfaces (cl.worldmodel);
 
 	// calculate dynamic lighting for the world
 	R_PushDlights (cl.worldmodel->brushhdr->nodes);
@@ -904,6 +919,7 @@ void D3D_BuildWorld (void)
 		R_AutomapSurfaces ();
 	else R_RecursiveWorldNode (cl.worldmodel->brushhdr->nodes);
 
+	// models are done after the world so that the double-reverse will put them after it too during the render
 	if (r_drawentities.integer)
 	{
 		// add brushmodels to the render
@@ -922,13 +938,14 @@ void D3D_BuildWorld (void)
 	}
 
 	// upload any lightmaps that were modified
+	// done as early as possible for best parallelism
 	d3d_Lightmaps->UploadLightmap ();
 
-	// some sky modes require extra stuff to be added after the surfs so handle those now
-	D3D_FinalizeSky ();
+	//if (lmuploads) Con_Printf ("uploaded %i lightmaps\n", lmuploads);
+	lmuploads = 0;
 
 	// finish solid surfaces by adding any such to the solid buffer
-	D3D_AddWorldSurfacesToRender ();
+	D3D_AddSurfacesToRender (255);
 }
 
 
@@ -970,6 +987,11 @@ void R_LeafVisibility (byte *vis)
 }
 
 
+extern cvar_t r_lavaalpha;
+extern cvar_t r_telealpha;
+extern cvar_t r_slimealpha;
+extern cvar_t r_lockalpha;
+
 bool R_NearWaterTest (void)
 {
 	msurface_t **mark = d3d_RenderDef.viewleaf->firstmarksurface;
@@ -979,7 +1001,19 @@ bool R_NearWaterTest (void)
 	{
 		do
 		{
-			if (mark[0]->flags & SURF_DRAWTURB) return true;
+			if (!r_lockalpha.integer)
+			{
+				if ((mark[0]->flags & SURF_DRAWLAVA) && (r_lavaalpha.value > 0.99f)) return true;
+				if ((mark[0]->flags & SURF_DRAWSLIME) && (r_slimealpha.value > 0.99f)) return true;
+				if ((mark[0]->flags & SURF_DRAWTELE) && (r_telealpha.value > 0.99f)) return true;
+				if ((mark[0]->flags & SURF_DRAWWATER) && (r_wateralpha.value > 0.99f)) return true;
+			}
+			else
+			{
+				// any type and use (r_wateralpha globally
+				if ((mark[0]->flags & SURF_DRAWTURB) && (r_wateralpha.value > 0.99f)) return true;
+			}
+
 			mark++;
 		} while (--c);
 	}
@@ -1022,4 +1056,48 @@ void R_MarkLeaves (void)
 	}
 }
 
+
+// just in case these get fucked...
+void R_FixupBModelBBoxes (void)
+{
+	// note - the player is model 0 in the precache list;
+	// the world is model 1
+	for (int j = 1; j < MAX_MODELS; j++)
+	{
+		model_t *mod;
+
+		// note - we set the end of the precache list to NULL in cl_parse to ensure this test is valid
+		if (!(mod = cl.model_precache[j])) break;
+
+		if (mod->type != mod_brush) continue;
+
+		brushhdr_t *hdr = mod->brushhdr;
+		msurface_t *surf = hdr->surfaces + hdr->firstmodelsurface;
+
+		float mins[3] = {99999999, 99999999, 99999999};
+		float maxs[3] = {-99999999, -99999999, -99999999};
+
+		for (int s = 0; s < hdr->nummodelsurfaces; s++, surf++)
+		{
+			for (int i = 0; i < 3; i++)
+			{
+				if (surf->mins[i] < mins[i]) mins[i] = surf->mins[i];
+				if (surf->maxs[i] > maxs[i]) maxs[i] = surf->maxs[i];
+			}
+		}
+
+		j = j;
+
+		for (int i = 0; i < 3; i++)
+		{
+			if (mins[i] < mod->mins[i]) mod->mins[i] = mins[i];
+			if (maxs[i] > mod->maxs[i]) mod->maxs[i] = maxs[i];
+		}
+	}
+}
+
+
+void R_FindHipnoticWindows (void)
+{
+}
 
