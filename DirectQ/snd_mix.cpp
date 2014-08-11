@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 3
+as published by the Free Software Foundation; either version 2
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,6 +15,7 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
 */
 // snd_mix.c -- portable code to mix sounds for snd_dma.c
 
@@ -40,7 +41,7 @@ __inline void Snd_InitPaintBuffer (void)
 	if (!paintbuffer)
 	{
 		paintbuffer = (portable_samplepair_t *) Zone_Alloc (PAINTBUF_SIZE * sizeof (portable_samplepair_t));
-		Q_MemSet (paintbuffer, 0, PAINTBUF_SIZE * sizeof (portable_samplepair_t));
+		memset (paintbuffer, 0, PAINTBUF_SIZE * sizeof (portable_samplepair_t));
 	}
 }
 
@@ -57,8 +58,6 @@ void Snd_WriteLinearBlastStereo16 (void)
 	}
 }
 
-
-bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize, void **pbuf2, DWORD *dwSize2, DWORD dwFlags);
 
 void S_TransferStereo16 (int endtime)
 {
@@ -186,8 +185,7 @@ void SND_InitScaletable (void)
 	for (int i = 0; i < 256; i++)
 	{
 		if (!snd_scaletable[i]) snd_scaletable[i] = (int *) Zone_Alloc (256 * sizeof (int));
-
-		for (int j = 0; j < 256; j++) snd_scaletable[i][j] = ((j < 128) ? j : j - 0xff) * i; //((signed char) j) * i;
+		for (int j = 0; j < 256; j++) snd_scaletable[i][j] = ((signed char) j) * i;
 	}
 }
 
@@ -197,8 +195,8 @@ void SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int count)
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
-	if (ch->leftvol > 255) ch->leftvol = 255; else if (ch->leftvol < 0) ch->leftvol = 0;
-	if (ch->rightvol > 255) ch->rightvol = 255; else if (ch->rightvol < 0) ch->rightvol = 0;
+	if (ch->leftvol > 255) ch->leftvol = 255;
+	if (ch->rightvol > 255) ch->rightvol = 255;
 
 	int *lscale = snd_scaletable[ch->leftvol];
 	int *rscale = snd_scaletable[ch->rightvol];
@@ -222,17 +220,21 @@ void SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count)
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
-	int leftvol = ch->leftvol;
-	int rightvol = ch->rightvol;
+	int data;
+	int left, right;
+	int leftvol, rightvol;
+	signed short *sfx;
+	int	i;
 
-	signed short *sfx = (signed short *) sc->data + ch->pos;
+	leftvol = ch->leftvol;
+	rightvol = ch->rightvol;
+	sfx = (signed short *) sc->data + ch->pos;
 
-	for (int i = 0; i < count; i++)
+	for (i = 0; i < count; i++)
 	{
-		int data = sfx[i];
-		int left = (data * leftvol) >> 8;
-		int right = (data * rightvol) >> 8;
-
+		data = sfx[i];
+		left = (data * leftvol) >> 8;
+		right = (data * rightvol) >> 8;
 		paintbuffer[i].left += left;
 		paintbuffer[i].right += right;
 	}
@@ -246,29 +248,32 @@ void S_PaintChannels (int endtime)
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
+	int 	i;
+	int 	end;
+	channel_t *ch;
+	sfxcache_t	*sc;
+	int		ltime, count;
+
 	while (paintedtime < endtime)
 	{
 		// if paintbuffer is smaller than DMA buffer
-		int end = endtime;
+		end = endtime;
 
 		if (endtime - paintedtime > PAINTBUF_SIZE) end = paintedtime + PAINTBUF_SIZE;
 
 		// clear the paint buffer
-		Q_MemSet (paintbuffer, 0, (end - paintedtime) * sizeof (portable_samplepair_t));
+		memset (paintbuffer, 0, (end - paintedtime) * sizeof (portable_samplepair_t));
 
 		// paint in the channels.
-		for (int i = 0; i < total_channels; i++)
-		{
-			channel_t *ch = channels[i];
-			sfxcache_t *sc;
+		ch = channels;
 
-			if (!ch) continue;
+		for (i = 0; i < total_channels; i++, ch++)
+		{
 			if (!ch->sfx) continue;
 			if (!ch->leftvol && !ch->rightvol) continue;
 			if (!(sc = S_LoadSound (ch->sfx))) continue;
 
-			int ltime = paintedtime;
-			int count;
+			ltime = paintedtime;
 
 			while (ltime < end)
 			{
@@ -278,15 +283,10 @@ void S_PaintChannels (int endtime)
 				else count = end - ltime;
 
 				if (count > 0)
-				{
-					// this should never happen but does if you rapidly switch between samplemodes via the menu
-					// make sure that ltime += count still happens or we get an infinite loop!
-					if (ch->pos + count < sc->length)
-					{
-						if (sc->width == 1)
-							SND_PaintChannelFrom8 (ch, sc, count);
-						else SND_PaintChannelFrom16 (ch, sc, count);
-					}
+				{	
+					if (sc->width == 1)
+						SND_PaintChannelFrom8 (ch, sc, count);
+					else SND_PaintChannelFrom16 (ch, sc, count);
 	
 					ltime += count;
 				}
@@ -300,8 +300,7 @@ void S_PaintChannels (int endtime)
 						ch->end = ltime + sc->length - ch->pos;
 					}
 					else				
-					{
-						// channel just stopped
+					{	// channel just stopped
 						ch->sfx = NULL;
 						break;
 					}

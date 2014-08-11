@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -112,7 +112,7 @@ huditem_t hud_keys[4] =
 };
 
 
-huditem_t hud_items[4] = 
+huditem_t hud_items[4] =
 {
 	{HUD_VISIBLE | HUD_CENTERX, 64, -40, 16, 0},
 	{HUD_VISIBLE | HUD_CENTERX, 64, -40, 16, 0},

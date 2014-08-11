@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -39,11 +39,11 @@ cvar_t nehx00 ("nehx00", "0", CVAR_NEHAHRA); cvar_t nehx01 ("nehx01", "0", CVAR_
 cvar_t nehx02 ("nehx02", "0", CVAR_NEHAHRA); cvar_t nehx03 ("nehx03", "0", CVAR_NEHAHRA);
 cvar_t nehx04 ("nehx04", "0", CVAR_NEHAHRA); cvar_t nehx05 ("nehx05", "0", CVAR_NEHAHRA);
 cvar_t nehx06 ("nehx06", "0", CVAR_NEHAHRA); cvar_t nehx07 ("nehx07", "0", CVAR_NEHAHRA);
-cvar_t nehx08 ("nehx08", "0", CVAR_NEHAHRA); cvar_t nehx09 ("nehx09", "0", CVAR_NEHAHRA); 
+cvar_t nehx08 ("nehx08", "0", CVAR_NEHAHRA); cvar_t nehx09 ("nehx09", "0", CVAR_NEHAHRA);
 cvar_t nehx10 ("nehx10", "0", CVAR_NEHAHRA); cvar_t nehx11 ("nehx11", "0", CVAR_NEHAHRA);
-cvar_t nehx12 ("nehx12", "0", CVAR_NEHAHRA); cvar_t nehx13 ("nehx13", "0", CVAR_NEHAHRA); 
+cvar_t nehx12 ("nehx12", "0", CVAR_NEHAHRA); cvar_t nehx13 ("nehx13", "0", CVAR_NEHAHRA);
 cvar_t nehx14 ("nehx14", "0", CVAR_NEHAHRA); cvar_t nehx15 ("nehx15", "0", CVAR_NEHAHRA);
-cvar_t nehx16 ("nehx16", "0", CVAR_NEHAHRA); cvar_t nehx17 ("nehx17", "0", CVAR_NEHAHRA); 
+cvar_t nehx16 ("nehx16", "0", CVAR_NEHAHRA); cvar_t nehx17 ("nehx17", "0", CVAR_NEHAHRA);
 cvar_t nehx18 ("nehx18", "0", CVAR_NEHAHRA); cvar_t nehx19 ("nehx19", "0", CVAR_NEHAHRA);
 
 // these cvars do nothing for now; they only exist to soak up abuse from nehahra maps which expect them to be there
@@ -145,6 +145,7 @@ void SHOWLMP_decodeshow (void)
 void SHOWLMP_drawall (void)
 {
 	if (!nehahra) return;
+
 	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
 
 	// evil evil evil evil
@@ -167,6 +168,7 @@ void SHOWLMP_drawall (void)
 void SHOWLMP_clear (void)
 {
 	if (!nehahra) return;
+
 	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
 
 	for (int i = 0; i < SHOWLMP_MAXLABELS; i++) showlmp[i].isactive = false;

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -61,7 +61,7 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *ent)
 		numframes = pspritegroup->numframes;
 		fullinterval = pintervals[numframes - 1];
 
-		time = cl.time + ent->syncbase;
+		time = (float) d3d_RenderDef.dwTime * 0.001f + ent->syncbase;
 
 		// when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
 		// are positive, so we don't have to worry about division by 0
@@ -84,6 +84,12 @@ D3D_SetupSpriteModel
 
 =================
 */
+LPDIRECT3DTEXTURE9 cachedspritetexture = NULL;
+
+void D3DSprite_Begin (void)
+{
+	cachedspritetexture = NULL;
+}
 
 
 void D3DSprite_SetState (void *data)
@@ -93,40 +99,24 @@ void D3DSprite_SetState (void *data)
 	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 
-	if (d3d_GlobalCaps.usingPixelShaders)
+	if (d3d_FXPass == FX_PASS_NOTBEGUN)
 	{
-		if (d3d_FXPass == FX_PASS_NOTBEGUN)
-		{
-			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
-			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_PARTICLES);
-		}
-		else if (d3d_FXPass == FX_PASS_PARTICLES)
-		{
-			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
-			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			d3d_FXCommitPending = true;
-		}
-		else
-		{
-			D3D_EndShaderPass ();
-			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
-			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_PARTICLES);
-		}
+		D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+		d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+		D3D_BeginShaderPass (FX_PASS_PARTICLES);
+	}
+	else if (d3d_FXPass == FX_PASS_PARTICLES)
+	{
+		D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+		d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+		d3d_FXCommitPending = true;
 	}
 	else
 	{
-		D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
-		D3D_SetTexCoordIndexes (0);
-
-		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-
-		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
-		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
-
-		D3D_SetTexture (tc->stage, tc->tex);
+		D3D_EndShaderPass ();
+		D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+		d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
+		D3D_BeginShaderPass (FX_PASS_PARTICLES);
 	}
 }
 
@@ -220,8 +210,15 @@ void D3D_SetupSpriteModel (entity_t *ent)
 		break;
 	}
 
-	d3d_texturechange_t tc = {0, frame->texture->d3d_Texture};
-	VBO_AddCallback (D3DSprite_SetState, &tc, sizeof (d3d_texturechange_t));
+	// batch sprites
+	if (cachedspritetexture != frame->texture->d3d_Texture)
+	{
+		d3d_texturechange_t tc = {0, frame->texture->d3d_Texture};
+		VBO_AddCallback (D3DSprite_SetState, &tc, sizeof (d3d_texturechange_t));
+
+		cachedspritetexture = frame->texture->d3d_Texture;
+	}
+
 	VBO_AddSprite (frame, fixed_origin, up, right, ent->alphaval);
 }
 

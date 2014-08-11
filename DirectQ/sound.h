@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -87,7 +87,7 @@ typedef struct
 	int 	pos;			// sample position in sfx
 	int		looping;		// where to loop, -1 = no looping
 	int		entnum;			// to allow overriding a specific sound
-	int		entchannel;		//
+	int		entchannel;
 	vec3_t	origin;			// origin of sound effect
 	vec_t	dist_mult;		// distance multiplier (attenuation/clipK)
 	int		master_vol;		// 0-255 master volume
@@ -109,43 +109,42 @@ void S_Shutdown (void);
 void S_StartSound (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float fvol,  float attenuation);
 void S_StaticSound (sfx_t *sfx, vec3_t origin, float vol, float attenuation);
 void S_StopSound (int entnum, int entchannel);
-void S_StopAllSounds(bool clear);
+void S_StopAllSounds (bool clear);
 void S_ClearBuffer (void);
-void S_Update (vec3_t origin, vec3_t v_forward, vec3_t v_right, vec3_t v_up);
-void S_EndThread (void);
+void S_Update (float sound_frametime, vec3_t origin, vec3_t v_forward, vec3_t v_right, vec3_t v_up);
 
 sfx_t *S_PrecacheSound (char *sample);
 void S_TouchSound (char *sample);
 void S_ClearPrecache (void);
 void S_BeginPrecaching (void);
 void S_EndPrecaching (void);
-void S_PaintChannels(int endtime);
+void S_PaintChannels (int endtime);
 void S_InitPaintChannels (void);
 
 // picks a channel based on priorities, empty slots, number of channels
-channel_t *SND_PickChannel(int entnum, int entchannel);
+channel_t *SND_PickChannel (int entnum, int entchannel);
 
 // spatializes a channel
-void SND_Spatialize(channel_t *ch);
+void SND_Spatialize (channel_t *ch);
 
 // initializes cycling through a DMA buffer and returns information on it
-bool SNDDMA_Init(void);
+bool SNDDMA_Init (void);
 
 // gets the current DMA position
-int SNDDMA_GetDMAPos(void);
+int SNDDMA_GetDMAPos (void);
 
 // shutdown the DMA xfer.
-void SNDDMA_Shutdown(void);
+void SNDDMA_Shutdown (void);
 
 // ====================================================================
 // User-setable variables
 // ====================================================================
 
-#define	MAX_CHANNELS			65536
-#define	MAX_DYNAMIC_CHANNELS	32768
+#define	MAX_CHANNELS			1028
+#define	MAX_DYNAMIC_CHANNELS	512
 
 
-extern	channel_t   *channels[MAX_CHANNELS];
+extern	channel_t   channels[MAX_CHANNELS];
 // 0 to MAX_DYNAMIC_CHANNELS-1	= normal entity sounds
 // MAX_DYNAMIC_CHANNELS to MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS -1 = water, etc
 // MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS to total_channels = static sounds
@@ -178,5 +177,7 @@ void SND_InitScaletable (void);
 
 void S_AmbientOff (void);
 void S_AmbientOn (void);
+
+bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize, void **pbuf2, DWORD *dwSize2, DWORD dwFlags);
 
 #endif

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -97,12 +97,12 @@ void MSG_WriteFloat (sizebuf_t *sb, float f);
 void MSG_WriteString (sizebuf_t *sb, char *s);
 
 
-void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol);
-void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol);
-float MSG_ReadCoord (int protocol);
-float MSG_ReadAngle (int protocol);
-void MSG_WriteAngle16 (sizebuf_t *sb, float f);
-float MSG_ReadAngle16 (void);
+void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol, unsigned flags);
+void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol, unsigned flags);
+float MSG_ReadCoord (int protocol, unsigned flags);
+float MSG_ReadAngle (int protocol, unsigned flags);
+void MSG_WriteAngle16 (sizebuf_t *sb, float f, int protocol, unsigned flags);
+float MSG_ReadAngle16 (int protocol, unsigned flags);
 
 extern	int			msg_readcount;
 extern	bool	msg_badread;		// set if a read goes beyond end of message
@@ -138,7 +138,7 @@ void COM_StripExtension (char *in, char *out);
 void COM_FileBase (char *in, char *out);
 void COM_DefaultExtension (char *path, char *extension);
 
-char	*va(char *format, ...);
+char	*va (char *format, ...);
 // does a varargs printf into a temp buffer
 
 

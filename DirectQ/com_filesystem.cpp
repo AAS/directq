@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -35,14 +35,17 @@ COM_SkipPath
 char *COM_SkipPath (char *pathname)
 {
 	char    *last;
-	
+
 	last = pathname;
+
 	while (*pathname)
 	{
-		if (*pathname=='/')
-			last = pathname+1;
+		if (*pathname == '/')
+			last = pathname + 1;
+
 		pathname++;
 	}
+
 	return last;
 }
 
@@ -55,6 +58,7 @@ void COM_StripExtension (char *in, char *out)
 {
 	while (*in && *in != '.')
 		*out++ = *in++;
+
 	*out = 0;
 }
 
@@ -70,11 +74,15 @@ char *COM_FileExtension (char *in)
 
 	while (*in && *in != '.')
 		in++;
+
 	if (!*in)
 		return "";
+
 	in++;
-	for (i=0; i<7 && *in; i++,in++)
+
+	for (i = 0; i < 7 && *in; i++, in++)
 		exten[i] = *in;
+
 	exten[i] = 0;
 	return exten;
 }
@@ -88,20 +96,20 @@ void COM_FileBase (char *in, char *out)
 {
 	char *s, *s2;
 
-	s = in + strlen(in) - 1;
+	s = in + strlen (in) - 1;
 
 	while (s != in && *s != '.')
 		s--;
-	
+
 	for (s2 = s; *s2 && *s2 != '/'; s2--)
-	;
-	
-	if (s-s2 < 2)
-		strcpy (out,"?model?");
+		;
+
+	if (s - s2 < 2)
+		strcpy (out, "?model?");
 	else
 	{
 		s--;
-		Q_strncpy (out,s2+1, s-s2);
+		Q_strncpy (out, s2 + 1, s - s2);
 		out[s-s2] = 0;
 	}
 }
@@ -115,16 +123,16 @@ COM_DefaultExtension
 void COM_DefaultExtension (char *path, char *extension)
 {
 	char    *src;
-//
-// if path doesn't have a .EXT, append extension
-// (extension should include the .)
-//
-	src = path + strlen(path) - 1;
+	
+	// if path doesn't have a .EXT, append extension
+	// (extension should include the .)
+	src = path + strlen (path) - 1;
 
 	while (*src != '/' && src != path)
 	{
 		if (*src == '.')
 			return;                 // it has an extension
+
 		src--;
 	}
 
@@ -235,6 +243,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 		for (int i = 0;; i++)
 		{
 			if (!fl[i]) break;
+
 			len++;
 		}
 	}
@@ -256,8 +265,11 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 				int filelen = strlen (pak->files[i].name);
 
 				if (filelen < typelen + dirlen) continue;
+
 				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
+
 				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
+
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
 				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
@@ -274,8 +286,11 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 				int filelen = strlen (pak->files[i].name);
 
 				if (filelen < typelen + dirlen) continue;
+
 				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
+
 				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
+
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
 				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
@@ -294,6 +309,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 			for (int i = 0;; i++)
 			{
 				if (find_filter[i] == 0) break;
+
 				if (find_filter[i] == '/') find_filter[i] = '\\';
 			}
 
@@ -310,11 +326,17 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 			{
 				// not interested
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
+
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
+
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
+
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
+
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
+
 				if (CheckExists (fl, FindFileData.cFileName)) continue;
 
 				if (flags & PREPEND_PATH)
@@ -368,7 +390,9 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 	for (int i = 1;; i++)
 	{
 		if (fpath2[i] == 0) break;
+
 		if (fpath2[i] == '/') fpath2[i] = '_';
+
 		if (fpath2[i] == '\\') fpath2[i] = '_';
 	}
 
@@ -378,15 +402,15 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 	// create the file - see http://blogs.msdn.com/larryosterman/archive/2004/04/19/116084.aspx for
 	// further info on the flags chosen here.
 	HANDLE hf = CreateFile
-	(
-		fpath1,
-		GENERIC_WRITE | GENERIC_READ,
-		FILE_SHARE_READ,
-		NULL,
-		CREATE_ALWAYS,
-		FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-		NULL
-	);
+				(
+					fpath1,
+					GENERIC_WRITE | GENERIC_READ,
+					FILE_SHARE_READ,
+					NULL,
+					CREATE_ALWAYS,
+					FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+					NULL
+				);
 
 	// either good or INVALID_HANDLE_VALUE
 	return hf;
@@ -609,6 +633,7 @@ int COM_FOpenFile (char *filename, void *hf)
 	{
 		// ensure...
 		if (*hFile != INVALID_HANDLE_VALUE) COM_FCloseFile (hFile);
+
 		*hFile = INVALID_HANDLE_VALUE;
 		com_filesize = -1;
 
@@ -624,15 +649,15 @@ int COM_FOpenFile (char *filename, void *hf)
 					// note - we need to share read access because e.g. a demo could result in 2 simultaneous
 					// reads, one for the .dem file and one for a .bsp file
 					*hFile = CreateFile
-					(
-						pak->filename,
-						GENERIC_READ,
-						FILE_SHARE_READ,
-						NULL,
-						OPEN_EXISTING,
-						FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
-						NULL
-					);
+							 (
+								 pak->filename,
+								 GENERIC_READ,
+								 FILE_SHARE_READ,
+								 NULL,
+								 OPEN_EXISTING,
+								 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+								 NULL
+							 );
 
 					// this can happen if a PAK file was enumerated on startup but deleted while running
 					if (*hFile == INVALID_HANDLE_VALUE)
@@ -672,15 +697,15 @@ int COM_FOpenFile (char *filename, void *hf)
 			// note - we need to share read access because e.g. a demo could result in 2 simultaneous
 			// reads, one for the .dem file and one for a .bsp file
 			*hFile = CreateFile
-			(
-				netpath,
-				GENERIC_READ,
-				FILE_SHARE_READ,
-				NULL,
-				OPEN_EXISTING,
-				FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
-				NULL
-			);
+					 (
+						 netpath,
+						 GENERIC_READ,
+						 FILE_SHARE_READ,
+						 NULL,
+						 OPEN_EXISTING,
+						 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+						 NULL
+					 );
 
 			if (*hFile == INVALID_HANDLE_VALUE) continue;
 
@@ -698,8 +723,8 @@ int COM_FOpenFile (char *filename, void *hf)
 
 void COM_FCloseFile (void *fh)
 {
-	CloseHandle (*((HANDLE *) fh));
-	*((HANDLE *) fh) = INVALID_HANDLE_VALUE;
+	CloseHandle (* ((HANDLE *) fh));
+	* ((HANDLE *) fh) = INVALID_HANDLE_VALUE;
 }
 
 
@@ -736,7 +761,7 @@ static byte *COM_LoadFile (char *path, class CQuakeHunk *spacebuf, class CQuakeZ
 		return NULL;
 	}
 
-	((byte *) buf)[len] = 0;
+	((byte *) buf) [len] = 0;
 	int Success = COM_FReadFile (fh, buf, len);
 	COM_FCloseFile (&fh);
 
@@ -786,6 +811,7 @@ pack_t *COM_LoadPackFile (char *packfile)
 
 	// read and validate the header
 	if (!(packfp = fopen (packfile, "rb"))) return NULL;
+
 	fread (&header, sizeof (header), 1, packfp);
 
 	if (header.id[0] != 'P' || header.id[1] != 'A' || header.id[2] != 'C' || header.id[3] != 'K')
@@ -829,8 +855,11 @@ void COM_InitFilesystem (void)
 	// (these are only checked at startup as the player might want to switch them off during gameplay; otherwise
 	// they would be enforced on always)
 	if (COM_CheckParm ("-rogue")) Cvar_Set ("com_rogue", 1);
+
 	if (COM_CheckParm ("-hipnotic")) Cvar_Set ("com_hipnotic", 1);
+
 	if (COM_CheckParm ("-quoth")) Cvar_Set ("com_quoth", 1);
+
 	if (COM_CheckParm ("-nehahra")) Cvar_Set ("com_nehahra", 1);
 
 	// -game <gamedir>

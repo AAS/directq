@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -25,21 +25,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern qpic_t *gfx_p_option_lmp;
 
 // cvars used
-extern cvar_t xi_usecontroller;
-extern cvar_t xi_dpadarrowmap;
-extern cvar_t xi_axislx;
-extern cvar_t xi_axisly;
-extern cvar_t xi_axisrx;
-extern cvar_t xi_axisry;
-extern cvar_t xi_axislt;
-extern cvar_t xi_axisrt;
 extern cvar_t scr_screenshotformat;
 extern cvar_t r_lerporient;
 extern cvar_t r_lerpframe;
 extern cvar_t r_lerplightstyle;
 extern cvar_t m_filter;
-extern cvar_t m_look;
-extern cvar_t m_boost;
+extern cvar_t freelook;
 extern cvar_t chase_back;
 extern cvar_t chase_up;
 extern cvar_t chase_right;
@@ -55,11 +46,6 @@ extern cvar_t r_lavaalpha;
 extern cvar_t r_telealpha;
 extern cvar_t r_slimealpha;
 extern cvar_t r_lockalpha;
-extern cvar_t m_directinput;
-extern cvar_t in_joystick;
-extern cvar_t m_accellevel;
-extern cvar_t m_accelthreshold1;
-extern cvar_t m_accelthreshold2;
 extern cvar_t r_automapshot;
 extern cvar_t com_hipnotic;
 extern cvar_t com_rogue;
@@ -71,7 +57,6 @@ extern cvar_t scr_shotnamebase;
 extern cvar_t r_skybackscroll;
 extern cvar_t r_skyfrontscroll;
 extern cvar_t r_waterwarptime;
-extern cvar_t r_waterwarpscale;
 extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
 extern cvar_t v_gamma;
@@ -79,9 +64,9 @@ extern cvar_t r_waterwarp;
 extern cvar_t r_wateralpha;
 extern cvar_t loadas8bit;
 extern cvar_t s_khz;
-extern cvar_t r_fastlightmaps;
 extern cvar_t scr_sbaralpha;
 extern cvar_t scr_centersbar;
+extern cvar_t r_aliaslightscale;
 
 CQMenu menu_Main (m_main);
 CQMenu menu_Singleplayer (m_other);
@@ -362,6 +347,7 @@ void Menu_UnbindAction (char *action)
 	for (int j = 0; j < 256; j++)
 	{
 		if (!(b = keybindings[j])) continue;
+
 		if (!strncmp (b, action, l)) Key_SetBinding (j, "");
 	}
 }
@@ -409,12 +395,16 @@ void Menu_KeybindingsCustomKey (int key)
 
 	case K_UPARROW:
 		menu_soundlevel = m_sound_nav;
+
 		if ((--bind_cursor) < 0) bind_cursor = NUMBINDINGS - 1;
+
 		break;
 
 	case K_DOWNARROW:
 		menu_soundlevel = m_sound_nav;
+
 		if ((++bind_cursor) >= NUMBINDINGS) bind_cursor = 0;
+
 		break;
 
 	case K_ENTER:
@@ -424,6 +414,7 @@ void Menu_KeybindingsCustomKey (int key)
 
 		// if two keys are bound we delete the first binding
 		if (keys[1] != -1) Menu_UnbindAction (key_bindnames[bind_cursor][0]);
+
 		break;
 
 	case K_BACKSPACE:
@@ -607,10 +598,6 @@ void EnumGameDirs (void)
 		// don't do these
 		if (!strcmp (FindFileData.cFileName, ".")) continue;
 		if (!strcmp (FindFileData.cFileName, "..")) continue;
-		if (!stricmp (FindFileData.cFileName, "rogue")) continue;
-		if (!stricmp (FindFileData.cFileName, "hipnotic")) continue;
-		if (!stricmp (FindFileData.cFileName, "quoth")) continue;
-		if (!stricmp (FindFileData.cFileName, "nehahra")) continue;
 
 		// ensure that it's a game dir
 		if (!IsGameDir (FindFileData.cFileName)) continue;
@@ -656,6 +643,7 @@ int Menu_EffectsCustomDraw (int y)
 {
 	// sanity check frame interpolation cvar
 	if (r_lerpframe.integer < 0) Cvar_Set (&r_lerpframe, (float) 0);
+
 	if (r_lerpframe.integer > 1) Cvar_Set (&r_lerpframe, 1);
 
 	// keep y
@@ -815,9 +803,6 @@ void Menu_LoadAvailableSkyboxes (void)
 }
 
 
-char *fastlmmodes[] = {"Off", "Fast Dynamic", "Fast Styles", "Full", NULL};
-int fastlmmode = 0;
-
 char *hudstylelist[] = {"Classic Status Bar", "Overlay Status Bar", "QuakeWorld HUD", "Quake 64 HUD", NULL};
 int hudstyleselection = 0;
 
@@ -826,6 +811,10 @@ int hudstyleselection = 0;
 
 char *hud_invshow[] = {"On", "Off", NULL};
 int hud_invshownum = 0;
+
+char *overbright_options[] = {"Off", "2 x Overbright", "4 x Overbright", NULL};
+int overbright_num = 1;
+extern cvar_t r_overbright;
 
 int Menu_WarpCustomDraw (int y)
 {
@@ -854,7 +843,7 @@ int Menu_WarpCustomDraw (int y)
 		menu_WarpSurf.EnableMenuOptions (TAG_WATERWARP);
 	else menu_WarpSurf.DisableMenuOptions (TAG_WATERWARP);
 
-	Cvar_Set (&r_fastlightmaps, fastlmmode);
+	Cvar_Set (&r_overbright, overbright_num);
 
 	// hud style
 	Cvar_Get (hudstyle, "cl_sbar");
@@ -903,10 +892,10 @@ void Menu_WarpCustomEnter (void)
 	skybox_menunumber = 0;
 	old_skybox_menunumber = 0;
 
-	fastlmmode = r_fastlightmaps.integer;
+	overbright_num = r_overbright.integer;
 
-	if (fastlmmode < 0) fastlmmode = 0;
-	if (fastlmmode > 3) fastlmmode = 3;
+	if (overbright_num < 0) overbright_num = 0;
+	if (overbright_num > 2) overbright_num = 2;
 
 	extern char CachedSkyBoxName[];
 
@@ -926,16 +915,16 @@ void Menu_WarpCustomEnter (void)
 }
 
 
-void R_LoadSkyBox (char *basename, bool feedback);
+void D3DSky_LoadSkyBox (char *basename, bool feedback);
 
 void Menu_WarpSkyBoxApply (void)
 {
 	if (skybox_menunumber)
-		R_LoadSkyBox (skybox_menulist[skybox_menunumber], true);
+		D3DSky_LoadSkyBox (skybox_menulist[skybox_menunumber], true);
 	else
 	{
 		// item 0 is "no skybox"
-		R_LoadSkyBox (skybox_menulist[skybox_menunumber], false);
+		D3DSky_LoadSkyBox (skybox_menulist[skybox_menunumber], false);
 		Con_Printf ("Skybox Unloaded\n");
 	}
 
@@ -965,118 +954,19 @@ int fogmode = 0;
 #define TAG_LINEARONLY	2
 #define TAG_EXPONLY		4
 
-extern cvar_t gl_fogenable;
-extern cvar_t gl_fogred;
-extern cvar_t gl_foggreen;
-extern cvar_t gl_fogblue;
-extern cvar_t gl_fogdensity;
-extern cvar_t gl_fogstart;
-extern cvar_t gl_fogend;
-extern cvar_t gl_fogsky;
-
 void Menu_FogCustomEnter (void)
 {
-	// decode cvar into variables
-	switch (gl_fogenable.integer)
-	{
-	case 2:
-		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
-		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
-		fogquality = 0;
-		fogmode = 1;
-		break;
-
-	case 3:
-		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
-		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
-		fogquality = 0;
-		fogmode = 2;
-		break;
-
-	case 4:
-		menu_Fog.DisableMenuOptions (TAG_EXPONLY);
-		menu_Fog.EnableMenuOptions (TAG_LINEARONLY);
-		fogquality = 1;
-		fogmode = 0;
-		break;
-
-	case 5:
-		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
-		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
-		fogquality = 1;
-		fogmode = 1;
-		break;
-
-	case 6:
-		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
-		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
-		fogquality = 1;
-		fogmode = 2;
-		break;
-
-	default:
-		menu_Fog.DisableMenuOptions (TAG_EXPONLY);
-		menu_Fog.EnableMenuOptions (TAG_LINEARONLY);
-		fogquality = 0;
-		fogmode = 0;
-		break;
-	}
-
-	if (gl_fogenable.integer)
-	{
-		fogenable = 1;
-		menu_Fog.EnableMenuOptions (TAG_FOGDISABLED);
-	}
-	else
-	{
-		fogenable = 0;
-		menu_Fog.DisableMenuOptions (TAG_FOGDISABLED);
-		menu_Fog.DisableMenuOptions (TAG_EXPONLY);
-		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
-	}
 }
 
 
 int Menu_FogCustomDraw (int y)
 {
-	// decode variables into cvar
-	if (fogenable)
-	{
-		int fogenableval = 1 + fogmode + (3 * fogquality);
-		Cvar_Set (&gl_fogenable, fogenableval);
-	}
-	else Cvar_Set (&gl_fogenable, 0.0f);
-
-	// sanity check cvars
-	if (gl_fogstart.value < 10) gl_fogstart.value = 10.0f;
-	if (gl_fogend.value < 10) gl_fogend.value = 10.0f;
-	if (gl_fogstart.value > 4010) gl_fogstart.value = 4010.0f;
-	if (gl_fogend.value > 4010) gl_fogend.value = 4010.0f;
-	if (gl_fogend.value < gl_fogstart.value) gl_fogend.value = gl_fogstart.value;
-
-	if (gl_fogdensity.value < 0) gl_fogdensity.value = 0.0f;
-	if (gl_fogdensity.value > 0.01f) gl_fogdensity.value = 0.01f;
-
-	// update cvars
-	Cvar_Set (&gl_fogstart, gl_fogstart.value);
-	Cvar_Set (&gl_fogend, gl_fogend.value);
-	Cvar_Set (&gl_fogdensity, gl_fogdensity.value);
-	Cvar_Set (&gl_fogred, gl_fogred.value);
-	Cvar_Set (&gl_foggreen, gl_foggreen.value);
-	Cvar_Set (&gl_fogblue, gl_fogblue.value);
-
-	// toggle options
-	Menu_FogCustomEnter ();
 	return y;
 }
 
 
 int Menu_FogColourBox (int y)
 {
-	if (!gl_fogenable.integer) return y;
-
-	Draw_TextBox ((vid.width / 2) - 125, y, 234, 50);
-	Draw_Fill ((vid.width / 2) - 117, y + 8, 234, 50, gl_fogred.value, gl_foggreen.value, gl_fogblue.value);
 	return y;
 }
 
@@ -1209,12 +1099,12 @@ void Menu_InitOptionsMenu (void)
 	menu_Options.AddOption (new CQMenuCvarSlider ("Sound Volume", &volume, 0, 1, 0.05));
 	menu_Options.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Options.AddOption (new CQMenuCvarToggle ("Always Run", &dummy_speed, 0, 1));
-	menu_Options.AddOption (new CQMenuCvarToggle ("Mouse Look", &m_look, 0, 1));
+	menu_Options.AddOption (new CQMenuCvarToggle ("Mouse Look", &freelook, 0, 1));
 	menu_Options.AddOption (new CQMenuCvarToggle ("Invert Mouse", &m_pitch, 0.022, -0.022));
 	menu_Options.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Options.AddOption (new CQMenuSubMenu ("Video Options", &menu_Video));
-	menu_Options.AddOption (new CQMenuSubMenu ("Sound Options", &menu_Sound));
-	menu_Options.AddOption (new CQMenuSubMenu ("More Options", &menu_EffectsSimple));
+	// menu_Options.AddOption (new CQMenuSubMenu ("Sound Options", &menu_Sound));
+	menu_Options.AddOption (new CQMenuSubMenu ("Effects and Other Options", &menu_EffectsSimple));
 
 	// sound
 	menu_Sound.AddOption (new CQMenuCustomEnter (Menu_SoundCustomEnter));
@@ -1232,30 +1122,6 @@ void Menu_InitOptionsMenu (void)
 	menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuSpinControl ("Sound Speed", &soundspeednum, soundspeedlist));
 	menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuCvarToggle ("8-Bit Sounds", &loadas8bit));
 
-	// input
-	menu_Input.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
-	menu_Input.AddOption (new CQMenuTitle ("Input Options"));
-	menu_Input.AddOption (new CQMenuSubMenu ("Customize Controls", &menu_Keybindings));
-	menu_Input.AddOption (new CQMenuSubMenu ("Configure XBox 360 Controller", &menu_Controller));
-	menu_Input.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Use DirectInput", &m_directinput));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Use Joystick", &in_joystick));
-	menu_Input.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Input.AddOption (new CQMenuCvarSlider ("Mouse Speed", &sensitivity, 1, 21, 1));
-	menu_Input.AddOption (new CQMenuCvarSlider ("Mouse Acceleration", &m_accellevel, 0, 2, 1));
-	menu_Input.AddOption (new CQMenuCvarSlider ("Threshold 1", &m_accelthreshold1, 0, 20, 1));
-	menu_Input.AddOption (new CQMenuCvarSlider ("Threshold 2", &m_accelthreshold2, 0, 20, 1));
-	menu_Input.AddOption (new CQMenuCvarSlider ("DirectInput Boost", &m_boost, 1, 5, 0.5));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Mouse Look", &m_look, 0, 1));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Mouse Filter", &m_filter, 0, 1));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Invert Mouse", &m_pitch, 0.022, -0.022));
-	menu_Input.AddOption (new CQMenuTitle ("Movement Options"));
-	menu_Input.AddOption (new CQMenuCustomEnter (Menu_SpeedEnterCheck));
-	menu_Input.AddOption (new CQMenuCustomDraw (Menu_SpeedDrawCheck));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Always Run", &dummy_speed, 0, 1));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Lookspring", &lookspring, 0, 1));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Lookstrafe", &lookstrafe, 0, 1));
-
 	Cvar_Get (hudstyle, "cl_sbar");
 
 	menu_EffectsSimple.AddOption (new CQMenuCustomEnter (Menu_WarpCustomEnter));
@@ -1265,6 +1131,10 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Orientation", &r_lerporient, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Frame", &r_lerpframe, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Light Style", &r_lerplightstyle, 0, 1));
+	menu_EffectsSimple.AddOption (new CQMenuTitle ("Lighting"));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Overbrighting", &overbright_num, overbright_options));
+	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
+	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("MDL Light Scaling", &r_aliaslightscale, 0.5, 3, 0.25));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Water and Liquids"));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Water Alpha", &r_wateralpha, 0, 1, 0.1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Underwater Warp", &r_waterwarp, 0, 1));
@@ -1273,10 +1143,6 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Show Inventory", &hud_invshownum, hud_invshow));
 	menu_EffectsSimple.AddOption (TAG_HUDALIGN, new CQMenuCvarToggle ("Center-align HUD", &scr_centersbar));
 	menu_EffectsSimple.AddOption (TAG_HUDALPHA, new CQMenuCvarSlider ("HUD Alpha", &scr_sbaralpha, 0, 1, 0.1));
-	menu_EffectsSimple.AddOption (new CQMenuTitle ("Other"));
-	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Fast Lightmaps", &fastlmmode, fastlmmodes));
-	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
-	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Automatic Mapshots", &r_automapshot, 0, 1));
 
 	// keybindings
 	menu_Keybindings.AddOption (new CQMenuBanner (&gfx_ttl_cstm_lmp));
@@ -1341,6 +1207,7 @@ void Menu_HelpCustomEnter (void)
 			// endcred.dem is not actually present in the nehahra download!
 			if (sv.active)
 				Cbuf_AddText ("disconnect\n");
+
 			Cbuf_AddText ("playdemo endcred\n");
 
 			return;
@@ -1385,6 +1252,7 @@ void Menu_HelpCustomKey (int key)
 	{
 	case K_UPARROW:
 	case K_RIGHTARROW:
+
 		if (registered.value)
 		{
 			if (++menu_HelpPage >= NUM_HELP_PAGES)
@@ -1395,10 +1263,12 @@ void Menu_HelpCustomKey (int key)
 			if (++menu_HelpPage >= NUM_HELP_PAGES)
 				menu_HelpPage = 0;
 		}
+
 		break;
 
 	case K_DOWNARROW:
 	case K_LEFTARROW:
+
 		if (registered.value)
 		{
 			if (--menu_HelpPage < 1)
@@ -1409,6 +1279,7 @@ void Menu_HelpCustomKey (int key)
 			if (--menu_HelpPage < 0)
 				menu_HelpPage = NUM_HELP_PAGES - 1;
 		}
+
 		break;
 	}
 }
@@ -1424,70 +1295,19 @@ void Menu_InitHelpMenu (void)
 	menu_Help.AddOption (new CQMenuCustomKey (K_RIGHTARROW, Menu_HelpCustomKey));
 }
 
-char *AxisActions[] =
-{
-	"No Action",
-	"Look Down/Up",
-	"Move Fwd/Back",
-	"Turn Left/Right",
-	"Strafe Left/Right",
-	"Look Up/Down",
-	"Move Back/Fwd",
-	"Turn Right/Left",
-	"Strafe Right/Left",
-	NULL
-};
-
-
 int Menu_ControllerCustomDraw (int y)
 {
-	// force a correct set
-	Cvar_Set (&xi_axislx, xi_axislx.integer);
-	Cvar_Set (&xi_axisly, xi_axisly.integer);
-	Cvar_Set (&xi_axisrx, xi_axisrx.integer);
-	Cvar_Set (&xi_axisry, xi_axisry.integer);
-	Cvar_Set (&xi_axislt, xi_axislt.integer);
-	Cvar_Set (&xi_axisrt, xi_axisrt.integer);
-
-	extern int xiActiveController;
-
-	if (xiActiveController < 0)
-		Menu_PrintCenter (y, "No Controllers Found");
-	else
-		Menu_PrintCenter (y, va ("Found Controller on Port %i", xiActiveController));
-
 	return y + 15;
 }
 
 
-void IN_StartupXInput (void);
-void IN_ActivateMouse (void);
-
 void Menu_RescanControllers (void)
 {
-	// rescan for controllers and activate them
-	IN_StartupXInput ();
-	IN_ActivateMouse ();
 }
 
 
 void Menu_InitControllerMenu (void)
 {
-	// options
-	menu_Controller.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
-	menu_Controller.AddOption (new CQMenuTitle ("XBox 360 Controller Options"));
-	menu_Controller.AddOption (new CQMenuCustomDraw (Menu_ControllerCustomDraw));
-	menu_Controller.AddOption (new CQMenuCommand ("Rescan for Controllers", Menu_RescanControllers));
-	menu_Controller.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Controller.AddOption (new CQMenuCvarToggle ("Use Controller", &xi_usecontroller, 0, 1));
-	menu_Controller.AddOption (new CQMenuCvarToggle ("Map DPAD to Arrows", &xi_dpadarrowmap, 0, 1));
-	menu_Controller.AddOption (new CQMenuTitle ("Controller Axis Actions"));
-	menu_Controller.AddOption (new CQMenuSpinControl ("Left Thumb X", &xi_axislx.integer, AxisActions));
-	menu_Controller.AddOption (new CQMenuSpinControl ("Left Thumb Y", &xi_axisly.integer, AxisActions));
-	menu_Controller.AddOption (new CQMenuSpinControl ("Right Thumb X", &xi_axisrx.integer, AxisActions));
-	menu_Controller.AddOption (new CQMenuSpinControl ("Right Thumb Y", &xi_axisry.integer, AxisActions));
-	menu_Controller.AddOption (new CQMenuSpinControl ("Left Trigger", &xi_axislt.integer, AxisActions));
-	menu_Controller.AddOption (new CQMenuSpinControl ("Right Trigger", &xi_axisrt.integer, AxisActions));
 }
 
 
@@ -1503,7 +1323,6 @@ typedef struct mapinfo_s
 
 mapinfo_t *menu_mapslist = NULL;
 int num_menumaps = 0;
-CScrollBoxProvider *MapListScrollBox = NULL;
 
 // this is used to provide access to the maps list in a spinbox for the multiplayer menu...
 char **spinbox_maps = NULL;
@@ -1530,6 +1349,7 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 
 	// likewise can never happen
 	if (!data) return;
+
 	if (com_token[0] != '{') return;
 
 	while (1)
@@ -1539,6 +1359,7 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 
 		// there is no key (end of worldspawn)
 		if (!data) break;
+
 		if (com_token[0] == '}') break;
 
 		// allow keys with a leading _
@@ -1752,8 +1573,6 @@ void Menu_MapsPopulate (void)
 	// clear down previous map list
 	menu_mapslist = NULL;
 
-	if (MapListScrollBox) delete MapListScrollBox;
-
 	char **MapList = NULL;
 	int listlen = COM_BuildContentList (&MapList, "maps/", ".bsp");
 
@@ -1777,12 +1596,6 @@ void Menu_MapsPopulate (void)
 		Sys_Error ("Menu_MapsPopulate: No Maps Installed!\n(Are you crazy?)");
 		return;
 	}
-
-	// set up the scrollbox
-	MapListScrollBox = new CScrollBoxProvider (maplistlen, 22, 22);
-	MapListScrollBox->SetDrawItemCallback (Menu_MapsOnDraw);
-	MapListScrollBox->SetHoverItemCallback (Menu_MapsOnHover);
-	MapListScrollBox->SetEnterItemCallback (Menu_MapsOnEnter);
 
 	// need to store this out for freeing above
 	num_menumaps = maplistlen;
@@ -1822,29 +1635,14 @@ void Menu_MapsPopulate (void)
 
 int Menu_MapsCustomDraw (int y)
 {
-	if (MapListScrollBox)
-		y = MapListScrollBox->DrawItems ((vid.width - 320) / 2 - 24, y);
-
 	return y;
 }
 
 
 void Menu_MapsCustomKey (int k)
 {
-	if (!MapListScrollBox) return;
-
-	switch (k)
-	{
-	case K_DOWNARROW:
-	case K_UPARROW:
-		menu_soundlevel = m_sound_nav;
-
-		// enter item callback needs this...!
-	case K_ENTER:
-		MapListScrollBox->KeyFunc (k);
-		break;
-	}
 }
+
 
 char *democmds[] = {"playdemo", "timedemo", "record", NULL};
 int democmd_num = 0;
@@ -2047,6 +1845,7 @@ bool M_Menu_Demo_Info (char *demofile)
 					break;
 
 				case svc_print:
+
 					while (1)
 					{
 						int c = msgdata[msgpos++];
@@ -2064,16 +1863,16 @@ bool M_Menu_Demo_Info (char *demofile)
 				case svc_serverinfo:
 					// copy out the serverinfo
 					// the cd track will be stomped on by this fread, so we need to save it out then restore it
-					{
-						int savedcdtrack = dsi.cdtrack;
-						Q_MemCpy (&dsi, &msgdata[msgpos], sizeof (demo_serverinfo_t));
-						dsi.cdtrack = savedcdtrack;
-					}
+				{
+					int savedcdtrack = dsi.cdtrack;
+					memcpy (&dsi, &msgdata[msgpos], sizeof (demo_serverinfo_t));
+					dsi.cdtrack = savedcdtrack;
+				}
 
-					// done
-					COM_FCloseFile (&fh);
-					Zone_Free (msgdata);
-					return true;
+				// done
+				COM_FCloseFile (&fh);
+				Zone_Free (msgdata);
+				return true;
 
 				default:
 					// unsupported
@@ -2167,12 +1966,13 @@ int Menu_DemoCustomDraw2 (int y)
 		{
 			char templevelname[64];
 
-			for (int i = 0; ;i++)
+			for (int i = 0;; i++)
 			{
 				templevelname[i] = dsi.levelname[i];
 
 				// yeah, and fuck you too.
 				if (i == 60) templevelname[i] = 0;
+
 				if (!templevelname[i]) break;
 			}
 
@@ -2254,7 +2054,7 @@ void Menu_RemoveMenu (void);
 
 void Menu_MapCommand (void)
 {
-	// "map 
+	// "map
 	// launch the map command
 	Menu_RemoveMenu ();
 	Cvar_Set (&skill, menumapsskillnum);

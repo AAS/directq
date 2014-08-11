@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -19,6 +19,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // net_main.c
 
 #include "quakedef.h"
+
+// clients need to be in a static memory block as string pointers to them can still be used after a client goes inactive
+extern client_t host_svsclients[];
+void Host_InitClients (int numclients);
 
 // joe: rcon from ProQuake
 #define RCON_BUFF_SIZE	8192
@@ -49,8 +53,8 @@ bool	slistLocal = true;
 static float	slistStartTime;
 static int		slistLastShown;
 
-static void Slist_Send(void *soak);
-static void Slist_Poll(void *soak);
+static void Slist_Send (void *soak);
+static void Slist_Poll (void *soak);
 PollProcedure	slistSendProcedure = {NULL, 0.0, Slist_Send};
 PollProcedure	slistPollProcedure = {NULL, 0.0, Slist_Poll};
 
@@ -63,7 +67,7 @@ int messagesReceived = 0;
 int unreliableMessagesSent = 0;
 int unreliableMessagesReceived = 0;
 
-cvar_t	net_messagetimeout ("net_messagetimeout","300");
+cvar_t	net_messagetimeout ("net_messagetimeout", "300");
 cvar_t	hostname ("hostname", "UNNAMED");
 
 bool	configRestored = false;
@@ -77,7 +81,7 @@ int	net_driverlevel;
 
 float			net_time;
 
-float SetNetTime(void)
+float SetNetTime (void)
 {
 	net_time = Sys_FloatTime();
 	return net_time;
@@ -112,7 +116,7 @@ qsocket_t *NET_NewQSocket (void)
 
 	sock->disconnected = false;
 	sock->connecttime = net_time;
-	strcpy (sock->address,"UNSET ADDRESS");
+	strcpy (sock->address, "UNSET ADDRESS");
 	sock->driver = net_driverlevel;
 	sock->socket = 0;
 	sock->driverdata = NULL;
@@ -131,7 +135,7 @@ qsocket_t *NET_NewQSocket (void)
 }
 
 
-void NET_FreeQSocket(qsocket_t *sock)
+void NET_FreeQSocket (qsocket_t *sock)
 {
 	qsocket_t	*s;
 
@@ -190,12 +194,13 @@ static void NET_Listen_f (void)
 		return;
 	}
 
-	listening = atoi(Cmd_Argv(1)) ? true : false;
+	listening = atoi (Cmd_Argv (1)) ? true : false;
 
-	for (net_driverlevel=0; net_driverlevel<net_numdrivers; net_driverlevel++)
+	for (net_driverlevel = 0; net_driverlevel < net_numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
+
 		net_DriverFunc.Listen (listening);
 	}
 }
@@ -217,7 +222,7 @@ static void MaxPlayers_f (void)
 		return;
 	}
 
-	n = atoi (Cmd_Argv(1));
+	n = atoi (Cmd_Argv (1));
 
 	if (n < 1) n = 1;
 
@@ -233,8 +238,8 @@ static void MaxPlayers_f (void)
 	svs.maxclients = n;
 
 	// recreate the client structs
-	MainZone->Free (svs.clients);
-	svs.clients = (client_s *) Zone_Alloc (svs.maxclients * sizeof (client_t));
+	svs.clients = host_svsclients;
+	Host_InitClients (svs.maxclients);
 
 	// realloc sockets
 	NET_AllocQSockets (svs.maxclients);
@@ -281,7 +286,7 @@ static void NET_Port_f (void)
 }
 
 
-static void PrintSlistHeader(void)
+static void PrintSlistHeader (void)
 {
 	Con_Printf ("Server          Map             Users\n");
 	Con_Printf ("--------------- --------------- -----\n");
@@ -289,7 +294,7 @@ static void PrintSlistHeader(void)
 }
 
 
-static void PrintSlist(void)
+static void PrintSlist (void)
 {
 	int n;
 
@@ -300,11 +305,12 @@ static void PrintSlist(void)
 		else
 			Con_Printf ("%-15.15s %-15.15s\n", hostcache[n].name, hostcache[n].map);
 	}
+
 	slistLastShown = n;
 }
 
 
-static void PrintSlistTrailer(void)
+static void PrintSlistTrailer (void)
 {
 	if (hostCacheCount)
 		Con_Printf ("== end list ==\n\n");
@@ -327,8 +333,8 @@ void NET_Slist_f (void)
 	slistInProgress = true;
 	slistStartTime = Sys_FloatTime();
 
-	SchedulePollProcedure(&slistSendProcedure, 0.0);
-	SchedulePollProcedure(&slistPollProcedure, 0.1);
+	SchedulePollProcedure (&slistSendProcedure, 0.0);
+	SchedulePollProcedure (&slistPollProcedure, 0.1);
 
 	hostCacheCount = 0;
 }
@@ -336,28 +342,32 @@ void NET_Slist_f (void)
 
 static void Slist_Send (void *soak)
 {
-	for (net_driverlevel=0; net_driverlevel < net_numdrivers; net_driverlevel++)
+	for (net_driverlevel = 0; net_driverlevel < net_numdrivers; net_driverlevel++)
 	{
 		if (!slistLocal && net_driverlevel == 0)
 			continue;
+
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
+
 		net_DriverFunc.SearchForHosts (true);
 	}
 
 	if ((Sys_FloatTime() - slistStartTime) < 0.5)
-		SchedulePollProcedure(&slistSendProcedure, 0.75);
+		SchedulePollProcedure (&slistSendProcedure, 0.75);
 }
 
 
 static void Slist_Poll (void *soak)
 {
-	for (net_driverlevel=0; net_driverlevel < net_numdrivers; net_driverlevel++)
+	for (net_driverlevel = 0; net_driverlevel < net_numdrivers; net_driverlevel++)
 	{
 		if (!slistLocal && net_driverlevel == 0)
 			continue;
+
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
+
 		net_DriverFunc.SearchForHosts (false);
 	}
 
@@ -366,12 +376,13 @@ static void Slist_Poll (void *soak)
 
 	if ((Sys_FloatTime() - slistStartTime) < 1.5)
 	{
-		SchedulePollProcedure(&slistPollProcedure, 0.1);
+		SchedulePollProcedure (&slistPollProcedure, 0.1);
 		return;
 	}
 
 	if (! slistSilent)
 		PrintSlistTrailer();
+
 	slistInProgress = false;
 	slistSilent = false;
 	slistLocal = true;
@@ -425,13 +436,14 @@ qsocket_t *NET_Connect (char *host)
 	slistSilent = host ? true : false;
 	NET_Slist_f ();
 
-	while(slistInProgress)
+	while (slistInProgress)
 		NET_Poll();
 
 	if (host == NULL)
 	{
 		if (hostCacheCount != 1)
 			return NULL;
+
 		host = hostcache[0].cname;
 		Con_Printf ("Connecting to...\n%s @ %s\n\n", hostcache[0].name, host);
 	}
@@ -449,11 +461,14 @@ qsocket_t *NET_Connect (char *host)
 	}
 
 JustDoIt:
+
 	for (net_driverlevel = 0; net_driverlevel < numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
+
 		ret = net_DriverFunc.Connect (host);
+
 		if (ret)
 			return ret;
 	}
@@ -489,9 +504,10 @@ qsocket_t *NET_CheckNewConnections (void)
 
 	SetNetTime();
 
-	for (net_driverlevel=0; net_driverlevel<net_numdrivers; net_driverlevel++)
+	for (net_driverlevel = 0; net_driverlevel < net_numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false) continue;
+
 		if (net_driverlevel && listening == false) continue;
 
 		ret = net_DriverFunc.CheckNewConnections ();
@@ -520,7 +536,7 @@ void NET_Close (qsocket_t *sock)
 	// call the driver_Close function
 	sfunc.Close (sock);
 
-	NET_FreeQSocket(sock);
+	NET_FreeQSocket (sock);
 }
 
 
@@ -545,7 +561,7 @@ struct
 	int		len;
 } vcrGetMessage;
 
-extern void PrintStats(qsocket_t *s);
+extern void PrintStats (qsocket_t *s);
 
 int	NET_GetMessage (qsocket_t *sock)
 {
@@ -565,14 +581,14 @@ int	NET_GetMessage (qsocket_t *sock)
 
 	SetNetTime();
 
-	ret = sfunc.QGetMessage(sock);
+	ret = sfunc.QGetMessage (sock);
 
 	// see if this connection has timed out
 	if (ret == 0 && sock->driver)
 	{
 		if (net_time - sock->lastMessageTime > net_messagetimeout.value)
 		{
-			NET_Close(sock);
+			NET_Close (sock);
 			Con_Printf ("NET_GetMessage: timed out\n");
 			return -1;
 		}
@@ -583,6 +599,7 @@ int	NET_GetMessage (qsocket_t *sock)
 		if (sock->driver)
 		{
 			sock->lastMessageTime = net_time;
+
 			if (ret == 1)
 				messagesReceived++;
 			else if (ret == 2)
@@ -619,7 +636,7 @@ struct
 int NET_SendMessage (qsocket_t *sock, sizebuf_t *data)
 {
 	int		r;
-	
+
 	if (!sock)
 		return -1;
 
@@ -630,7 +647,8 @@ int NET_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	}
 
 	SetNetTime();
-	r = sfunc.QSendMessage(sock, data);
+	r = sfunc.QSendMessage (sock, data);
+
 	if (r == 1 && sock->driver)
 		messagesSent++;
 
@@ -641,7 +659,7 @@ int NET_SendMessage (qsocket_t *sock, sizebuf_t *data)
 int NET_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 {
 	int		r;
-	
+
 	if (!sock)
 		return -1;
 
@@ -652,7 +670,8 @@ int NET_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	}
 
 	SetNetTime();
-	r = sfunc.SendUnreliableMessage(sock, data);
+	r = sfunc.SendUnreliableMessage (sock, data);
+
 	if (r == 1 && sock->driver)
 		unreliableMessagesSent++;
 
@@ -671,7 +690,7 @@ message to be transmitted.
 bool NET_CanSendMessage (qsocket_t *sock)
 {
 	int		r;
-	
+
 	if (!sock)
 		return false;
 
@@ -680,13 +699,13 @@ bool NET_CanSendMessage (qsocket_t *sock)
 
 	SetNetTime();
 
-	r = sfunc.CanSendMessage(sock);
+	r = sfunc.CanSendMessage (sock);
 
 	return r;
 }
 
 
-int NET_SendToAll(sizebuf_t *data, int blocktime)
+int NET_SendToAll (sizebuf_t *data, int blocktime)
 {
 	float		start;
 	int			i;
@@ -694,19 +713,21 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 	bool	state1 [MAX_SCOREBOARD];
 	bool	state2 [MAX_SCOREBOARD];
 
-	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
+	for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 	{
 		if (!host_client->netconnection)
 			continue;
+
 		if (host_client->active)
 		{
 			if (host_client->netconnection->driver == 0)
 			{
-				NET_SendMessage(host_client->netconnection, data);
+				NET_SendMessage (host_client->netconnection, data);
 				state1[i] = true;
 				state2[i] = true;
 				continue;
 			}
+
 			count++;
 			state1[i] = false;
 			state2[i] = false;
@@ -723,19 +744,21 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 	while (count)
 	{
 		count = 0;
-		for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
+
+		for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 		{
 			if (!state1[i])
 			{
 				if (NET_CanSendMessage (host_client->netconnection))
 				{
 					state1[i] = true;
-					NET_SendMessage(host_client->netconnection, data);
+					NET_SendMessage (host_client->netconnection, data);
 				}
 				else
 				{
 					NET_GetMessage (host_client->netconnection);
 				}
+
 				count++;
 				continue;
 			}
@@ -750,13 +773,16 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 				{
 					NET_GetMessage (host_client->netconnection);
 				}
+
 				count++;
 				continue;
 			}
 		}
+
 		if ((Sys_FloatTime() - start) > blocktime)
 			break;
 	}
+
 	return count;
 }
 
@@ -784,7 +810,7 @@ void NET_Init (void)
 
 	if (i)
 	{
-		if (i < com_argc-1)
+		if (i < com_argc - 1)
 			DEFAULTnet_hostport = atoi (com_argv[i+1]);
 		else
 			Sys_Error ("NET_Init: you must specify a number after -port");
@@ -802,18 +828,21 @@ void NET_Init (void)
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
 
 	// initialize all the drivers
-	for (net_driverlevel=0; net_driverlevel<net_numdrivers; net_driverlevel++)
+	for (net_driverlevel = 0; net_driverlevel < net_numdrivers; net_driverlevel++)
 	{
 		controlSocket = net_drivers[net_driverlevel].Init();
+
 		if (controlSocket == -1)
 			continue;
+
 		net_drivers[net_driverlevel].initialized = true;
 		net_drivers[net_driverlevel].controlSock = controlSocket;
+
 		if (listening)
 			net_drivers[net_driverlevel].Listen (true);
 	}
 
-	if (*my_tcpip_address) Con_DPrintf("TCP/IP address %s\n", my_tcpip_address);
+	if (*my_tcpip_address) Con_DPrintf ("TCP/IP address %s\n", my_tcpip_address);
 }
 
 
@@ -846,7 +875,7 @@ void NET_Shutdown (void)
 
 static PollProcedure *pollProcedureList = NULL;
 
-void NET_Poll(void)
+void NET_Poll (void)
 {
 	PollProcedure *pp;
 	bool	useModem;
@@ -860,21 +889,24 @@ void NET_Poll(void)
 	{
 		if (pp->nextTime > net_time)
 			break;
+
 		pollProcedureList = pp->next;
-		pp->procedure(pp->arg);
+		pp->procedure (pp->arg);
 	}
 }
 
 
-void SchedulePollProcedure(PollProcedure *proc, float timeOffset)
+void SchedulePollProcedure (PollProcedure *proc, float timeOffset)
 {
 	PollProcedure *pp, *prev;
 
 	proc->nextTime = Sys_FloatTime() + timeOffset;
+
 	for (pp = pollProcedureList, prev = NULL; pp; pp = pp->next)
 	{
 		if (pp->nextTime >= proc->nextTime)
 			break;
+
 		prev = pp;
 	}
 

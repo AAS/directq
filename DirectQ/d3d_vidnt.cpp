@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -21,13 +21,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
-#include "d3d_vbo.h"
 
 #include "winquake.h"
 #include "resource.h"
 #include <commctrl.h>
 
-void D3D_SetDefaultStates (void);
+#ifdef _DEBUG
+#pragma comment (lib, "d3d9.lib")
+//#pragma comment (lib, "d3dx9d.lib")
+#pragma comment (lib, "d3dx9.lib")
+#else
+#pragma comment (lib, "d3d9.lib")
+#pragma comment (lib, "d3dx9.lib")
+#endif
+
+#define VIDDRIVER_VERSION "1.8.7"
+cvar_t viddriver_version ("viddriver_version", "unknown", CVAR_ARCHIVE);
+
 void D3D_SetAllStates (void);
 
 extern bool WinDWM;
@@ -36,125 +46,15 @@ extern bool WinDWM;
 LPDIRECT3D9 d3d_Object = NULL;
 LPDIRECT3DDEVICE9 d3d_Device = NULL;
 
-// entrypoints for d3d
-// because we don't know which version of d3d9 is going to be on a target machine we load dynamically
-HINSTANCE hInstD3D9 = NULL;
-HINSTANCE hInstD3DX = NULL;
-
-FARPROC D3DX_GetProcAddress (char *procname)
-{
-	FARPROC proc = NULL;
-
-	if (hInstD3DX && procname)
-		proc = GetProcAddress (hInstD3DX, procname);
-
-	return proc;
-}
-
-
-DIRECT3DCREATE9PROC QDirect3DCreate9 = NULL;
-D3DXMATRIXPERSPECTIVEFOVRHPROC QD3DXMatrixPerspectiveFovRH = NULL;
-D3DXCREATEEFFECTPROC QD3DXCreateEffect = NULL;
-D3DXLOADSURFACEFROMSURFACEPROC QD3DXLoadSurfaceFromSurface = NULL;
-D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC QD3DXMatrixPerspectiveOffCenterRH = NULL;
-D3DXMATRIXORTHOOFFCENTERPROC QD3DXMatrixOrthoOffCenterRH = NULL;
-D3DXMATRIXMULTIPLYPROC QD3DXMatrixMultiply = NULL;
-D3DXMATRIXSCALINGPROC QD3DXMatrixScaling = NULL;
-D3DXMATRIXTRANSLATIONPROC QD3DXMatrixTranslation = NULL;
-D3DXMATRIXROTATIONXPROC QD3DXMatrixRotationX = NULL;
-D3DXMATRIXROTATIONYPROC QD3DXMatrixRotationY = NULL;
-D3DXMATRIXROTATIONZPROC QD3DXMatrixRotationZ = NULL;
-D3DXLOADSURFACEFROMMEMORYPROC QD3DXLoadSurfaceFromMemory = NULL;
-D3DXFILTERTEXTUREPROC QD3DXFilterTexture = NULL;
-D3DXGETPIXELSHADERPROFILEPROC QD3DXGetPixelShaderProfile = NULL;
-D3DXGETVERTEXSHADERPROFILEPROC QD3DXGetVertexShaderProfile = NULL;
-D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA = NULL;
-D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx = NULL;
-D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA = NULL;
-D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface = NULL;
-D3DXDDECLARATORFROMFVFPROC QD3DXDeclaratorFromFVF = NULL;
-D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeFaces = NULL;
-D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeVertices = NULL;
-D3DXCREATEMESHFVFPROC QD3DXCreateMeshFVF = NULL;
-D3DXLOADSURFACEFROMFILEINMEMORYPROC QD3DXLoadSurfaceFromFileInMemory = NULL;
-D3DXMATRIXINVERSEPROC QD3DXMatrixInverse = NULL;
-
-// this needs to default to 42 and be capped at that level as using d3dx versions later than the SDK we compile with it problematical
-cvar_t d3dx_version ("d3dx_version", 42, CVAR_ARCHIVE);
-
-void D3D_LoadD3DXVersion (int ver)
-{
-	// no versions of the dll below 24 exist, but DirectQ requires 32 to compile it's shaders so prevent attempts to use anything lower.
-	// a version of -1 (or any other negative number) can be used for a "best available" 
-	if (ver < 0) ver = 42;
-	if (ver < 32) ver = 32;
-
-	// never go higher than 42 - see above
-	if (ver > 42) ver = 42;
-
-	// select the best version of d3dx available to us
-	for (int i = ver; i; i--)
-	{
-		UNLOAD_LIBRARY (hInstD3DX);
-		hInstD3DX = LoadLibrary (va ("d3dx9_%i.dll", i));
-
-		if (hInstD3DX)
-		{
-			// it's known-good that these all have entrypoints in d3dx9 up to version 42, but who knows about potential future versions?
-			if (!(QD3DXMatrixPerspectiveFovRH = (D3DXMATRIXPERSPECTIVEFOVRHPROC) D3DX_GetProcAddress ("D3DXMatrixPerspectiveFovRH"))) continue;
-			if (!(QD3DXCreateEffect = (D3DXCREATEEFFECTPROC) D3DX_GetProcAddress ("D3DXCreateEffect"))) continue;
-			if (!(QD3DXLoadSurfaceFromSurface = (D3DXLOADSURFACEFROMSURFACEPROC) D3DX_GetProcAddress ("D3DXLoadSurfaceFromSurface"))) continue;
-			if (!(QD3DXMatrixPerspectiveOffCenterRH = (D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC) D3DX_GetProcAddress ("D3DXMatrixPerspectiveOffCenterRH"))) continue;
-			if (!(QD3DXMatrixOrthoOffCenterRH = (D3DXMATRIXORTHOOFFCENTERPROC) D3DX_GetProcAddress ("D3DXMatrixOrthoOffCenterRH"))) continue;
-			if (!(QD3DXMatrixMultiply = (D3DXMATRIXMULTIPLYPROC) D3DX_GetProcAddress ("D3DXMatrixMultiply"))) continue;
-			if (!(QD3DXMatrixScaling = (D3DXMATRIXSCALINGPROC) D3DX_GetProcAddress ("D3DXMatrixScaling"))) continue;
-			if (!(QD3DXMatrixTranslation = (D3DXMATRIXTRANSLATIONPROC) D3DX_GetProcAddress ("D3DXMatrixTranslation"))) continue;
-			if (!(QD3DXMatrixRotationX = (D3DXMATRIXROTATIONXPROC) D3DX_GetProcAddress ("D3DXMatrixRotationX"))) continue;
-			if (!(QD3DXMatrixRotationY = (D3DXMATRIXROTATIONYPROC) D3DX_GetProcAddress ("D3DXMatrixRotationY"))) continue;
-			if (!(QD3DXMatrixRotationZ = (D3DXMATRIXROTATIONZPROC) D3DX_GetProcAddress ("D3DXMatrixRotationZ"))) continue;
-			if (!(QD3DXLoadSurfaceFromMemory = (D3DXLOADSURFACEFROMMEMORYPROC) D3DX_GetProcAddress ("D3DXLoadSurfaceFromMemory"))) continue;
-			if (!(QD3DXFilterTexture = (D3DXFILTERTEXTUREPROC) D3DX_GetProcAddress ("D3DXFilterTexture"))) continue;
-			if (!(QD3DXGetPixelShaderProfile = (D3DXGETPIXELSHADERPROFILEPROC) D3DX_GetProcAddress ("D3DXGetPixelShaderProfile"))) continue;
-			if (!(QD3DXGetVertexShaderProfile = (D3DXGETVERTEXSHADERPROFILEPROC) D3DX_GetProcAddress ("D3DXGetVertexShaderProfile"))) continue;
-			if (!(QD3DXSaveSurfaceToFileA = (D3DXSAVESURFACETOFILEPROC) D3DX_GetProcAddress ("D3DXSaveSurfaceToFileA"))) continue;
-			if (!(QD3DXCreateTextureFromFileInMemoryEx = (D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromFileInMemoryEx"))) continue;
-			if (!(QD3DXCreateTextureFromResourceExA = (D3DXCREATETEXTUREFROMRESOURCEEXAPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromResourceExA"))) continue;
-			if (!(QD3DXCreateRenderToSurface = (D3DXCREATERENDERTOSURFACEPROC) D3DX_GetProcAddress ("D3DXCreateRenderToSurface"))) continue;
-			if (!(QD3DXDeclaratorFromFVF = (D3DXDDECLARATORFROMFVFPROC) D3DX_GetProcAddress ("D3DXDeclaratorFromFVF"))) continue;
-			if (!(QD3DXOptimizeFaces = (D3DXOPTIMIZEFACEVERTPROC) D3DX_GetProcAddress ("D3DXOptimizeFaces"))) continue;
-			if (!(QD3DXOptimizeVertices = (D3DXOPTIMIZEFACEVERTPROC) D3DX_GetProcAddress ("D3DXOptimizeVertices"))) continue;
-			if (!(QD3DXCreateMeshFVF = (D3DXCREATEMESHFVFPROC) D3DX_GetProcAddress ("D3DXCreateMeshFVF"))) continue;
-			if (!(QD3DXLoadSurfaceFromFileInMemory = (D3DXLOADSURFACEFROMFILEINMEMORYPROC) D3DX_GetProcAddress ("D3DXLoadSurfaceFromFileInMemory"))) continue;
-			if (!(QD3DXMatrixInverse = (D3DXMATRIXINVERSEPROC) D3DX_GetProcAddress ("D3DXMatrixInverse"))) continue;
-
-			// done
-			Con_SafePrintf ("Loaded D3DX version %i (d3dx9_%i.dll)\n", i, i);
-			Cvar_Set (&d3dx_version, i);
-			return;
-		}
-	}
-
-	// no d3dx9 available (this should never happen)
-	UNLOAD_LIBRARY (hInstD3DX);
-	Sys_Error ("Couldn't load D3DX version %i (d3dx9_%i.dll)\n\nConsider upgrading or installing/reinstalling DirectX 9.", ver, ver);
-}
-
 D3DADAPTER_IDENTIFIER9 d3d_Adapter;
 D3DCAPS9 d3d_DeviceCaps;
 d3d_global_caps_t d3d_GlobalCaps;
 D3DPRESENT_PARAMETERS d3d_PresentParams;
 
-bool d3d_SceneBegun = false;
-
-void D3D_Init3DSceneTexture (void);
-void D3D_Kill3DSceneTexture (void);
-
-
 // global video state
 viddef_t	vid;
 
 // window state management
-bool d3d_DeviceLost = false;
 bool vid_canalttab = false;
 bool vid_initialized = false;
 bool scr_skipupdate;
@@ -173,8 +73,8 @@ void VID_MenuKey (int key);
 void Menu_VideoBuild (void);
 
 // hlsl
-void D3D_InitHLSL (void);
-void D3D_ShutdownHLSL (void);
+void D3DHLSL_Init (void);
+void D3DHLSL_Shutdown (void);
 
 // lightmaps
 void D3D_LoseLightmapResources (void);
@@ -184,8 +84,6 @@ void D3D_RecoverLightmapResources (void);
 HWND d3d_Window;
 
 modestate_t	modestate = MS_UNINIT;
-
-void Splash_Destroy (void);
 
 // video cvars
 // force an invalid mode on initial entry
@@ -228,10 +126,13 @@ cvar_t gl_triplebuffer ("gl_triplebuffer", 1, CVAR_ARCHIVE);
 
 d3d_ModeDesc_t *d3d_ModeList = NULL;
 
+int d3d_NumModes = 0;
+int d3d_NumWindowedModes = 0;
+
 D3DDISPLAYMODE d3d_DesktopMode;
 D3DDISPLAYMODE d3d_CurrentMode;
 
-d3d_ModeDesc_t d3d_BadMode = {{666, 666, 666, D3DFMT_UNKNOWN}, false, 0, -1, "Bad Mode", NULL};
+d3d_ModeDesc_t d3d_BadMode = {{666, 666, 666, D3DFMT_UNKNOWN}, false, 0, -1, "Bad Mode"};
 
 
 // list of mode formats we wish to test
@@ -254,18 +155,7 @@ void ClearAllStates (void);
 void AppActivate (BOOL fActive, BOOL minimize);
 
 
-
-DWORD D3D_RenderThread (LPVOID lpParam)
-{
-	while (1)
-	{
-	}
-
-	return 0;
-}
-
-
-void D3D_ResetWindow (D3DDISPLAYMODE *mode)
+void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
 {
 	if (mode->RefreshRate == 0)
 	{
@@ -329,7 +219,7 @@ void D3D_ResetWindow (D3DDISPLAYMODE *mode)
 }
 
 
-DWORD D3D_GetPresentInterval (void)
+DWORD D3DVid_GetPresentInterval (void)
 {
 	if (vid_vsync.integer)
 	{
@@ -349,12 +239,12 @@ DWORD D3D_GetPresentInterval (void)
 }
 
 
-D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
+D3DFORMAT D3DVid_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 {
 	D3DFORMAT ModeFormat = mode->Format;
 
-	// 32/24 bit needs to come first because a 16 bit depth buffer is just not good enough for to prevent precision trouble in places
-	D3DFORMAT d3d_AllowedDepthFormats[] = {D3DFMT_D32, D3DFMT_D24X8, D3DFMT_D16, D3DFMT_D24S8, D3DFMT_D24X4S4, D3DFMT_D15S1, D3DFMT_UNKNOWN};
+	// 24 bit needs to come first because a 16 bit depth buffer is just not good enough for to prevent precision trouble in places
+	D3DFORMAT d3d_AllowedDepthFormats[] = {D3DFMT_D24S8, D3DFMT_D24X8, D3DFMT_D16, D3DFMT_UNKNOWN};
 
 	if (ModeFormat == D3DFMT_UNKNOWN) ModeFormat = d3d_DesktopMode.Format;
 
@@ -365,27 +255,27 @@ D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 
 		// check that the format exists
 		hr = d3d_Object->CheckDeviceFormat
-		(
-			D3DADAPTER_DEFAULT,
-			D3DDEVTYPE_HAL,
-			ModeFormat,
-			D3DUSAGE_DEPTHSTENCIL,
-			D3DRTYPE_SURFACE,
-			d3d_AllowedDepthFormats[i]
-		);
+			 (
+				 D3DADAPTER_DEFAULT,
+				 D3DDEVTYPE_HAL,
+				 ModeFormat,
+				 D3DUSAGE_DEPTHSTENCIL,
+				 D3DRTYPE_SURFACE,
+				 d3d_AllowedDepthFormats[i]
+			 );
 
 		// format does not exist
 		if (FAILED (hr)) continue;
 
 		// check that the format is compatible
 		hr = d3d_Object->CheckDepthStencilMatch
-		(
-			D3DADAPTER_DEFAULT,
-			D3DDEVTYPE_HAL,
-			ModeFormat,
-			ModeFormat,
-			d3d_AllowedDepthFormats[i]
-		);
+			 (
+				 D3DADAPTER_DEFAULT,
+				 D3DDEVTYPE_HAL,
+				 ModeFormat,
+				 ModeFormat,
+				 d3d_AllowedDepthFormats[i]
+			 );
 
 		// format is not compatible
 		if (FAILED (hr)) continue;
@@ -395,16 +285,16 @@ D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 	}
 
 	// didn't find one
-	Sys_Error ("D3D_GetDepthStencilFormat: Failed to find a valid DepthStencil format");
+	Sys_Error ("D3DVid_GetDepthStencilFormat: Failed to find a valid DepthStencil format");
 
 	// shut up compiler
 	return D3DFMT_UNKNOWN;
 }
 
 
-void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
+void D3DVid_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 {
-	Q_MemSet (pp, 0, sizeof (D3DPRESENT_PARAMETERS));
+	memset (pp, 0, sizeof (D3DPRESENT_PARAMETERS));
 
 	if (mode->RefreshRate == 0)
 	{
@@ -420,13 +310,13 @@ void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 	}
 
 	// create it without a depth buffer to begin with
-	d3d_GlobalCaps.DepthStencilFormat = D3D_GetDepthStencilFormat (mode);
+	d3d_GlobalCaps.DepthStencilFormat = D3DVid_GetDepthStencilFormat (mode);
 	pp->AutoDepthStencilFormat = d3d_GlobalCaps.DepthStencilFormat;
 	pp->EnableAutoDepthStencil = TRUE;
 	pp->Flags = 0;
 
 	pp->SwapEffect = D3DSWAPEFFECT_DISCARD;
-	pp->PresentationInterval = D3D_GetPresentInterval ();
+	pp->PresentationInterval = D3DVid_GetPresentInterval ();
 	pp->BackBufferCount = 1;
 	pp->BackBufferWidth = mode->Width;
 	pp->BackBufferHeight = mode->Height;
@@ -436,7 +326,7 @@ void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 }
 
 
-void D3D_ModeDescription (d3d_ModeDesc_t *mode)
+void D3DVid_ModeDescription (d3d_ModeDesc_t *mode)
 {
 	Con_Printf
 	(
@@ -450,27 +340,25 @@ void D3D_ModeDescription (d3d_ModeDesc_t *mode)
 }
 
 
-void D3D_DescribeModes_f (void)
+void D3DVid_DescribeModes_f (void)
 {
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
-		D3D_ModeDescription (mode);
+	for (int i = 0; i < d3d_NumModes; i++)
+	{
+		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+		D3DVid_ModeDescription (mode);
+	}
 }
 
 
-void D3D_NumModes_f (void)
+void D3DVid_NumModes_f (void)
 {
-	int nummodes = 0;
-
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
-		nummodes++;
-
-	if (nummodes == 1)
-		Con_Printf ("%d video mode is available\n", nummodes);
-	else Con_Printf ("%d video modes are available\n", nummodes);
+	if (d3d_NumModes == 1)
+		Con_Printf ("%d video mode is available\n", d3d_NumModes);
+	else Con_Printf ("%d video modes are available\n", d3d_NumModes);
 }
 
 
-bool D3D_ModeIsCurrent (d3d_ModeDesc_t *mode)
+bool D3DVid_ModeIsCurrent (d3d_ModeDesc_t *mode)
 {
 	if (d3d_CurrentMode.RefreshRate)
 	{
@@ -490,42 +378,46 @@ bool D3D_ModeIsCurrent (d3d_ModeDesc_t *mode)
 }
 
 
-void D3D_SetVidMode (void)
+void D3DVid_SetVidMode (void)
 {
 	// puts a correct number into the d3d_mode cvar
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		if (D3D_ModeIsCurrent (mode))
+		if (D3DVid_ModeIsCurrent (&d3d_ModeList[i]))
 		{
 			// set the correct value
-			Cvar_Set (&d3d_mode, mode->ModeNum);
+			Cvar_Set (&d3d_mode, d3d_ModeList[i].ModeNum);
 			return;
 		}
 	}
 }
 
 
-void D3D_DescribeCurrentMode_f (void)
+void D3DVid_DescribeCurrentMode_f (void)
 {
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		if (!D3D_ModeIsCurrent(mode)) continue;
+		d3d_ModeDesc_t *mode = d3d_ModeList + i;
 
-		D3D_ModeDescription (mode);
+		if (!D3DVid_ModeIsCurrent (mode)) continue;
+
+		D3DVid_ModeDescription (mode);
 		return;
 	}
 }
 
 
-void D3D_DescribeMode_f (void)
+void D3DVid_DescribeMode_f (void)
 {
 	int modenum = atoi (Cmd_Argv (1));
 
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+
 		if (mode->ModeNum != modenum) continue;
 
-		D3D_ModeDescription (mode);
+		D3DVid_ModeDescription (mode);
 		return;
 	}
 
@@ -533,12 +425,36 @@ void D3D_DescribeMode_f (void)
 }
 
 
-void D3D_RecoverDeviceResources (void)
+#define MAX_HANDLERS	256
+CD3DDeviceLossHandler *d3d_DeviceLossHandlers[MAX_HANDLERS];
+int numhandlers = 0;
+
+
+CD3DDeviceLossHandler::CD3DDeviceLossHandler (xcommand_t onloss, xcommand_t onrecover)
+{
+	this->OnLoseDevice = onloss;
+	this->OnRecoverDevice = onrecover;
+
+	if (numhandlers == MAX_HANDLERS)
+		Sys_Error ("CD3DDeviceLossHandler::CD3DDeviceLossHandler - Too many handlers!");
+	else
+	{
+		d3d_DeviceLossHandlers[numhandlers] = this;
+		numhandlers++;
+	}
+}
+
+
+void D3DVid_RecoverDeviceResources (void)
 {
 	// recreate anything that needs to be recreated
-	D3D_Init3DSceneTexture ();
-	D3D_InitHLSL ();
-	D3D_RecoverLightmapResources ();
+	for (int i = 0; i < MAX_HANDLERS; i++)
+	{
+		if (!d3d_DeviceLossHandlers[i]) continue;
+		if (!d3d_DeviceLossHandlers[i]->OnRecoverDevice) continue;
+
+		d3d_DeviceLossHandlers[i]->OnRecoverDevice ();
+	}
 
 	// recover all states back to what they should be
 	D3D_SetAllStates ();
@@ -548,19 +464,19 @@ void D3D_RecoverDeviceResources (void)
 }
 
 
-void D3D_ClearOcclusionQueries (void);
-
-void D3D_LoseDeviceResources (void)
+void D3DVid_LoseDeviceResources (void)
 {
 	// release anything that needs to be released
-	D3D_ClearOcclusionQueries ();
-	D3D_Kill3DSceneTexture ();
-	D3D_ShutdownHLSL ();
-	D3D_LoseLightmapResources ();
-	VBO_DestroyBuffers ();
+	for (int i = 0; i < MAX_HANDLERS; i++)
+	{
+		if (!d3d_DeviceLossHandlers[i]) continue;
+		if (!d3d_DeviceLossHandlers[i]->OnLoseDevice) continue;
+
+		d3d_DeviceLossHandlers[i]->OnLoseDevice ();
+	}
 
 	// ensure that present params are valid
-	D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
+	D3DVid_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
 }
 
 
@@ -568,14 +484,14 @@ void Host_GetConsoleCommands (void);
 
 bool vid_restarted = false;
 
-void D3D_VidRestart_f (void)
+void D3DVid_Restart_f (void)
 {
 	// if we're attempting to change a fullscreen mode we need to validate it first
 	if (d3d_CurrentMode.Format != D3DFMT_UNKNOWN && d3d_CurrentMode.RefreshRate != 0)
 	{
 		DEVMODE dm;
 
-		Q_MemSet (&dm, 0, sizeof (DEVMODE));
+		memset (&dm, 0, sizeof (DEVMODE));
 		dm.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
 
 		switch (d3d_CurrentMode.Format)
@@ -622,26 +538,22 @@ void D3D_VidRestart_f (void)
 		// wipe the screen before resetting the device
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 		d3d_Device->Present (NULL, NULL, NULL, NULL);
+		HUD_Changed ();
 	}
 
 	// release anything that needs to be released
-	D3D_LoseDeviceResources ();
+	D3DVid_LoseDeviceResources ();
 
 	// reset the device
 	hr = d3d_Device->Reset (&d3d_PresentParams);
 
 	// if we're going to a fullscreen mode we need to handle the mouse properly
-	if (!d3d_PresentParams.Windowed)
-	{
-		IN_ActivateMouse ();
-		IN_ShowMouse (FALSE);
-	}
+	IN_SetMouseState (!d3d_PresentParams.Windowed);
 
 	if (FAILED (hr))
 	{
-		// a failed reset causes a lost device
-		d3d_DeviceLost = true;
-		Con_Printf ("D3D_VidRestart_f: Unable to Reset Device.\n");
+		// a failed reset causes hassle
+		Sys_Error ("D3DVid_Restart_f: Unable to Reset Device");
 		return;
 	}
 
@@ -659,10 +571,11 @@ void D3D_VidRestart_f (void)
 		// wipe the screen again post-reset
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 		d3d_Device->Present (NULL, NULL, NULL, NULL);
+		HUD_Changed ();
 	}
 
 	// bring back anything that needs to be brought back
-	D3D_RecoverDeviceResources ();
+	D3DVid_RecoverDeviceResources ();
 
 	// flag to skip this frame so that we update more robustly
 	vid_restarted = true;
@@ -672,14 +585,16 @@ void D3D_VidRestart_f (void)
 }
 
 
-D3DFORMAT D3D_VidFindBPP (int bpp)
+D3DFORMAT D3DVid_FindBPP (int bpp)
 {
 	// any matching bpp
 	D3DFORMAT AnyBPP = D3DFMT_UNKNOWN;
 
 	// attempt to find an exact match BPP in the mode list
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+
 		// bpp match
 		if (mode->BPP == bpp) return mode->d3d_Mode.Format;
 
@@ -690,7 +605,7 @@ D3DFORMAT D3D_VidFindBPP (int bpp)
 	// return any bpp we got
 	if (AnyBPP != D3DFMT_UNKNOWN) return AnyBPP;
 
-	Sys_Error ("D3D_VidFindBPP: Failed to find matching BPP");
+	Sys_Error ("D3DVid_FindBPP: Failed to find matching BPP");
 
 	// shut up compiler
 	return D3DFMT_UNKNOWN;
@@ -699,30 +614,50 @@ D3DFORMAT D3D_VidFindBPP (int bpp)
 
 int RRCompFunc (const void *a, const void *b)
 {
-	int ia = ((int *) a)[0];
-	int ib = ((int *) b)[0];
+	int ia = ((int *) a) [0];
+	int ib = ((int *) b) [0];
 
 	return ia - ib;
 }
 
 
-void D3D_EnumerateVideoModes (void)
+void Menu_VideoDecodeVideoModes (d3d_ModeDesc_t *modes, int totalnummodes, int numwindowed);
+
+bool ExistingMode (D3DDISPLAYMODE *mode)
+{
+	for (int i = 0; i < d3d_NumModes; i++)
+	{
+		if (d3d_ModeList[i].d3d_Mode.Format != mode->Format) continue;
+		if (d3d_ModeList[i].d3d_Mode.Height != mode->Height) continue;
+		if (d3d_ModeList[i].d3d_Mode.RefreshRate != mode->RefreshRate) continue;
+		if (d3d_ModeList[i].d3d_Mode.Width != mode->Width) continue;
+
+		// mode is already present
+		return true;
+	}
+
+	// mode is not 
+	return false;
+}
+
+
+void D3DVid_EnumerateVideoModes (void)
 {
 	// get the desktop mode for reference
 	d3d_Object->GetAdapterDisplayMode (D3DADAPTER_DEFAULT, &d3d_DesktopMode);
 
-	int NumModes = 0;
-	int NumWindowedModes = 0;
-
 	// get the size of the desktop working area.  this is used instead of the desktop resolution for
 	// determining if a mode is valid for windowed operation, as the desktop size gives 768 as a
-	// valid height in an 800 high display, meaning that the taskbar will occlude parts of the DirectQ window.
+	// valid height in an 800 high display, meaning that the taskbar will hide parts of the DirectQ window.
 	RECT WorkArea;
 
 	SystemParametersInfo (SPI_GETWORKAREA, 0, &WorkArea, 0);
 
 	int MaxWindowWidth = WorkArea.right - WorkArea.left;
 	int MaxWindowHeight = WorkArea.bottom - WorkArea.top;
+
+	// get a valid pointer for the first mode in the list
+	d3d_ModeList = (d3d_ModeDesc_t *) MainHunk->Alloc (0);
 
 	// enumerate the modes in the adapter
 	for (int m = 0;; m++)
@@ -732,14 +667,17 @@ void D3D_EnumerateVideoModes (void)
 
 		// see can we support a fullscreen format with this mode format
 		hr = d3d_Object->CheckDeviceType (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], d3d_AdapterModeDescs[m], FALSE);
+
 		if (FAILED (hr)) continue;
 
 		// see can we create a standard texture on it
 		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
+
 		if (FAILED (hr)) continue;
 
 		// see can we create an alpha texture on it
 		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
+
 		if (FAILED (hr)) continue;
 
 		// get the count of modes for this format
@@ -758,7 +696,7 @@ void D3D_EnumerateVideoModes (void)
 
 			DEVMODE dm;
 
-			Q_MemSet (&dm, 0, sizeof (DEVMODE));
+			memset (&dm, 0, sizeof (DEVMODE));
 			dm.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
 
 			switch (mode.Format)
@@ -781,6 +719,7 @@ void D3D_EnumerateVideoModes (void)
 			dm.dmSize = sizeof (DEVMODE);
 
 			// attempt to change to it
+			// (fixme - this still breaks on vmwares svga driver which allows huge virtual resolutions)
 			if (ChangeDisplaySettings (&dm, CDS_TEST | CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL) continue;
 
 			// we're only interested in modes that match the desktop refresh rate
@@ -794,25 +733,16 @@ void D3D_EnumerateVideoModes (void)
 			// and therefore we skip the mode
 			if (mode.Width < mode.Height) continue;
 
-			// store it in our master mode list
-			d3d_ModeDesc_t *newmode;
+			// if the mode is already present don't record it
+			if (ExistingMode (&mode)) continue;
 
-			// we need to keep our own list because d3d makes it awkward for us by maintaining a separate list for each format
-			if (!d3d_ModeList)
-			{
-				d3d_ModeList = (d3d_ModeDesc_t *) Zone_Alloc (sizeof (d3d_ModeDesc_t));
-				newmode = d3d_ModeList;
-			}
-			else
-			{
-				// add it to the end of the list
-				for (newmode = d3d_ModeList;; newmode = newmode->Next)
-					if (!newmode->Next)
-						break;
+			// ensure that we have space to store it
+			MainHunk->Alloc (sizeof (d3d_ModeDesc_t));
 
-				newmode->Next = (d3d_ModeDesc_t *) Zone_Alloc (sizeof (d3d_ModeDesc_t));
-				newmode = newmode->Next;
-			}
+			// and store it in our master mode list
+			d3d_ModeDesc_t *newmode = &d3d_ModeList[d3d_NumModes];
+			newmode->ModeNum = d3d_NumModes;
+			d3d_NumModes++;
 
 			// copy out
 			newmode->d3d_Mode.Format = mode.Format;
@@ -837,12 +767,6 @@ void D3D_EnumerateVideoModes (void)
 			// store the description
 			strcpy (newmode->ModeDesc, D3DTypeToString (d3d_AdapterModeDescs[m]));
 
-			// store the number
-			newmode->ModeNum = NumModes++;
-
-			// end of list pointer
-			newmode->Next = NULL;
-
 			// see is it valid for windowed
 			newmode->AllowWindowed = true;
 
@@ -850,77 +774,88 @@ void D3D_EnumerateVideoModes (void)
 			if (newmode->d3d_Mode.Width >= MaxWindowWidth) newmode->AllowWindowed = false;
 			if (newmode->d3d_Mode.Height >= MaxWindowHeight) newmode->AllowWindowed = false;
 			if (newmode->d3d_Mode.Format != d3d_DesktopMode.Format) newmode->AllowWindowed = false;
-
-			if (newmode->AllowWindowed) NumWindowedModes++;
+			if (newmode->AllowWindowed) d3d_NumWindowedModes++; else continue;
+			d3d_NumWindowedModes = d3d_NumWindowedModes;
 		}
 	}
 
-	if (!d3d_ModeList)
+	if (!d3d_NumModes)
 	{
-		Sys_Error ("D3D_EnumerateVideoModes: No RGB fullscreen modes available");
+		Sys_Error ("D3DVid_EnumerateVideoModes: No RGB display modes available");
 		return;
 	}
 
-	// did we find any windowed modes?
-	if (NumWindowedModes)
+	// we must emulate WinQuake by putting the windowed modes at the start of the list
+	if (d3d_NumWindowedModes)
 	{
-		// now we emulate winquake by pushing windowed modes to the start of the list
-		d3d_ModeDesc_t *WindowedModes = (d3d_ModeDesc_t *) Zone_Alloc (NumWindowedModes * sizeof (d3d_ModeDesc_t));
-		int wm = 0;
+		// allocare extra space for the windowed modes
+		MainHunk->Alloc (d3d_NumWindowedModes * sizeof (d3d_ModeDesc_t));
 
-		// walk the main list adding any windowed modes to the windowed modes list
-		for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+		// move the fullscreen modes to the end of the list
+		for (int i = 0; i < d3d_NumModes; i++)
 		{
-			// not windowed
-			if (!mode->AllowWindowed) continue;
+			d3d_ModeDesc_t *src = &d3d_ModeList[d3d_NumModes - (i + 1)];
+			d3d_ModeDesc_t *dst = &d3d_ModeList[d3d_NumModes + d3d_NumWindowedModes - (i + 1)];
 
-			// copy the mode in
-			WindowedModes[wm].AllowWindowed = true;
-			WindowedModes[wm].BPP = 0;
-			WindowedModes[wm].d3d_Mode.Format = mode->d3d_Mode.Format;
-			WindowedModes[wm].d3d_Mode.Height = mode->d3d_Mode.Height;
-			WindowedModes[wm].d3d_Mode.RefreshRate = 0;
-			WindowedModes[wm].d3d_Mode.Width = mode->d3d_Mode.Width;
-
-			strcpy (WindowedModes[wm].ModeDesc, "Windowed");
-
-			// set the original not to allow windowed
-			mode->AllowWindowed = false;
-
-			// link in
-			WindowedModes[wm].Next = &WindowedModes[wm + 1];
-			wm++;
-
-			// check for end
-			if (wm == NumWindowedModes)
-			{
-				WindowedModes[wm - 1].Next = d3d_ModeList;
-				break;
-			}
+			memcpy (dst, src, sizeof (d3d_ModeDesc_t));
 		}
 
-		// set the main list pointer back to the windowed modes list
-		d3d_ModeList = WindowedModes;
-		wm = 0;
+		// reset pointers and stuff so that we can start copying in the windowed modes
+		d3d_ModeDesc_t *fullmode = &d3d_ModeList[d3d_NumWindowedModes];
+		d3d_ModeDesc_t *winmode = d3d_ModeList;
 
-		// finally walk the list setting consecutive mode numbers
-		for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode->ModeNum = wm++, mode = mode->Next);
+		// put windowed modes at the start of the list
+		for (int i = 0; i < d3d_NumModes; i++, fullmode++)
+		{
+			// not a valid windowed mode
+			if (!fullmode->AllowWindowed) continue;
+
+			// copy it in and update it
+			memcpy (winmode, fullmode, sizeof (d3d_ModeDesc_t));
+			strcpy (winmode->ModeDesc, "Windowed");
+
+			// ensure that it's recognized as a windowed mode
+			winmode->d3d_Mode.Format = D3DFMT_UNKNOWN;
+			winmode->d3d_Mode.RefreshRate = 0;
+			winmode->BPP = 0;
+
+			// this is no longer a windowed mode
+			fullmode->AllowWindowed = false;
+
+			// next windowed mode
+			winmode++;
+		}
+
+		// add the windowed modes to the total mode count
+		// (fixme: maintain separate pointers and counters for each too???)
+		d3d_NumModes += d3d_NumWindowedModes;
+
+		// fix up the mode numbers
+		for (int i = 0; i < d3d_NumModes; i++)
+			d3d_ModeList[i].ModeNum = i;
 	}
 
-	// check for mode already set
-	if (d3d_mode.integer >= 0)
-	{
-		// make sure it's a good one
-		for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
-		{
-			if (mode->ModeNum == d3d_mode.integer)
-			{
-				// we got a good 'un
-				return;
-			}
-		}
+	// finally copy from the mainhunk to the zone at the correct size
+	d3d_ModeDesc_t *modes = (d3d_ModeDesc_t *) MainZone->Alloc (d3d_NumModes * sizeof (d3d_ModeDesc_t));
+	memcpy (modes, d3d_ModeList, d3d_NumModes * sizeof (d3d_ModeDesc_t));
+	d3d_ModeList = modes;
+	MainHunk->Free ();
 
-		// the value of d3d_mode isn't in our mode list so pick a decent default mode
+	Menu_VideoDecodeVideoModes (d3d_ModeList, d3d_NumModes, d3d_NumWindowedModes);
+
+	// here we protect the user against changes i might make to the video driver startup.  in the past
+	// this may have started up in an invalid mode, so we make sure that the value of viddriver_version
+	// retrieved from the config is the same as what this version of directq expects. and fall back to
+	// a known good safe mode if it's not.  the string stored in VIDDRIVER_VERSION can be changed each
+	// time i make updates to this code so that this should never happen again.
+	if (!strcmp (viddriver_version.string, VIDDRIVER_VERSION))
+	{
+		// check for mode already set and return if it was a valid one already in our list
+		if (d3d_mode.integer >= 0 && d3d_mode.integer < d3d_NumModes)
+		{
+			d3d_ModeDesc_t *mode = d3d_ModeList + d3d_mode.integer;
+			return;
+		}
 	}
 
 	// find a mode to start in; we start directq in a windowed mode at either 640x480 or 800x600, whichever is
@@ -930,13 +865,15 @@ void D3D_EnumerateVideoModes (void)
 	int windowedmode640 = -1;
 
 	// now find a good default windowed mode - try to find either 800x600 or 640x480
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+
 		// not a windowed mode
 		if (!mode->AllowWindowed) continue;
+
 		if (mode->BPP > 0) continue;
 		if (mode->d3d_Mode.RefreshRate > 0) continue;
-
 		if (mode->d3d_Mode.Width == 800 && mode->d3d_Mode.Height == 600) windowedmode800 = mode->ModeNum;
 		if (mode->d3d_Mode.Width == 640 && mode->d3d_Mode.Height == 480) windowedmode640 = mode->ModeNum;
 	}
@@ -957,16 +894,22 @@ void D3D_EnumerateVideoModes (void)
 		d3d_CurrentMode.Format = D3DFMT_UNKNOWN;
 		d3d_CurrentMode.RefreshRate = 0;
 	}
+	else
+	{
+		// to do...
+	}
 }
 
 
-void D3D_FindModeForVidMode (D3DDISPLAYMODE *mode)
+void D3DVid_FindModeForVidMode (D3DDISPLAYMODE *mode)
 {
 	// catch unspecified modes
 	if (d3d_mode.value < 0) return;
 
-	for (d3d_ModeDesc_t *findmode = d3d_ModeList; findmode; findmode = findmode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *findmode = d3d_ModeList + i;
+
 		// look for a match
 		if (findmode->ModeNum == (int) d3d_mode.value)
 		{
@@ -987,12 +930,14 @@ void D3D_FindModeForVidMode (D3DDISPLAYMODE *mode)
 }
 
 
-void D3D_FindBestWindowedMode (D3DDISPLAYMODE *mode)
+void D3DVid_FindBestWindowedMode (D3DDISPLAYMODE *mode)
 {
 	D3DDISPLAYMODE *best = NULL;
 
-	for (d3d_ModeDesc_t *winmode = d3d_ModeList; winmode; winmode = winmode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *winmode = d3d_ModeList + i;
+
 		// not valid for a windowed mode
 		if (!winmode->AllowWindowed) continue;
 
@@ -1012,6 +957,7 @@ void D3D_FindBestWindowedMode (D3DDISPLAYMODE *mode)
 
 		// if either of width or height were unspecified, take one that matches
 		if (winmode->d3d_Mode.Width == mode->Width && mode->Height == 0) best = &winmode->d3d_Mode;
+
 		if (winmode->d3d_Mode.Width == 0 && winmode->d3d_Mode.Height == mode->Height) best = &winmode->d3d_Mode;
 
 		// if both were unspecified we take the current windowed mode as the best
@@ -1020,7 +966,7 @@ void D3D_FindBestWindowedMode (D3DDISPLAYMODE *mode)
 
 	if (!best)
 	{
-		Sys_Error ("D3D_FindBestWindowedMode: Failed to find a Windowed mode");
+		Sys_Error ("D3DVid_FindBestWindowedMode: Failed to find a Windowed mode");
 		return;
 	}
 
@@ -1031,12 +977,14 @@ void D3D_FindBestWindowedMode (D3DDISPLAYMODE *mode)
 }
 
 
-void D3D_FindBestFullscreenMode (D3DDISPLAYMODE *mode)
+void D3DVid_FindBestFullscreenMode (D3DDISPLAYMODE *mode)
 {
 	D3DDISPLAYMODE *best = NULL;
 
-	for (d3d_ModeDesc_t *fsmode = d3d_ModeList; fsmode; fsmode = fsmode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *fsmode = d3d_ModeList + i;
+
 		// invalid format
 		if (fsmode->d3d_Mode.Format != mode->Format) continue;
 
@@ -1056,6 +1004,7 @@ void D3D_FindBestFullscreenMode (D3DDISPLAYMODE *mode)
 
 		// if either of width or height were unspecified, take one that matches
 		if (fsmode->d3d_Mode.Width == mode->Width && mode->Height == 0) best = &fsmode->d3d_Mode;
+
 		if (fsmode->d3d_Mode.Width == 0 && fsmode->d3d_Mode.Height == mode->Height) best = &fsmode->d3d_Mode;
 
 		// if both were unspecified we take the current fullscreen mode as the best
@@ -1064,7 +1013,7 @@ void D3D_FindBestFullscreenMode (D3DDISPLAYMODE *mode)
 
 	if (!best)
 	{
-		Sys_Error ("D3D_FindBestFullscreenMode: Failed to find a Fullscreen mode");
+		Sys_Error ("D3DVid_FindBestFullscreenMode: Failed to find a Fullscreen mode");
 		return;
 	}
 
@@ -1074,7 +1023,7 @@ void D3D_FindBestFullscreenMode (D3DDISPLAYMODE *mode)
 }
 
 
-void D3D_InfoDump_f (void)
+void D3DVid_InfoDump_f (void)
 {
 	Con_Printf ("Getting driver info... ");
 	FILE *f = fopen ("driver.bin", "wb");
@@ -1100,22 +1049,22 @@ void D3D_InfoDump_f (void)
 }
 
 
-cmd_t d3d_InfoDump_Cmd ("d3d_infodump", D3D_InfoDump_f);
+cmd_t d3d_InfoDump_Cmd ("d3d_infodump", D3DVid_InfoDump_f);
 
 
-void D3D_TexMem_f (void)
+void D3DVid_TexMem_f (void)
 {
 	Con_Printf ("Available Texture Memory: %i MB\n", (d3d_Device->GetAvailableTextureMem ()) / (1024 * 1024));
 }
 
 
-cmd_t D3D_TexMem_Cmd ("gl_videoram", D3D_TexMem_f);
+cmd_t D3DVid_TexMem_Cmd ("gl_videoram", D3DVid_TexMem_f);
 
-void D3D_ValidateTextureSizes (void)
+void D3DVid_ValidateTextureSizes (void)
 {
 	LPDIRECT3DTEXTURE9 tex = NULL;
 
-	for (int s = d3d_DeviceCaps.MaxTextureWidth; ; s >>= 1)
+	for (int s = d3d_DeviceCaps.MaxTextureWidth;; s >>= 1)
 	{
 		if (s < 256)
 		{
@@ -1136,7 +1085,7 @@ void D3D_ValidateTextureSizes (void)
 		break;
 	}
 
-	for (int s = d3d_DeviceCaps.MaxTextureHeight; ; s >>= 1)
+	for (int s = d3d_DeviceCaps.MaxTextureHeight;; s >>= 1)
 	{
 		if (s < 256)
 		{
@@ -1172,15 +1121,14 @@ void D3D_ValidateTextureSizes (void)
 }
 
 
-void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
+void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 {
 	// get the kind of capabilities we can expect from a HAL device ("hello Dave")
 	hr = d3d_Object->GetDeviceCaps (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3d_DeviceCaps);
 
-	if (FAILED (hr)) Sys_Error ("D3D_InitDirect3D: Failed to retrieve object caps\n(No HAL D3D Device Available)");
+	if (FAILED (hr)) Sys_Error ("D3DVid_InitDirect3D: Failed to retrieve object caps\n(No HAL D3D Device Available)");
 
 	// check for basic required capabilities ("your name's not down, you're not coming in")
-	// if (d3d_DeviceCaps.MaxStreams < 1) Sys_Error ("You must have a Direct3D 9 driver to run DirectQ");	// not a factor any more
 	if (!(d3d_DeviceCaps.DevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX)) Sys_Error ("You need at least a DirectX 7-compliant device to run DirectQ");
 	if (!(d3d_DeviceCaps.DevCaps & D3DDEVCAPS_HWRASTERIZATION)) Sys_Error ("You need a hardware-accelerated device to run DirectQ");
 	if (!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_MIPMAP)) Sys_Error ("You need a device that supports mipmapping to run DirectQ");
@@ -1198,9 +1146,10 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_CLAMP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_CLAMP to run DirectQ");
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_WRAP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_WRAP to run DirectQ");
 
-	// check for TMU support - Anything less than 2 TMUs is a 1st gen 3D card and doesn't stand a hope anyway...
-	if (d3d_DeviceCaps.MaxTextureBlendStages < 2) Sys_Error ("You need a device with at least 2 TMUs to run DirectQ");
-	if (d3d_DeviceCaps.MaxSimultaneousTextures < 2) Sys_Error ("You need a device with at least 2 TMUs to run DirectQ");
+	// check for TMU support - Anything less than 3 TMUs is not d3d9 hardware
+	if (d3d_DeviceCaps.MaxTextureBlendStages < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
+	if (d3d_DeviceCaps.MaxSimultaneousTextures < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
+	if (d3d_DeviceCaps.MaxStreams < 3) Sys_Error ("You need a device with at least 3 Vertex Streams to run DirectQ");
 
 	// check for z buffer support
 	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_ALWAYS)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
@@ -1225,7 +1174,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 
 	// now reset the present params as they will have become messed up above
-	D3D_SetPresentParams (&d3d_PresentParams, mode);
+	D3DVid_SetPresentParams (&d3d_PresentParams, mode);
 
 	// attempt to create the device - we can ditch all of the extra flags now :)
 	// (Quark ETP needs D3DCREATE_FPU_PRESERVE - using _controlfp during texcoord gen doesn't work)
@@ -1242,7 +1191,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 
 	if (FAILED (hr))
 	{
-		Sys_Error ("D3D_InitDirect3D: IDirect3D9::CreateDevice failed");
+		Sys_Error ("D3DVid_InitDirect3D: IDirect3D9::CreateDevice failed");
 		return;
 	}
 
@@ -1259,18 +1208,19 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	// clear to black immediately
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 	d3d_Device->Present (NULL, NULL, NULL, NULL);
+	HUD_Changed ();
 
 	// get capabilities on the actual device
 	hr = d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
 
 	if (FAILED (hr))
 	{
-		Sys_Error ("D3D_InitDirect3D: Failed to retrieve device caps");
+		Sys_Error ("D3DVid_InitDirect3D: Failed to retrieve device caps");
 		return;
 	}
 
 	// ensure that the reported texture sizes are correct
-	D3D_ValidateTextureSizes ();
+	D3DVid_ValidateTextureSizes ();
 
 	// report on selected ones
 	Con_Printf ("Maximum Texture Blend Stages: %i\n", d3d_DeviceCaps.MaxTextureBlendStages);
@@ -1278,6 +1228,45 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	Con_Printf ("Maximum Texture Size: %i x %i\n", d3d_DeviceCaps.MaxTextureWidth, d3d_DeviceCaps.MaxTextureHeight);
 	Con_Printf ("Maximum Anisotropic Filter: %i\n", d3d_DeviceCaps.MaxAnisotropy);
 	Con_Printf ("\n");
+
+	// no np2 support by default
+	d3d_GlobalCaps.supportNonPow2 = false;
+
+	// get the shader model because we don't want to support NP2 on SM2 hardware (both ATI and NVIDIA have problems with this in OpenGL, and
+	// while D3D does have stricter hardware capabilities checking it's not beyond the bounds of possibility that the driver could lie
+	// and/or not throw an error until the texture is used).
+	int vsvermaj = D3DSHADER_VERSION_MAJOR (d3d_DeviceCaps.VertexShaderVersion);
+	int psvermaj = D3DSHADER_VERSION_MAJOR (d3d_DeviceCaps.PixelShaderVersion);
+
+	if (!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_POW2) && 
+		!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) && 
+		(vsvermaj >= 3 && psvermaj >= 3))
+	{
+		// validate that the reported support actually does exist by creating a NP2 texture with a full mipchain
+		LPDIRECT3DTEXTURE9 tex = NULL;
+
+		hr = d3d_Device->CreateTexture (160, 192, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
+
+		if (SUCCEEDED (hr) && tex)
+		{
+			hr = tex->AddDirtyRect (NULL);
+
+			if (SUCCEEDED (hr))
+			{
+				// ensure that all miplevels get updated correctly
+				hr = D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX);
+
+				if (SUCCEEDED (hr))
+				{
+					Con_Printf ("Allowing non-power-of-2 textures\n");
+					d3d_GlobalCaps.supportNonPow2 = true;
+				}
+			}
+
+			tex->Release ();
+			tex = NULL;
+		}
+	}
 
 	// tmus; take the lower of what's available as we need to work with them all
 	d3d_GlobalCaps.NumTMUs = 666;
@@ -1290,7 +1279,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	d3d_GlobalCaps.supportXRGB = D3D_CheckTextureFormat (D3DFMT_X8R8G8B8, FALSE);
 
 	// check for availability of alpha/luminance formats
-	// unused d3d_GlobalCaps.supportL8 = D3D_CheckTextureFormat (D3DFMT_L8, FALSE);
+	d3d_GlobalCaps.supportL8 = D3D_CheckTextureFormat (D3DFMT_L8, TRUE);
 	d3d_GlobalCaps.supportA8L8 = D3D_CheckTextureFormat (D3DFMT_A8L8, FALSE);
 
 	// check for availability of compressed texture formats
@@ -1298,41 +1287,47 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	d3d_GlobalCaps.supportDXT3 = D3D_CheckTextureFormat (D3DFMT_DXT3, FALSE);
 	d3d_GlobalCaps.supportDXT5 = D3D_CheckTextureFormat (D3DFMT_DXT5, FALSE);
 
-	// check for availability of occlusion queries
-	LPDIRECT3DQUERY9 testOcclusion = NULL;
+	d3d_GlobalCaps.supportInstancing = false;
 
-	if (SUCCEEDED (d3d_Device->CreateQuery (D3DQUERYTYPE_OCCLUSION, &testOcclusion)))
+	// basic requirements for instancing
+	if (vsvermaj >= 3 && psvermaj >= 3 && (d3d_DeviceCaps.DevCaps2 & D3DDEVCAPS2_STREAMOFFSET))
 	{
-		Con_Printf ("Using Occlusion Queries\n");
-		d3d_GlobalCaps.supportOcclusion = true;
-		SAFE_RELEASE (testOcclusion);
-	}
-	else d3d_GlobalCaps.supportOcclusion = false;
+		hr = d3d_Device->SetStreamSourceFreq (0, D3DSTREAMSOURCE_INDEXEDDATA | 25);
 
-	// assume that vertex buffers are going to work with a hardware t&l device
-	// there are no advantages to vertex buffers with software t&l
-	if (d3d_GlobalCaps.supportHardwareTandL)
-		d3d_GlobalCaps.supportVertexBuffers = true;
-	else d3d_GlobalCaps.supportVertexBuffers = false;
+		if (SUCCEEDED (hr))
+		{
+			hr = d3d_Device->SetStreamSourceFreq (1, D3DSTREAMSOURCE_INSTANCEDATA | 1);
+
+			if (SUCCEEDED (hr))
+			{
+				Con_Printf ("Allowing geometry instancing\n");
+				d3d_GlobalCaps.supportInstancing = true;
+			}
+		}
+
+		// revert back to non-instanced geometry
+		d3d_Device->SetStreamSourceFreq (0, 1);
+		d3d_Device->SetStreamSourceFreq (1, 1);
+	}
 
 	// set up everything else
-	D3D_Init3DSceneTexture ();
-	D3D_InitHLSL ();
+	// (fixme - run through the on-recover code for the loss handlers here instead)
+	D3DHLSL_Init ();
 
 	Con_Printf ("\n");
 
-	// set default states
-	D3D_SetDefaultStates ();
-
 	// set the d3d_mode cvar correctly
-	D3D_SetVidMode ();
+	D3DVid_SetVidMode ();
 
 	// build the rest of the video menu (deferred to here as it's dependent on video being up)
 	Menu_VideoBuild ();
+
+	// set initial state caches
+	D3D_SetAllStates ();
 }
 
 
-void D3D_CreateWindow (D3DDISPLAYMODE *mode)
+void D3DVid_CreateWindow (D3DDISPLAYMODE *mode)
 {
 	if (mode->RefreshRate == 0)
 	{
@@ -1406,7 +1401,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 }
 
 
-void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
+void D3DVid_SetVideoMode (D3DDISPLAYMODE *mode)
 {
 	// suspend stuff that could mess us up while creating the window
 	bool temp = scr_disabled_for_loading;
@@ -1415,50 +1410,28 @@ void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
 
 	// if neither width nor height were specified we take it from the d3d_mode cvar
 	// this then passes through to the find best... functions so that the rest of the mode is filled in
-	if (mode->Width == 0 && mode->Height == 0) D3D_FindModeForVidMode (mode);
+	if (mode->Width == 0 && mode->Height == 0) D3DVid_FindModeForVidMode (mode);
 
 	// even if a mode is found we pass through here
 	if (mode->RefreshRate == 0)
-		D3D_FindBestWindowedMode (mode);
-	else D3D_FindBestFullscreenMode (mode);
+		D3DVid_FindBestWindowedMode (mode);
+	else D3DVid_FindBestFullscreenMode (mode);
 
 	// retrieve and store the gamma ramp for the desktop
 	HDC hdc = GetDC (NULL);
 	GetDeviceGammaRamp (hdc, &d3d_DefaultGamma);
 	ReleaseDC (NULL, hdc);
 
-	// destroy our splash screen
-	Splash_Destroy ();
-
 	// create the mode and activate input
-	D3D_CreateWindow (mode);
-	IN_ActivateMouse ();
-	IN_ShowMouse (FALSE);
+	D3DVid_CreateWindow (mode);
+	IN_SetMouseState (mode->RefreshRate != 0);
 
 	// now initialize direct 3d on the window
-	D3D_InitDirect3D (mode);
+	D3DVid_InitDirect3D (mode);
 
 	// now resume the messy-uppy stuff
 	CDAudio_Resume ();
 	scr_disabled_for_loading = temp;
-
-	// now we try to make sure we get the focus on the mode switch, because
-	// sometimes in some systems we don't.  We grab the foreground, then
-	// finish setting up, pump all our messages, and sleep for a little while
-	// to let messages finish bouncing around the system, then we put
-	// ourselves at the top of the z order, then grab the foreground again,
-	// Who knows if it helps, but it probably doesn't hurt
-	SetForegroundWindow (d3d_Window);
-
-	MSG msg;
-
-	while (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
-	{
-      	TranslateMessage (&msg);
-      	DispatchMessage (&msg);
-	}
-
-	Sleep (100);
 
 	// now we force the window to the top of the z-order and the foreground
 	SetWindowPos
@@ -1499,16 +1472,16 @@ void PaletteFromColormap (byte *pal, byte *map)
 }
 
 
-cmd_t D3D_DescribeModes_f_Cmd ("vid_describemodes", D3D_DescribeModes_f);
-cmd_t D3D_NumModes_f_Cmd ("vid_nummodes", D3D_NumModes_f);
-cmd_t D3D_DescribeCurrentMode_f_Cmd ("vid_describecurrentmode", D3D_DescribeCurrentMode_f);
-cmd_t D3D_DescribeMode_f_Cmd ("vid_describemode", D3D_DescribeMode_f);
-cmd_t D3D_VidRestart_f_Cmd ("vid_restart", D3D_VidRestart_f);
+cmd_t D3DVid_DescribeModes_f_Cmd ("vid_describemodes", D3DVid_DescribeModes_f);
+cmd_t D3DVid_NumModes_f_Cmd ("vid_nummodes", D3DVid_NumModes_f);
+cmd_t D3DVid_DescribeCurrentMode_f_Cmd ("vid_describecurrentmode", D3DVid_DescribeCurrentMode_f);
+cmd_t D3DVid_DescribeMode_f_Cmd ("vid_describemode", D3DVid_DescribeMode_f);
+cmd_t D3DVid_Restart_f_Cmd ("vid_restart", D3DVid_Restart_f);
 
-void D3D_VidInit (void)
+void D3DVid_Init (void)
 {
 	// ensure
-	Q_MemSet (&d3d_RenderDef, 0, sizeof (d3d_renderdef_t));
+	memset (&d3d_RenderDef, 0, sizeof (d3d_renderdef_t));
 
 	vid_initialized = true;
 	vid_canalttab = true;
@@ -1516,32 +1489,15 @@ void D3D_VidInit (void)
 	// dump the colormap out to file so that we can have a look-see at what's in it
 	// SCR_WriteDataToTGA ("colormap.tga", vid.colormap, 256, 64, 8, 24);
 
-	hInstD3D9 = LoadLibrary ("d3d9.dll");
-
-	if (!hInstD3D9)
-	{
-		Sys_Error ("D3D_InitDirect3D - failed to load Direct3D!");
-		return;
-	}
-
-	// create a regular XPDM object
-	QDirect3DCreate9 = (DIRECT3DCREATE9PROC) GetProcAddress (hInstD3D9, "Direct3DCreate9");
-
-	if (!QDirect3DCreate9)
-	{
-		Sys_Error ("D3D_InitDirect3D - GetProcAddress failed for Direct3DCreate9");
-		return;
-	}
-
 	// this is always 32 irrespective of which version of the sdk we use
-	if (!(d3d_Object = QDirect3DCreate9 (D3D_SDK_VERSION)))
+	if (!(d3d_Object = Direct3DCreate9 (D3D_SDK_VERSION)))
 	{
-		Sys_Error ("D3D_InitDirect3D - failed to initialize Direct3D!");
+		Sys_Error ("D3DVid_InitDirect3D - failed to initialize Direct3D!");
 		return;
 	}
 
 	// enumerate available modes
-	D3D_EnumerateVideoModes ();
+	D3DVid_EnumerateVideoModes ();
 
 	d3d_Object->GetAdapterIdentifier (D3DADAPTER_DEFAULT, 0, &d3d_Adapter);
 
@@ -1558,9 +1514,6 @@ void D3D_VidInit (void)
 		d3d_Adapter.Revision
 	);
 
-	// load d3dx library - directq has been tested with versions up to 42
-	D3D_LoadD3DXVersion (d3dx_version.integer);
-
 	Con_Printf ("\n");
 
 	// check command-line args for resolution specifiers
@@ -1571,7 +1524,7 @@ void D3D_VidInit (void)
 
 		if (GetDeviceCaps (hdc, RASTERCAPS) & RC_PALETTE)
 		{
-			Sys_Error ("D3D_VidStartup: Can't run Windowed Mode in non-RGB Display Mode");
+			Sys_Error ("D3DVid_Init: Can't run Windowed Mode in non-RGB Display Mode");
 			return;
 		}
 
@@ -1593,8 +1546,8 @@ void D3D_VidInit (void)
 
 			// set the mode format according to the BPP
 			if (bpp == 32)
-				d3d_CurrentMode.Format = D3D_VidFindBPP (32);
-			else d3d_CurrentMode.Format = D3D_VidFindBPP (16);
+				d3d_CurrentMode.Format = D3DVid_FindBPP (32);
+			else d3d_CurrentMode.Format = D3DVid_FindBPP (16);
 		}
 		else
 		{
@@ -1631,23 +1584,24 @@ void D3D_VidInit (void)
 	}
 
 	// set the selected video mode
-	D3D_SetVideoMode (&d3d_CurrentMode);
+	D3DVid_SetVideoMode (&d3d_CurrentMode);
 }
 
 
 void Menu_PrintCenterWhite (int cy, char *str);
 
-void D3D_ShutdownDirect3D (void)
+void D3DVid_ShutdownDirect3D (void)
 {
 	// clear the screen to black so that shutdown doesn't leave artefacts from the last SCR_UpdateScreen
 	if (d3d_Device)
 	{
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 		d3d_Device->Present (NULL, NULL, NULL, NULL);
+		HUD_Changed ();
 	}
 
 	// also need these... ;)
-	D3D_LoseDeviceResources ();
+	D3DVid_LoseDeviceResources ();
 
 	// release anything that needs to be released
 	D3D_ReleaseTextures ();
@@ -1655,10 +1609,6 @@ void D3D_ShutdownDirect3D (void)
 	// destroy the device and object
 	SAFE_RELEASE (d3d_Device);
 	SAFE_RELEASE (d3d_Object);
-
-	// unload our libraries
-	UNLOAD_LIBRARY (hInstD3DX);
-	UNLOAD_LIBRARY (hInstD3D9);
 }
 
 
@@ -1687,62 +1637,10 @@ void VID_Shutdown (void)
 	{
 		vid_canalttab = false;
 
-		D3D_ShutdownDirect3D ();
+		D3DVid_ShutdownDirect3D ();
 
 		AppActivate (false, false);
 	}
-}
-
-
-// thanks to www.codesampler.com for the groundwork for this one
-bool D3D_CheckRecoverDevice (void)
-{
-	// check was the device lost
-	if (d3d_DeviceLost)
-	{
-		// yield some CPU time
-		Sleep (100);
-
-		// see if the device can be recovered
-		hr = d3d_Device->TestCooperativeLevel ();
-
-		switch (hr)
-		{
-		case D3D_OK:
-			// recover device resources and bring states back to defaults
-			D3D_RecoverDeviceResources ();
-
-			// the device is no longer lost
-			d3d_DeviceLost = false;
-
-			// return to normal rendering
-			return true;
-
-		case D3DERR_DEVICELOST:
-			// the device cannot be recovered at this time
-			break;
-
-		case D3DERR_DEVICENOTRESET:
-			// the device is ready to be reset
-			D3D_LoseDeviceResources ();
-
-			// reset the device
-			d3d_Device->Reset (&d3d_PresentParams);
-			break;
-
-		case D3DERR_DRIVERINTERNALERROR:
-		default:
-			// something bad happened
-			Sys_Quit ();
-			break;
-		}
-
-		// not quite ready yet
-		return false;
-	}
-
-	// device is not lost
-	return true;
 }
 
 
@@ -1766,7 +1664,7 @@ d3d_filtermode_t d3d_filtermodes[] =
 D3DTEXTUREFILTERTYPE d3d_TexFilter = D3DTEXF_LINEAR;
 D3DTEXTUREFILTERTYPE d3d_MipFilter = D3DTEXF_LINEAR;
 
-void D3D_TextureMode_f (void)
+void D3DVid_TextureMode_f (void)
 {
 	if (Cmd_Argc () == 1)
 	{
@@ -1811,9 +1709,9 @@ void D3D_TextureMode_f (void)
 }
 
 
-cmd_t D3D_TextureMode_Cmd ("gl_texturemode", D3D_TextureMode_f);
+cmd_t D3DVid_TextureMode_Cmd ("gl_texturemode", D3DVid_TextureMode_f);
 
-void D3D_CheckVidMode (void)
+void D3DVid_CheckVidMode (void)
 {
 	// 0 is a valid d3d_mode!
 	static int old_vidmode = -1;
@@ -1835,8 +1733,11 @@ void D3D_CheckVidMode (void)
 
 	// find the supplied mode and see if it has REALLY changed
 	// (first time into this function it won't have)
-	for (findmode = d3d_ModeList; findmode; findmode = findmode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		// this was also declared in loop scope; how did it ever work???
+		findmode = d3d_ModeList + i;
+
 		// look for a match
 		if (findmode->ModeNum == d3d_mode.integer)
 		{
@@ -1859,7 +1760,7 @@ void D3D_CheckVidMode (void)
 	if (!findmode)
 	{
 		// didn't find the requested new mode
-		Con_Printf ("D3D_CheckVidMode: selected video mode not available\n");
+		Con_Printf ("D3DVid_CheckVidMode: selected video mode not available\n");
 
 		// restore the previous value
 		Cvar_Set (&d3d_mode, old_vidmode);
@@ -1872,7 +1773,7 @@ void D3D_CheckVidMode (void)
 	old_vidmode = d3d_mode.integer;
 
 	// reset the window
-	D3D_ResetWindow (&findmode->d3d_Mode);
+	D3DVid_ResetWindow (&findmode->d3d_Mode);
 
 	// store to current mode
 	d3d_CurrentMode.Format = findmode->d3d_Mode.Format;
@@ -1881,14 +1782,14 @@ void D3D_CheckVidMode (void)
 	d3d_CurrentMode.Width = findmode->d3d_Mode.Width;
 
 	// restart video
-	D3D_VidRestart_f ();
+	D3DVid_Restart_f ();
 
 	// update the refdef
 	vid.recalc_refdef = 1;
 }
 
 
-int D3D_AdjustGamma (float gammaval, int baseval)
+int D3DVid_AdjustGamma (float gammaval, int baseval)
 {
 	baseval >>= 8;
 
@@ -1902,30 +1803,30 @@ int D3D_AdjustGamma (float gammaval, int baseval)
 }
 
 
-void D3D_SetActiveGamma (void)
+void D3DVid_SetActiveGamma (void)
 {
 	// apply v_gamma to all components
 	for (int i = 0; i < 256; i++)
 	{
 		// adjust v_gamma to the same scale as glquake uses
-		d3d_CurrentGamma.r[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.r[i]);
-		d3d_CurrentGamma.g[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.g[i]);
-		d3d_CurrentGamma.b[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.b[i]);
+		d3d_CurrentGamma.r[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_DefaultGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_DefaultGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_DefaultGamma.b[i]);
 	}
 
 	// now apply r/g/b to the derived values
 	for (int i = 0; i < 256; i++)
 	{
-		d3d_CurrentGamma.r[i] = D3D_AdjustGamma (r_gamma.value, d3d_CurrentGamma.r[i]);
-		d3d_CurrentGamma.g[i] = D3D_AdjustGamma (g_gamma.value, d3d_CurrentGamma.g[i]);
-		d3d_CurrentGamma.b[i] = D3D_AdjustGamma (b_gamma.value, d3d_CurrentGamma.b[i]);
+		d3d_CurrentGamma.r[i] = D3DVid_AdjustGamma (r_gamma.value, d3d_CurrentGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3DVid_AdjustGamma (g_gamma.value, d3d_CurrentGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3DVid_AdjustGamma (b_gamma.value, d3d_CurrentGamma.b[i]);
 	}
 
 	VID_SetAppGamma ();
 }
 
 
-void D3D_CheckGamma (void)
+void D3DVid_CheckGamma (void)
 {
 	// these values are to force a change on first run
 	static int oldvgamma = -1;
@@ -1935,9 +1836,9 @@ void D3D_CheckGamma (void)
 
 	// didn't change - call me paranoid about floats!!!
 	if ((int) (v_gamma.value * 100) == oldvgamma &&
-		(int) (r_gamma.value * 100) == oldrgamma &&
-		(int) (g_gamma.value * 100) == oldggamma &&
-		(int) (b_gamma.value * 100) == oldbgamma)
+			(int) (r_gamma.value * 100) == oldrgamma &&
+			(int) (g_gamma.value * 100) == oldggamma &&
+			(int) (b_gamma.value * 100) == oldbgamma)
 	{
 		// didn't change
 		return;
@@ -1949,315 +1850,111 @@ void D3D_CheckGamma (void)
 	oldggamma = (int) (g_gamma.value * 100);
 	oldbgamma = (int) (b_gamma.value * 100);
 
-	D3D_SetActiveGamma ();
+	D3DVid_SetActiveGamma ();
 }
 
 
-void D3D_CheckPixelShaders (void)
-{
-	// init this to force a check first time in
-	static bool oldUsingPixelShaders = !d3d_GlobalCaps.usingPixelShaders;
-
-	// unavailable so don't try to use them
-	if (!d3d_GlobalCaps.supportPixelShaders) return;
-
-	if (d3d_GlobalCaps.usingPixelShaders != oldUsingPixelShaders)
-	{
-		if (d3d_GlobalCaps.usingPixelShaders)
-		{
-			// Con_SafePrintf ("Enabled pixel shaders\n");
-			D3D_SetDefaultStates ();
-		}
-		else
-		{
-			// switch shaders off
-			d3d_Device->SetPixelShader (NULL);
-			d3d_Device->SetVertexShader (NULL);
-			D3D_SetDefaultStates ();
-			// Con_SafePrintf ("Disabled pixel shaders\n");
-		}
-
-		// store back
-		oldUsingPixelShaders = d3d_GlobalCaps.usingPixelShaders;
-	}
-}
-
-
-void D3D_CheckVSync (void)
+void D3DVid_CheckVSync (void)
 {
 	static int old_vsync = vid_vsync.integer;
 
 	if (old_vsync != vid_vsync.integer)
 	{
 		old_vsync = vid_vsync.integer;
-		D3D_VidRestart_f ();
+		D3DVid_Restart_f ();
 	}
 }
 
 
-void D3D_CheckD3DXVersion (void)
+void D3DVid_RecoverLostDevice (void)
 {
-	static int oldversion = d3dx_version.integer;
-
-	if (oldversion != d3dx_version.integer)
+	while (1)
 	{
-		// this needs a resource reload as otherwise the shaders will potentially be new versions
-		D3D_LoseDeviceResources ();
-		D3D_LoadD3DXVersion (d3dx_version.integer);
-		D3D_RecoverDeviceResources ();
-		D3D_VidRestart_f ();
-		oldversion = d3dx_version.integer;
+		// see if the device can be recovered
+		hr = d3d_Device->TestCooperativeLevel ();
+
+		switch (hr)
+		{
+		case D3D_OK:
+			// recover device resources and bring states back to defaults
+			D3DVid_RecoverDeviceResources ();
+
+			// the device is no longer lost
+			Con_DPrintf ("recovered lost device\n");
+
+			// force an update of areas that aren't normally updated in the main refresh
+			HUD_Changed ();
+
+			// return to normal rendering
+			return;
+
+		case D3DERR_DEVICELOST:
+			// the device cannot be recovered at this time
+			break;
+
+		case D3DERR_DEVICENOTRESET:
+			// the device is ready to be reset
+			D3DVid_LoseDeviceResources ();
+
+			// reset the device
+			d3d_Device->Reset (&d3d_PresentParams);
+			break;
+
+		case D3DERR_DRIVERINTERNALERROR:
+		default:
+			// something bad happened
+			Sys_Quit ();
+			break;
+		}
+
+		// yield CPU for a while
+		Sleep (10);
 	}
 }
 
 
-void D3D_CheckAnisotropic (void)
-{
-	// force an update first time through
-	static int oldaniso = ~r_anisotropicfilter.integer;
+void Fog_FrameCheck (void);
 
-	if (oldaniso != r_anisotropicfilter.integer)
-	{
-		int blah;
-		for (blah = 1; blah < r_anisotropicfilter.integer; blah <<= 1);
-
-		if (blah > d3d_DeviceCaps.MaxAnisotropy) blah = d3d_DeviceCaps.MaxAnisotropy;
-		if (blah < 1) blah = 1;
-
-		if (blah != r_anisotropicfilter.integer)
-			Cvar_Set (&r_anisotropicfilter, (float) blah);
-
-		for (int stage = 0; stage < d3d_GlobalCaps.NumTMUs; stage++)
-			D3D_SetSamplerState (stage, D3DSAMP_MAXANISOTROPY, r_anisotropicfilter.integer);
-
-		oldaniso = r_anisotropicfilter.integer;
-	}
-}
-
-
-void D3D_SubdivideWater (void);
-void D3D_VBOCheck (void);
-
-void D3D_BeginRendering (void)
+void D3DVid_BeginRendering (void)
 {
 	// video is not restarted by default
 	vid_restarted = false;
 
-	// check for device recovery and recover it if needed
-	if (!D3D_CheckRecoverDevice ()) return;
-
 	// check for any changes to any display properties
 	// if we need to restart video we must skip drawing this frame
-	D3D_CheckGamma ();
-	D3D_CheckVidMode (); if (vid_restarted) return;
-	D3D_CheckVSync (); if (vid_restarted) return;
-	D3D_CheckD3DXVersion (); if (vid_restarted) return;
-	D3D_CheckAnisotropic ();
+	D3DVid_CheckGamma ();
+	D3DVid_CheckVidMode (); if (vid_restarted) return;
+	D3DVid_CheckVSync (); if (vid_restarted) return;
+	Fog_FrameCheck ();
 
-	// flag that we haven't begun the scene yet
-	d3d_SceneBegun = false;
+	// force lighting calcs off; this is done every frame and it will be filtered if necessary
+	D3D_SetRenderState (D3DRS_LIGHTING, FALSE);
 
-	// begin processing vertex buffers
-	VBO_BeginFrame ();
+	// SCR_UpdateScreen assumes that this is the last call in this function
+	hr = d3d_Device->BeginScene ();
 }
 
 
-void D3D_EndRendering (void)
+void D3DVid_EndRendering (void)
 {
-	// end vertex buffers for the frame
-	VBO_EndFrame ();
+	// unbind everything
+	D3D_SetStreamSource (0, NULL, 0, 0);
+	D3D_SetStreamSource (1, NULL, 0, 0);
+	D3D_SetStreamSource (2, NULL, 0, 0);
 
-	// end the previous scene
-	if (d3d_SceneBegun)
-	{
-		d3d_Device->EndScene ();
-		hr = d3d_Device->Present (NULL, NULL, NULL, NULL);
+	D3D_SetIndices (NULL);
+	D3D_SetVertexDeclaration (NULL);
 
-		// force to false or it may be invalid for 2 consecutive calls to this
-		d3d_SceneBegun = false;
-	}
-	else
-	{
-		// fake an OK hr from present if nothing was drawn
-		hr = S_OK;
-	}
+	d3d_Device->EndScene ();
 
-	// defer the pixel shaders check to here to ensure that we're in the right mode before subdividing
-	D3D_CheckPixelShaders ();
-
-	// check for water subdivision changes
-	// done here so that the scratch buffer will be valid for use
-	D3D_SubdivideWater ();
-
-	// check for a lost device
-	if (hr == D3DERR_DEVICELOST)
-	{
-		d3d_DeviceLost = true;
-		return;
-	}
-
-	// handle the mouse state for both fullscreen and windowed modes.
-	// this ensures that it's always inactive and not buffering commands when
-	// not being used in fullscreen modes.
-	// the only difference for windowed modes is that the cursor is shown
-	extern bool mouseactive;
-	extern bool keybind_grab;
-	RECT cliprect;
-
-	if ((key_dest == key_menu || key_dest == key_console || cls.state != ca_connected) && !keybind_grab)
-	{
-		if (mouseactive)
-		{
-			IN_ActivateMouse ();
-			IN_DeactivateMouse ();
-			if (d3d_CurrentMode.RefreshRate == 0) IN_ShowMouse (TRUE);
-
-			// recenter the cursor here so that it will be visible if windowed
-			GetWindowRect (d3d_Window, &cliprect);
-			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
-			mouseactive = false;
-		}
-	}
-	else
-	{
-		if (!mouseactive)
-		{
-			// recenter the cursor here so that the next press will be valid
-			GetWindowRect (d3d_Window, &cliprect);
-			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
-
-			IN_DeactivateMouse ();
-			IN_ActivateMouse ();
-			IN_ShowMouse (TRUE);
-			IN_ShowMouse (FALSE);
-			mouseactive = true;
-		}
-	}
+	if ((hr = d3d_Device->Present (NULL, NULL, NULL, NULL)) == D3DERR_DEVICELOST)
+		D3DVid_RecoverLostDevice ();
 }
 
 
-void D3D_Finish (void)
+void D3DVid_Finish (void)
 {
 	// bollocks!
 }
 
-
-#include <gdiplus.h>
-#pragma comment (lib, "gdiplus.lib")
-#include "CGdiPlusBitmap.h"
-
-Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-ULONG_PTR gdiplusToken;
-CGdiPlusBitmapResource *SplashBMP = NULL;
-
-LRESULT CALLBACK SplashProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	HDC          hdc;
-	PAINTSTRUCT  ps;
-
-	switch (message)
-	{
-	case WM_PAINT:
-		if (SplashBMP)
-		{
-			hdc = BeginPaint (hWnd, &ps);
-			Gdiplus::Graphics g (hdc);
-
-			int w = SplashBMP->TheBitmap->GetWidth ();
-			int h = SplashBMP->TheBitmap->GetHeight ();
-
-			g.DrawImage (SplashBMP->TheBitmap, 0, 0, w, h);
-
-			// this pretty much replicates the functionality of my splash screen maker app but brings it back into the engine
-			// unicode sucks cocks in hell, by the way.
-			Gdiplus::FontFamily   fontFamily (L"Arial");
-			Gdiplus::Font         font (&fontFamily, 10, Gdiplus::FontStyleBold, Gdiplus::UnitPoint);
-			Gdiplus::RectF        rectF (0, (h / 2) + 10, w, h);
-			Gdiplus::StringFormat stringFormat;
-			Gdiplus::SolidBrush   solidBrush (Gdiplus::Color (255, 192, 192, 192));
-
-			stringFormat.SetAlignment (Gdiplus::StringAlignmentCenter);
-			stringFormat.SetLineAlignment (Gdiplus::StringAlignmentNear);
-
-			g.SetTextRenderingHint (Gdiplus::TextRenderingHintAntiAliasGridFit);
-			g.DrawString (QASCIIToUnicode ("Release "DIRECTQ_VERSION), -1, &font, rectF, &stringFormat, &solidBrush);
-
-			g.Flush (Gdiplus::FlushIntentionFlush);
-			g.ReleaseHDC (hdc);
-			EndPaint (hWnd, &ps);
-
-			// sleep a little to give the splash a chance to show
-			Sleep (500);
-		}
-		else
-		{
-			// this is to cover cases where this window proc may be triggered with no valid bitmap
-			hdc = GetDC (d3d_Window);
-			RECT cr;
-			GetClientRect (d3d_Window, &cr);
-			PatBlt (hdc, cr.left, cr.top, cr.right - cr.left, cr.bottom - cr.top, BLACKNESS);
-			ReleaseDC (d3d_Window, hdc);
-		}
-
-		return 0;
-
-	default:
-		return DefWindowProc (hWnd, message, wParam, lParam);
-	}
-}
-
-
-void Splash_Init (void)
-{
-	// switch window properties
-	SetWindowLong (d3d_Window, GWL_WNDPROC, (LONG) SplashProc);
-	SetWindowLong (d3d_Window, GWL_EXSTYLE, WS_EX_TOPMOST);
-	SetWindowLong (d3d_Window, GWL_STYLE, WS_POPUP);
-
-	// Initialize GDI+.
-	Gdiplus::GdiplusStartup (&gdiplusToken, &gdiplusStartupInput, NULL);
-
-	// load our bitmap; basic GDI+ doesn't provide support for loading PNGs from resources so
-	// we use the code found at http://www.codeproject.com/KB/GDI-plus/cgdiplusbitmap.aspx
-	SplashBMP = new CGdiPlusBitmapResource ();
-	SplashBMP->Load (IDR_SPLASH, RT_RCDATA, GetModuleHandle (NULL));
-
-	int BMPWidth = SplashBMP->TheBitmap->GetWidth ();
-	int BMPHeight = SplashBMP->TheBitmap->GetHeight ();
-
-	// get the desktop resolution
-	HDC DesktopDC = GetDC (NULL);
-	int DeskWidth = GetDeviceCaps (DesktopDC, HORZRES);
-	int DeskHeight = GetDeviceCaps (DesktopDC, VERTRES);
-	ReleaseDC (NULL, DesktopDC);
-
-	// center and show the splash window (resizing it to the bitmap size as we go)
-	SetWindowPos (d3d_Window, NULL, (DeskWidth - BMPWidth) / 2, (DeskHeight - BMPHeight) / 2, BMPWidth, BMPHeight, 0);
-
-	ShowWindow (d3d_Window, SW_SHOW);
-	UpdateWindow (d3d_Window);
-
-	SetForegroundWindow (d3d_Window);
-
-	// pump all messages
-	MSG msg;
-
-	while (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
-	{
-      	TranslateMessage (&msg);
-      	DispatchMessage (&msg);
-	}
-}
-
-
-void Splash_Destroy (void)
-{
-	if (SplashBMP) delete SplashBMP;
-	SplashBMP = NULL;
-	Gdiplus::GdiplusShutdown (gdiplusToken);
-	SetWindowLong (d3d_Window, GWL_WNDPROC, (LONG) DefWindowProc);
-
-	// hide the window
-	ShowWindow (d3d_Window, SW_HIDE);
-}
 

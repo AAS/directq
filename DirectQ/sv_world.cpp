@@ -168,7 +168,7 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 		if (ent->v.movetype != MOVETYPE_PUSH)
 			Sys_Error ("SOLID_BSP without MOVETYPE_PUSH");
 
-		model = sv.models[ (int) ent->v.modelindex ];
+		model = sv.models[(int) ent->v.modelindex ];
 
 		if (!model || model->type != mod_brush)
 			Sys_Error ("MOVETYPE_PUSH with a non bsp model");
@@ -276,7 +276,7 @@ void SV_ClearWorld (void)
 {
 	SV_InitBoxHull ();
 
-	Q_MemSet (sv_areanodes, 0, sizeof (sv_areanodes));
+	memset (sv_areanodes, 0, sizeof (sv_areanodes));
 	sv_numareanodes = 0;
 	SV_CreateAreaNode (0, sv.worldmodel->mins, sv.worldmodel->maxs);
 }
@@ -320,14 +320,16 @@ loc0:;
 	// Build a list of touched edicts since linked list may change during touch
 	for (l = node->trigger_edicts.next; l != &node->trigger_edicts; l = l->next)
 	{
-		touch = EDICT_FROM_AREA(l);
+		touch = EDICT_FROM_AREA (l);
 
 		if (touch == ent) continue;
+
 		if (touch->free) continue;
+
 		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER) continue;
 
 		if (ent->v.absmin[0] > touch->v.absmax[0] || ent->v.absmin[1] > touch->v.absmax[1] || ent->v.absmin[2] > touch->v.absmax[2] ||
-			ent->v.absmax[0] < touch->v.absmin[0] || ent->v.absmax[1] < touch->v.absmin[1] || ent->v.absmax[2] < touch->v.absmin[2])
+				ent->v.absmax[0] < touch->v.absmin[0] || ent->v.absmax[1] < touch->v.absmin[1] || ent->v.absmax[2] < touch->v.absmin[2])
 			continue;
 
 		list[touched++] = touch;
@@ -347,7 +349,7 @@ loc0:;
 
 		touch = list[i];
 
-		ednum = GetNumberForEdict(touch);
+		ednum = GetNumberForEdict (touch);
 
 		old_self = SVProgs->GlobalStruct->self;
 		old_other = SVProgs->GlobalStruct->other;
@@ -368,7 +370,8 @@ loc0:;
 	if (ent->v.absmax[node->axis] > node->dist)
 	{
 		// order reversed to reduce code
-		if (ent->v.absmin[node->axis] < node->dist) SV_TouchLinks(ent, node->children[1]);
+		if (ent->v.absmin[node->axis] < node->dist) SV_TouchLinks (ent, node->children[1]);
+
 		node = node->children[0];
 		goto loc0;
 	}
@@ -392,7 +395,9 @@ SV_LinkEdict
 void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 {
 	if (ent->area.prev) SV_UnlinkEdict (ent);	// unlink from old position
+
 	if (ent == SVProgs->EdictPointers[0]) return;		// don't add the world
+
 	if (ent->free) return;
 
 	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
@@ -696,7 +701,7 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	hull_t		*hull;
 
 	// fill in a default trace
-	Q_MemSet (&trace, 0, sizeof (trace_t));
+	memset (&trace, 0, sizeof (trace_t));
 	trace.fraction = 1;
 	trace.allsolid = true;
 	VectorCopy (end, trace.endpos);
@@ -793,20 +798,25 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 		touch = EDICT_FROM_AREA (l);
 
 		if (touch->v.solid == SOLID_NOT) continue;
+
 		if (touch == clip->passedict) continue;
+
 		if (touch->v.solid == SOLID_TRIGGER) Sys_Error ("Trigger in clipping list");
+
 		if (clip->type == MOVE_NOMONSTERS && touch->v.solid != SOLID_BSP) continue;
 
 		if (clip->boxmins[0] > touch->v.absmax[0] || clip->boxmins[1] > touch->v.absmax[1] || clip->boxmins[2] > touch->v.absmax[2] ||
-			clip->boxmaxs[0] < touch->v.absmin[0] || clip->boxmaxs[1] < touch->v.absmin[1] || clip->boxmaxs[2] < touch->v.absmin[2])
+				clip->boxmaxs[0] < touch->v.absmin[0] || clip->boxmaxs[1] < touch->v.absmin[1] || clip->boxmaxs[2] < touch->v.absmin[2])
 			continue;
 
 		if (clip->passedict && clip->passedict->v.size[0] && !touch->v.size[0]) continue;	// points never interact
+
 		if (clip->trace.allsolid) return; // might intersect, so do an exact clip
 
 		if (clip->passedict)
 		{
 			if (PROG_TO_EDICT (touch->v.owner) == clip->passedict) continue;	// don't clip against own missiles
+
 			if (PROG_TO_EDICT (clip->passedict->v.owner) == touch) continue;	// don't clip against owner
 		}
 
@@ -831,7 +841,9 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 
 	// recurse down both sides
 	if (node->axis == -1) return;
+
 	if (clip->boxmaxs[node->axis] > node->dist) SV_ClipToLinks (node->children[0], clip);
+
 	if (clip->boxmins[node->axis] < node->dist) SV_ClipToLinks (node->children[1], clip);
 }
 
@@ -871,7 +883,7 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 	moveclip_t	clip;
 	int			i;
 
-	Q_MemSet (&clip, 0, sizeof (moveclip_t));
+	memset (&clip, 0, sizeof (moveclip_t));
 
 	// clip to world
 	clip.trace = SV_ClipMoveToEntity (SVProgs->EdictPointers[0], start, mins, maxs, end);

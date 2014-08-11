@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
-#include "d3d_vbo.h"
 
 
 bool D3D_DrawAutomap (void);
@@ -64,7 +63,7 @@ SlowPrint ()
 Screen_Update ();
 Con_Printf ();
 
-net 
+net
 turn off messages option
 
 the refresh is allways rendered, unless the console is full screen
@@ -74,7 +73,7 @@ console is:
 	notify lines
 	half
 	full
-	
+
 
 */
 
@@ -93,7 +92,7 @@ bool		oldautomap = false;
 extern cvar_t		gl_conscale;
 cvar_t		scr_viewsize ("viewsize", 100, CVAR_ARCHIVE);
 cvar_t		scr_fov ("fov", 90);	// 10 - 170
-cvar_t		scr_fovcompat ("fov_compatible", 1, CVAR_ARCHIVE);
+cvar_t		scr_fovcompat ("fov_compatible", 0.0f, CVAR_ARCHIVE);
 cvar_t		scr_conspeed ("scr_conspeed", 3000);
 cvar_t		scr_centertime ("scr_centertime", 2);
 cvar_t		scr_centerlog ("scr_centerlog", 1, CVAR_ARCHIVE);
@@ -141,8 +140,8 @@ CENTER PRINTING
 */
 
 char		scr_centerstring[1024];
-float		scr_centertime_start;	// for slow victory printing
-float		scr_centertime_off;
+float		ScrCenterTimeStart;	// for slow victory printing
+float		ScrCenterTimeOff;
 int			scr_center_lines;
 int			scr_erase_lines;
 int			scr_erase_center;
@@ -164,12 +163,12 @@ void SCR_CenterPrint (char *str)
 	if (!str[0])
 	{
 		// an empty print is sometimes used to explicitly clear the previous centerprint
-		scr_centertime_off = -1;
+		ScrCenterTimeOff = 0;
 		return;
 	}
 
 	// only log if the previous centerprint has already been cleared
-	if (scr_centerlog.integer && !cl.intermission && scr_centertime_off < 0.01)
+	if (scr_centerlog.integer && !cl.intermission && ScrCenterTimeOff < 0.01f)
 	{
 		Con_SilentPrintf ("\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");
 		Con_SilentPrintf ("\n%s\n\n", str);
@@ -180,8 +179,8 @@ void SCR_CenterPrint (char *str)
 	}
 
 	Q_strncpy (scr_centerstring, str, sizeof (scr_centerstring) - 1);
-	scr_centertime_off = scr_centertime.value;
-	scr_centertime_start = cl.time;
+	ScrCenterTimeOff = scr_centertime.value;
+	ScrCenterTimeStart = d3d_RenderDef.time;
 
 	// count the number of lines for centering
 	scr_center_lines = 1;
@@ -218,9 +217,8 @@ void SCR_DrawCenterString (void)
 
 	// the finale prints the characters one at a time
 	if (cl.intermission)
-		remaining = scr_printspeed.value * (cl.time - scr_centertime_start);
-	else
-		remaining = 9999;
+		remaining = scr_printspeed.value * d3d_RenderDef.time - ScrCenterTimeStart;
+	else remaining = 9999;
 
 	scr_erase_center = 0;
 	start = scr_centerstring;
@@ -243,7 +241,7 @@ void SCR_DrawCenterString (void)
 			if (!remaining--)
 				return;
 		}
-			
+
 		y += 10;
 
 		while (*start && *start != '\n')
@@ -262,10 +260,10 @@ void SCR_CheckDrawCenterString (void)
 	if (scr_center_lines > scr_erase_lines)
 		scr_erase_lines = scr_center_lines;
 
-	scr_centertime_off -= host_frametime;
+	ScrCenterTimeOff -= d3d_RenderDef.frametime;
 
 	// bug - this will potentially print the last seen centerprint during the end intermission!!!
-	if (scr_centertime_off <= 0 && !cl.intermission)
+	if (ScrCenterTimeOff < 0.001f && !cl.intermission)
 	{
 		scr_centerstring[0] = 0;
 		return;
@@ -275,28 +273,18 @@ void SCR_CheckDrawCenterString (void)
 	{
 		// ensure it's off
 		scr_centerstring[0] = 0;
-		scr_centertime_off = -1;
+		ScrCenterTimeOff = 0;
 		return;
 	}
 
 	// should never happen
 	if (!scr_centerstring[0])
 	{
-		scr_centertime_off = -1;
+		ScrCenterTimeOff = 0;
 		return;
 	}
 
-	// intermission prints an extended message which we don't want to fade
-	// note - this is buggy with mods that use centerprints for persistent messages
-//	if (scr_centertime_off < 1.0f && !cl.intermission)
-//		D3D_Set2DShade (scr_centertime_off);
-	// else D3D_Set2DShade (1.0f);
-
 	SCR_DrawCenterString ();
-
-//	if (scr_centertime_off < 1.0f) D3D_Set2DShade (1.0f);
-
-//	Menu_PrintWhite (20, 20, va ("%0.2f", scr_centertime_off));
 }
 
 //=============================================================================
@@ -316,12 +304,10 @@ float SCR_CalcFovX (float fov_y, float width, float height)
 	if (fov_y > 179) fov_y = 179;
 
 	y = height / tan (fov_y / 360 * D3DX_PI);
-
 	a = atan (width / y);
+	a = a * 360 / D3DX_PI;
 
-    a = a * 360 / D3DX_PI;
-
-    return a;
+	return a;
 }
 
 
@@ -335,12 +321,10 @@ float SCR_CalcFovY (float fov_x, float width, float height)
 	if (fov_x > 179) fov_x = 179;
 
 	x = width / tan (fov_x / 360 * D3DX_PI);
-
 	a = atan (height / x);
+	a = a * 360 / D3DX_PI;
 
-    a = a * 360 / D3DX_PI;
-
-    return a;
+	return a;
 }
 
 
@@ -362,10 +346,12 @@ static void SCR_CalcRefdef (void)
 
 	// bound viewsize
 	if (scr_viewsize.value < 100) Cvar_Set ("viewsize", "100");
+
 	if (scr_viewsize.value > 120) Cvar_Set ("viewsize", "120");
 
 	// bound field of view
 	if (scr_fov.value < 10) Cvar_Set ("fov", "10");
+
 	if (scr_fov.value > 170) Cvar_Set ("fov", "170");
 
 	// conditions for switching off the HUD - viewsize 120 always switches it off, period
@@ -382,6 +368,7 @@ static void SCR_CalcRefdef (void)
 
 	// bound console scale
 	if (conscale->value < 0) Cvar_Set ("r_conscale", "0");
+
 	if (conscale->value > 1) Cvar_Set ("r_conscale", "1");
 
 	// adjust a conwidth and conheight to match the mode aspect
@@ -402,6 +389,7 @@ static void SCR_CalcRefdef (void)
 
 	// clamp
 	if (conwidth > d3d_CurrentMode.Width) conwidth = d3d_CurrentMode.Width;
+
 	if (conheight > d3d_CurrentMode.Height) conheight = d3d_CurrentMode.Height;
 
 	// set width and height
@@ -409,6 +397,7 @@ static void SCR_CalcRefdef (void)
 	r_refdef.vrect.height = vid.height = (d3d_CurrentMode.Height - conheight) * conscale->value + conheight;
 
 	if (r_refdef.vrect.height > vid.height - sb_lines) r_refdef.vrect.height = vid.height - sb_lines;
+
 	if (r_refdef.vrect.height > vid.height) r_refdef.vrect.height = vid.height;
 
 	// always
@@ -434,6 +423,9 @@ static void SCR_CalcRefdef (void)
 	}
 
 	scr_vrect = r_refdef.vrect;
+
+	// !!!!!!!!!!!!!!!!!
+	HUD_Changed ();
 }
 
 
@@ -463,7 +455,7 @@ Keybinding command
 */
 void SCR_SizeUp_f (void)
 {
-	Cvar_Set ("viewsize",scr_viewsize.value+10);
+	Cvar_Set ("viewsize", scr_viewsize.value + 10);
 	vid.recalc_refdef = 1;
 }
 
@@ -477,7 +469,7 @@ Keybinding command
 */
 void SCR_SizeDown_f (void)
 {
-	Cvar_Set ("viewsize",scr_viewsize.value-10);
+	Cvar_Set ("viewsize", scr_viewsize.value - 10);
 	vid.recalc_refdef = 1;
 }
 
@@ -515,13 +507,14 @@ void SCR_DrawTurtle (void)
 	if (!scr_showturtle.value)
 		return;
 
-	if (host_frametime < 0.1)
+	if (d3d_RenderDef.frametime < 0.1f)
 	{
 		count = 0;
 		return;
 	}
 
 	count++;
+
 	if (count < 3)
 		return;
 
@@ -535,10 +528,8 @@ SCR_DrawNet
 */
 void SCR_DrawNet (void)
 {
-	if (realtime - cl.last_received_message < 0.3)
-		return;
-	if (cls.demoplayback)
-		return;
+	if (realtime - cl.lastrecievedmessage < 0.3f) return;
+	if (cls.demoplayback) return;
 
 	Draw_Pic (vid.width - 168, 4, scr_net);
 }
@@ -553,6 +544,7 @@ void SCR_DrawPause (void)
 	extern qpic_t *gfx_pause_lmp;
 
 	if (!scr_showpause.value) return;
+
 	if (!cl.paused) return;
 
 	Draw_Pic ((vid.width - gfx_pause_lmp->width) / 2, (vid.height - 48 - gfx_pause_lmp->height) / 2, gfx_pause_lmp);
@@ -564,7 +556,7 @@ void SCR_DrawPause (void)
 SCR_SetUpToDrawConsole
 ==================
 */
-void SCR_SetUpToDrawConsole (void)
+void SCR_SetUpToDrawConsole (float frametime)
 {
 	Con_CheckResize ();
 
@@ -577,20 +569,22 @@ void SCR_SetUpToDrawConsole (void)
 		scr_con_current = scr_conlines;
 	}
 	else if (key_dest == key_console)
-		scr_conlines = vid.height/2;	// half screen
+		scr_conlines = vid.height / 2;	// half screen
 	else
 		scr_conlines = 0;				// none visible
 
 	if (scr_conlines < scr_con_current)
 	{
-		scr_con_current -= scr_conspeed.value*host_frametime;
+		scr_con_current -= scr_conspeed.value * frametime;
+
 		if (scr_conlines > scr_con_current)
 			scr_con_current = scr_conlines;
 
 	}
 	else if (scr_conlines > scr_con_current)
 	{
-		scr_con_current += scr_conspeed.value*host_frametime;
+		scr_con_current += scr_conspeed.value * frametime;
+
 		if (scr_conlines < scr_con_current)
 			scr_con_current = scr_conlines;
 	}
@@ -619,13 +613,13 @@ void SCR_DrawConsole (void)
 }
 
 
-/* 
-============================================================================== 
- 
-						SCREEN SHOTS 
- 
-============================================================================== 
-*/ 
+/*
+==============================================================================
+
+						SCREEN SHOTS
+
+==============================================================================
+*/
 
 
 void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int srcbpp, int dstbpp)
@@ -650,7 +644,7 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 
 	// allocate space for the header
 	byte buffer[18];
-	Q_MemSet (buffer, 0, 18);
+	memset (buffer, 0, 18);
 
 	// compose the header
 	buffer[2] = 2;
@@ -670,7 +664,7 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 
 		if (srcbpp == 8)
 			outcolor = (byte *) &d3d_QuakePalette.standard32[data[i]];
-		else outcolor = (byte *) &((unsigned *) data)[i];
+		else outcolor = (byte *) & ((unsigned *) data) [i];
 
 		if (dstbpp == 24)
 			fwrite (outcolor, 3, 1, f);
@@ -716,7 +710,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 	}
 
 	// copy from the rendertarget to system memory
-	hr = QD3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
+	hr = D3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
 
 	if (FAILED (hr))
 	{
@@ -743,7 +737,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 
 	// allocate space for the header
 	byte buffer[18];
-	Q_MemSet (buffer, 0, 18);
+	memset (buffer, 0, 18);
 
 	// compose the header
 	buffer[2] = 2;
@@ -762,7 +756,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 	for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++)
 	{
 		// retrieve the data
-		byte *data = (byte *) &((unsigned *) lockrect.pBits)[i];
+		byte *data = (byte *) &((unsigned *) lockrect.pBits) [i];
 
 		// write it out
 		fwrite (data, 3, 1, f);
@@ -787,12 +781,12 @@ void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts)
 }
 
 
-/* 
-================== 
+/*
+==================
 SCR_ScreenShot_f
-================== 
+==================
 */
-void SCR_ScreenShot_f (void) 
+void SCR_ScreenShot_f (void)
 {
 	// clear the sound buffer as this can take some time
 	S_ClearBuffer ();
@@ -836,7 +830,7 @@ void SCR_ScreenShot_f (void)
 		Cvar_Set (&scr_screenshotformat, "tga");
 	}
 
-	// find a file name to save it to 
+	// find a file name to save it to
 	for (i = 0; i <= 9999; i++)
 	{
 		_snprintf
@@ -854,17 +848,17 @@ void SCR_ScreenShot_f (void)
 		if (!Sys_FileExists (checkname)) break;
 	}
 
-	if (i == 10000) 
+	if (i == 10000)
 	{
-		Con_Printf ("SCR_ScreenShot_f: 9999 Screenshots exceeded.\n"); 
+		Con_Printf ("SCR_ScreenShot_f: 9999 Screenshots exceeded.\n");
 		return;
- 	}
+	}
 
 	// run a screen refresh
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// the surface we'll use
-	LPDIRECT3DSURFACE9 Surf;
+	LPDIRECT3DSURFACE9 Surf = NULL;
 
 	// get the backbuffer (note - this might be a render to texture surf if it's underwater!!!)
 	d3d_Device->GetRenderTarget (0, &Surf);
@@ -873,7 +867,7 @@ void SCR_ScreenShot_f (void)
 	// d3dx doesn't support tga writes (BASTARDS) so we made our own
 	if (ssfmt == D3DXIFF_TGA)
 		SCR_WriteSurfaceToTGA (checkname, Surf);
-	else QD3DXSaveSurfaceToFileA (checkname, ssfmt, Surf, NULL, NULL);
+	else D3DXSaveSurfaceToFileA (checkname, ssfmt, Surf, NULL, NULL);
 
 	// not releasing is a memory leak!!!
 	Surf->Release ();
@@ -993,7 +987,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	scr_drawmapshot = true;
 
 	// do a screen refresh to get rid of any UI/etc
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// sample the rendered surf down to 128 * 128 for the correct mapshot sise
 	if (d3d_CurrentMode.Width > d3d_CurrentMode.Height)
@@ -1060,6 +1054,8 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	// invalidate the cached mapshot
 	Draw_InvalidateMapshot ();
 
+	HUD_Changed ();
+
 	// done
 	if (report) Con_Printf ("Wrote mapshot \"%s\"\n", workingname);
 }
@@ -1068,6 +1064,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 void SCR_Mapshot_cmd (void)
 {
 	if (!cl.worldmodel) return;
+
 	if (cls.state != ca_connected) return;
 
 	// first ensure we have a "maps" directory
@@ -1079,6 +1076,7 @@ void SCR_Mapshot_cmd (void)
 
 
 cmd_t Mapshot_Cmd ("mapshot", SCR_Mapshot_cmd);
+
 
 
 //=============================================================================
@@ -1111,15 +1109,17 @@ void SCR_BeginLoadingPlaque (void)
 	S_StopAllSounds (true);
 
 	if (cls.state != ca_connected) return;
+
 	if (cls.signon != SIGNONS) return;
 
 	// redraw with no console and no center text
 	Con_ClearNotify ();
-	scr_centertime_off = 0;
+	scr_centerstring[0] = 0;
+	ScrCenterTimeOff = 0;
 	scr_con_current = 0;
 
 	scr_drawloading = true;
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 	scr_drawloading = false;
 
 	scr_disabled_for_loading = true;
@@ -1182,6 +1182,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 
 			// this is to catch a \n\0 case
 			if (textbuf[i + 1]) lines[scr_modallines] = &textbuf[i + 1];
+
 			textbuf[i] = 0;
 		}
 	}
@@ -1191,6 +1192,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 	for (int i = 0;; i++)
 	{
 		if (!lines[i]) break;
+
 		if (strlen (lines[i]) > maxline) maxline = strlen (lines[i]);
 	}
 
@@ -1244,7 +1246,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 SCR_ModalMessage
 
 Displays a text string in the center of the screen and waits for a Y or N
-keypress.  
+keypress.
 ==================
 */
 void ClearAllStates (void);
@@ -1265,10 +1267,10 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 
 	// force a screen update
 	scr_modalmessage = true;
-	SCR_UpdateScreen ();
-	SCR_UpdateScreen ();
-	SCR_UpdateScreen ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
+	SCR_UpdateScreen (0);
+	SCR_UpdateScreen (0);
+	SCR_UpdateScreen (0);
 	scr_modalmessage = false;
 
 	do
@@ -1408,23 +1410,21 @@ void M_Draw (void);
 void HUD_IntermissionOverlay (void);
 void HUD_FinaleOverlay (void);
 void SHOWLMP_drawall (void);
-void D3D_UpdateOcclusionQueries (void);
 
 extern bool vid_restarted;
-extern bool d3d_DeviceLost;
 
-void D3DRMain_HLSLBeginCallback (void *blah);
-void D3DRMain_HLSLEndCallback (void *blah);
+void D3DDraw_End2D (void);
 
-void SCR_UpdateScreen (void)
+void SCR_UpdateScreen (float timepassed)
 {
 	// ensure that everything needed is up
-	if (!hInstD3D9) return;
-	if (!hInstD3DX) return;
 	if (!d3d_Device) return;
 
 	extern D3DDISPLAYMODE d3d_DesktopMode;
 	extern D3DDISPLAYMODE d3d_CurrentMode;
+
+	// update the mouse state
+	IN_SetMouseState (d3d_CurrentMode.RefreshRate != 0);
 
 	if (block_drawing) return;
 
@@ -1444,17 +1444,13 @@ void SCR_UpdateScreen (void)
 
 	// begin rendering; get the size of the refresh window and set up for the render
 	// this is also used for lost device recovery mode
-	D3D_BeginRendering ();
+	D3DVid_BeginRendering ();
 
-	// if we've just lost the device we're going into recovery mode, so don't draw anything
-	if (d3d_DeviceLost) return;
+	// this assumes that hr = d3d_Device->BeginScene (); is the final D3D call in D3DVid_BeginRendering...
+	if (FAILED (hr)) return;
 
 	// if we needed to restart video skip updating this frame
 	if (vid_restarted) return;
-
-	// see if we are using pixel shaders - this needs to be done after begin rendering in case anything in there
-	// upsets the availability
-	d3d_GlobalCaps.usingPixelShaders = (d3d_GlobalCaps.supportPixelShaders && r_hlsl.integer);
 
 	// determine size of refresh window
 	if (oldfov != scr_fov.value)
@@ -1489,12 +1485,11 @@ void SCR_UpdateScreen (void)
 
 	if (vid.recalc_refdef) SCR_CalcRefdef ();
 
-	// do 3D refresh drawing, and then update the screen
-	SCR_SetUpToDrawConsole ();
+	D3DHLSL_BeginFrame ();
 
-	V_RenderView ();
+	R_RenderView (timepassed);
 
-	D3D_Set2D ();
+	D3DDraw_Begin2D ();
 
 	if (scr_drawloading)
 	{
@@ -1535,14 +1530,12 @@ void SCR_UpdateScreen (void)
 				Draw_String (vid.width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
 				Draw_String (vid.width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
 				Draw_String (vid.width - 100, 50, va ("%5i stream", d3d_RenderDef.numsss));
-				Draw_String (vid.width - 100, 60, va ("%5i lock", d3d_RenderDef.numlocks));
+				Draw_String (vid.width - 100, 60, va ("%5i lock", d3d_RenderDef.numlock));
 				Draw_String (vid.width - 100, 70, va ("%5i draw", d3d_RenderDef.numdrawprim));
 			}
 
 			if (scr_showcoords.integer && !con_forcedup)
-			{
 				Draw_String (10, 10, va ("%0.3f %0.3f %0.3f", r_origin[0], r_origin[1], r_origin[2]));
-			}
 
 			if (!scr_drawloading) M_Draw ();
 		}
@@ -1554,11 +1547,11 @@ void SCR_UpdateScreen (void)
 
 	d3d_RenderDef.numdrawprim = 0;
 	d3d_RenderDef.numsss = 0;
-	d3d_RenderDef.numlocks = 0;
+	d3d_RenderDef.numlock = 0;
 
-	VBO_AddCallback (D3DRMain_HLSLEndCallback);
-
-	D3D_EndRendering ();
+	D3DDraw_End2D ();
+	D3DHLSL_EndFrame ();
+	D3DVid_EndRendering ();
 
 	// take a mapshot on entry to the map, unless one already exists
 	// unless we're already in mapshot mode, in which case we'll have an infinite loop!!!
@@ -1571,7 +1564,7 @@ void SCR_UpdateScreen (void)
 		SCR_Mapshot_f (va ("%s/%s", com_gamedir, cl.worldmodel->name), false, false);
 	}
 
-	V_UpdatePalette ();
+	V_UpdatePalette (timepassed);
 }
 
 
@@ -1598,18 +1591,20 @@ void SCR_DrawSlider (int x, int y, int width, int stage, int maxstage)
 
 void SCR_QuakeIsLoading (int stage, int maxstage)
 {
-	// explicitly send this through the fixed path
-	d3d_GlobalCaps.usingPixelShaders = false;
+	// pretend we're fullscreen because we definitely want to hide the mouse
+	IN_SetMouseState (true);
 
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 	SCR_CalcRefdef ();
-	D3D_BeginRendering ();
+	hr = d3d_Device->BeginScene ();
+
+	if (FAILED (hr)) return;
 
 	// if we needed to restart video skip updating this frame
-	if (d3d_DeviceLost) return;
 	if (vid_restarted) return;
 
-	D3D_Set2D ();
+	D3DHLSL_BeginFrame ();
+	D3DDraw_Begin2D ();
 
 	Draw_ConsoleBackground (vid.height);
 
@@ -1622,6 +1617,10 @@ void SCR_QuakeIsLoading (int stage, int maxstage)
 
 	SCR_DrawSlider (x + 8, y + gfx_loading_lmp->height + 8, gfx_loading_lmp->width - 16, stage, maxstage);
 
-	D3D_EndRendering ();
+	D3DDraw_End2D ();
+	D3DHLSL_EndFrame ();
+
+	d3d_Device->EndScene ();
+	d3d_Device->Present (NULL, NULL, NULL, NULL);
 }
 

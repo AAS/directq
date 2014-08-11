@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -27,15 +27,12 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 void Draw_Init (void);
 void Draw_Character (int x, int y, int num);
 void Draw_BackwardsCharacter (int x, int y, int num);
-void Draw_RotateCharacter (int x, int y, int num);
-void Draw_InvertCharacter (int x, int y, int num);
 void Draw_VScrollBar (int x, int y, int height, int pos, int scale);
 void Draw_DebugChar (char num);
 void Draw_Pic (int x, int y, qpic_t *pic);
 void Draw_Pic (int x, int y, qpic_t *pic, float alpha);
 void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt, int pants);
 void Draw_ConsoleBackground (int lines);
-void Draw_TileClear (int x, int y, int w, int h);
 void Draw_Fill (int x, int y, int w, int h, int c, int alpha = 255);
 void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alpha = 1.0f);
 void Draw_FadeScreen (int alpha);

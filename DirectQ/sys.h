@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -24,7 +24,7 @@ void Sys_mkdir (char *path);
 void Sys_ThreadCatchup (void);
 
 // system IO
-void Sys_DebugLog(char *file, char *fmt, ...);
+void Sys_DebugLog (char *file, char *fmt, ...);
 
 void Sys_Error (char *error, ...);
 // an error will cause the entire program to exit
@@ -32,6 +32,7 @@ void Sys_Error (char *error, ...);
 void Sys_Quit (void);
 
 float Sys_FloatTime (void);
+DWORD Sys_Milliseconds (void);
 
 void Sys_SendKeyEvents (void);
 // Perform Key_Event () callbacks until the input que is empty

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -21,7 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 
-cvar_t	cl_web_download		("cl_web_download", "1");
+cvar_t	cl_web_download	("cl_web_download", "1");
 cvar_t	cl_web_download_url	("cl_web_download_url", "http://bigfoot.quake1.net/"); // the quakeone.com link is dead //"http://downloads.quakeone.com/");
 
 // we need to declare some mouse variables here, because the menu system
@@ -31,17 +31,17 @@ cvar_t	cl_web_download_url	("cl_web_download_url", "http://bigfoot.quake1.net/")
 cvar_t	cl_name ("_cl_name", "player", CVAR_ARCHIVE);
 cvar_t	cl_color ("_cl_color", "0", CVAR_ARCHIVE);
 
-cvar_t	cl_shownet ("cl_shownet","0");	// can be 0, 1, or 2
-cvar_t	cl_nolerp ("cl_nolerp","0");
+cvar_t	cl_shownet ("cl_shownet", "0");	// can be 0, 1, or 2
+cvar_t	cl_nolerp ("cl_nolerp", "0");
 
-cvar_t	lookspring ("lookspring","0", CVAR_ARCHIVE);
-cvar_t	lookstrafe ("lookstrafe","0", CVAR_ARCHIVE);
-cvar_t	sensitivity ("sensitivity","3", CVAR_ARCHIVE);
+cvar_t	lookspring ("lookspring", "0", CVAR_ARCHIVE);
+cvar_t	lookstrafe ("lookstrafe", "0", CVAR_ARCHIVE);
+cvar_t	sensitivity ("sensitivity", "3", CVAR_ARCHIVE);
 
-cvar_t	m_pitch ("m_pitch","0.022", CVAR_ARCHIVE);
-cvar_t	m_yaw ("m_yaw","0.022", CVAR_ARCHIVE);
-cvar_t	m_forward ("m_forward","0", CVAR_ARCHIVE);
-cvar_t	m_side ("m_side","0.8", CVAR_ARCHIVE);
+cvar_t	m_pitch ("m_pitch", "0.022", CVAR_ARCHIVE);
+cvar_t	m_yaw ("m_yaw", "0.022", CVAR_ARCHIVE);
+cvar_t	m_forward ("m_forward", "0", CVAR_ARCHIVE);
+cvar_t	m_side ("m_side", "0.8", CVAR_ARCHIVE);
 
 // proquake nat fix
 cvar_t	cl_natfix ("cl_natfix", "1");
@@ -66,6 +66,21 @@ void D3D_BeginVisedicts (void);
 void R_InitEfrags (void);
 
 
+// save and restore anything that needs it while wiping the cl struct
+void CL_ClearCLStruct (void)
+{
+	client_state_t *oldcl = (client_state_t *) scratchbuf;
+
+	memcpy (oldcl, &cl, sizeof (client_state_t));
+	memset (&cl, 0, sizeof (client_state_t));
+
+	// now restore the stuff we want to persist between servers
+	cl.death_location[0] = oldcl->death_location[0];
+	cl.death_location[1] = oldcl->death_location[1];
+	cl.death_location[2] = oldcl->death_location[2];
+}
+
+
 /*
 =====================
 CL_ClearState
@@ -80,15 +95,15 @@ void CL_ClearState (void)
 	if (!sv.active) Host_ClearMemory ();
 
 	// wipe the entire cl structure
-	Q_MemSet (&cl, 0, sizeof(cl));
+	CL_ClearCLStruct ();
 
 	SZ_Clear (&cls.message);
 
 	cl.teamscores = (teamscore_t *) MainHunk->Alloc (sizeof (teamscore_t) * 16);
 
 	// clear down anything that was allocated one-time-only at startup
-	Q_MemSet (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
-	Q_MemSet (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
+	memset (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
+	memset (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
 	// allocate space for the first 512 entities - also clears the array
 	// the remainder are left at NULL and allocated on-demand if they are ever needed
@@ -152,12 +167,13 @@ void CL_Disconnect (void)
 		NET_Close (cls.netcon);
 
 		cls.state = ca_disconnected;
+
 		if (sv.active)
-			Host_ShutdownServer(false);
+			Host_ShutdownServer (false);
 	}
 
-	extern HWND d3d_Window;
-	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s", DIRECTQ_VERSION, com_gamename));
+	// clear the map from the title bar
+	UpdateTitlebarText ();
 
 	cls.demoplayback = cls.timedemo = false;
 	cls.signon = 0;
@@ -196,7 +212,7 @@ void CL_EstablishConnection (char *host)
 	if (!cls.netcon) Host_Error ("CL_Connect: connect failed\n");
 
 	Con_DPrintf ("CL_EstablishConnection: connected to %s\n", host);
-	
+
 	cls.demonum = -1;			// not in the demo loop now
 	cls.state = ca_connected;
 	cls.signon = 0;				// need all the signon messages before playing
@@ -224,24 +240,24 @@ void CL_SignonReply (void)
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "prespawn");
 		break;
-		
+
 	case 2:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
-		MSG_WriteString (&cls.message, va("name \"%s\"\n", cl_name.string));
-	
+		MSG_WriteString (&cls.message, va ("name \"%s\"\n", cl_name.string));
+
 		MSG_WriteByte (&cls.message, clc_stringcmd);
-		MSG_WriteString (&cls.message, va("color %i %i\n", ((int)cl_color.value)>>4, ((int)cl_color.value)&15));
-	
+		MSG_WriteString (&cls.message, va ("color %i %i\n", ((int) cl_color.value) >> 4, ((int) cl_color.value) & 15));
+
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		_snprintf (str, 8192, "spawn %s", cls.spawnparms);
 		MSG_WriteString (&cls.message, str);
 		break;
-		
+
 	case 3:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "begin");
 		break;
-		
+
 	case 4:
 		SCR_EndLoadingPlaque ();		// allow normal screen updates
 		break;
@@ -269,6 +285,7 @@ void CL_NextDemo (void)
 	if (!cls.demos[cls.demonum][0] || cls.demonum == MAX_DEMOS)
 	{
 		cls.demonum = 0;
+
 		if (!cls.demos[cls.demonum][0])
 		{
 			Con_Printf ("No demos listed with startdemos\n");
@@ -277,7 +294,7 @@ void CL_NextDemo (void)
 		}
 	}
 
-	_snprintf (str,1024, "playdemo %s\n", cls.demos[cls.demonum]);
+	_snprintf (str, 1024, "playdemo %s\n", cls.demos[cls.demonum]);
 	Cbuf_InsertText (str);
 	cls.demonum++;
 }
@@ -347,11 +364,12 @@ dlight_t *CL_FindDlight (int key)
 	if (key)
 	{
 		dl = cl_dlights;
-		for (i=0; i<MAX_DLIGHTS; i++, dl++)
+
+		for (i = 0; i < MAX_DLIGHTS; i++, dl++)
 		{
 			if (dl->key == key)
 			{
-				Q_MemSet (dl, 0, sizeof(*dl));
+				memset (dl, 0, sizeof (*dl));
 				dl->key = key;
 				return dl;
 			}
@@ -361,18 +379,18 @@ dlight_t *CL_FindDlight (int key)
 	// then look for anything else
 	dl = cl_dlights;
 
-	for (i=0; i<MAX_DLIGHTS; i++, dl++)
+	for (i = 0; i < MAX_DLIGHTS; i++, dl++)
 	{
 		if (dl->die < cl.time)
 		{
-			Q_MemSet (dl, 0, sizeof(*dl));
+			memset (dl, 0, sizeof (*dl));
 			dl->key = key;
 			return dl;
 		}
 	}
 
 	dl = &cl_dlights[0];
-	Q_MemSet (dl, 0, sizeof(*dl));
+	memset (dl, 0, sizeof (*dl));
 	dl->key = key;
 	return dl;
 }
@@ -404,10 +422,9 @@ void CL_DecayLights (void)
 	int			i;
 	dlight_t	*dl;
 	float		time;
-	static float old_decaytime = 0;
+	static float olddecaytime = 0;
 
-	time = cl.time - old_decaytime;
-
+	time = cl.time - olddecaytime;
 	dl = cl_dlights;
 
 	for (i = 0; i < MAX_DLIGHTS; i++, dl++)
@@ -420,11 +437,11 @@ void CL_DecayLights (void)
 		if (dl->radius < 0)
 		{
 			dl->radius = 0;
-			dl->die = -1;
+			dl->die = 0;
 		}
 	}
 
-	old_decaytime = cl.time;
+	olddecaytime = cl.time;
 }
 
 
@@ -448,11 +465,11 @@ float CL_LerpPoint (void)
 		return 1;
 	}
 
-	if (f > 0.1)
+	if (f > 0.1f)
 	{
 		// dropped packet, or start of demo
-		cl.mtime[1] = cl.mtime[0] - 0.1;
-		f = 0.1;
+		cl.mtime[1] = cl.mtime[0] - 0.1f;
+		f = 0.1f;
 	}
 
 	frac = (cl.time - cl.mtime[1]) / f;
@@ -487,24 +504,24 @@ void CL_EntityInterpolateOrigins (entity_t *ent)
 {
 	if (r_lerporient.integer)
 	{
-		float timepassed = cl.time - ent->translate_start_time;
+		float timepassed = cl.time - ent->translatestarttime;
 		float blend = 0;
 		vec3_t delta = {0, 0, 0};
 
-		if (ent->translate_start_time == 0 || timepassed > 1)
+		if (ent->translatestarttime < 0.001 || timepassed > 1)
 		{
-			ent->translate_start_time = cl.time;
+			ent->translatestarttime = cl.time;
 
-			VectorCopy (ent->origin, ent->lastorigin);
-			VectorCopy (ent->origin, ent->currorigin);
+			VectorCopy2 (ent->lastorigin, ent->origin);
+			VectorCopy2 (ent->currorigin, ent->origin);
 		}
 
 		if (!VectorCompare (ent->origin, ent->currorigin))
 		{
-			ent->translate_start_time = cl.time;
+			ent->translatestarttime = cl.time;
 
-			VectorCopy (ent->currorigin, ent->lastorigin);
-			VectorCopy (ent->origin,  ent->currorigin);
+			VectorCopy2 (ent->lastorigin, ent->currorigin);
+			VectorCopy2 (ent->currorigin, ent->origin);
 
 			blend = 0;
 		}
@@ -518,8 +535,8 @@ void CL_EntityInterpolateOrigins (entity_t *ent)
 		VectorSubtract (ent->currorigin, ent->lastorigin, delta);
 
 		// use cubic interpolation
-		float lastlerp = 2 * (blend * blend * blend) - 3 * (blend * blend) + 1;
-		float currlerp = 3 * (blend * blend) - 2 * (blend * blend * blend);
+		float lastlerp = 1.0f - blend;
+		float currlerp = blend;
 
 		ent->origin[0] = ent->lastorigin[0] * lastlerp + ent->currorigin[0] * currlerp;
 		ent->origin[1] = ent->lastorigin[1] * lastlerp + ent->currorigin[1] * currlerp;
@@ -532,24 +549,24 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 {
 	if (r_lerporient.integer)
 	{
-		float timepassed = cl.time - ent->rotate_start_time;
+		float timepassed = cl.time - ent->rotatestarttime;
 		float blend = 0;
 		vec3_t delta = {0, 0, 0};
 
-		if (ent->rotate_start_time == 0 || timepassed > 1)
+		if (ent->rotatestarttime < 0.001 || timepassed > 1)
 		{
-			ent->rotate_start_time = cl.time;
+			ent->rotatestarttime = cl.time;
 
-			VectorCopy (ent->angles, ent->lastangles);
-			VectorCopy (ent->angles, ent->currangles);
+			VectorCopy2 (ent->lastangles, ent->angles);
+			VectorCopy2 (ent->currangles, ent->angles);
 		}
 
 		if (!VectorCompare (ent->angles, ent->currangles))
 		{
-			ent->rotate_start_time = cl.time;
+			ent->rotatestarttime = cl.time;
 
-			VectorCopy (ent->currangles, ent->lastangles);
-			VectorCopy (ent->angles,  ent->currangles);
+			VectorCopy2 (ent->lastangles, ent->currangles);
+			VectorCopy2 (ent->currangles, ent->angles);
 
 			blend = 0;
 		}
@@ -571,8 +588,8 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 		VectorAdd (ent->lastangles, delta, delta);
 
 		// use cubic interpolation
-		float lastlerp = 2 * (blend * blend * blend) - 3 * (blend * blend) + 1;
-		float currlerp = 3 * (blend * blend) - 2 * (blend * blend * blend);
+		float lastlerp = 1.0f - blend;
+		float currlerp = blend;
 
 		ent->angles[0] = ent->lastangles[0] * lastlerp + delta[0] * currlerp;
 		ent->angles[1] = ent->lastangles[1] * lastlerp + delta[1] * currlerp;
@@ -596,7 +613,7 @@ void CL_RelinkEntities (void)
 	vec3_t		oldorg;
 	dlight_t	*dl;
 
-	// determine partial update time	
+	// determine partial update time
 	frac = CL_LerpPoint ();
 
 	// interpolate player info
@@ -605,7 +622,7 @@ void CL_RelinkEntities (void)
 
 	if (cls.demoplayback)
 	{
-		// interpolate the angles	
+		// interpolate the angles
 		for (j = 0; j < 3; j++)
 		{
 			d = cl.mviewangles[0][j] - cl.mviewangles[1][j];
@@ -631,18 +648,19 @@ void CL_RelinkEntities (void)
 		{
 			// clear it's interpolation data too
 			CL_ClearInterpolation (ent);
+			ent->brushstate.bmrelinked = true;
 			ent->model = NULL;
 			continue;
 		}
 
-		VectorCopy (ent->origin, oldorg);
+		VectorCopy2 (oldorg, ent->origin);
 
 		if (ent->forcelink)
 		{
 			// the entity was not updated in the last message
 			// so move to the final spot
-			VectorCopy (ent->msg_origins[0], ent->origin);
-			VectorCopy (ent->msg_angles[0], ent->angles);
+			VectorCopy2 (ent->origin, ent->msg_origins[0]);
+			VectorCopy2 (ent->angles, ent->msg_angles[0]);
 		}
 		else
 		{
@@ -700,7 +718,7 @@ void CL_RelinkEntities (void)
 			vec3_t		fv, rv, uv;
 
 			dl = CL_AllocDlight (i);
-			dl->die = cl.time + 0.1;
+			dl->die = cl.time + 0.1f;
 
 			// some entities have different attacks resulting in a different flash colour
 			if (!strncmp (&ent->model->name[6], "wizard", 6))
@@ -716,12 +734,12 @@ void CL_RelinkEntities (void)
 				if (cl.stats[STAT_ACTIVEWEAPON] == IT_NAILGUN)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.1;
+					dl->die = cl.time + 0.1f;
 				}
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_LIGHTNING)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.1;
+					dl->die = cl.time + 0.1f;
 
 					// switch the dlight colour
 					R_ColourDLight (dl, 65, 232, 470);
@@ -729,7 +747,7 @@ void CL_RelinkEntities (void)
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.1;
+					dl->die = cl.time + 0.1f;
 
 					// switch the dlight colour
 					R_ColourDLight (dl, 65, 232, 470);
@@ -737,33 +755,35 @@ void CL_RelinkEntities (void)
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_NAILGUN)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.1;
+					dl->die = cl.time + 0.1f;
 				}
 			}
 
-			VectorCopy (ent->origin,  dl->origin);
+			VectorCopy2 (dl->origin, ent->origin);
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
 
 			VectorMA (dl->origin, 18, fv, dl->origin);
-			dl->radius = 200 + (rand()&31);
+			dl->radius = 200 + (rand() & 31);
 			dl->minlight = 32;
 		}
+
 		if (ent->effects & EF_BRIGHTLIGHT)
 		{
 			// uncoloured
 			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
+			VectorCopy2 (dl->origin, ent->origin);
 			dl->origin[2] += 16;
-			dl->radius = 400 + (rand()&31);
-			dl->die = cl.time + 0.001;
+			dl->radius = 400 + (rand() & 31);
+			dl->die = cl.time + 0.001f;
 		}
+
 		if (ent->effects & EF_DIMLIGHT)
-		{			
+		{
 			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->die = cl.time + 0.001;
+			VectorCopy2 (dl->origin, ent->origin);
+			dl->radius = 200 + (rand() & 31);
+			dl->die = cl.time + 0.001f;
 
 			// powerup dynamic lights
 			if (i == cl.viewentity)
@@ -776,6 +796,7 @@ void CL_RelinkEntities (void)
 				rgb[2] = 64;
 
 				if (cl.items & IT_QUAD) rgb[2] = 255;
+
 				if (cl.items & IT_INVULNERABILITY) rgb[0] = 255;
 
 				// re-balance the colours
@@ -792,12 +813,10 @@ void CL_RelinkEntities (void)
 		if (ent->model->flags & EF_GIB)
 		{
 			R_RocketTrail (oldorg, ent->origin, 2);
-			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_ZOMGIB)
 		{
 			R_RocketTrail (oldorg, ent->origin, 4);
-			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_TRACER)
 		{
@@ -807,14 +826,12 @@ void CL_RelinkEntities (void)
 			if (r_extradlight.value)
 			{
 				dl = CL_AllocDlight (i);
-				VectorCopy (ent->origin, dl->origin);
+				VectorCopy2 (dl->origin, ent->origin);
 				dl->radius = 200;
-				dl->die = cl.time + 0.01;
+				dl->die = cl.time + 0.01f;
 
 				R_ColourDLight (dl, 308, 351, 109);
 			}
-
-			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_TRACER2)
 		{
@@ -824,31 +841,26 @@ void CL_RelinkEntities (void)
 			if (r_extradlight.value)
 			{
 				dl = CL_AllocDlight (i);
-				VectorCopy (ent->origin, dl->origin);
+				VectorCopy2 (dl->origin, ent->origin);
 				dl->radius = 200;
-				dl->die = cl.time + 0.01;
+				dl->die = cl.time + 0.01f;
 
 				R_ColourDLight (dl, 408, 242, 117);
 			}
-
-			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_ROCKET)
 		{
 			R_RocketTrail (oldorg, ent->origin, 0);
 			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin, dl->origin);
+			VectorCopy2 (dl->origin, ent->origin);
 			dl->radius = 200;
-			dl->die = cl.time + 0.01;
+			dl->die = cl.time + 0.01f;
 
 			R_ColourDLight (dl, 408, 242, 117);
-
-			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_GRENADE)
 		{
 			R_RocketTrail (oldorg, ent->origin, 1);
-			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_TRACER3)
 		{
@@ -858,14 +870,12 @@ void CL_RelinkEntities (void)
 			if (r_extradlight.value)
 			{
 				dl = CL_AllocDlight (i);
-				VectorCopy (ent->origin, dl->origin);
+				VectorCopy2 (dl->origin, ent->origin);
 				dl->radius = 200;
-				dl->die = cl.time + 0.01;
+				dl->die = cl.time + 0.01f;
 
 				R_ColourDLight (dl, 399, 141, 228);
 			}
-
-			ent->effects |= EF_NEVEROCCLUDE;
 		}
 
 		ent->forcelink = false;
@@ -888,14 +898,13 @@ CL_ReadFromServer
 Read all incoming data from the server
 ===============
 */
-int CL_ReadFromServer (void)
+int CL_ReadFromServer (float frametime)
 {
 	int		ret;
 
 	cl.oldtime = cl.time;
-
-	// keep client timings millisecond steady
-	cl.time += host_frametime;
+	cl.time += frametime;
+	cl.frametime = frametime;
 
 	do
 	{
@@ -904,7 +913,7 @@ int CL_ReadFromServer (void)
 		if (ret == -1) Host_Error ("CL_ReadFromServer: lost server connection");
 		if (!ret) break;
 
-		cl.last_received_message = realtime;
+		cl.lastrecievedmessage = realtime;
 		CL_ParseServerMessage ();
 	} while (ret && cls.state == ca_connected);
 
@@ -935,7 +944,7 @@ void CL_SendCmd (void)
 		CL_BaseMove (&cmd);
 
 		// allow mice or other external controllers to add to the move
-		IN_Move (&cmd);
+		IN_MouseMove (&cmd);
 
 		// send the unreliable message
 		CL_SendMove (&cmd);
@@ -977,7 +986,7 @@ cmd_t CL_TimeDemo_f_Cmd ("timedemo", CL_TimeDemo_f);
 
 
 void CL_Init (void)
-{	
+{
 	SZ_Alloc (&cls.message, 1024);
 
 	// allocated here because (1) it's just a poxy array of pointers, so no big deal, and (2) it's

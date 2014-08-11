@@ -9,7 +9,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -21,11 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern byte *scratchbuf;
 #define SCRATCHBUF_SIZE 262144
 
-// fast memcpy and memset replacements
-// memcpy and memset in MS CRT are just straight char-by-char operations!!!
-void *Q_MemCpy (void *dst, void *src, int size);
-void *Q_MemSet (void *dst, int val, int size);
-
 // interface
 void Pool_Init (void);
 
@@ -34,7 +29,7 @@ void Zone_FreeMemory (void *ptr);
 void Zone_Compact (void);
 
 // wrapper to ensure that the pointer is NULL after a free op
-#define Zone_Free(ptr) {Zone_FreeMemory (ptr); ptr = NULL;}
+#define Zone_Free(ptr) {Zone_FreeMemory (ptr); (ptr) = NULL;}
 
 
 class CQuakeHunk

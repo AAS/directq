@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -20,24 +20,22 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // protocol.h -- communications protocols
 
 // Standard Quake
-#define	PROTOCOL_VERSION	15
+#define	PROTOCOL_VERSION_NQ		15
 
 // FitzQuake
 #define PROTOCOL_VERSION_FITZ	666
 
-// RemakeQuake (current draft protocol, subject to change)
-#define PROTOCOL_VERSION_RMQ_MINUS2	778
+// RMQ
+#define PROTOCOL_VERSION_RMQ	999
 
-// BJP protocols - just ripped them from his engine!  let's see how far we get with them... :)
-#define	PROTOCOL_VERSION_BJP	10000	// Extended protocol (models > 256 etc), hopefully no conflict
-#define	PROTOCOL_VERSION_BJP2	10001	// Extended protocol (sounds > 256), problems with Marcher
-#define	PROTOCOL_VERSION_BJP3	10002	// Extended protocol (sounds > 256), more compatible, but less functional
 
-// new MH protocol(s)
-// if a new protocol is added, it must also be added to the autocomplete list in keys.cpp
-// new protocols should be numbered sequentially from 10000 to retain compatibility with SV_SetProtocol_f
-// this will of course break if arguiRe ever creates a BJP4 protocol...
-#define	PROTOCOL_VERSION_MH		10003	// Extended protocol, as 10002 but extends coords to full float
+// protocol flags
+#define PRFL_SHORTANGLE         (1 << 1)
+#define PRFL_FLOATANGLE         (1 << 2)
+#define PRFL_24BITCOORD         (1 << 3)
+#define PRFL_FLOATCOORD         (1 << 4)
+#define PRFL_MOREFLAGS          (1 << 31)       // to do - support this...
+
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:
 #define	U_MOREBITS		(1<<0)
@@ -119,14 +117,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define B_LARGEFRAME	(1<<1)	// frame is short instead of byte
 #define B_ALPHA			(1<<2)	// 1 byte, uses ENTALPHA_ENCODE, not sent if ENTALPHA_DEFAULT
 
-// fitzquake protocol
-#define ENTALPHA_DEFAULT	0	//entity's alpha is "default" (i.e. water obeys r_wateralpha) -- must be zero so zeroed out memory works
-#define ENTALPHA_ZERO		1	//entity is invisible (lowest possible alpha)
-#define ENTALPHA_ONE		255 //entity is fully opaque (highest possible alpha)
-#define ENTALPHA_ENCODE(a)	(((a)==0)?ENTALPHA_DEFAULT:Q_rint(CLAMP(1,(a)*254.0f+1,255))) //server convert to byte to send to client
-#define ENTALPHA_DECODE(a)	(((a)==ENTALPHA_DEFAULT)?1.0f:((float)(a)-1)/(254)) //client convert to float for rendering
-#define ENTALPHA_TOSAVE(a)	(((a)==ENTALPHA_DEFAULT)?0.0f:(((a)==ENTALPHA_ZERO)?-1.0f:((float)(a)-1)/(254))) //server convert to float for savegame
-
 // defaults for clientinfo messages
 #define	DEFAULT_VIEWHEIGHT	22
 
@@ -141,9 +131,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // also related to svc_strings[] in cl_parse
 //==================
 
-//
+
 // server to client
-//
 #define	svc_bad				0
 #define	svc_nop				1
 #define	svc_disconnect		2
@@ -154,13 +143,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	svc_time			7	// [float] server time
 #define	svc_print			8	// [string] null terminated string
 #define	svc_stufftext		9	// [string] stuffed into client's console buffer
-								// the string should be \n terminated
+// the string should be \n terminated
 #define	svc_setangle		10	// [angle3] set the view angle to this absolute value
-	
+
 #define	svc_serverinfo		11	// [long] version
-						// [string] signon string
-						// [string]..[0]model cache
-						// [string]...[0]sounds cache
+// [string] signon string
+// [string]..[0]model cache
+// [string]...[0]sounds cache
 #define	svc_lightstyle		12	// [byte] [string]
 #define	svc_updatename		13	// [byte] [string]
 #define	svc_updatefrags		14	// [byte] [short]
@@ -169,11 +158,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	svc_updatecolors	17	// [byte] [byte]
 #define	svc_particle		18	// [vec3] <variable>
 #define	svc_damage			19
-	
+
 #define	svc_spawnstatic		20
 //	svc_spawnbinary		21
 #define	svc_spawnbaseline	22
-	
+
 #define	svc_temp_entity		23
 
 #define	svc_setpause		24	// [byte] on / off
@@ -210,9 +199,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define svc_skyboxsize          50      // [coord] size (default is 4096)
 #define svc_fog			51	// [byte] enable <optional past this point, only included if enable is true> [float] density [byte] red [byte] green [byte] blue
 
-//
 // client to server
-//
 #define	clc_bad			0
 #define	clc_nop 		1
 #define	clc_disconnect	2
@@ -220,9 +207,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	clc_stringcmd	4		// [string] message
 
 
-//
 // temp entity events
-//
 #define	TE_SPIKE			0
 #define	TE_SUPERSPIKE		1
 #define	TE_GUNSHOT			2
@@ -237,9 +222,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	TE_TELEPORT			11
 #define TE_EXPLOSION2		12
 
-// PGM 01/21/97 
+// PGM 01/21/97
 #define TE_BEAM				13
-// PGM 01/21/97 
+// PGM 01/21/97
 
 #ifdef QUAKE2
 #define TE_IMPLOSION		14

@@ -22,7 +22,7 @@ void InitSymbols (void)
 		SymSetOptions (dwOptions | SYMOPT_LOAD_LINES);
 
 		BOOL blah = SymInitialize (GetCurrentProcess (), NULL, TRUE);
-        assert (blah);
+		assert (blah);
 
 		symbolsinit = true;
 	}
@@ -43,6 +43,7 @@ void GetCrashReason (LPEXCEPTION_POINTERS ep)
 {
 	// ensure that the exception pointers weren't stomped
 	if (!ep) return;
+
 	if (IsBadReadPtr (ep, sizeof (EXCEPTION_POINTERS))) return;
 
 	// turn on the symbols engine
@@ -68,8 +69,8 @@ void GetCrashReason (LPEXCEPTION_POINTERS ep)
 {
 	// if we're not using a debug build all that we can do is display an error
 	MessageBox (NULL, "Something bad happened and DirectQ is now toast.\n"
-		"Please visit http://mhquake.blogspot.com and report this crash.",
-		"An error has occurred",
-		MB_OK | MB_ICONSTOP);
+				"Please visit http://mhquake.blogspot.com and report this crash.",
+				"An error has occurred",
+				MB_OK | MB_ICONSTOP);
 }
 #endif

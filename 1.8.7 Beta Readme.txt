@@ -1,0 +1,11 @@
+The first thing you need to know is that this is a beta release.  It's purpose is to get feedback on what works
+well, what doesn't work well, and what doesn't work at all.  Nothing in here should be viewed as the definitive
+final way that things are going to be, but it is a good indication.
+
+You will need D3D9 capable hardware with pixel shaders 2.0 support at a minimum.  If you don't have that, stop
+right now.  If you're in Intel land this means that you'll need at least a 915.
+
+If you haven't updated your DirectX in a while, it might be an idea to do so.  This release was compiled against
+the April 2007 release of D3D9, so you will need to have at least that version.
+
+

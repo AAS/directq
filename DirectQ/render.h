@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -31,12 +31,21 @@ typedef struct aliascache_s
 	// all the info we need to draw the model is here
 	float lastlerp;
 	float currlerp;
-	float *shadedots;
+
 	struct image_s *teximage;
 	struct image_s *lumaimage;
 	vec3_t lightspot;
 	struct mplane_s *lightplane;
 } aliasstate_t;
+
+
+typedef struct brushstate_s
+{
+	vec3_t bmoldorigin;
+	vec3_t bmoldangles;
+	bool bmrelinked;
+	bool bmmoved;
+} brushstate_t;
 
 
 typedef struct efrag_s
@@ -48,6 +57,9 @@ typedef struct efrag_s
 } efrag_t;
 
 
+// just for consistency although it's not protocol-dependent
+#define LERP_FINISH (1 << 4)
+
 typedef struct entity_s
 {
 	bool				forcelink;		// model changed
@@ -56,11 +68,12 @@ typedef struct entity_s
 
 	entity_state_t			baseline;		// to fill in defaults in updates
 
-	float					msgtime;		// time of last update
-	vec3_t					msg_origins[2];	// last two updates (0 is newest)	
+	float					msgtime;
+
+	vec3_t					msg_origins[2];	// last two updates (0 is newest)
 	vec3_t					origin;
 	vec3_t					msg_angles[2];	// last two updates (0 is newest)
-	vec3_t					angles;	
+	vec3_t					angles;
 	struct model_s			*model;			// NULL = no model
 	struct efrag_s			*efrag;
 	int						frame;
@@ -78,47 +91,56 @@ typedef struct entity_s
 	// allocated at runtime client and server side
 	int						entnum;
 
+	// VBO cache
+	int cacheposes;
+
 	// interpolation
-	float		frame_start_time;
+	float		framestarttime;
 	int			lastpose, currpose;
 
-	float		translate_start_time;
+	float		translatestarttime;
 	vec3_t		lastorigin, currorigin;
 
-	float		rotate_start_time;
+	float		rotatestarttime;
 	vec3_t		lastangles, currangles;
 
 	// allows an alpha value to be assigned to any entity
 	int			alphaval;
+	float		lerpinterval;
+	int			lerpflags;
 
 	// light averaging
 	float		shadelight[3];
+	float		ambientlight[3];
 
 	// false if the entity is to be subjected to bbox culling
 	bool		nocullbox;
-
-	// occlusion query used by this entity
-	struct d3d_occlusionquery_s *occlusion;
-	bool occluded;
 
 	// distance from client (for depth sorting)
 	float		dist;
 
 	// FIXME: could turn these into a union
-	int						trivial_accept;
-	struct mnode_s			*topnode;		// for bmodels, first world node
-											//  that splits bmodel, or NULL if
-											//  not split
+	// done (trivial_accept is only on alias models, topnode only on brush models)
+	union
+	{
+		int						trivial_accept;
+		struct mnode_s			*topnode;		// for bmodels, first world node
+	};
+	//  that splits bmodel, or NULL if
+	//  not split
 
 	// the matrix used for transforming this entity
 	// D3DXMATRIX in *incredibly* unhappy living in an entity_t struct...
 	D3DMATRIX		matrix;
 
-	// check rotation for all model types
+	// check transforms for all model types
 	bool			rotated;
+	bool			translated;
 
-	// cached info about an alias model for deferred drawing
+	// cached info about models
+	// these can't be in a union as the entity slot could be reused for a different model type
 	aliasstate_t		aliasstate;
+	brushstate_t		brushstate;
 } entity_t;
 
 
@@ -126,37 +148,35 @@ typedef struct entity_s
 typedef struct
 {
 	vrect_t		vrect;				// subwindow in video for refresh
-									// FIXME: not need vrect next field here?
+	// FIXME: not need vrect next field here?
 	vrect_t		aliasvrect;			// scaled Alias version
 	int			vrectright, vrectbottom;	// right & bottom screen coords
 	int			aliasvrectright, aliasvrectbottom;	// scaled Alias versions
 	float		vrectrightedge;			// rightmost right edge we care about,
-										//  for use in edge list
+	//  for use in edge list
 	float		fvrectx, fvrecty;		// for floating-point compares
 	float		fvrectx_adj, fvrecty_adj; // left and top edges, for clamping
 	int			vrect_x_adj_shift20;	// (vrect.x + 0.5 - epsilon) << 20
 	int			vrectright_adj_shift20;	// (vrectright + 0.5 - epsilon) << 20
 	float		fvrectright_adj, fvrectbottom_adj;
-										// right and bottom edges, for clamping
+	// right and bottom edges, for clamping
 	float		fvrectright;			// rightmost edge, for Alias clamping
 	float		fvrectbottom;			// bottommost edge, for Alias clamping
-	float		horizontalFieldOfView;	// at Z = 1.0, this many X is visible 
-										// 2.0 = 90 degrees
+	float		horizontalFieldOfView;	// at Z = 1.0, this many X is visible
+	// 2.0 = 90 degrees
 	float		xOrigin;			// should probably allways be 0.5
 	float		yOrigin;			// between be around 0.3 to 0.5
 
 	vec3_t		vieworg;
 	vec3_t		viewangles;
-	
+
 	float		fov_x, fov_y;
 
 	int			ambientlight;
 } refdef_t;
 
 
-//
 // refresh
-//
 extern	int		reinit_surfcache;
 
 
@@ -168,9 +188,9 @@ extern	struct texture_s	*r_notexture_mip;
 
 void R_Init (void);
 void R_InitTextures (void);
-void R_RenderView (void);		// must set r_refdef first
+void R_RenderView (float timepassed);		// must set r_refdef first
 void R_ViewChanged (vrect_t *pvrect, int lineadj, float aspect);
-								// called whenever r_refdef or vid change
+// called whenever r_refdef or vid change
 
 void R_NewMap (void);
 
@@ -189,9 +209,7 @@ void R_LavaSplash (vec3_t org);
 void R_TeleportSplash (vec3_t org);
 
 
-//
 // surface cache related
-//
 extern	int		reinit_surfcache;	// if 1, surface cache is currently empty and
 
 int	D_SurfaceCacheForRes (int width, int height);

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -116,9 +116,7 @@ typedef char quakepath[260];
 
 extern int		sv_max_datagram;	// is default MAX_DATAGRAM
 
-//
 // per-level limits
-//
 #define	MAX_EDICTS		65536		// protocol limit
 #define	MAX_LIGHTSTYLES	64
 
@@ -130,9 +128,7 @@ extern int		sv_max_datagram;	// is default MAX_DATAGRAM
 
 #define	MAX_STYLESTRING	64
 
-//
 // stats are integers communicated to the client by the server
-//
 #define	MAX_CL_STATS		32
 #define	STAT_HEALTH			0
 #define	STAT_FRAGS			1
@@ -242,7 +238,7 @@ typedef struct
 	int		colormap;
 	int		skin;
 	int		effects;
-	byte	alpha;
+	int		alpha;
 } entity_state_t;
 
 
@@ -267,7 +263,7 @@ typedef struct
 #include "crc.h"
 #include "cdaudio.h"
 #include "dshow_mp3.h"
-
+#include "iplog.h"
 
 //=============================================================================
 
@@ -291,9 +287,7 @@ typedef struct
 extern bool noclip_anglehack;
 
 
-//
 // host
-//
 extern	quakeparms_t host_parms;
 
 extern	cvar_t		sys_ticrate;
@@ -302,17 +296,15 @@ extern	cvar_t		developer;
 
 extern	bool	host_initialized;		// true if into command execution
 
-extern	float		host_frametime;
 extern	int			host_framecount;	// incremented every frame, never reset
 
 extern	float		realtime;			// not bounded in any way, changed at
 										// start of every frame, never reset
 
 void Host_ClearMemory (void);
-void Host_ServerFrame (void);
 void Host_InitCommands (void);
 void Host_Init (quakeparms_t *parms);
-void Host_Shutdown(void);
+void Host_Shutdown (void);
 void Host_Error (char *error, ...);
 void Host_EndGame (char *message, ...);
 void Host_Quit_f (void);
@@ -320,10 +312,10 @@ void Host_ClientCommands (char *fmt, ...);
 void Host_ShutdownServer (bool crash);
 
 extern bool		msg_suppress_1;		// suppresses resolution and cache size console output
-										//  an fullscreen DIB focus gain/loss
+//  an fullscreen DIB focus gain/loss
 extern int			current_skill;		// skill level for currently loaded level (in case
-										//  the user changes the cvar while the level is
-										//  running, this reflects the level actually in use)
+//  the user changes the cvar while the level is
+//  running, this reflects the level actually in use)
 
 // make these accessible throught the engine
 extern cvar_t temp1;
@@ -365,7 +357,10 @@ float CastRay (float *p1, float *p2);
 // using byte colours and having the macros wrap may have seemed like a good idea to someone somewhere sometime
 // say in 1996, when every single byte or cpu cycle was precious...
 #define BYTE_CLAMP(i) (int) ((((i) > 255) ? 255 : (((i) < 0) ? 0 : (i))))
+#define BYTE_CLAMPF(i) (int) ((((i) > 1) ? 255 : (((i) < 0) ? 0 : (i) * 255)))
 
 // generic useful stuff
 int Sys_LoadResourceData (int resourceid, void **resbuf);
+
+void UpdateTitlebarText (char *mapname = NULL);
 

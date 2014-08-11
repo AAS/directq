@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -23,7 +23,7 @@ typedef struct
 {
 	vec3_t	viewangles;
 
-// intended velocities
+	// intended velocities
 	float	forwardmove;
 	float	sidemove;
 	float	upmove;
@@ -71,9 +71,7 @@ typedef struct
 #define	NAME_LENGTH	64
 
 
-//
 // client_state_t should hold all pieces of the client state
-//
 
 #define	SIGNONS		4			// signon messages to receive before connected
 
@@ -110,30 +108,28 @@ typedef enum
 typedef struct
 {
 	bool			web;
-	char			*name;	
-	int				percent;	
-	bool			disconnect;			// set when user tries to disconnect, to allow cleaning up webdownload	
+	char			*name;
+	int				percent;
+	bool			disconnect;			// set when user tries to disconnect, to allow cleaning up webdownload
 } download_t;
 
 
-//
 // the client_static_t structure is persistant through an arbitrary number
 // of server connections
-//
 typedef struct
 {
 	cactive_t	state;
 
-// personalization data sent to server	
+	// personalization data sent to server
 	char		mapstring[MAX_QPATH];
 	char		spawnparms[MAX_MAPSTRING];	// to restart a level
 
-// demo loop control
+	// demo loop control
 	int			demonum;		// -1 = don't play demos
 	char		demos[MAX_DEMOS][MAX_DEMONAME];		// when not playing
 
-// demo recording info must be here, because record is started before
-// entering a map (and clearing client_state_t)
+	// demo recording info must be here, because record is started before
+	// entering a map (and clearing client_state_t)
 	bool	demorecording;
 	bool	demoplayback;
 	bool	timedemo;
@@ -143,57 +139,54 @@ typedef struct
 	int			td_startframe;		// host_framecount at start
 	float		td_starttime;		// realtime at second frame of timedemo
 
-
 	download_t	download;
 
-// connection information
+	// connection information
 	int			signon;			// 0 to SIGNONS
 	struct qsocket_s	*netcon;
 	sizebuf_t	message;		// writing buffer to send to server
-	
+
 } client_static_t;
 
 extern client_static_t	cls;
 
-//
 // the client_state_t structure is wiped completely at every
 // server signon
-//
 typedef struct client_state_s
 {
 	int			movemessages;	// since connecting to this server
-								// throw out the first couple, so the player
-								// doesn't accidentally do something the 
-								// first frame
+	// throw out the first couple, so the player
+	// doesn't accidentally do something the
+	// first frame
 	usercmd_t	cmd;			// last command sent to the server
 
-// information for local display
+	// information for local display
 	int			stats[MAX_CL_STATS];	// health, etc
 	int			items;			// inventory bit flags
-	float	item_gettime[32];	// cl.time of aquiring item, for blinking
+	float		itemgettime[32];	// cl.time of aquiring item, for blinking
 	float		faceanimtime;	// use anim frame if cl.time < this
 
 	cshift_t	cshifts[NUM_CSHIFTS];	// color shifts for damage, powerups
 	cshift_t	prev_cshifts[NUM_CSHIFTS];	// and content types
 
-// the client maintains its own idea of view angles, which are
-// sent to the server each frame.  The server sets punchangle when
-// the view is temporarliy offset, and an angle reset commands at the start
-// of each level and after teleporting.
+	// the client maintains its own idea of view angles, which are
+	// sent to the server each frame.  The server sets punchangle when
+	// the view is temporarliy offset, and an angle reset commands at the start
+	// of each level and after teleporting.
 	vec3_t		mviewangles[2];	// during demo playback viewangles is lerped
 								// between these
 	vec3_t		viewangles;
-	
+
 	vec3_t		mvelocity[2];	// update by server, used for lean+bob
 								// (0 is newest)
 	vec3_t		velocity;		// lerped between mvelocity[0] and [1]
 
 	vec3_t		punchangle;		// temporary offset
-	
-// pitch drifting vars
+
+	// pitch drifting vars
 	float		idealpitch;
 	float		pitchvel;
-	bool	nodrift;
+	bool		nodrift;
 	float		driftmove;
 	float		laststop;
 
@@ -203,21 +196,20 @@ typedef struct client_state_s
 	bool	paused;			// send over by server
 	bool	onground;
 	bool	inwater;
-	
+
 	int			intermission;	// don't change view angle, full screen, etc
 	int			completed_time;	// latched at intermission start
-	
-	float		mtime[2];		// the timestamp of last two messages	
+
+	float		mtime[2];		// keep message times steady
 
 	float		time;			// clients view of time, should be between
 								// servertime and oldservertime to generate
 								// a lerp point for other data
 
-	float		oldtime;		// previous cl.time, time-oldtime is used
-								// to decay light values and smooth step ups
-	
+	float frametime;
 
-	float		last_received_message;	// (realtime) for net trouble icon
+	float		oldtime;
+	float		lastrecievedmessage;	// (realtime) for net trouble icon
 
 	// information that is static for the entire time connected to a server
 	struct model_s		**model_precache;
@@ -229,6 +221,7 @@ typedef struct client_state_s
 	int			gametype;
 
 	int			Protocol;
+	unsigned	PrototcolFlags;
 
 	// refresh related state
 	struct model_s	*worldmodel;	// cl_entitites[0].model
@@ -247,9 +240,9 @@ typedef struct client_state_s
 	int				minutes;			// JPG - for match time in status bar
 	int				seconds;			// JPG - for match time in status bar
 	float			last_match_time;	// JPG - last time match time was obtained
-	float			last_ping_time;		// JPG - last time pings were obtained
+	float			lastpingtime;		// JPG - last time pings were obtained
 	bool			console_ping;		// JPG 1.05 - true if the ping came from the console
-	float			last_status_time;	// JPG 1.05 - last time status was obtained
+	float			laststatustime;		// JPG 1.05 - last time status was obtained
 	bool			console_status;		// JPG 1.05 - true if the status came from the console
 	float			match_pause_time;	// JPG - time that match was paused (or 0)
 	vec3_t			lerpangles;			// JPG - angles now used by view.c so that smooth chasecam doesn't fuck up demos
@@ -257,9 +250,7 @@ typedef struct client_state_s
 } client_state_t;
 
 
-//
 // cvars
-//
 extern	cvar_t	cl_name;
 extern	cvar_t	cl_color;
 
@@ -301,9 +292,7 @@ extern	dlight_t		*cl_dlights;
 
 //=============================================================================
 
-//
 // cl_main
-//
 dlight_t *CL_AllocDlight (int key);
 void	CL_DecayLights (void);
 
@@ -343,7 +332,7 @@ void CL_UpdateTEnts (void);
 void CL_ClearState (void);
 
 
-int  CL_ReadFromServer (void);
+int  CL_ReadFromServer (float frametime);
 void CL_WriteToServer (usercmd_t *cmd);
 void CL_BaseMove (usercmd_t *cmd);
 
@@ -351,9 +340,7 @@ void CL_BaseMove (usercmd_t *cmd);
 float CL_KeyState (kbutton_t *key);
 char *Key_KeynumToString (int keynum);
 
-//
 // cl_demo.c
-//
 void CL_StopPlayback (void);
 int CL_GetMessage (void);
 
@@ -362,26 +349,20 @@ void CL_Record_f (void);
 void CL_PlayDemo_f (void);
 void CL_TimeDemo_f (void);
 
-//
 // cl_parse.c
-//
 void CL_ParseServerMessage (void);
 
-//
 // view
-//
 void V_StartPitchDrift (void);
 void V_StopPitchDrift (void);
 
-void V_RenderView (void);
-void V_UpdatePalette (void);
+void V_RenderView (float time, float frametime);
+void V_UpdatePalette (float frametime);
 void V_Register (void);
-void V_ParseDamage (void);
+void V_ParseDamage (float time);
 void V_SetContentsColor (int contents);
 
 
-//
 // cl_tent
-//
 void CL_InitTEnts (void);
 void CL_SignonReply (void);

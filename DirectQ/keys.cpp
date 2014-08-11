@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -28,12 +28,12 @@ key up events are sent even if in console mode
 #define		MAXCMDLINE	256
 char	key_lines[32][MAXCMDLINE];
 int		key_linepos;
-int		shift_down=false;
+int		shift_down = false;
 int		key_lastpress;
 int		key_insert = 0;
 
-int		edit_line=0;
-int		history_line=0;
+int		edit_line = 0;
+int		history_line = 0;
 
 keydest_t	key_dest;
 
@@ -67,7 +67,7 @@ keyname_t keynames[] =
 	{"ALT", K_ALT},
 	{"CTRL", K_CTRL},
 	{"SHIFT", K_SHIFT},
-	
+
 	{"F1", K_F1},
 	{"F2", K_F2},
 	{"F3", K_F3},
@@ -142,7 +142,7 @@ keyname_t keynames[] =
 
 	{"SEMICOLON", ';'},	// because a raw semicolon seperates commands
 
-	{NULL,0}
+	{NULL, 0}
 };
 
 /*
@@ -157,11 +157,7 @@ char *protolist[] =
 {
 	"15",
 	"Fitz",
-	"RMQ (unfinished)",
-	"BJP",
-	"BJP2",
-	"BJP3",
-	"MH",
+	"RMQ",
 	NULL
 };
 
@@ -246,7 +242,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 		// find the first matching one
 		for (int i = 0;; i++)
 		{
-			if (!contentlist[i]) 
+			if (!contentlist[i])
 			{
 				// no match (should this gracefully fail or inform the user of no match?)
 				cycle[0] = 0;
@@ -300,6 +296,8 @@ Key_Console
 Interactive line editing and console scrollback
 ====================
 */
+char *capturecmds[] = {"start ", "stop ", NULL};
+
 void Key_Console (int key)
 {
 	char	*cmd;
@@ -320,7 +318,7 @@ void Key_Console (int key)
 	{
 		Cbuf_AddText (key_lines[edit_line] + 1);	// skip the >
 		Cbuf_AddText ("\n");
-		Con_Printf ("%s\n",key_lines[edit_line]);
+		Con_Printf ("%s\n", key_lines[edit_line]);
 
 		edit_line = (edit_line + 1) & 31;
 		history_line = edit_line;
@@ -330,7 +328,7 @@ void Key_Console (int key)
 		key_linepos = 1;
 
 		// force an update, because the command may take some time
-		if (cls.state != ca_connected) SCR_UpdateScreen ();
+		if (cls.state != ca_connected) SCR_UpdateScreen (0);
 
 		return;
 	}
@@ -341,41 +339,55 @@ void Key_Console (int key)
 		if (!strnicmp (&key_lines[edit_line][1], "map ", 4) && spinbox_bsps[0])
 		{
 			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "changelevel ", 12) && spinbox_bsps[0])
 		{
 			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
+
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "capture ", 8) && capturecmds[0])
+		{
+			if (capturecmds) Key_ContentMatch (capturecmds, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "loadsky ", 8) && skybox_menulist[0])
 		{
 			if (skybox_menulist) Key_ContentMatch (skybox_menulist, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "playdemo ", 9) && demolist[0])
 		{
 			if (demolist) Key_ContentMatch (demolist, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "timedemo ", 9) && demolist[0])
 		{
 			if (demolist) Key_ContentMatch (demolist, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "save ", 5) && saveloadlist[0])
 		{
 			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "load ", 5) && saveloadlist[0])
 		{
 			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "game ", 5) && gamedirs[0])
 		{
 			if (gamedirs[0]) Key_ContentMatch (gamedirs, &contentcycle);
+
 			return;
 		}
 		else if (!strnicmp (&key_lines[edit_line][1], "sv_protocol ", 12) && protolist[0])
@@ -440,7 +452,7 @@ void Key_Console (int key)
 	if (key == K_DEL)
 	{
 		// delete char on cursor
-		if (key_linepos < strlen(key_lines[edit_line]))
+		if (key_linepos < strlen (key_lines[edit_line]))
 			strcpy (key_lines[edit_line] + key_linepos, key_lines[edit_line] + key_linepos + 1);
 
 		return;
@@ -452,7 +464,7 @@ void Key_Console (int key)
 		if (strlen (key_lines[edit_line]) == key_linepos)
 		{
 			// no character to get
-			if (strlen(key_lines[(edit_line + 31) & 31]) <= key_linepos) return;
+			if (strlen (key_lines[(edit_line + 31) & 31]) <= key_linepos) return;
 
 			key_lines[edit_line][key_linepos] = key_lines[(edit_line + 31) & 31][key_linepos];
 			key_linepos++;
@@ -475,24 +487,29 @@ void Key_Console (int key)
 		do
 		{
 			history_line = (history_line - 1) & 31;
-		} while (history_line != edit_line
+		}
+		while (history_line != edit_line
 				&& !key_lines[history_line][1]);
+
 		if (history_line == edit_line)
-			history_line = (edit_line+1)&31;
-		strcpy(key_lines[edit_line], key_lines[history_line]);
-		key_linepos = strlen(key_lines[edit_line]);
+			history_line = (edit_line + 1) & 31;
+
+		strcpy (key_lines[edit_line], key_lines[history_line]);
+		key_linepos = strlen (key_lines[edit_line]);
 		return;
 	}
 
 	if (key == K_DOWNARROW)
 	{
 		if (history_line == edit_line) return;
+
 		do
 		{
 			history_line = (history_line + 1) & 31;
 		}
 		while (history_line != edit_line
-			&& !key_lines[history_line][1]);
+				&& !key_lines[history_line][1]);
+
 		if (history_line == edit_line)
 		{
 			key_lines[edit_line][0] = ']';
@@ -500,9 +517,10 @@ void Key_Console (int key)
 		}
 		else
 		{
-			strcpy(key_lines[edit_line], key_lines[history_line]);
-			key_linepos = strlen(key_lines[edit_line]);
+			strcpy (key_lines[edit_line], key_lines[history_line]);
+			key_linepos = strlen (key_lines[edit_line]);
 		}
+
 		return;
 	}
 
@@ -512,6 +530,7 @@ void Key_Console (int key)
 
 		if (con_backscroll > con_totallines - (vid.height >> 3) - 1)
 			con_backscroll = con_totallines - (vid.height >> 3) - 1;
+
 		return;
 	}
 
@@ -521,21 +540,41 @@ void Key_Console (int key)
 
 		if (con_backscroll < 0)
 			con_backscroll = 0;
+
 		return;
 	}
 
 	if (key == K_HOME)
 	{
-		// expected behaviour
-		key_linepos = 1;
-		return;
+		// the home key functions differently depending on whether or not we are in the first position on the line
+		if (key_linepos == 1)
+		{
+			con_backscroll = con_totallines - (vid.height >> 3) - 1;
+			return;
+		}
+		else
+		{
+			// expected behaviour
+			key_linepos = 1;
+			return;
+		}
 	}
 
 	if (key == K_END)
 	{
-		// expected behaviour
-		key_linepos = strlen (key_lines[edit_line]);
-		return;
+		// the home key functions differently depending on whether or not we are in the first position on the line
+		if (!key_lines[edit_line][key_linepos])
+		{
+			// note that position 0 is the input prompt ']'
+			con_backscroll = 0;
+			return;
+		}
+		else
+		{
+			// expected behaviour
+			key_linepos = strlen (key_lines[edit_line]);
+			return;
+		}
 	}
 
 	if ((key == 'C' || key == 'c') && GetKeyState (VK_CONTROL) < 0)
@@ -615,6 +654,7 @@ void Key_Console (int key)
 		{
 			// can't do strcpy to move string to right
 			if ((i = strlen (key_lines[edit_line]) - 1) == 254) i--;
+
 			for (; i >= key_linepos; i--) key_lines[edit_line][i + 1] = key_lines[edit_line][i];
 		}
 
@@ -630,7 +670,7 @@ void Key_Console (int key)
 
 //============================================================================
 
-char chat_buffer[32];
+char chat_buffer[78];
 bool team_message = false;
 
 void Key_Message (int key)
@@ -641,10 +681,10 @@ void Key_Message (int key)
 	{
 		if (team_message)
 			Cbuf_AddText ("say_team \"");
-		else
-			Cbuf_AddText ("say \"");
-		Cbuf_AddText(chat_buffer);
-		Cbuf_AddText("\"\n");
+		else Cbuf_AddText ("say \"");
+
+		Cbuf_AddText (chat_buffer);
+		Cbuf_AddText ("\"\n");
 
 		key_dest = key_game;
 		chat_bufferlen = 0;
@@ -670,10 +710,11 @@ void Key_Message (int key)
 			chat_bufferlen--;
 			chat_buffer[chat_bufferlen] = 0;
 		}
+
 		return;
 	}
 
-	if (chat_bufferlen == 31)
+	if (chat_bufferlen == 77)
 		return; // all full
 
 	chat_buffer[chat_bufferlen++] = key;
@@ -695,17 +736,19 @@ the K_* names are matched up.
 int Key_StringToKeynum (char *str)
 {
 	keyname_t	*kn;
-	
+
 	if (!str || !str[0])
 		return -1;
+
 	if (!str[1])
 		return str[0];
 
-	for (kn=keynames; kn->name; kn++)
+	for (kn = keynames; kn->name; kn++)
 	{
-		if (!stricmp(str,kn->name))
+		if (!stricmp (str, kn->name))
 			return kn->keynum;
 	}
+
 	return -1;
 }
 
@@ -720,7 +763,7 @@ FIXME: handle quote special (general escape sequence?)
 */
 char *Key_KeynumToString (int keynum)
 {
-	keyname_t	*kn;	
+	keyname_t	*kn;
 	static	char	tinystr[2];
 
 	if (keynum == -1)
@@ -734,7 +777,7 @@ char *Key_KeynumToString (int keynum)
 		return tinystr;
 	}
 
-	for (kn=keynames; kn->name; kn++)
+	for (kn = keynames; kn->name; kn++)
 		if (keynum == kn->keynum)
 			return kn->name;
 
@@ -751,7 +794,7 @@ void Key_SetBinding (int keynum, char *binding)
 {
 	char	*newbind;
 	int		l;
-			
+
 	if (keynum == -1)
 		return;
 
@@ -763,11 +806,11 @@ void Key_SetBinding (int keynum, char *binding)
 	}
 
 	// allocate memory for new binding
-	l = strlen (binding);	
+	l = strlen (binding);
 	newbind = (char *) Zone_Alloc (l + 1);
 	strcpy (newbind, binding);
 	newbind[l] = 0;
-	keybindings[keynum] = newbind;	
+	keybindings[keynum] = newbind;
 }
 
 
@@ -785,11 +828,12 @@ void Key_Unbind_f (void)
 		Con_Printf ("unbind <key> : remove commands from a key\n");
 		return;
 	}
-	
-	b = Key_StringToKeynum (Cmd_Argv(1));
-	if (b==-1)
+
+	b = Key_StringToKeynum (Cmd_Argv (1));
+
+	if (b == -1)
 	{
-		Con_Printf ("\"%s\" isn't a valid key\n", Cmd_Argv(1));
+		Con_Printf ("\"%s\" isn't a valid key\n", Cmd_Argv (1));
 		return;
 	}
 
@@ -799,8 +843,8 @@ void Key_Unbind_f (void)
 void Key_Unbindall_f (void)
 {
 	int		i;
-	
-	for (i=0; i<256; i++)
+
+	for (i = 0; i < 256; i++)
 		if (keybindings[i])
 			Key_SetBinding (i, "");
 }
@@ -815,7 +859,7 @@ void Key_Bind_f (void)
 {
 	int			i, c, b;
 	char		cmd[1024];
-	
+
 	c = Cmd_Argc();
 
 	if (c != 2 && c != 3)
@@ -824,30 +868,33 @@ void Key_Bind_f (void)
 		return;
 	}
 
-	b = Key_StringToKeynum (Cmd_Argv(1));
+	b = Key_StringToKeynum (Cmd_Argv (1));
 
-	if (b==-1)
+	if (b == -1)
 	{
-		Con_Printf ("\"%s\" isn't a valid key\n", Cmd_Argv(1));
+		Con_Printf ("\"%s\" isn't a valid key\n", Cmd_Argv (1));
 		return;
 	}
 
 	if (c == 2)
 	{
 		if (keybindings[b])
-			Con_Printf ("\"%s\" = \"%s\"\n", Cmd_Argv(1), keybindings[b] );
+			Con_Printf ("\"%s\" = \"%s\"\n", Cmd_Argv (1), keybindings[b]);
 		else
-			Con_Printf ("\"%s\" is not bound\n", Cmd_Argv(1) );
+			Con_Printf ("\"%s\" is not bound\n", Cmd_Argv (1));
+
 		return;
 	}
 
 	// copy the rest of the command line
 	cmd[0] = 0;		// start out with a null string
-	for (i=2; i< c; i++)
+
+	for (i = 2; i < c; i++)
 	{
 		if (i > 2)
 			strcat (cmd, " ");
-		strcat (cmd, Cmd_Argv(i));
+
+		strcat (cmd, Cmd_Argv (i));
 	}
 
 	Key_SetBinding (b, cmd);
@@ -908,15 +955,16 @@ void Key_Init (void)
 {
 	int		i;
 
-	for (i=0; i<32; i++)
+	for (i = 0; i < 32; i++)
 	{
 		key_lines[i][0] = ']';
 		key_lines[i][1] = 0;
 	}
+
 	key_linepos = 1;
-	
+
 	// init ascii characters in console mode
-	for (i=32; i<128; i++)
+	for (i = 32; i < 128; i++)
 		consolekeys[i] = true;
 
 	consolekeys[K_ENTER] = true;
@@ -938,10 +986,12 @@ void Key_Init (void)
 	consolekeys['`'] = false;
 	consolekeys['~'] = false;
 
-	for (i=0; i<256; i++)
+	for (i = 0; i < 256; i++)
 		keyshift[i] = i;
-	for (i='a'; i<='z'; i++)
+
+	for (i = 'a'; i <= 'z'; i++)
 		keyshift[i] = i - 'a' + 'A';
+
 	keyshift['1'] = '!';
 	keyshift['2'] = '@';
 	keyshift['3'] = '#';
@@ -965,7 +1015,8 @@ void Key_Init (void)
 	keyshift['\\'] = '|';
 
 	menubound[K_ESCAPE] = true;
-	for (i=0; i<12; i++)
+
+	for (i = 0; i < 12; i++)
 		menubound[K_F1+i] = true;
 }
 
@@ -1017,7 +1068,7 @@ void Key_Event (int key, bool down)
 		}
 
 		if (key >= 200 && !keybindings[key])
-			Con_Printf ("%s is unbound, hit F4 to set.\n", Key_KeynumToString (key) );
+			Con_Printf ("%s is unbound, hit F4 to set.\n", Key_KeynumToString (key));
 	}
 
 	if (key == K_SHIFT)
@@ -1028,6 +1079,7 @@ void Key_Event (int key, bool down)
 	{
 		if (!down)
 			return;
+
 		switch (key_dest)
 		{
 		case key_message:
@@ -1051,6 +1103,7 @@ void Key_Event (int key, bool down)
 		default:
 			Sys_Error ("Bad key_dest");
 		}
+
 		return;
 	}
 
@@ -1062,20 +1115,24 @@ void Key_Event (int key, bool down)
 	if (!down)
 	{
 		kb = keybindings[key];
+
 		if (kb && kb[0] == '+')
 		{
-			_snprintf (cmd, 1024, "-%s %i\n", kb+1, key);
+			_snprintf (cmd, 1024, "-%s %i\n", kb + 1, key);
 			Cbuf_AddText (cmd);
 		}
+
 		if (keyshift[key] != key)
 		{
 			kb = keybindings[keyshift[key]];
+
 			if (kb && kb[0] == '+')
 			{
-				_snprintf (cmd, 1024, "-%s %i\n", kb+1, key);
+				_snprintf (cmd, 1024, "-%s %i\n", kb + 1, key);
 				Cbuf_AddText (cmd);
 			}
 		}
+
 		return;
 	}
 
@@ -1091,8 +1148,8 @@ void Key_Event (int key, bool down)
 
 	// if not a consolekey, send to the interpreter no matter what mode is
 	if ((key_dest == key_menu && menubound[key]) ||
-		(key_dest == key_console && !consolekeys[key]) ||
-		(key_dest == key_game && (!con_forcedup || !consolekeys[key])))
+			(key_dest == key_console && !consolekeys[key]) ||
+			(key_dest == key_game && (!con_forcedup || !consolekeys[key])))
 	{
 		kb = keybindings[key];
 
@@ -1110,6 +1167,7 @@ void Key_Event (int key, bool down)
 				Cbuf_AddText ("\n");
 			}
 		}
+
 		return;
 	}
 
@@ -1145,12 +1203,13 @@ void Key_Event (int key, bool down)
 }
 
 
-// ===================================================================================================================================
-//
-//						STUFF PORTED FROM VIDNT CODE
-//
-// ===================================================================================================================================
+/*
+===================================================================================================================================
 
+						STUFF PORTED FROM VIDNT CODE
+
+===================================================================================================================================
+*/
 
 /*
 ===================================================================
@@ -1162,7 +1221,7 @@ shiftscantokey was unused
 
 ===================================================================
 */
-byte scantokey[128] = 
+byte scantokey[128] =
 {
 	// scancode to quake key table
 	// 0     1     2     3     4     5     6     7     8     9     a     b     c     d     e     f
@@ -1174,7 +1233,7 @@ byte scantokey[128] =
 	0x81, 0x95, 0x93, 0x94, 0x00, 0x00, 0x00, 0x91, 0x92, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,		// 0x5
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,		// 0x6
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00		// 0x7
-}; 
+};
 
 
 /*
@@ -1186,7 +1245,7 @@ Map from windows to quake keynums
 */
 int MapKey (int key)
 {
-//			key	22740993	int
+	//			key	22740993	int
 
 	key = (key >> 16) & 255;
 

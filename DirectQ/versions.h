@@ -9,7 +9,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -32,10 +32,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DIRECTINPUT_VERSION	0x0800
 
 // here we define a windows version to ensure that we'll always compile OK for the minimum supported platform
-#define WINVER 0x0500
-#define _WIN32_WINNT 0x0500
+#define WINVER 0x0501
+#define _WIN32_WINNT 0x0501
 
 // this is the current version of DirectQ
-#define DIRECTQ_VERSION "1.8.666b"
+#define DIRECTQ_VERSION "1.8.7"
 
 #endif

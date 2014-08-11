@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -33,14 +33,14 @@ int COM_ListSortFunc (const void *a, const void *b)
 {
 	if (listsortascorder)
 	{
-		char *a1 = *((char **) a);
-		char *b1 = *((char **) b);
+		char *a1 = * ((char **) a);
+		char *b1 = * ((char **) b);
 		return strcmp (a1, b1);
 	}
 	else
 	{
-		char *a1 = *((char **) b);
-		char *b1 = *((char **) a);
+		char *a1 = * ((char **) b);
+		char *b1 = * ((char **) a);
 		return strcmp (a1, b1);
 	}
 }
@@ -74,10 +74,10 @@ static char     *largv[MAX_NUM_ARGVS + NUM_SAFE_ARGVS + 1];
 static char     *argvdummy = " ";
 
 static char     *safeargvs[NUM_SAFE_ARGVS] =
-	{"-stdvid", "-nolan", "-nosound", "-nocdaudio", "-nojoy", "-nomouse", "-dibonly"};
+{"-stdvid", "-nolan", "-nosound", "-nocdaudio", "-nojoy", "-nomouse", "-dibonly"};
 
-cvar_t  registered ("registered","0");
-cvar_t  cmdline ("cmdline","0", CVAR_SERVER);
+cvar_t  registered ("registered", "0");
+cvar_t  cmdline ("cmdline", "0", CVAR_SERVER);
 
 int             static_registered = 1;  // only for startup check, then set
 
@@ -108,21 +108,21 @@ bool		standard_quake = true, rogue = false, hipnotic = false, quoth = false, neh
 
 bool        bigendien;
 
-short   (*BigShort) (short l);
-short   (*LittleShort) (short l);
-int     (*BigLong) (int l);
-int     (*LittleLong) (int l);
-float   (*BigFloat) (float l);
-float   (*LittleFloat) (float l);
+short (*BigShort) (short l);
+short (*LittleShort) (short l);
+int (*BigLong) (int l);
+int (*LittleLong) (int l);
+float (*BigFloat) (float l);
+float (*LittleFloat) (float l);
 
 short   ShortSwap (short l)
 {
-	byte    b1,b2;
+	byte    b1, b2;
 
-	b1 = l&255;
-	b2 = (l>>8)&255;
+	b1 = l & 255;
+	b2 = (l >> 8) & 255;
 
-	return (b1<<8) + b2;
+	return (b1 << 8) + b2;
 }
 
 short   ShortNoSwap (short l)
@@ -132,14 +132,14 @@ short   ShortNoSwap (short l)
 
 int    LongSwap (int l)
 {
-	byte    b1,b2,b3,b4;
+	byte    b1, b2, b3, b4;
 
-	b1 = l&255;
-	b2 = (l>>8)&255;
-	b3 = (l>>16)&255;
-	b4 = (l>>24)&255;
+	b1 = l & 255;
+	b2 = (l >> 8) & 255;
+	b3 = (l >> 16) & 255;
+	b4 = (l >> 24) & 255;
 
-	return ((int)b1<<24) + ((int)b2<<16) + ((int)b3<<8) + b4;
+	return ((int) b1 << 24) + ((int) b2 << 16) + ((int) b3 << 8) + b4;
 }
 
 int     LongNoSwap (int l)
@@ -154,8 +154,8 @@ float FloatSwap (float f)
 		float   f;
 		byte    b[4];
 	} dat1, dat2;
-	
-	
+
+
 	dat1.f = f;
 	dat2.b[0] = dat1.b[3];
 	dat2.b[1] = dat1.b[2];
@@ -180,15 +180,16 @@ where the given parameter apears, or 0 if not present
 int COM_CheckParm (char *parm)
 {
 	int             i;
-	
-	for (i=1; i<com_argc; i++)
+
+	for (i = 1; i < com_argc; i++)
 	{
 		if (!com_argv[i])
 			continue;               // NEXTSTEP sometimes clears appkit vars.
-		if (!strcmp (parm,com_argv[i]))
+
+		if (!strcmp (parm, com_argv[i]))
 			return i;
 	}
-		
+
 	return 0;
 }
 
@@ -312,10 +313,10 @@ cmd_t COM_Path_f_Cmd ("path", COM_Path_f);
 
 void COM_Init (char *basedir)
 {
-	byte    swaptest[2] = {1,0};
+	byte    swaptest[2] = {1, 0};
 
-// set the byte swapping variables in a portable manner 
-	if ( *(short *)swaptest == 1)
+	// set the byte swapping variables in a portable manner
+	if (* (short *) swaptest == 1)
 	{
 		bigendien = false;
 		BigShort = ShortSwap;
@@ -383,10 +384,11 @@ char *va (char *format, ...)
 int memsearch (byte *start, int count, int search)
 {
 	int             i;
-	
-	for (i=0; i<count; i++)
+
+	for (i = 0; i < count; i++)
 		if (start[i] == search)
 			return i;
+
 	return -1;
 }
 
@@ -421,6 +423,7 @@ bool COM_FindExtension (char *filename, char *ext)
 	for (int i = 0;; i++)
 	{
 		if (!filename[i]) break;
+
 		if (!stricmp (&filename[i], ext)) return true;
 	}
 
@@ -433,12 +436,14 @@ bool COM_StringContains (char *str1, char *str2)
 {
 	// sanity check args
 	if (!str1) return false;
+
 	if (!str2) return false;
 
 	// OK, perf-wise it sucks, but - hey! - it doesn't really matter for the circumstances it's used in.
 	for (int i = 0;; i++)
 	{
 		if (!str1[i]) break;
+
 		if (!strnicmp (&str1[i], str2, strlen (str2))) return true;
 	}
 

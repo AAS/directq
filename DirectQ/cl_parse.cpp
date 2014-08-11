@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -34,13 +34,13 @@ char *svc_strings[] =
 	"svc_time",			// [float] server time
 	"svc_print",			// [string] null terminated string
 	"svc_stufftext",		// [string] stuffed into client's console buffer
-						// the string should be \n terminated
+	// the string should be \n terminated
 	"svc_setangle",		// [vec3] set the view angle to this absolute value
-	
+
 	"svc_serverinfo",		// [long] version
-						// [string] signon string
-						// [string]..[0]model cache [string]...[0]sounds cache
-						// [string]..[0]item cache
+	// [string] signon string
+	// [string]..[0]model cache [string]...[0]sounds cache
+	// [string]..[0]item cache
 	"svc_lightstyle",		// [byte] [string]
 	"svc_updatename",		// [byte] [string]
 	"svc_updatefrags",	// [byte] [short]
@@ -49,11 +49,11 @@ char *svc_strings[] =
 	"svc_updatecolors",	// [byte] [byte]
 	"svc_particle",		// [vec3] <variable>
 	"svc_damage",			// [byte] impact [byte] blood [vec3] from
-	
+
 	"svc_spawnstatic",
 	"OBSOLETE svc_spawnbinary",
 	"svc_spawnbaseline",
-	
+
 	"svc_temp_entity",		// <variable>
 	"svc_setpause",
 	"svc_signonnum",
@@ -99,9 +99,7 @@ CL_ReadByteShort2
 */
 int CL_ReadByteShort2 (bool Compatibility)
 {
-	if (cl.Protocol < PROTOCOL_VERSION_BJP2 || Compatibility && cl.Protocol > PROTOCOL_VERSION_BJP2)
-		return MSG_ReadByte (); // Some progs (Marcher) send sound services, maintain compatibility, kludge
-	else return MSG_ReadShort ();
+	return MSG_ReadByte ();
 }
 
 
@@ -112,7 +110,7 @@ CL_ReadByteShort
 */
 int CL_ReadByteShort (void)
 {
-	return cl.Protocol == PROTOCOL_VERSION ? MSG_ReadByte () : MSG_ReadShort ();
+	return cl.Protocol == PROTOCOL_VERSION_NQ ? MSG_ReadByte () : MSG_ReadShort ();
 }
 
 
@@ -128,7 +126,7 @@ entity_t *CL_EntityNum (int num)
 	if (num >= cl.num_entities)
 	{
 		if (num >= MAX_EDICTS)
-			Host_Error ("CL_EntityNum: %i is an invalid number",num);
+			Host_Error ("CL_EntityNum: %i is an invalid number", num);
 
 		while (cl.num_entities <= num)
 		{
@@ -137,6 +135,7 @@ entity_t *CL_EntityNum (int num)
 				// alloc a new entity and set it's number
 				cl_entities[cl.num_entities] = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
+				cl_entities[cl.num_entities]->alphaval = 255;
 			}
 
 			// force cl.numentities up until it exceeds the number we're looking for
@@ -153,28 +152,28 @@ entity_t *CL_EntityNum (int num)
 CL_ParseStartSoundPacket
 ==================
 */
-void CL_ParseStartSoundPacket(void)
+void CL_ParseStartSoundPacket (void)
 {
-    vec3_t  pos;
-    int 	channel, ent;
-    int 	sound_num;
-    int 	volume;
-    int 	field_mask;
-    float 	attenuation;  
- 	int		i;
-	           
-    field_mask = MSG_ReadByte(); 
+	vec3_t  pos;
+	int 	channel, ent;
+	int 	sound_num;
+	int 	volume;
+	int 	field_mask;
+	float 	attenuation;
+	int		i;
 
-    if (field_mask & SND_VOLUME)
+	field_mask = MSG_ReadByte();
+
+	if (field_mask & SND_VOLUME)
 		volume = MSG_ReadByte ();
 	else
 		volume = DEFAULT_SOUND_PACKET_VOLUME;
-	
-    if (field_mask & SND_ATTENUATION)
+
+	if (field_mask & SND_ATTENUATION)
 		attenuation = MSG_ReadByte () / 64.0;
 	else
 		attenuation = DEFAULT_SOUND_PACKET_ATTENUATION;
-	
+
 	if (field_mask & SND_LARGEENTITY)
 	{
 		ent = (unsigned short) MSG_ReadShort ();
@@ -193,12 +192,12 @@ void CL_ParseStartSoundPacket(void)
 
 	if (ent > MAX_EDICTS)
 		Host_Error ("CL_ParseStartSoundPacket: ent = %i", ent);
-	
-	for (i=0; i<3; i++)
-		pos[i] = MSG_ReadCoord (cl.Protocol);
- 
-    S_StartSound (ent, channel, cl.sound_precache[sound_num], pos, volume/255.0, attenuation);
-}       
+
+	for (i = 0; i < 3; i++)
+		pos[i] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+	S_StartSound (ent, channel, cl.sound_precache[sound_num], pos, volume / 255.0, attenuation);
+}
 
 /*
 ==================
@@ -210,28 +209,27 @@ so the server doesn't disconnect.
 */
 void CL_KeepaliveMessage (bool showmsg = true)
 {
-	float	time;
-	static float lastmsg = 0;
+	DWORD	Time;
+	static DWORD LastMsg = 0;
 	int		ret;
 	sizebuf_t	old;
 	byte		olddata[8192];
-	
-	if (sv.active)
-		return;		// no need if server is local
-	if (cls.demoplayback)
-		return;
+
+	if (sv.active) return;		// no need if server is local
+	if (cls.demoplayback) return;
 
 	// read messages from server, should just be nops
 	old = net_message;
-	Q_MemCpy (olddata, net_message.data, net_message.cursize);
-	
+	memcpy (olddata, net_message.data, net_message.cursize);
+
 	do
 	{
 		ret = CL_GetMessage ();
+
 		switch (ret)
 		{
 		default:
-			Host_Error ("CL_KeepaliveMessage: CL_GetMessage failed");		
+			Host_Error ("CL_KeepaliveMessage: CL_GetMessage failed");
 		case 0:
 			break;	// nothing waiting
 		case 1:
@@ -240,19 +238,20 @@ void CL_KeepaliveMessage (bool showmsg = true)
 		case 2:
 			if (MSG_ReadByte() != svc_nop)
 				Host_Error ("CL_KeepaliveMessage: datagram wasn't a nop");
+
 			break;
 		}
 	} while (ret);
 
 	net_message = old;
-	Q_MemCpy (net_message.data, olddata, net_message.cursize);
+	memcpy (net_message.data, olddata, net_message.cursize);
 
 	// check time
-	time = Sys_FloatTime ();
+	Time = Sys_Milliseconds ();
 
-	if (time - lastmsg < 5) return;
+	if (Time - LastMsg < 5000) return;
 
-	lastmsg = time;
+	LastMsg = Time;
 
 	// write out a nop
 	if (showmsg) Con_Printf ("--> client to server keepalive\n");
@@ -262,11 +261,11 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	SZ_Clear (&cls.message);
 }
 
-void Host_Frame (float time);
+void Host_Frame (DWORD time);
 
 static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 {
-	static float time, oldtime, newtime;
+	static DWORD time, oldtime, newtime;
 	static int lastpercent = 666;
 	int thispercent = (PercentDown / 10);
 
@@ -282,7 +281,7 @@ static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 
 	cls.download.percent = PercentDown;
 
-	newtime = Sys_FloatTime ();
+	newtime = Sys_Milliseconds ();
 	time = newtime - oldtime;
 
 	if (lastpercent != thispercent)
@@ -343,7 +342,7 @@ void CL_DoWebDownload (char *filename)
 	Con_Printf ("Downloading from %s%s\n\n", cl_web_download_url.string, filename);
 
 	// this needs a screen update
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// default download params
 	cls.download.web = true;
@@ -352,11 +351,11 @@ void CL_DoWebDownload (char *filename)
 
 	// let the Windows API do it's magic!!
 	DWORD DLResult = Web_DoDownload
-	(
-		va ("%s%s", cl_web_download_url.string, filename),
-		va ("%s/%s", com_gamedir, filename),
-		CL_WebDownloadProgress
-	);
+					 (
+						 va ("%s%s", cl_web_download_url.string, filename),
+						 va ("%s/%s", com_gamedir, filename),
+						 CL_WebDownloadProgress
+					 );
 
 	// we're not downloading any more
 	cls.download.web = false;
@@ -434,21 +433,24 @@ void CL_ParseServerInfo (void)
 	// parse protocol version number
 	i = MSG_ReadLong ();
 
-	if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ_MINUS2 && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+	if (i != PROTOCOL_VERSION_NQ && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ)
 	{
 		Host_Error
 		(
-			"Server returned unknown protocol version %i, (not %i, %i, %i or %i-%i)",
+			"Server returned unknown protocol version %i, (not %i, %i or %i)",
 			i,
-			PROTOCOL_VERSION,
+			PROTOCOL_VERSION_NQ,
 			PROTOCOL_VERSION_FITZ,
-			PROTOCOL_VERSION_RMQ_MINUS2,
-			PROTOCOL_VERSION_BJP,
-			PROTOCOL_VERSION_MH
+			PROTOCOL_VERSION_RMQ
 		);
 	}
 
 	cl.Protocol = i;
+
+	// get the correct protocol flags
+	if (cl.Protocol == PROTOCOL_VERSION_RMQ)
+		cl.PrototcolFlags = (unsigned) MSG_ReadLong ();
+	else cl.PrototcolFlags = 0;
 
 	// parse maxclients
 	cl.maxclients = MSG_ReadByte ();
@@ -487,6 +489,7 @@ void CL_ParseServerInfo (void)
 	for (nummodels = 1;; nummodels++)
 	{
 		str = MSG_ReadString ();
+
 		if (!str[0])
 			break;
 
@@ -504,9 +507,11 @@ void CL_ParseServerInfo (void)
 	for (numsounds = 1;; numsounds++)
 	{
 		str = MSG_ReadString ();
+
 		if (!str[0])
 			break;
-		if (numsounds==MAX_SOUNDS)
+
+		if (numsounds == MAX_SOUNDS)
 		{
 			Con_Printf ("Server sent too many sound precaches\n");
 			return;
@@ -523,7 +528,7 @@ void CL_ParseServerInfo (void)
 		// don't crash because we're attempting downloads here
 		cl.model_precache[i] = Mod_ForName (model_precache[i], false);
 
-		// avoid Q_MemSet 0 requirement
+		// avoid memset 0 requirement
 		cl.model_precache[i + 1] = NULL;
 
 		if (cl.model_precache[i] == NULL)
@@ -558,7 +563,7 @@ void CL_ParseServerInfo (void)
 	{
 		cl.sound_precache[i] = S_PrecacheSound (sound_precache[i]);
 
-		// avoid Q_MemSet 0 requirement
+		// avoid memset 0 requirement
 		cl.sound_precache[i + 1] = NULL;
 
 		CL_KeepaliveMessage ();
@@ -585,8 +590,8 @@ void CL_ParseServerInfo (void)
 	extern HWND d3d_Window;
 
 	if (cls.demoplayback)
-		SetWindowText (d3d_Window, va ("DirectQ Release %s - %s - %s (%s)", DIRECTQ_VERSION, com_gamename, cl.levelname, cls.demoname));
-	else SetWindowText (d3d_Window, va ("DirectQ Release %s - %s - %s (%s)", DIRECTQ_VERSION, com_gamename, cl.levelname, mapname));
+		UpdateTitlebarText (cls.demoname);
+	else UpdateTitlebarText (mapname);
 
 	// clean up zone allocations
 	Zone_Compact ();
@@ -612,14 +617,14 @@ int	bitcounts[16];
 
 void CL_ClearInterpolation (entity_t *ent)
 {
-	ent->frame_start_time = 0;
+	ent->framestarttime = 0;
 	ent->lastpose = ent->currpose;
 
-	ent->translate_start_time = 0;
+	ent->translatestarttime = 0;
 	ent->lastorigin[0] = ent->lastorigin[1] = ent->lastorigin[2] = 0;
 	ent->currorigin[0] = ent->currorigin[1] = ent->currorigin[2] = 0;
 
-	ent->rotate_start_time = 0;
+	ent->rotatestarttime = 0;
 	ent->lastangles[0] = ent->lastangles[1] = ent->lastangles[2] = 0;
 	ent->currangles[0] = ent->currangles[1] = ent->currangles[2] = 0;
 }
@@ -648,13 +653,13 @@ void CL_ParseUpdate (int bits)
 		bits |= (i << 8);
 	}
 
-	if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
 	{
 		if (bits & U_EXTEND1) bits |= MSG_ReadByte () << 16;
 		if (bits & U_EXTEND2) bits |= MSG_ReadByte () << 24;
 	}
 
-	if (bits & U_LONGENTITY)	
+	if (bits & U_LONGENTITY)
 		num = MSG_ReadShort ();
 	else num = MSG_ReadByte ();
 
@@ -675,7 +680,7 @@ void CL_ParseUpdate (int bits)
 
 	if (bits & U_MODEL)
 	{
-		if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+		if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
 			modnum = MSG_ReadByte ();
 		else modnum = CL_ReadByteShort ();
 
@@ -728,34 +733,37 @@ void CL_ParseUpdate (int bits)
 	else ent->effects = ent->baseline.effects;
 
 	// shift the known values for interpolation
-	VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
-	VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
+	VectorCopy2 (ent->msg_origins[1], ent->msg_origins[0]);
+	VectorCopy2 (ent->msg_angles[1], ent->msg_angles[0]);
 
 	if (bits & U_ORIGIN1)
-		ent->msg_origins[0][0] = MSG_ReadCoord (cl.Protocol);
+		ent->msg_origins[0][0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_origins[0][0] = ent->baseline.origin[0];
 
 	if (bits & U_ANGLE1)
-		ent->msg_angles[0][0] = MSG_ReadAngle (cl.Protocol);
+		ent->msg_angles[0][0] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_angles[0][0] = ent->baseline.angles[0];
 
 	if (bits & U_ORIGIN2)
-		ent->msg_origins[0][1] = MSG_ReadCoord (cl.Protocol);
+		ent->msg_origins[0][1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_origins[0][1] = ent->baseline.origin[1];
 
 	if (bits & U_ANGLE2)
-		ent->msg_angles[0][1] = MSG_ReadAngle (cl.Protocol);
+		ent->msg_angles[0][1] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_angles[0][1] = ent->baseline.angles[1];
 
 	if (bits & U_ORIGIN3)
-		ent->msg_origins[0][2] = MSG_ReadCoord (cl.Protocol);
+		ent->msg_origins[0][2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_origins[0][2] = ent->baseline.origin[2];
 
 	if (bits & U_ANGLE3)
-		ent->msg_angles[0][2] = MSG_ReadAngle (cl.Protocol);
+		ent->msg_angles[0][2] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_angles[0][2] = ent->baseline.angles[2];
 
-	if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+	// default lerp interval which we can assume for most entities
+	ent->lerpinterval = 0.1f;
+
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
 	{
 		if (bits & U_ALPHA)
 			ent->alphaval = MSG_ReadByte ();
@@ -765,26 +773,34 @@ void CL_ParseUpdate (int bits)
 		if (bits & U_MODEL2) modnum = (modnum & 0x00FF) | (MSG_ReadByte () << 8);
 
 		// directq doesn't do no fitzquake-style lerping so just silently read the byte
+#if 1
+		if (bits & U_LERPFINISH)
+		{
+			ent->lerpinterval = (float) (MSG_ReadByte()) / 255.0f;
+			ent->lerpflags |= LERP_FINISH;
+		}
+		else ent->lerpflags &= ~LERP_FINISH;
+#else
 		if (bits & U_LERPFINISH) MSG_ReadByte ();
+#endif
 	}
-	else if (bits & U_TRANS) // && (cl.Protocol != PROTOCOL_VERSION || nehahra))
+	else if (bits & U_TRANS) // && (cl.Protocol != PROTOCOL_VERSION_NQ || nehahra))
 	{
 		// the server controls the protocol so this is safe to do.
-		// required as some engines add U_TRANS but don't change PROTOCOL_VERSION
+		// required as some engines add U_TRANS but don't change PROTOCOL_VERSION_NQ
 		// retain neharha protocol compatibility; the 1st and 3rd do nothing yet...
 		int transbits = MSG_ReadFloat ();
-		ent->alphaval = MSG_ReadFloat () * 256;
+		ent->alphaval = MSG_ReadFloat () * 255;
+
 		if (transbits == 2) MSG_ReadFloat ();
 	}
 	else if (ent != cl_entities[cl.viewentity])
 	{
-		// this will stomp the alphaval set in chase, so don't do it
 		ent->alphaval = 255;
 	}
 
-	// an alpha of 0 is equivalent to 255 (so that Q_MemSet 0 will work correctly)
+	// an alpha of 0 is equivalent to 255 (so that memset 0 will work correctly)
 	if (ent->alphaval < 1) ent->alphaval = 255;
-
 	if (bits & U_NOLERP) ent->forcelink = true;
 
 	// this was moved down for protocol fitz messaqe ordering because the model num could be changed by extend bits
@@ -797,17 +813,16 @@ void CL_ParseUpdate (int bits)
 		// if (model && ent->model) Con_Printf ("Change from %s to %s\n", ent->model->name, model->name);
 		ent->model = model;
 
-		// the new model will most likely have different bbox dimensions
-		// so force it to be un-occluded
-		ent->occluded = false;
-
 		// automatic animation (torches, etc) can be either all together
 		// or randomized
 		if (model)
 		{
 			if (model->synctype == ST_RAND)
-				ent->syncbase = (float) (rand () &0x7fff) / 0x7fff;
+				ent->syncbase = (float) (rand () & 0x7fff) / 0x7fff;
 			else ent->syncbase = 0.0;
+
+			// recache
+			if (model->type == mod_alias) model->aliashdr->cacheposes = 0xffffffff;
 
 			// ST_RAND is not always set on animations that should be out of lockstep
 			ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
@@ -818,6 +833,7 @@ void CL_ParseUpdate (int bits)
 		// if the model has changed we must also reset the interpolation data
 		// lastpose and currpose are critical as they might be pointing to invalid frames in the new model!!!
 		CL_ClearInterpolation (ent);
+		ent->brushstate.bmrelinked = true;
 
 		// reset frame and skin too...!
 		if (!(bits & U_FRAME)) ent->frame = 0;
@@ -826,11 +842,14 @@ void CL_ParseUpdate (int bits)
 
 	if (forcelink)
 	{
+		if (ent->model && ent->model->type == mod_alias)
+			ent->model->aliashdr->cacheposes = 0xffffffff;
+
 		// didn't have an update last message
-		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
-		VectorCopy (ent->msg_origins[0], ent->origin);
-		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
-		VectorCopy (ent->msg_angles[0], ent->angles);
+		VectorCopy2 (ent->msg_origins[1], ent->msg_origins[0]);
+		VectorCopy2 (ent->origin, ent->msg_origins[0]);
+		VectorCopy2 (ent->msg_angles[1], ent->msg_angles[0]);
+		VectorCopy2 (ent->angles, ent->msg_angles[0]);
 
 		ent->forcelink = true;
 
@@ -853,7 +872,7 @@ void CL_ParseBaseline (entity_t *ent, int version)
 
 	if (bits & B_LARGEMODEL)
 		ent->baseline.modelindex = MSG_ReadShort ();
-	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
 		ent->baseline.modelindex = MSG_ReadByte ();
 	else ent->baseline.modelindex = CL_ReadByteShort ();
 
@@ -863,15 +882,13 @@ void CL_ParseBaseline (entity_t *ent, int version)
 
 	for (i = 0; i < 3; i++)
 	{
-		ent->baseline.origin[i] = MSG_ReadCoord (cl.Protocol);
-		ent->baseline.angles[i] = MSG_ReadAngle (cl.Protocol);
+		ent->baseline.origin[i] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		ent->baseline.angles[i] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 	}
 
-	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte () : ENTALPHA_DEFAULT;
-
-	// a new entity is never occluded
-	ent->occluded = false;
-	ent->occlusion = NULL;
+	if (bits & B_ALPHA)
+		ent->baseline.alpha = MSG_ReadByte ();
+	else ent->baseline.alpha = 255;
 }
 
 
@@ -882,14 +899,30 @@ CL_ParseClientdata
 Server information pertaining to this client only
 ==================
 */
+void CL_UpdateClientStat (int stat, int value)
+{
+	if (cl.stats[stat] != value)
+	{
+		cl.stats[stat] = value;
+		HUD_Changed ();
+	}
+}
+
+
 void CL_ParseClientdata (void)
 {
 	int		i, j;
 	int		bits;
+	int		clnewstats[32];
+
+	// copy out stats before the parse so we know what needs to be changed
+	for (i = 0; i < 32; i++)
+		clnewstats[i] = cl.stats[i];
 
 	bits = (unsigned short) MSG_ReadShort ();
 
 	if (bits & SU_EXTEND1) bits |= (MSG_ReadByte () << 16);
+
 	if (bits & SU_EXTEND2) bits |= (MSG_ReadByte () << 24);
 
 	if (bits & SU_VIEWHEIGHT)
@@ -900,28 +933,28 @@ void CL_ParseClientdata (void)
 		cl.idealpitch = MSG_ReadChar ();
 	else cl.idealpitch = 0;
 
-	VectorCopy (cl.mvelocity[0], cl.mvelocity[1]);
+	VectorCopy2 (cl.mvelocity[1], cl.mvelocity[0]);
 
-	for (i=0; i<3; i++)
+	for (i = 0; i < 3; i++)
 	{
-		if (bits & (SU_PUNCH1<<i) )
+		if (bits & (SU_PUNCH1 << i))
 			cl.punchangle[i] = MSG_ReadChar();
 		else cl.punchangle[i] = 0;
 
-		if (bits & (SU_VELOCITY1<<i) )
-			cl.mvelocity[0][i] = MSG_ReadChar()*16;
+		if (bits & (SU_VELOCITY1 << i))
+			cl.mvelocity[0][i] = MSG_ReadChar() * 16;
 		else cl.mvelocity[0][i] = 0;
 	}
 
-// [always sent]	if (bits & SU_ITEMS)
-		i = MSG_ReadLong ();
-
-	if (cl.items != i)
+	// always sent
+	if ((i = MSG_ReadLong ()) != cl.items)
 	{
 		// set flash times
-		for (j=0; j<32; j++)
-			if ( (i & (1<<j)) && !(cl.items & (1<<j)))
-				cl.item_gettime[j] = cl.time;
+		for (j = 0; j < 32; j++)
+			if ((i & (1 << j)) && !(cl.items & (1 << j)))
+				cl.itemgettime[j] = cl.time;
+
+		HUD_Changed ();
 		cl.items = i;
 	}
 
@@ -929,73 +962,56 @@ void CL_ParseClientdata (void)
 	cl.inwater = (bits & SU_INWATER) != 0;
 
 	if (bits & SU_WEAPONFRAME)
-		cl.stats[STAT_WEAPONFRAME] = MSG_ReadByte ();
-	else
-		cl.stats[STAT_WEAPONFRAME] = 0;
+		clnewstats[STAT_WEAPONFRAME] = MSG_ReadByte ();
+	else clnewstats[STAT_WEAPONFRAME] = 0;
 
 	if (bits & SU_ARMOR)
-		i = MSG_ReadByte ();
-	else
-		i = 0;
-
-	if (cl.stats[STAT_ARMOR] != i)
-		cl.stats[STAT_ARMOR] = i;
+		clnewstats[STAT_ARMOR] = MSG_ReadByte ();
+	else clnewstats[STAT_ARMOR] = 0;
 
 	if (bits & SU_WEAPON)
 	{
-		if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
-			i = MSG_ReadByte ();
-		else i = CL_ReadByteShort ();
+		if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
+			clnewstats[STAT_WEAPON] = MSG_ReadByte ();
+		else clnewstats[STAT_WEAPON] = CL_ReadByteShort ();
 	}
-	else i = 0;
+	else clnewstats[STAT_WEAPON] = 0;
 
-	cl.stats[STAT_WEAPON] = i;
-
-	i = MSG_ReadShort ();
-	cl.stats[STAT_HEALTH] = i;
-
-	i = MSG_ReadByte ();
-	cl.stats[STAT_AMMO] = i;
+	clnewstats[STAT_HEALTH] = MSG_ReadShort ();
+	clnewstats[STAT_AMMO] = MSG_ReadByte ();
 
 	for (i = 0; i < 4; i++)
-	{
-		j = MSG_ReadByte ();
-		cl.stats[STAT_SHELLS+i] = j;
-	}
-
-	i = MSG_ReadByte ();
+		clnewstats[STAT_SHELLS + i] = MSG_ReadByte ();
 
 	if (standard_quake)
-		cl.stats[STAT_ACTIVEWEAPON] = i;
-	else cl.stats[STAT_ACTIVEWEAPON] = (1<<i);
+		clnewstats[STAT_ACTIVEWEAPON] = MSG_ReadByte ();
+	else clnewstats[STAT_ACTIVEWEAPON] = (1 << (MSG_ReadByte ()));
 
-	if (bits & SU_WEAPON2) cl.stats[STAT_WEAPON] |= (MSG_ReadByte () << 8);
-	if (bits & SU_ARMOR2) cl.stats[STAT_ARMOR] |= (MSG_ReadByte () << 8);
-	if (bits & SU_AMMO2) cl.stats[STAT_AMMO] |= (MSG_ReadByte () << 8);
-	if (bits & SU_SHELLS2) cl.stats[STAT_SHELLS] |= (MSG_ReadByte () << 8);
-	if (bits & SU_NAILS2) cl.stats[STAT_NAILS] |= (MSG_ReadByte () << 8);
-	if (bits & SU_ROCKETS2) cl.stats[STAT_ROCKETS] |= (MSG_ReadByte () << 8);
-	if (bits & SU_CELLS2) cl.stats[STAT_CELLS] |= (MSG_ReadByte () << 8);
-	if (bits & SU_WEAPONFRAME2) cl.stats[STAT_WEAPONFRAME] |= (MSG_ReadByte () << 8);
+	if (bits & SU_WEAPON2) clnewstats[STAT_WEAPON] |= (MSG_ReadByte () << 8);
+	if (bits & SU_ARMOR2) clnewstats[STAT_ARMOR] |= (MSG_ReadByte () << 8);
+	if (bits & SU_AMMO2) clnewstats[STAT_AMMO] |= (MSG_ReadByte () << 8);
+	if (bits & SU_SHELLS2) clnewstats[STAT_SHELLS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_NAILS2) clnewstats[STAT_NAILS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_ROCKETS2) clnewstats[STAT_ROCKETS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_CELLS2) clnewstats[STAT_CELLS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_WEAPONFRAME2) clnewstats[STAT_WEAPONFRAME] |= (MSG_ReadByte () << 8);
+
+	if (cl.stats[STAT_HEALTH] > 0 && clnewstats[STAT_HEALTH] < 1)
+	{
+		// update death location
+		cl.death_location[0] = cl_entities[cl.viewentity]->origin[0];
+		cl.death_location[1] = cl_entities[cl.viewentity]->origin[1];
+		cl.death_location[2] = cl_entities[cl.viewentity]->origin[2];
+		Con_DPrintf ("updated death location\n");
+	}
+
+	// now update the stats
+	for (i = 0; i < 32; i++)
+		CL_UpdateClientStat (i, clnewstats[i]);
 
 	if (bits & SU_WEAPONALPHA)
 		cl.viewent.alphaval = MSG_ReadByte ();
 	else cl.viewent.alphaval = 255;
-
-	// update for flash frames
-	for (i = 0; i < 32; i++)
-	{
-		if (cl.item_gettime[i] - cl.time < 2)
-		{
-			float time = cl.item_gettime[i];
-			int flashon = (int) ((cl.time - time) * 10);
-
-			// > 10 instead of >= so that the final flash off also gets triggered
-			if (flashon > 10)
-				flashon = 0;
-			else flashon = (flashon % 5) + 2;
-		}
-	}
 }
 
 
@@ -1016,7 +1032,7 @@ void CL_ParseStatic (int version)
 
 	// just alloc in the map pool
 	entity_t *ent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
-	Q_MemSet (ent, 0, sizeof (entity_t));
+	memset (ent, 0, sizeof (entity_t));
 
 	// read in baseline state
 	CL_ParseBaseline (ent, version);
@@ -1026,11 +1042,11 @@ void CL_ParseStatic (int version)
 	ent->frame = ent->baseline.frame;
 	ent->skinnum = ent->baseline.skin;
 	ent->effects = ent->baseline.effects;
-	ent->alphaval = 255;
+	ent->alphaval = ent->baseline.alpha;
 	ent->efrag = NULL;
 
-	VectorCopy (ent->baseline.origin, ent->origin);
-	VectorCopy (ent->baseline.angles, ent->angles);
+	VectorCopy2 (ent->origin, ent->baseline.origin);
+	VectorCopy2 (ent->angles, ent->baseline.angles);
 
 	// ST_RAND is not always set on animations that should be out of lockstep
 	ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
@@ -1051,9 +1067,9 @@ void CL_ParseStaticSound (int version)
 	vec3_t		org;
 	int			sound_num, vol, atten;
 	int			i;
-	
-	for (i=0; i<3; i++)
-		org[i] = MSG_ReadCoord (cl.Protocol);
+
+	for (i = 0; i < 3; i++)
+		org[i] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 	if (version == 2)
 		sound_num = MSG_ReadShort ();
@@ -1061,7 +1077,7 @@ void CL_ParseStaticSound (int version)
 
 	vol = MSG_ReadByte ();
 	atten = MSG_ReadByte ();
-	
+
 	S_StaticSound (cl.sound_precache[sound_num], org, vol, atten);
 }
 
@@ -1088,18 +1104,15 @@ void CL_ParseServerMessage (void)
 	int			cmd;
 	int			i;
 
-//
-// if recording demos, copy the message out
-//
+	// if recording demos, copy the message out
 	if (cl_shownet.value == 1)
-		Con_Printf ("%i ",net_message.cursize);
+		Con_Printf ("%i ", net_message.cursize);
 	else if (cl_shownet.value == 2)
 		Con_Printf ("------------------\n");
-	
-	cl.onground = false;	// unless the server says otherwise	
-//
-// parse the message
-//
+
+	cl.onground = false;	// unless the server says otherwise
+
+	// parse the message
 	MSG_BeginReading ();
 
 	static int lastcmd = 0;
@@ -1113,19 +1126,19 @@ void CL_ParseServerMessage (void)
 
 		if (cmd == -1)
 		{
-			SHOWNET("END OF MESSAGE");
+			SHOWNET ("END OF MESSAGE");
 			return;		// end of message
 		}
 
 		// if the high bit of the command byte is set, it is a fast update
 		if (cmd & 128)
 		{
-			SHOWNET("fast update");
+			SHOWNET ("fast update");
 			CL_ParseUpdate (cmd & 127);
 			continue;
 		}
 
-		SHOWNET(svc_strings[cmd]);
+		SHOWNET (svc_strings[cmd]);
 
 		// other commands
 		switch (cmd)
@@ -1135,12 +1148,12 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_nop:
-//			Con_Printf ("svc_nop\n");
+			//			Con_Printf ("svc_nop\n");
 			break;
 
 		case svc_time:
 			cl.mtime[1] = cl.mtime[0];
-			cl.mtime[0] = MSG_ReadFloat ();			
+			cl.mtime[0] = MSG_ReadFloat ();
 			break;
 
 		case svc_clientdata:
@@ -1150,17 +1163,15 @@ void CL_ParseServerMessage (void)
 		case svc_version:
 			i = MSG_ReadLong ();
 
-			if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ_MINUS2 && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+			if (i != PROTOCOL_VERSION_NQ && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ)
 			{
 				Host_Error
 				(
-					"CL_ParseServerMessage: Server is protocol %i instead of %i, %i, %i or %i-%i",
+					"CL_ParseServerMessage: Server is protocol %i instead of %i, %i or %i",
 					i,
-					PROTOCOL_VERSION,
+					PROTOCOL_VERSION_NQ,
 					PROTOCOL_VERSION_FITZ,
-					PROTOCOL_VERSION_RMQ_MINUS2,
-					PROTOCOL_VERSION_BJP,
-					PROTOCOL_VERSION_MH
+					PROTOCOL_VERSION_RMQ
 				);
 			}
 
@@ -1174,16 +1185,18 @@ void CL_ParseServerMessage (void)
 			Host_EndGame ("Server disconnected\n");
 
 		case svc_print:
+
 			if (!cls.download.web)
 			{
 				char *str = MSG_ReadString ();
 
 				// proquake messaging only exists with protocol 15
-				if (cl.Protocol == PROTOCOL_VERSION)
+				if (cl.Protocol == PROTOCOL_VERSION_NQ)
 					CL_ParseProQuakeString (str);
 
 				Con_Printf ("%s", str);
 			}
+
 			break;
 
 		case svc_centerprint:
@@ -1191,29 +1204,29 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_stufftext:
+		{
+			// check for proquake messages
+			// proquake messaging only exists with protocol 15
+			if ((cl.Protocol == PROTOCOL_VERSION_NQ) && (MSG_PeekByte () == MOD_PROQUAKE))
+				CL_ParseProQuakeMessage ();
+
+			char *stufftxt = MSG_ReadString ();
+
+			// Still want to add text, even on ProQuake messages.  This guarantees compatibility;
+			// unrecognized messages will essentially be ignored but there will be no parse errors
+			if (!strnicmp (stufftxt, "crosshair", 9) && nehahra)
 			{
-				// check for proquake messages
-				// proquake messaging only exists with protocol 15
-				if ((cl.Protocol == PROTOCOL_VERSION) && (MSG_PeekByte () == MOD_PROQUAKE))
-					CL_ParseProQuakeMessage ();
-
-				char *stufftxt = MSG_ReadString ();
-
-				// Still want to add text, even on ProQuake messages.  This guarantees compatibility;
-				// unrecognized messages will essentially be ignored but there will be no parse errors
-				if (!strnicmp (stufftxt, "crosshair", 9) && nehahra)
-				{
-					// gotcha FUCKING nehahra
-					// the crosshair cvar belongs to the PLAYER, not to the mod
-					break;
-				}
-
-				Cbuf_AddText (stufftxt);
+				// gotcha FUCKING nehahra
+				// the crosshair cvar belongs to the PLAYER, not to the mod
+				break;
 			}
-			break;
+
+			Cbuf_AddText (stufftxt);
+		}
+		break;
 
 		case svc_damage:
-			V_ParseDamage ();
+			V_ParseDamage (cl.time);
 			break;
 
 		case svc_serverinfo:
@@ -1222,8 +1235,10 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_setangle:
-			for (i=0; i<3; i++)
-				cl.viewangles[i] = MSG_ReadAngle (cl.Protocol);
+
+			for (i = 0; i < 3; i++)
+				cl.viewangles[i] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
+
 			break;
 
 		case svc_setview:
@@ -1242,7 +1257,7 @@ void CL_ParseServerMessage (void)
 
 			// note - 64, not 63, is intentional here
 			Q_strncpy (cl_lightstyle[i].map,  MSG_ReadString(), 64);
-			cl_lightstyle[i].length = strlen(cl_lightstyle[i].map);
+			cl_lightstyle[i].length = strlen (cl_lightstyle[i].map);
 			break;
 
 		case svc_sound:
@@ -1251,10 +1266,11 @@ void CL_ParseServerMessage (void)
 
 		case svc_stopsound:
 			i = MSG_ReadShort();
-			S_StopSound(i>>3, i&7);
+			S_StopSound (i >> 3, i & 7);
 			break;
 
 		case svc_updatename:
+			HUD_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1268,6 +1284,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatefrags:
+			HUD_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1278,9 +1295,10 @@ void CL_ParseServerMessage (void)
 			}
 
 			cl.scores[i].frags = MSG_ReadShort ();
-			break;			
+			break;
 
 		case svc_updatecolors:
+			HUD_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1315,24 +1333,26 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_setpause:
-			{
-				cl.paused = MSG_ReadByte ();
+		{
+			cl.paused = MSG_ReadByte ();
 
-				if (cl.paused)
-				{
-					CDAudio_Pause ();
-				}
-				else
-				{
-					CDAudio_Resume ();
-				}
+			if (cl.paused)
+			{
+				CDAudio_Pause ();
 			}
-			break;
+			else
+			{
+				CDAudio_Resume ();
+			}
+		}
+		break;
 
 		case svc_signonnum:
 			i = MSG_ReadByte ();
+
 			if (i <= cls.signon)
 				Host_Error ("Received signon %i when at %i", i, cls.signon);
+
 			cls.signon = i;
 			CL_SignonReply ();
 			break;
@@ -1347,6 +1367,7 @@ void CL_ParseServerMessage (void)
 
 		case svc_updatestat:
 			i = MSG_ReadByte ();
+
 			if (i < 0 || i >= MAX_CL_STATS)
 			{
 				Con_DPrintf ("CL_ParseServerMessage: svc_updatestat: %i is invalid\n", i);
@@ -1371,6 +1392,7 @@ void CL_ParseServerMessage (void)
 				CDAudio_Play ((byte) cls.forcetrack, true);
 			else
 				CDAudio_Play ((byte) cl.cdtrack, true);
+
 			break;
 
 		case svc_intermission:
@@ -1383,14 +1405,14 @@ void CL_ParseServerMessage (void)
 			cl.intermission = 2;
 			cl.completed_time = cl.time;
 			vid.recalc_refdef = true;	// go to full screen
-			SCR_CenterPrint (MSG_ReadString ());			
+			SCR_CenterPrint (MSG_ReadString ());
 			break;
 
 		case svc_cutscene:
 			cl.intermission = 3;
 			cl.completed_time = cl.time;
 			vid.recalc_refdef = true;	// go to full screen
-			SCR_CenterPrint (MSG_ReadString ());			
+			SCR_CenterPrint (MSG_ReadString ());
 			break;
 
 		case svc_sellscreen:
@@ -1406,17 +1428,17 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_skybox:
-		// case svc_skyboxfitz: (this is 37 too...)
-			{
-				// cheesy skybox loading
-				char *skyname = MSG_ReadString ();
-				Cmd_ExecuteString (va ("loadsky %s\n", skyname), src_command);
-			}
-			break;
+			// case svc_skyboxfitz: (this is 37 too...)
+		{
+			// cheesy skybox loading
+			char *skyname = MSG_ReadString ();
+			Cmd_ExecuteString (va ("loadsky %s\n", skyname), src_command);
+		}
+		break;
 
 		case svc_skyboxsize:
 			// irrelevant in directQ
-			MSG_ReadCoord (cl.Protocol);
+			MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 			break;
 
 		case svc_fogfitz:
@@ -1483,6 +1505,7 @@ void CL_ParseProQuakeMessage (void)
 	{
 	case pqc_new_team:
 		team = MSG_ReadByte () - 16;
+
 		if (team < 0 || team > 13)
 			Host_Error ("CL_ParseProQuakeMessage: pqc_new_team invalid team");
 
@@ -1497,6 +1520,7 @@ void CL_ParseProQuakeMessage (void)
 
 	case pqc_erase_team:
 		team = MSG_ReadByte() - 16;
+
 		if (team < 0 || team > 13)
 			Host_Error ("CL_ParseProQuakeMessage: pqc_erase_team invalid team");
 
@@ -1516,6 +1540,7 @@ void CL_ParseProQuakeMessage (void)
 		if (frags & 32768) frags = frags - 65536;
 
 		if (!cl.teamscores) break;
+
 		cl.teamscores[team].frags = frags;
 		break;
 
@@ -1526,6 +1551,7 @@ void CL_ParseProQuakeMessage (void)
 		break;
 
 	case pqc_match_reset:
+
 		if (!cl.teamscores) break;
 
 		for (i = 0; i < 14; i++)
@@ -1545,7 +1571,7 @@ void CL_ParseProQuakeMessage (void)
 			cl.scores[ping / 4096].ping = ping & 4095;
 		}
 
-		cl.last_ping_time = cl.time;
+		cl.lastpingtime = cl.time;
 		break;
 	}
 }
@@ -1587,13 +1613,6 @@ CL_ParseProQuakeString
 */
 cvar_t pq_scoreboard_pings ("pq_scoreboard_pings", "1", CVAR_ARCHIVE);
 
-// no iplog in directq
-#define iplog_size 0
-
-void IPLog_Add (int blah1, char *blah2)
-{
-}
-
 void CL_ParseProQuakeString (char *string)
 {
 	static int checkping = -1;
@@ -1611,13 +1630,15 @@ void CL_ParseProQuakeString (char *string)
 
 	if (!strcmp (string, "Client ping times:\n") && pq_scoreboard_pings.value)
 	{
-		cl.last_ping_time = cl.time;
+		cl.lastpingtime = cl.time;
 		checkping = 0;
+
 		if (!cl.console_ping) *string = 0;
 	}
 	else if (checkping >= 0)
 	{
 		while (*s == ' ') s++;
+
 		ping = 0;
 
 		if (*s >= '0' && *s <= '9')
@@ -1642,6 +1663,7 @@ void CL_ParseProQuakeString (char *string)
 					if (!strncmp (cl.scores[checkping].name, s, 15))
 					{
 						cl.scores[checkping].ping = ping > 9999 ? 9999 : ping;
+
 						for (checkping++; !*cl.scores[checkping].name && checkping < cl.maxclients; checkping++);
 					}
 
@@ -1649,6 +1671,7 @@ void CL_ParseProQuakeString (char *string)
 				}
 
 				if (!cl.console_ping) *string = 0;
+
 				if (checkping == cl.maxclients) checkping = -1;
 			}
 			else checkping = -1;
@@ -1663,9 +1686,9 @@ void CL_ParseProQuakeString (char *string)
 	{
 		s = string + 14;
 
-		if ((*s != 'T') && strchr(s, 'm'))
+		if ((*s != 'T') && strchr (s, 'm'))
 		{
-			sscanf(s, "%d", &cl.minutes);
+			sscanf (s, "%d", &cl.minutes);
 			cl.seconds = 0;
 			cl.last_match_time = cl.time;
 		}
@@ -1701,6 +1724,7 @@ void CL_ParseProQuakeString (char *string)
 		if (!strncmp (string, "host:    ", 9))
 		{
 			begin_status = 1;
+
 			if (!cl.console_status)
 				remove_status = 1;
 		}
@@ -1720,6 +1744,7 @@ void CL_ParseProQuakeString (char *string)
 		else if (playercount && string[0] == '#')
 		{
 			if (!sscanf (string, "#%d", &checkip) || --checkip < 0 || checkip >= cl.maxclients) checkip = -1;
+
 			if (!cl.console_status) *string = 0;
 
 			remove_status = 0;

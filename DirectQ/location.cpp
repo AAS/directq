@@ -9,7 +9,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -66,7 +66,7 @@ void LOC_LoadLocations (void)
 		// scan it in to a temp location
 		if (sscanf (com_token, "%f, %f, %f, %f, %f, %f, ", &l->a[0], &l->a[1], &l->a[2], &l->b[0], &l->b[1], &l->b[2]) == 6)
 		{
-			l->sd = 0;	// JPG 1.05 
+			l->sd = 0;	// JPG 1.05
 
 			for (int i = 0; i < 3; i++)
 			{
@@ -141,7 +141,7 @@ char *LOC_GetLocation (vec3_t p)
 
 	for (l = locations; l < locations + numlocations; l++)
 	{
-		dist =	fabs (l->a[0] - p[0]) + fabs (l->b[0] - p[0]) + 
+		dist =	fabs (l->a[0] - p[0]) + fabs (l->b[0] - p[0]) +
 				fabs (l->a[1] - p[1]) + fabs (l->b[1] - p[1]) +
 				fabs (l->a[2] - p[2]) + fabs (l->b[2] - p[2]) - l->sd;
 

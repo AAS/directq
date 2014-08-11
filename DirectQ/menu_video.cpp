@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -48,7 +48,6 @@ extern cvar_t g_gamma;
 extern cvar_t b_gamma;
 extern cvar_t r_anisotropicfilter;
 extern cvar_t vid_vsync;
-extern cvar_t r_hlsl;
 
 char *filtermodes[] = {"None", "Point", "Linear", NULL};
 
@@ -61,6 +60,8 @@ int dummy_vsync;
 bool D3D_ModeIsCurrent (d3d_ModeDesc_t *mode);
 
 extern d3d_ModeDesc_t *d3d_ModeList;
+extern int d3d_NumModes;
+extern int d3d_NumWindowedModes;
 
 #define TAG_VIDMODEAPPLY	1
 #define TAG_HLSL			32
@@ -88,10 +89,11 @@ void VID_ApplyModeChange (void)
 {
 	// run a screen update after each to make sure they only occur one at a time
 	Cvar_Set (&d3d_mode, menu_videomodenum);
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	Cvar_Set (&vid_vsync, dummy_vsync);
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
+	HUD_Changed ();
 
 	// position the selection back up one as the "apply" option is no longer valid
 	menu_Video.Key (K_UPARROW);
@@ -103,6 +105,7 @@ bool Menu_VideoCheckNeedApply (void)
 	// if any of the options that need a device reset have changed from their defaults
 	// we signal to show the apply option
 	if (menu_videomodenum != d3d_mode.integer) return true;
+
 	if (vid_vsync.integer != dummy_vsync) return true;
 
 	// no apply needed
@@ -185,6 +188,63 @@ int modetypenum = 0;
 
 extern D3DDISPLAYMODE d3d_DesktopMode;
 
+void Menu_VideoDecodeVideoModes (d3d_ModeDesc_t *modes, int totalnummodes, int numwindowed)
+{
+	char tempmode[64];
+
+	// windowed modes
+	if (numwindowed)
+	{
+		// add one extra for NULL termination
+		menu_windowedres = (char **) MainZone->Alloc ((numwindowed + 1) * sizeof (char *));
+
+		for (int i = 0; i < numwindowed; i++)
+		{
+			d3d_ModeDesc_t *mode = modes + i;
+
+			// copy to a temp buffer, alloc in memory, copy back to memory and ensure NULL termination
+			sprintf (tempmode, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
+			menu_windowedres[i] = (char *) MainZone->Alloc (strlen (tempmode) + 1);
+			strcpy (menu_windowedres[i], tempmode);
+			menu_windowedres[i + 1] = NULL;
+		}
+	}
+
+	// fullscreen modes
+	if (totalnummodes > numwindowed)
+	{
+		int numfullscreen = totalnummodes - numwindowed;
+
+		// add one extra for NULL termination
+		menu_fullscrnres = (char **) MainZone->Alloc ((numfullscreen + 1) * sizeof (char *));
+
+		for (int i = 0, realfs = 0; i < numfullscreen; i++)
+		{
+			d3d_ModeDesc_t *mode = modes + numwindowed + i;
+
+			switch (mode->d3d_Mode.Format)
+			{
+			case D3DFMT_R5G6B5:
+			case D3DFMT_X1R5G5B5:
+			case D3DFMT_A1R5G5B5:
+				// these are the 16-bit modes and they don't get added to the list
+				break;
+
+			default:
+				// add 32 bpp modes
+				// copy to a temp buffer, alloc in memory, copy back to memory and ensure NULL termination
+				sprintf (tempmode, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
+				menu_fullscrnres[realfs] = (char *) MainZone->Alloc (strlen (tempmode) + 1);
+				strcpy (menu_fullscrnres[realfs], tempmode);
+				menu_fullscrnres[realfs + 1] = NULL;
+				realfs++;
+				break;
+			}
+		}
+	}
+}
+
+
 void Menu_VideoDecodeVideoMode (void)
 {
 	if (menu_windowedres || menu_fullscrnres)
@@ -221,7 +281,7 @@ void Menu_VideoDecodeVideoMode (void)
 
 		sprintf (resbuf, "%i x %i", d3d_CurrentMode.Width, d3d_CurrentMode.Height);
 
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!findres[i]) break;
 
@@ -259,8 +319,10 @@ void Menu_VideoDecodeVideoMode (void)
 	char *windresolutions = (char *) (scratchbuf + SCRATCHBUF_SIZE / 2);
 	int numwindresolutions = 0;
 
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+
 		if (mode->AllowWindowed)
 		{
 			sprintf (windresolutions, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
@@ -326,8 +388,10 @@ void Menu_VideoEncodeVideoMode (void)
 	else sscanf (menu_fullscrnres[menu_fullnum], "%i x %i", &width, &height);
 
 	// search through the modes for it
-	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
+	for (int i = 0; i < d3d_NumModes; i++)
 	{
+		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+
 		// ensure matching dimensions
 		if (mode->d3d_Mode.Width != width) continue;
 		if (mode->d3d_Mode.Height != height) continue;
@@ -346,10 +410,6 @@ void Menu_VideoEncodeVideoMode (void)
 	}
 }
 
-
-char *occlusionslist[] = {"Off", "MDL Only", "Brush Only", "Full", NULL};
-int occlusionsnum = 0;
-extern cvar_t r_occlusionqueries;
 
 int Menu_VideoCustomDraw (int y)
 {
@@ -371,18 +431,10 @@ int Menu_VideoCustomDraw (int y)
 		menu_Video.HideMenuOptions (TAG_WINDOWED_HIDE);
 	}
 
-	if (occlusionsnum != r_occlusionqueries.integer)
-		Cvar_Set (&r_occlusionqueries, occlusionsnum);
-
 	// check for "Apply" on d3d_mode change
 	if (!Menu_VideoCheckNeedApply ())
 		menu_Video.DisableMenuOptions (TAG_VIDMODEAPPLY);
 	else menu_Video.EnableMenuOptions (TAG_VIDMODEAPPLY);
-
-	// toggle hlsl access
-	if (!d3d_GlobalCaps.supportPixelShaders)
-		menu_Video.DisableMenuOptions (TAG_HLSL);
-	else menu_Video.EnableMenuOptions (TAG_HLSL);
 
 	if (d3d_CurrentMode.Width > 640 && d3d_CurrentMode.Height > 480)
 	{
@@ -422,11 +474,6 @@ void Menu_VideoCustomEnter (void)
 {
 	// decode the video mode and set currently selected stuff
 	Menu_VideoDecodeVideoMode ();
-
-	if (r_occlusionqueries.integer < 0) Cvar_Set (&r_occlusionqueries, 0.0f);
-	if (r_occlusionqueries.integer > 3) Cvar_Set (&r_occlusionqueries, 3.0f);
-
-	occlusionsnum = r_occlusionqueries.integer;
 
 	// take it from the d3d_mode cvar
 	menu_videomodenum = (int) d3d_mode.value;
@@ -509,10 +556,6 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
 	}
 
-	if (d3d_GlobalCaps.supportOcclusion)
-		menu_Video.AddOption (new CQMenuSpinControl ("Occlusion Queries", &occlusionsnum, occlusionslist));
-
-	menu_Video.AddOption (TAG_HLSL, new CQMenuCvarToggle ("Pixel Shaders", &r_hlsl, 0, 1));
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 
 	// menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));

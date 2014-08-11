@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -16,6 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
+
+void D3D_PrelockVertexBuffer (LPDIRECT3DVERTEXBUFFER9 vb);
+void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib);
 
 // palette hackery
 typedef struct palettedef_s
@@ -30,68 +33,7 @@ typedef struct palettedef_s
 
 extern palettedef_t d3d_QuakePalette;
 
-#define MAX_CHAR_TEXTURES	50
-
-// dynamic linking
-typedef IDirect3D9 *(WINAPI *DIRECT3DCREATE9PROC) (UINT);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXPERSPECTIVEFOVRHPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT, FLOAT);
-typedef HRESULT (WINAPI *D3DXCREATEEFFECTPROC) (LPDIRECT3DDEVICE9, LPCVOID, UINT, CONST D3DXMACRO *, LPD3DXINCLUDE, DWORD, LPD3DXEFFECTPOOL, LPD3DXEFFECT *, LPD3DXBUFFER *);
-typedef HRESULT (WINAPI *D3DXLOADSURFACEFROMSURFACEPROC) (LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, DWORD, D3DCOLOR);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXORTHOOFFCENTERPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXMULTIPLYPROC) (D3DXMATRIX *, CONST D3DXMATRIX *, CONST D3DXMATRIX *);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXSCALINGPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXTRANSLATIONPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXROTATIONXPROC) (D3DXMATRIX *, FLOAT);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXROTATIONYPROC) (D3DXMATRIX *, FLOAT);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXROTATIONZPROC) (D3DXMATRIX *, FLOAT);
-typedef HRESULT (WINAPI *D3DXLOADSURFACEFROMMEMORYPROC) (LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, LPCVOID, D3DFORMAT, UINT, CONST PALETTEENTRY *, CONST RECT *, DWORD, D3DCOLOR);
-typedef HRESULT (WINAPI *D3DXFILTERTEXTUREPROC) (LPDIRECT3DBASETEXTURE9, CONST PALETTEENTRY *, UINT, DWORD);
-typedef LPCSTR (WINAPI *D3DXGETPIXELSHADERPROFILEPROC) (LPDIRECT3DDEVICE9);
-typedef LPCSTR (WINAPI *D3DXGETVERTEXSHADERPROFILEPROC) (LPDIRECT3DDEVICE9);
-typedef HRESULT (WINAPI *D3DXSAVESURFACETOFILEPROC) (LPCSTR, D3DXIMAGE_FILEFORMAT, LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *);
-typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) (LPDIRECT3DDEVICE9, LPCVOID, UINT, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
-typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMRESOURCEEXAPROC) (LPDIRECT3DDEVICE9, HMODULE, LPCSTR, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
-typedef HRESULT (WINAPI *D3DXCREATERENDERTOSURFACEPROC) (LPDIRECT3DDEVICE9, UINT, UINT, D3DFORMAT, BOOL, D3DFORMAT, LPD3DXRENDERTOSURFACE *);
-typedef HRESULT (WINAPI *D3DXDDECLARATORFROMFVFPROC) (DWORD FVF, D3DVERTEXELEMENT9 *);
-typedef HRESULT (WINAPI *D3DXOPTIMIZEFACEVERTPROC) (LPCVOID, UINT, UINT, BOOL, DWORD *);
-typedef HRESULT (WINAPI *D3DXCREATEMESHFVFPROC) (DWORD, DWORD, DWORD, DWORD, LPDIRECT3DDEVICE9, LPD3DXMESH *);
-typedef HRESULT (WINAPI *D3DXLOADSURFACEFROMFILEINMEMORYPROC) (LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, LPCVOID, UINT, CONST RECT *, DWORD, D3DCOLOR, D3DXIMAGE_INFO *);
-typedef D3DXMATRIX *(WINAPI *D3DXMATRIXINVERSEPROC) (D3DXMATRIX *, FLOAT *, CONST D3DXMATRIX *);
-
-
-extern HINSTANCE hInstD3D9;
-extern HINSTANCE hInstD3DX;
-
-extern DIRECT3DCREATE9PROC QDirect3DCreate9;
-extern D3DXMATRIXPERSPECTIVEFOVRHPROC QD3DXMatrixPerspectiveFovRH;
-extern D3DXCREATEEFFECTPROC QD3DXCreateEffect;
-extern D3DXLOADSURFACEFROMSURFACEPROC QD3DXLoadSurfaceFromSurface;
-extern D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC QD3DXMatrixPerspectiveOffCenterRH;
-extern D3DXMATRIXORTHOOFFCENTERPROC QD3DXMatrixOrthoOffCenterRH;
-extern D3DXMATRIXMULTIPLYPROC QD3DXMatrixMultiply;
-extern D3DXMATRIXSCALINGPROC QD3DXMatrixScaling;
-extern D3DXMATRIXTRANSLATIONPROC QD3DXMatrixTranslation;
-extern D3DXMATRIXROTATIONXPROC QD3DXMatrixRotationX;
-extern D3DXMATRIXROTATIONYPROC QD3DXMatrixRotationY;
-extern D3DXMATRIXROTATIONZPROC QD3DXMatrixRotationZ;
-extern D3DXLOADSURFACEFROMMEMORYPROC QD3DXLoadSurfaceFromMemory;
-extern D3DXFILTERTEXTUREPROC QD3DXFilterTexture;
-extern D3DXGETPIXELSHADERPROFILEPROC QD3DXGetPixelShaderProfile;
-extern D3DXGETVERTEXSHADERPROFILEPROC QD3DXGetVertexShaderProfile;
-extern D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA;
-extern D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx;
-extern D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA;
-extern D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface;
-extern D3DXDDECLARATORFROMFVFPROC QD3DXDeclaratorFromFVF;
-extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeFaces;
-extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeVertices;
-extern D3DXCREATEMESHFVFPROC QD3DXCreateMeshFVF;
-extern D3DXLOADSURFACEFROMFILEINMEMORYPROC QD3DXLoadSurfaceFromFileInMemory;
-extern D3DXMATRIXINVERSEPROC QD3DXMatrixInverse;
-
-// for render to texture
-extern bool d3d_SceneBegun;
+#define MAX_CHAR_TEXTURES	64
 
 // VBO interface
 void D3D_VBOReleaseBuffers (void);
@@ -109,53 +51,66 @@ extern D3DMATRIX d3d_WorldMatrix;
 extern D3DMATRIX d3d_ModelViewProjMatrix;
 extern D3DMATRIX d3d_ProjMatrix;
 
-void D3D_TranslateMatrix (D3DMATRIX *matrix, float x, float y, float z);
-void D3D_ScaleMatrix (D3DMATRIX *matrix, float x, float y, float z);
-void D3D_RotateMatrix (D3DMATRIX *matrix, float x, float y, float z, float angle);
-D3DMATRIX *D3D_LoadIdentity (D3DMATRIX *matrix);
-D3DXMATRIX *D3D_LoadIdentity (D3DXMATRIX *matrix);
-void D3D_MultMatrix (D3DMATRIX *matrix1, D3DMATRIX *matrix2);
-void D3D_MultMatrix (D3DMATRIX *matrixout, D3DMATRIX *matrix1, D3DMATRIX *matrix2);
-D3DXMATRIX *D3D_MakeD3DXMatrix (D3DMATRIX *matrix);
+void D3DMatrix_Translate (D3DMATRIX *matrix, float x, float y, float z);
+void D3DMatrix_Scale (D3DMATRIX *matrix, float x, float y, float z);
+void D3DMatrix_Rotate (D3DMATRIX *matrix, float x, float y, float z, float angle);
+D3DMATRIX *D3DMatrix_Identity (D3DMATRIX *matrix);
+D3DXMATRIX *D3DMatrix_Identity (D3DXMATRIX *matrix);
+void D3DMatrix_Multiply (D3DMATRIX *matrix1, D3DMATRIX *matrix2);
+void D3DMatrix_Multiply (D3DMATRIX *matrixout, D3DMATRIX *matrix1, D3DMATRIX *matrix2);
+D3DMATRIX *D3DMatrix_OrthoOffCenterRH (D3DMATRIX *matrix, FLOAT l, FLOAT r, FLOAT b, FLOAT t, FLOAT zn, FLOAT zf);
+D3DMATRIX *D3DMatrix_PerspectiveFovRH (D3DMATRIX *matrix, FLOAT fovy, FLOAT aspect, FLOAT zn, FLOAT zf);
+D3DXMATRIX *D3DMatrix_ToD3DXMatrix (D3DMATRIX *matrix);
 
 extern HRESULT hr;
 
 extern cvar_t r_overbright;
 
 // hlsl
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex1;
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex2;
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyz;
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuseTex1;
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuse;
+void D3DHLSL_SetPass (int passnum);
+void D3DHLSL_SetAlpha (float alphaval);
+void D3DHLSL_SetDepthBias (float depthbias);
+void D3DHLSL_SetTexture (UINT stage, LPDIRECT3DBASETEXTURE9 tex);
+void D3DHLSL_SetAddressMode (UINT stage, DWORD mode);
+void D3DHLSL_SetMagFilter (UINT stage, DWORD mode);
+void D3DHLSL_SetMinFilter (UINT stage, DWORD mode);
+void D3DHLSL_SetMipFilter (UINT stage, DWORD mode);
+void D3DHLSL_CheckCommit (void);
+void D3DHLSL_SetMatrix (D3DXHANDLE h, D3DMATRIX *matrix);
+void D3DHLSL_SetWorldMatrix (D3DMATRIX *worldmatrix);
+void D3DHLSL_SetEntMatrix (D3DMATRIX *entmatrix);
+void D3DHLSL_SetFogMatrix (D3DMATRIX *fogmatrix);
+void D3DHLSL_InvalidateState (void);
+void D3DHLSL_BeginFrame (void);
+void D3DHLSL_EndFrame (void);
+void D3DHLSL_SetFloat (D3DXHANDLE handle, float fl);
+void D3DHLSL_SetFloatArray (D3DXHANDLE handle, float *fl, int len);
+void D3DHLSL_SetInt (D3DXHANDLE handle, int n);
+void D3DHLSL_SetCurrLerp (float val);
+void D3DHLSL_SetLastLerp (float val);
 
-extern bool d3d_FXCommitPending;
-extern LPD3DXEFFECT d3d_MasterFX;
+#define FX_PASS_NOTBEGUN				-1
+#define FX_PASS_ALIAS_NOLUMA			0
+#define FX_PASS_ALIAS_LUMA				1
+#define FX_PASS_LIQUID					2
+#define FX_PASS_SHADOW					3
+#define FX_PASS_WORLD_NOLUMA			4
+#define FX_PASS_WORLD_LUMA				5
+#define FX_PASS_SKYWARP					6
+#define FX_PASS_DRAWTEXTURED			7
+#define FX_PASS_DRAWCOLORED				8
+#define FX_PASS_SKYBOX					9
+#define FX_PASS_PARTICLES				10
+#define FX_PASS_WORLD_NOLUMA_ALPHA		11
+#define FX_PASS_WORLD_LUMA_ALPHA		12
+#define FX_PASS_PARTICLES_INSTANCED		13
 
-void D3D_BeginShaderPass (int passnum);
-void D3D_EndShaderPass (void);
+void D3DHLSL_Init (void);
+void D3DHLSL_Shutdown (void);
 
-#define FX_PASS_NOTBEGUN		-1
-#define FX_PASS_ALIAS_NOLUMA	0
-#define FX_PASS_ALIAS_LUMA		1
-#define FX_PASS_GENERIC			2
-#define FX_PASS_LIQUID			3
-#define FX_PASS_SHADOW			4
-#define FX_PASS_WORLD_NOLUMA	5
-#define FX_PASS_WORLD_LUMA		6
-#define FX_PASS_RTT				7
-#define FX_PASS_SKYWARP			8
-#define FX_PASS_DRAWTEXTURED	9
-#define FX_PASS_DRAWCOLORED		10
-#define FX_PASS_SKYBOX			11
-#define FX_PASS_WORLD_LUMA_NO_LUMA	12
-#define FX_PASS_ALIAS_LUMA_NO_LUMA	13
-#define FX_PASS_PARTICLES		14
 
-extern int d3d_FXPass;
-
-void D3D_InitHLSL (void);
-void D3D_ShutdownHLSL (void);
+// this one wraps DIP so that I can check for commit and anything else i need to do before drawing
+void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumIndexes);
 
 
 // crap from the old glquake.h
@@ -188,7 +143,6 @@ extern	cvar_t	r_wateralpha;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_novis;
 
-extern	cvar_t	gl_clear;
 extern	cvar_t	gl_cull;
 extern	cvar_t	gl_smoothmodels;
 extern	cvar_t	gl_affinemodels;
@@ -212,30 +166,12 @@ class CD3DLightmap
 public:
 	CD3DLightmap (msurface_t *surf);
 	~CD3DLightmap (void);
-	void UploadLightmap (void);
 	void CalcLightmapTexCoords (msurface_t *surf);
 	void CheckSurfaceForModification (msurface_t *surf);
 	bool AllocBlock (msurface_t *surf);
-	void LoseDefaultTexture (void);
-	void RecoverDefaultTexture (void);
-	void EnsureSurfaceTexture (msurface_t *surf);
 
-	void ChainModelSurf (struct d3d_modelsurf_s *ms);
-	void DrawSurfaceChain (bool luma);
-
+	int LightmapNum;
 private:
-	bool modified;
-	int width;
-	int height;
-	int *allocated;
-	D3DLOCKED_RECT d3d_LockedRect;
-	LPDIRECT3DTEXTURE9 d3d_MainTexture;
-	LPDIRECT3DTEXTURE9 d3d_BackupTexture;
-	bool lost;
-	RECT DirtyRect;
-
-	// chained modelsurfs for by-lightmap sorting
-	struct d3d_modelsurf_s *lightmapchain;
 
 	// next lightmap in the chain
 	CD3DLightmap *next;
@@ -260,9 +196,9 @@ typedef struct worldvert_s
 // video
 void D3D_InitDirect3D (D3DDISPLAYMODE *mode);
 void D3D_ShutdownDirect3D (void);
-void D3D_BeginRendering (void);
-void D3D_EndRendering (void);
-void D3D_Finish (void);
+void D3DVid_BeginRendering (void);
+void D3DVid_EndRendering (void);
+void D3DVid_Finish (void);
 
 extern D3DDISPLAYMODE d3d_CurrentMode;
 void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf);
@@ -287,6 +223,7 @@ void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf);
 #define IMAGE_NOCOMPRESS	(1 << 16)
 #define IMAGE_SYSMEM		(1 << 17)
 #define IMAGE_SCRAP			(1 << 18)
+#define IMAGE_FENCE			(1 << 19)
 
 int D3D_PowerOf2Size (int size);
 
@@ -322,7 +259,7 @@ extern D3DADAPTER_IDENTIFIER9 d3d_Adapter;
 extern D3DCAPS9 d3d_DeviceCaps;
 
 // state changes
-void D3D_Set2D (void);
+void D3DDraw_Begin2D (void);
 
 // global caps - used for any specific settings that we choose rather than that are
 // enforced on us through device caps
@@ -337,18 +274,14 @@ typedef struct d3d_global_caps_s
 	bool supportDXT3;
 	bool supportDXT5;
 	bool supportDynTex;
-	bool supportPixelShaders;
-	bool usingPixelShaders;
 	bool supportHardwareTandL;
-	bool supportOcclusion;
-	bool supportVertexBuffers;
+	bool supportNonPow2;
+	bool supportInstancing;
 	DWORD deviceCreateFlags;
 	int NumTMUs;
 } d3d_global_caps_t;
 
 extern d3d_global_caps_t d3d_GlobalCaps;
-
-extern cvar_t r_hlsl;
 
 typedef struct d3d_renderdef_s
 {
@@ -358,11 +291,10 @@ typedef struct d3d_renderdef_s
 
 	// r_speeds counts
 	int	brush_polys;
-	int last_alias_polys;
 	int alias_polys;
 	int numsss;
-	int numlocks;
 	int numdrawprim;
+	int numlock;
 
 	mleaf_t *viewleaf;
 	mleaf_t *oldviewleaf;
@@ -373,6 +305,9 @@ typedef struct d3d_renderdef_s
 	int numvisedicts;
 
 	entity_t worldentity;
+
+	float time;
+	float oldtime;
 	float frametime;
 
 	// actual fov used for rendering
@@ -382,19 +317,10 @@ typedef struct d3d_renderdef_s
 
 extern d3d_renderdef_t d3d_RenderDef;
 
-// this is needed outside of r_part now...
-typedef struct particle_type_s
-{
-	struct particle_s *particles;
-	int numparticles;
-	vec3_t spawnorg;
-	struct particle_type_s *next;
-} particle_type_t;
-
-void D3D_AddToAlphaList (entity_t *ent);
-void D3D_AddToAlphaList (struct d3d_modelsurf_s *modelsurf);
-void D3D_AddToAlphaList (particle_type_t *particle);
-void D3D_RenderAlphaList (void);
+void D3DAlpha_AddToList (entity_t *ent);
+void D3DAlpha_AddToList (struct d3d_modelsurf_s *modelsurf);
+void D3DAlpha_AddToList (struct particle_type_s *particle);
+void D3DAlpha_RenderList (void);
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
@@ -405,25 +331,15 @@ extern D3DTEXTUREFILTERTYPE d3d_MipFilter;
 // these are wrappers around the real call that check the previous value for a change before issuing the API call
 void D3D_SetRenderState (D3DRENDERSTATETYPE State, DWORD Value);
 void D3D_SetRenderStatef (D3DRENDERSTATETYPE State, float Value);
-void D3D_SetSamplerState (DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value);
-void D3D_SetSamplerStatef (DWORD Stage, D3DSAMPLERSTATETYPE Type, float Value);
-void D3D_SetTextureState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value);
-void D3D_SetTextureStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Value);
-void D3D_SetTexture (DWORD Sampler, LPDIRECT3DBASETEXTURE9 pTexture);
 void D3D_SetVertexDeclaration (LPDIRECT3DVERTEXDECLARATION9 vd);
-
-void D3D_SetColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
-void D3D_SetAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
+void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset, DWORD stride);
+void D3D_SetIndices (LPDIRECT3DINDEXBUFFER9 ib);
 
 // batched up states
 void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor);
 void D3D_DisableAlphaBlend (void);
-void D3D_SetTexCoordIndexes (DWORD tmu0index, DWORD tmu1index = 1, DWORD tmu2index = 2);
 void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode = D3DTADDRESS_WRAP, DWORD tmu2mode = D3DTADDRESS_WRAP);
 void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE texfilter, D3DTEXTUREFILTERTYPE mipfilter = D3DTEXF_NONE);
-void D3D_SetTextureMatrixOp (DWORD tmu0op, DWORD tmu1op = D3DTTFF_DISABLE, DWORD tmu2op = D3DTTFF_DISABLE);
-void D3D_SetTextureColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
-void D3D_SetTextureAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
 
 void D3D_AlignCubeMapFaceTexels (LPDIRECT3DSURFACE9 surf, D3DCUBEMAP_FACES face);
 
@@ -440,8 +356,6 @@ typedef struct d3d_ModeDesc_s
 	int ModeNum;
 
 	char ModeDesc[64];
-
-	struct d3d_ModeDesc_s *Next;
 } d3d_ModeDesc_t;
 
 bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory);
@@ -493,3 +407,11 @@ char *D3DTypeToString (D3DTEXTURETRANSFORMFLAGS enumval);
 char *D3DTypeToString (D3DTRANSFORMSTATETYPE enumval);
 char *D3DTypeToString (D3DVERTEXBLENDFLAGS enumval);
 char *D3DTypeToString (D3DZBUFFERTYPE enumval);
+
+class CD3DDeviceLossHandler
+{
+public:
+	CD3DDeviceLossHandler (xcommand_t onloss, xcommand_t onrecover);
+	xcommand_t OnLoseDevice;
+	xcommand_t OnRecoverDevice;
+};

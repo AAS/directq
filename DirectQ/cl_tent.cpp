@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -115,7 +115,7 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 		{
 			b->entity = ent;
 			b->model = m;
-			b->endtime = cl.time + 0.2;
+			b->endtime = cl.time + 0.2f;
 			VectorCopy (start, b->start);
 			VectorCopy (end, b->end);
 			return;
@@ -145,7 +145,7 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 	// set it's properties
 	b->entity = ent;
 	b->model = m;
-	b->endtime = cl.time + 0.2;
+	b->endtime = cl.time + 0.2f;
 	VectorCopy (start, b->start);
 	VectorCopy (end, b->end);
 }
@@ -180,16 +180,16 @@ void CL_ParseTEnt (void)
 	switch (type)
 	{
 	case TE_WIZSPIKE:			// spike hitting wall
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		if (r_extradlight.value)
 		{
 			dl = CL_AllocDlight (0);
 			VectorCopy (pos, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.5;
+			dl->die = cl.time + 0.5f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 308, 351, 109);
@@ -198,18 +198,18 @@ void CL_ParseTEnt (void)
 		R_WallHitParticles (pos, vec3_origin, 20, 30);
 		S_StartSound (-1, 0, cl_sfx_wizhit, pos, 1, 1);
 		break;
-		
+
 	case TE_KNIGHTSPIKE:			// spike hitting wall
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		if (r_extradlight.value)
 		{
 			dl = CL_AllocDlight (0);
 			VectorCopy (pos, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.5;
+			dl->die = cl.time + 0.5f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 408, 242, 117);
@@ -218,38 +218,41 @@ void CL_ParseTEnt (void)
 		R_WallHitParticles (pos, vec3_origin, 226, 20);
 		S_StartSound (-1, 0, cl_sfx_knighthit, pos, 1, 1);
 		break;
-		
+
 	case TE_SPIKE:			// spike hitting wall
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		R_WallHitParticles (pos, vec3_origin, 0, 10);
 
-		if ( rand() % 5 )
+		if (rand() % 5)
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
 		{
 			rnd = rand() & 3;
+
 			if (rnd == 1)
 				S_StartSound (-1, 0, cl_sfx_ric1, pos, 1, 1);
 			else if (rnd == 2)
 				S_StartSound (-1, 0, cl_sfx_ric2, pos, 1, 1);
 			else S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
+
 		break;
 
 	case TE_SUPERSPIKE:			// super spike hitting wall
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_WallHitParticles (pos, vec3_origin, 0, 20);
 
-		if ( rand() % 5 )
+		if (rand() % 5)
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
 		{
 			rnd = rand() & 3;
+
 			if (rnd == 1)
 				S_StartSound (-1, 0, cl_sfx_ric1, pos, 1, 1);
 			else if (rnd == 2)
@@ -257,36 +260,37 @@ void CL_ParseTEnt (void)
 			else
 				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
+
 		break;
-		
+
 	case TE_GUNSHOT:			// bullet hitting wall
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_WallHitParticles (pos, vec3_origin, 0, 20);
 		break;
-		
+
 	case TE_EXPLOSION:			// rocket explosion
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_ParticleExplosion (pos);
 
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
-		dl->die = cl.time + 0.5;
+		dl->die = cl.time + 0.5f;
 		dl->decay = 300;
 
 		R_ColourDLight (dl, 408, 242, 117);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
-		
+
 	case TE_TAREXPLOSION:			// tarbaby explosion
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_BlobExplosion (pos);
 
 		if (r_extradlight.value)
@@ -294,7 +298,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (pos, dl->origin);
 			dl->radius = 350;
-			dl->die = cl.time + 0.5;
+			dl->die = cl.time + 0.5f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 399, 141, 228);
@@ -305,21 +309,21 @@ void CL_ParseTEnt (void)
 
 	case TE_LIGHTNING1:				// lightning bolts
 		ent = MSG_ReadShort ();
-		
-		start[0] = MSG_ReadCoord (cl.Protocol);
-		start[1] = MSG_ReadCoord (cl.Protocol);
-		start[2] = MSG_ReadCoord (cl.Protocol);
-		
-		end[0] = MSG_ReadCoord (cl.Protocol);
-		end[1] = MSG_ReadCoord (cl.Protocol);
-		end[2] = MSG_ReadCoord (cl.Protocol);
+
+		start[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+		end[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		if (r_extradlight.value)
 		{
 			dl = CL_AllocDlight (0);
 			VectorCopy (start, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.1;
+			dl->die = cl.time + 0.1f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 65, 232, 470);
@@ -327,7 +331,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.1;
+			dl->die = cl.time + 0.1f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 65, 232, 470);
@@ -338,21 +342,21 @@ void CL_ParseTEnt (void)
 
 	case TE_LIGHTNING2:				// lightning bolts
 		ent = MSG_ReadShort ();
-		
-		start[0] = MSG_ReadCoord (cl.Protocol);
-		start[1] = MSG_ReadCoord (cl.Protocol);
-		start[2] = MSG_ReadCoord (cl.Protocol);
-		
-		end[0] = MSG_ReadCoord (cl.Protocol);
-		end[1] = MSG_ReadCoord (cl.Protocol);
-		end[2] = MSG_ReadCoord (cl.Protocol);
+
+		start[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+		end[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		if (r_extradlight.value)
 		{
 			dl = CL_AllocDlight (0);
 			VectorCopy (start, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.1;
+			dl->die = cl.time + 0.1f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 65, 232, 470);
@@ -360,7 +364,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.1;
+			dl->die = cl.time + 0.1f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 65, 232, 470);
@@ -371,21 +375,21 @@ void CL_ParseTEnt (void)
 
 	case TE_LIGHTNING3:				// lightning bolts
 		ent = MSG_ReadShort ();
-		
-		start[0] = MSG_ReadCoord (cl.Protocol);
-		start[1] = MSG_ReadCoord (cl.Protocol);
-		start[2] = MSG_ReadCoord (cl.Protocol);
-		
-		end[0] = MSG_ReadCoord (cl.Protocol);
-		end[1] = MSG_ReadCoord (cl.Protocol);
-		end[2] = MSG_ReadCoord (cl.Protocol);
+
+		start[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+		end[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		if (r_extradlight.value)
 		{
 			dl = CL_AllocDlight (0);
 			VectorCopy (start, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.1;
+			dl->die = cl.time + 0.1f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 65, 232, 470);
@@ -393,7 +397,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.1;
+			dl->die = cl.time + 0.1f;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 65, 232, 470);
@@ -402,92 +406,92 @@ void CL_ParseTEnt (void)
 		CL_ParseBeam (cl_bolt3_mod, ent, start, end);
 		break;
 
-// PGM 01/21/97 
+		// PGM 01/21/97
 	case TE_BEAM:				// grappling hook beam
 		ent = MSG_ReadShort ();
 
-		start[0] = MSG_ReadCoord (cl.Protocol);
-		start[1] = MSG_ReadCoord (cl.Protocol);
-		start[2] = MSG_ReadCoord (cl.Protocol);
-		
-		end[0] = MSG_ReadCoord (cl.Protocol);
-		end[1] = MSG_ReadCoord (cl.Protocol);
-		end[2] = MSG_ReadCoord (cl.Protocol);
+		start[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+		end[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		CL_ParseBeam (cl_beam_mod, ent, start, end);
 		break;
-// PGM 01/21/97
+		// PGM 01/21/97
 
-	case TE_LAVASPLASH:	
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+	case TE_LAVASPLASH:
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_LavaSplash (pos);
 		break;
-	
+
 	case TE_TELEPORT:
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_TeleportSplash (pos);
 		break;
-		
+
 	case TE_EXPLOSION2:				// color mapped explosion
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
 		R_ParticleExplosion2 (pos, colorStart, colorLength);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
-		dl->die = cl.time + 0.5;
+		dl->die = cl.time + 0.5f;
 		dl->decay = 300;
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
 	case TE_SMOKE:
 		// falls through to explosion 3
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		MSG_ReadByte();
 
 	case TE_EXPLOSION3:
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
-		dl->die = cl.time + 0.5;
+		dl->die = cl.time + 0.5f;
 		dl->decay = 300;
-		dl->rgb[0] = MSG_ReadCoord (cl.Protocol) * 255;
-		dl->rgb[1] = MSG_ReadCoord (cl.Protocol) * 255;
-		dl->rgb[2] = MSG_ReadCoord (cl.Protocol) * 255;
+		dl->rgb[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags) * 255;
+		dl->rgb[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags) * 255;
+		dl->rgb[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags) * 255;
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
 	case TE_LIGHTNING4:
-		{
-			// need to do it this way for correct parsing order
-			char *modelname = MSG_ReadString ();
+	{
+		// need to do it this way for correct parsing order
+		char *modelname = MSG_ReadString ();
 
-			ent = MSG_ReadShort ();
-			
-			start[0] = MSG_ReadCoord (cl.Protocol);
-			start[1] = MSG_ReadCoord (cl.Protocol);
-			start[2] = MSG_ReadCoord (cl.Protocol);
-			
-			end[0] = MSG_ReadCoord (cl.Protocol);
-			end[1] = MSG_ReadCoord (cl.Protocol);
-			end[2] = MSG_ReadCoord (cl.Protocol);
+		ent = MSG_ReadShort ();
 
-			CL_ParseBeam (Mod_ForName (modelname, true), ent, start, end);
-		}
+		start[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		start[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		break;
+		end[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+		CL_ParseBeam (Mod_ForName (modelname, true), ent, start, end);
+	}
+
+	break;
 
 	case TE_NEW1:
 		break;
@@ -496,17 +500,17 @@ void CL_ParseTEnt (void)
 		break;
 
 	case TE_PARTICLESNOW:	// general purpose particle effect
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		pos2[0] = MSG_ReadCoord (cl.Protocol);
-		pos2[1] = MSG_ReadCoord (cl.Protocol);
-		pos2[2] = MSG_ReadCoord (cl.Protocol);
+		pos2[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos2[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos2[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		dir[0] = MSG_ReadCoord (cl.Protocol);
-		dir[1] = MSG_ReadCoord (cl.Protocol);
-		dir[2] = MSG_ReadCoord (cl.Protocol);
+		dir[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		dir[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		dir[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		count = MSG_ReadShort (); // number of particles
 		colorStart = MSG_ReadByte (); // color
@@ -515,17 +519,17 @@ void CL_ParseTEnt (void)
 		break;
 
 	case TE_PARTICLERAIN:	// general purpose particle effect
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		pos2[0] = MSG_ReadCoord (cl.Protocol);
-		pos2[1] = MSG_ReadCoord (cl.Protocol);
-		pos2[2] = MSG_ReadCoord (cl.Protocol);
+		pos2[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos2[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos2[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		dir[0] = MSG_ReadCoord (cl.Protocol);
-		dir[1] = MSG_ReadCoord (cl.Protocol);
-		dir[2] = MSG_ReadCoord (cl.Protocol);
+		dir[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		dir[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		dir[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 		count = MSG_ReadShort (); // number of particles
 		colorStart = MSG_ReadByte (); // color
@@ -539,9 +543,9 @@ void CL_ParseTEnt (void)
 		Con_DPrintf ("CL_ParseTEnt: bad type %i\n", type);
 
 		// note - this might crash the server at some stage if more data is expected
-		pos[0] = MSG_ReadCoord (cl.Protocol);
-		pos[1] = MSG_ReadCoord (cl.Protocol);
-		pos[2] = MSG_ReadCoord (cl.Protocol);
+		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		break;
 	}
 }
@@ -576,7 +580,7 @@ entity_t *CL_NewTempEntity (void)
 	cl_temp_entities = ent;
 
 	// init the new entity
-	Q_MemSet (&ent->ent, 0, sizeof (entity_t));
+	memset (&ent->ent, 0, sizeof (entity_t));
 
 	// done
 	return &ent->ent;
@@ -595,10 +599,10 @@ void CL_UpdateTEnts (void)
 	float	    yaw, pitch;
 	float	    forward;
 
-	// hack - cl.time goes to 0 before some maps are fully flushed which can cause invalid
+	// hack - cl.dwTime goes to 0 before some maps are fully flushed which can cause invalid
 	// beam entities to be added to the list, so need to test for that (this can cause
 	// crashes on maps where you give yourself the lightning gun and then issue a changelevel)
-	if (cl.time < 0.1) return;
+	if (cl.time < 0.1f) return;
 
 	// no beams while a server is paused (if running locally)
 	if (sv.active && sv.paused) return;
@@ -681,7 +685,7 @@ void CL_UpdateTEnts (void)
 			yaw = (int) (atan2 (dist[1], dist[0]) * 180 / D3DX_PI);
 
 			if (yaw < 0) yaw += 360;
-	
+
 			forward = sqrt (dist[0] * dist[0] + dist[1] * dist[1]);
 			pitch = (int) (atan2 (dist[2], forward) * 180 / D3DX_PI);
 
@@ -710,9 +714,6 @@ void CL_UpdateTEnts (void)
 				org[i] += dist[i] * 30;
 				ent->origin[i] = org[i];
 			}
-
-			// never occlude these wee buggers
-			ent->effects |= EF_NEVEROCCLUDE;
 
 			// add a visedict for it
 			D3D_AddVisEdict (ent);

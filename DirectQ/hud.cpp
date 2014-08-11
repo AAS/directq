@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -45,7 +45,7 @@ qpic_t		*sb_armor[3];
 qpic_t		*sb_items[32];
 
 qpic_t	*sb_faces[7][2];		// 0 is gibbed, 1 is dead, 2-6 are alive
-							// 0 is static, 1 is temporary animation
+// 0 is static, 1 is temporary animation
 qpic_t	*sb_face_invis;
 qpic_t	*sb_face_quad;
 qpic_t	*sb_face_invuln;
@@ -61,12 +61,13 @@ qpic_t      *rsb_teambord;		// PGM 01/19/97 - team color border
 
 qpic_t		*gfx_ranking_lmp;
 qpic_t		*gfx_finale_lmp;
+qpic_t		*gfx_inter_lmp;
 qpic_t		*gfx_complete_lmp;
 
 //MED 01/04/97 added two more weapons + 3 alternates for grenade launcher
 qpic_t      *hsb_weapons[7][5];   // 0 is active, 1 is owned, 2-5 are flashes
 //MED 01/04/97 added array to simplify weapon parsing
-int         hipweapons[4] = {HIT_LASER_CANNON_BIT,HIT_MJOLNIR_BIT,4,HIT_PROXIMITY_GUN_BIT};
+int         hipweapons[4] = {HIT_LASER_CANNON_BIT, HIT_MJOLNIR_BIT, 4, HIT_PROXIMITY_GUN_BIT};
 //MED 01/04/97 added hipnotic items array
 qpic_t      *hsb_items[2];
 
@@ -81,6 +82,7 @@ void HUD_Init (void)
 	gfx_ranking_lmp = Draw_LoadPic ("gfx/ranking.lmp");
 	gfx_finale_lmp = Draw_LoadPic ("gfx/finale.lmp");
 	gfx_complete_lmp = Draw_LoadPic ("gfx/complete.lmp");
+	gfx_inter_lmp = Draw_LoadPic ("gfx/inter.lmp");
 
 	// these must be loaded first otherwise 0 will butt on to the turtle pic, causing the right edge of
 	// the turtle pic to bleed into the left edge of 0 when using linear filtering with gl_conscale < 1
@@ -114,13 +116,13 @@ void HUD_Init (void)
 
 	for (i = 0; i < 5; i++)
 	{
-		sb_weapons[2 + i][0] = Draw_LoadPic (va("inva%i_shotgun", i + 1));
-		sb_weapons[2 + i][1] = Draw_LoadPic (va("inva%i_sshotgun", i + 1));
-		sb_weapons[2 + i][2] = Draw_LoadPic (va("inva%i_nailgun", i + 1));
-		sb_weapons[2 + i][3] = Draw_LoadPic (va("inva%i_snailgun", i + 1));
-		sb_weapons[2 + i][4] = Draw_LoadPic (va("inva%i_rlaunch", i + 1));
-		sb_weapons[2 + i][5] = Draw_LoadPic (va("inva%i_srlaunch", i + 1));
-		sb_weapons[2 + i][6] = Draw_LoadPic (va("inva%i_lightng", i + 1));
+		sb_weapons[2 + i][0] = Draw_LoadPic (va ("inva%i_shotgun", i + 1));
+		sb_weapons[2 + i][1] = Draw_LoadPic (va ("inva%i_sshotgun", i + 1));
+		sb_weapons[2 + i][2] = Draw_LoadPic (va ("inva%i_nailgun", i + 1));
+		sb_weapons[2 + i][3] = Draw_LoadPic (va ("inva%i_snailgun", i + 1));
+		sb_weapons[2 + i][4] = Draw_LoadPic (va ("inva%i_rlaunch", i + 1));
+		sb_weapons[2 + i][5] = Draw_LoadPic (va ("inva%i_srlaunch", i + 1));
+		sb_weapons[2 + i][6] = Draw_LoadPic (va ("inva%i_lightng", i + 1));
 	}
 
 	sb_ammo[0] = Draw_LoadPic ("sb_shells");
@@ -217,6 +219,15 @@ void HUD_Init (void)
 		rsb_invbar[0] = Draw_LoadPic ("r_invbar1");
 		rsb_invbar[1] = Draw_LoadPic ("r_invbar2");
 	}
+}
+
+
+int hud_updates = 0;
+void Draw_TileClear (void);
+
+void HUD_Changed (void)
+{
+	hud_updates = 0;
 }
 
 
@@ -350,7 +361,7 @@ int HUD_itoa (int num, char *buf)
 }
 
 
-void HUD_DrawNum (int x, int y, int num, int digits, int color)
+void HUD_DrawNum (int x, int y, int num, int digits, int color = 0)
 {
 	char str[12];
 	char *ptr;
@@ -450,6 +461,7 @@ int	HUD_ColorForMap (int m)
 void HUD_DrawFrags (void)
 {
 	if (cl.maxclients < 2) return;
+
 	if (!(hud_ibar[cl_sbar.integer].flags & HUD_VISIBLE)) return;
 
 	int i, k, l;
@@ -488,7 +500,7 @@ void HUD_DrawFrags (void)
 
 		// draw number
 		f = s->frags;
-		_snprintf (num, 12, "%3i",f);
+		_snprintf (num, 12, "%3i", f);
 
 		Draw_Character (xofs + (x + 1) * 8, y, num[0]);
 		Draw_Character (xofs + (x + 2) * 8, y, num[1]);
@@ -544,7 +556,7 @@ void HUD_DrawLevelName (int x, int y)
 		Draw_String (x - l * 4, y, str);
 	else
 	{
-		int ofs = ((int) (realtime * 30)) % (l * 8);
+		int ofs = ((int) (cl.time * 30)) % (l * 8);
 
 		Draw_String (x - ofs, y, str);
 	}
@@ -582,12 +594,20 @@ void HUD_DeathmatchOverlay (void)
 	extern cvar_t pq_scoreboard_pings;
 
 	// update scoreboard pings every 5 seconds; force immediate update if we haven't had one at all yet
-	if (((cl.last_ping_time < cl.time - 5) || (cl.last_ping_time < 0.1)) && pq_scoreboard_pings.value && cl.Protocol == PROTOCOL_VERSION)
+	if (((cl.lastpingtime < cl.time - 5) || (cl.lastpingtime < 0.1)) && pq_scoreboard_pings.value && cl.Protocol == PROTOCOL_VERSION_NQ)
 	{
 		// send a ping command to the server
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		SZ_Print (&cls.message, "ping\n");
-		cl.last_ping_time = cl.time;
+		cl.lastpingtime = cl.time;
+	}
+
+	// JPG 1.05 - check to see if we should update IP status
+	if (iplog_size && (cl.laststatustime < cl.time - 5))
+	{
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		SZ_Print (&cls.message, "status\n");
+		cl.laststatustime = cl.time;
 	}
 
 	char str[128];
@@ -621,7 +641,7 @@ void HUD_DeathmatchOverlay (void)
 	bool have_cl_pings = false;
 
 	// only ping on prot 15 servers
-	if (pq_scoreboard_pings.value && cl.Protocol == PROTOCOL_VERSION)
+	if (pq_scoreboard_pings.value && cl.Protocol == PROTOCOL_VERSION_NQ)
 	{
 		for (i = 0; i < l; i++)
 		{
@@ -699,6 +719,11 @@ void HUD_DeathmatchOverlay (void)
 
 void HUD_SoloScoreboard (qpic_t *pic, float solotime)
 {
+	// shade behind the overlay so that we can see the text on-screen
+	D3D_Set2DShade (0.666f);
+	Draw_TextBox ((vid.width >> 1) - 148, 20, 280, 144);
+	D3D_Set2DShade (1.0f);
+
 	char str[128];
 	int l;
 	int i;
@@ -797,7 +822,10 @@ void HUD_DrawFace (int ActiveItems, int HealthStat)
 		else f = HealthStat / 20;
 
 		if (cl.time <= cl.faceanimtime)
+		{
+			HUD_Changed ();
 			anim = 1;
+		}
 		else anim = 0;
 
 		facepic = sb_faces[f][anim];
@@ -1012,6 +1040,43 @@ void HUD_DrawKeys (int ActiveItems)
 }
 
 
+void HUD_DrawPowerUpTimers (int ActiveItems)
+{
+	// to do
+	if (hipnotic || rogue) return;
+
+	// normal same way of doing things
+	int x = HUD_GetX (&hud_items[cl_sbar.integer]);
+	int y = HUD_GetY (&hud_items[cl_sbar.integer]);
+
+	char str[16];
+
+	for (int i = 2; i < 6; i++)
+	{
+		int CurrentItem = 17 + i;
+
+		if (ActiveItems & (1 << CurrentItem))
+		{
+			int seconds = 30 - (cl.time - cl.itemgettime[CurrentItem]);
+
+			if (seconds > 0)
+			{
+				sprintf (str, "%02i", seconds);
+
+				// we need to scrunch these together a little to make room
+				if (str[0] != ' ') Draw_Character (x + 1, y - (cl_sbar.integer > 1 ? 12 : 20), 18 + str[0] - '0');
+				if (str[1] != ' ') Draw_Character (x + 7, y - (cl_sbar.integer > 1 ? 12 : 20), 18 + str[1] - '0');
+
+				HUD_Changed ();
+			}
+		}
+
+		x += hud_items[cl_sbar.integer].hx;
+		y += hud_items[cl_sbar.integer].hy;
+	}
+}
+
+
 void HUD_DrawItems (int ActiveItems)
 {
 	// normal same way of doing things
@@ -1020,7 +1085,9 @@ void HUD_DrawItems (int ActiveItems)
 
 	for (int i = 2; i < 6; i++)
 	{
-		if ((ActiveItems & (1 << (17 + i))) || hud_drawfull)
+		int CurrentItem = 17 + i;
+
+		if (ActiveItems & (1 << CurrentItem))
 			Draw_Pic (x, y, sb_items[i]);
 
 		x += hud_items[cl_sbar.integer].hx;
@@ -1070,13 +1137,15 @@ void HUD_DrawAmmoCounts (int ac1, int ac2, int ac3, int ac4, int ActiveWeapon)
 		if (cl_sbar.integer > 1)
 		{
 			// background pic at x/y
-			Draw_SubPic (x - 4, y, sb_ibar, 3 + (i * 48), 0, 42, 11);
+			Draw_SubPic (x - 4, y, sb_ibar, 3 + (i * 48), 0, 42, 10);
 		}
 
 		_snprintf (num, 10, "%3i", ActiveAmmo[i]);
 
 		if (num[0] != ' ') Draw_Character (x, y, 18 + num[0] - '0');
+
 		if (num[1] != ' ') Draw_Character (x + 8, y, 18 + num[1] - '0');
+
 		if (num[2] != ' ') Draw_Character (x + 16, y, 18 + num[2] - '0');
 
 		x += hud_ammocount[cl_sbar.integer].hx;
@@ -1103,7 +1172,7 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 
 		if ((ActiveItems & (IT_SHOTGUN << i)) || hud_drawfull)
 		{
-			float time = cl.item_gettime[i];
+			float time = cl.itemgettime[i];
 			int flashon = (int) ((cl.time - time) * 10);
 
 			if (flashon >= 10)
@@ -1112,7 +1181,11 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 					flashon = 1;
 				else flashon = 0;
 			}
-			else flashon = (flashon % 5) + 2;
+			else
+			{
+				HUD_Changed ();
+				flashon = (flashon % 5) + 2;
+			}
 
 			// handle wider lightning gun pic
 			if (cl_sbar.value > 1)
@@ -1135,7 +1208,7 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 		{
 			if ((ActiveItems & (1 << hipweapons[i])) || hud_drawfull)
 			{
-				float time = cl.item_gettime[hipweapons[i]];
+				float time = cl.itemgettime[hipweapons[i]];
 				int flashon = (int) ((cl.time - time) * 10);
 				qpic_t *hipnopic = NULL;
 				int hipnox = x;
@@ -1147,12 +1220,17 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 						flashon = 1;
 					else flashon = 0;
 				}
-				else flashon = (flashon % 5) + 2;
+				else
+				{
+					HUD_Changed ();
+					flashon = (flashon % 5) + 2;
+				}
 
 				// check grenade launcher
 				switch (i)
 				{
 				case 2:
+
 					if (ActiveItems & HIT_PROXIMITY_GUN)
 					{
 						if (flashon)
@@ -1163,9 +1241,11 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 							hipnoy = savedy[4];
 						}
 					}
+
 					break;
 
 				case 3:
+
 					if (ActiveItems & (IT_SHOTGUN << 4))
 					{
 						if (flashon && !grenadeflashing)
@@ -1210,7 +1290,7 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 	if (rogue)
 	{
 		// rogue hackery; not as ugly as hipnotic hackery but still hackery all the same
-	    // check for powered up weapon.
+		// check for powered up weapon.
 		if (ActiveWeapon >= RIT_LAVA_NAILGUN)
 		{
 			for (int i = 0; i < 5; i++)
@@ -1273,7 +1353,9 @@ void HUD_DrawTeamColors (void)
 	if (top == 8)
 	{
 		if (num[0] != ' ') Draw_Character (x + 2, y + 2, 18 + num[0] - '0');
+
 		if (num[1] != ' ') Draw_Character (x + 9, y + 2, 18 + num[1] - '0');
+
 		if (num[2] != ' ') Draw_Character (x + 16, y + 2, 18 + num[2] - '0');
 	}
 	else
@@ -1394,6 +1476,7 @@ void HUD_MiniDeathmatchOverlay (void)
 			break;
 
 	if (i == hud_scoreboardlines) i = 0;
+
 	if (i < 0) i = 0;
 
 	// no more than 4 lines in the mini overlay
@@ -1416,7 +1499,8 @@ void HUD_MiniDeathmatchOverlay (void)
 
 void HUD_DrawFPS (void)
 {
-	static float	oldtime = 0, fps = 0;
+	static float	oldtime = 0;
+	static float	fps = 0;
 	static int		oldframecount = 0;
 	float			time;
 	int				x, y, frames;
@@ -1431,9 +1515,9 @@ void HUD_DrawFPS (void)
 		return;
 	}
 
-	if (time > 0.25) //update value every 1/4 second
+	if (time > 0.25f) // update value every 1/4 second
 	{
-		fps = frames / time;
+		fps = (float) frames / time;
 		oldtime = realtime;
 		oldframecount = d3d_RenderDef.framecount;
 	}
@@ -1449,9 +1533,11 @@ void HUD_DrawFPS (void)
 
 		_snprintf (str, 16, "%4i fps", (int) (fps + 0.5f));
 
+		int x = vid.width - (strlen (str) * 8 + 4);
+
 		if (cl_sbar.integer > 2)
-			Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y1, str);
-		else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y2, str);
+			Draw_String (x, vid.height - y1, str);
+		else Draw_String (x, vid.height - y2, str);
 	}
 }
 
@@ -1462,8 +1548,9 @@ void HUD_DrawClock (void)
 
 	if (scr_clock.value)
 	{
-		int minutes = cl.time / 60;
-		int seconds = ((int) cl.time) % 60;
+		int seconds = (int) cl.time;
+		int minutes = (int) (cl.time / 60);
+		seconds -= minutes * 60;
 
 		_snprintf (str, 9, "%02i:%i%i", minutes, seconds / 10, seconds % 10);
 	}
@@ -1494,6 +1581,9 @@ void HUD_DrawHUD (void)
 	if (scr_viewsize.value > 111) return;
 	if (cl.intermission) return;
 
+	// hack
+	if (!cl.levelname) return;
+
 	// bound sbar
 	if (cl_sbar.integer < 0) Cvar_Set (&cl_sbar, "0");
 	if (cl_sbar.integer > 3) Cvar_Set (&cl_sbar, "3");
@@ -1517,12 +1607,15 @@ void HUD_DrawHUD (void)
 		}
 	}
 
-	// draw any areas not covered by the HUD
-	if (sb_lines)
+	// check if it needs to be redrawn
+	if (cl_sbar.integer < 1)
 	{
-		Draw_TileClear (0, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
-		Draw_TileClear ((vid.width - 320) / 2 + 320, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
+		// need to update both draw buffers so pageflipping works right
+		if (hud_updates >= 2) return;
 	}
+
+	Draw_TileClear ();
+	hud_updates++;
 
 	// draw elements
 	// note - team colors must be drawn after the face as they overlap in the default layout
@@ -1544,6 +1637,7 @@ void HUD_DrawHUD (void)
 
 		// ammocounts are left till last because they don't batch with everything else
 		HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
+		HUD_DrawPowerUpTimers (cl.items);
 
 		// deathmatch overlay
 		HUD_MiniDeathmatchOverlay ();
@@ -1551,11 +1645,82 @@ void HUD_DrawHUD (void)
 }
 
 
+void HUD_DrawStuffGotten (int x, int y, int numstuff, int totalstuff)
+{
+	char stuffstr[64];
+
+	if (totalstuff)
+		sprintf (stuffstr, "%4i/%i", numstuff, totalstuff);
+	else sprintf (stuffstr, "%4i", numstuff);
+
+	for (int i = 0; ; i++)
+	{
+		if (!stuffstr[i]) break;
+
+		if (stuffstr[i] == '/')
+		{
+			Draw_Pic (x, y, sb_slash);
+			x += 16;
+		}
+		else if (stuffstr[i] == ' ')
+			x += 24;
+		else
+		{
+			Draw_Pic (x, y, sb_nums[0][stuffstr[i] - '0']);
+			x += 24;
+		}
+	}
+}
+
+
 void HUD_IntermissionOverlay (void)
 {
+#if 1
 	if (cl.gametype == GAME_DEATHMATCH)
 		HUD_DeathmatchOverlay ();
 	else HUD_SoloScoreboard (gfx_complete_lmp, cl.completed_time);
+#else
+	if (cl.gametype == GAME_DEATHMATCH)
+	{
+		HUD_DeathmatchOverlay ();
+		return;
+	}
+
+	// so that we can position everything correctly relative to each other and move it around as may be required
+	int basex = 192;
+	int basey = 24;
+
+	Draw_Pic (basex - 96, basey, gfx_complete_lmp);
+
+	// because the MP folks sometimes use the level name as a "server message" instead,
+	// containing additional info, etc, we need to take a copy of it, potentially truncate it, and tidy it up for display
+	char levelname[60];
+
+	for (int i = 0; i < 59; i++)
+	{
+		if (cl.levelname[i] < ' ') break;
+
+		levelname[i] = cl.levelname[i];
+		levelname[i + 1] = 0;
+
+		if (!cl.levelname[i]) break;
+	}
+
+	Draw_String (basex - strlen (levelname) * 4, basey + 34, levelname);
+	Draw_String (basex - 56, basey + 49, DIVIDER_LINE);
+	Draw_Pic (basex - 160, basey + 64, gfx_inter_lmp);
+
+	int dig = cl.completed_time / 60;
+	HUD_DrawStuffGotten (basex, basey + 72, dig, 0);
+	int num = cl.completed_time - dig * 60;
+
+	Draw_Pic (basex + 96, basey + 72, sb_colon);
+	Draw_Pic (basex + 112, basey + 72, sb_nums[0][num / 10]);
+	Draw_Pic (basex + 136, basey + 72, sb_nums[0][num % 10]);
+
+	HUD_DrawStuffGotten (basex, basey + 112, cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+	HUD_DrawStuffGotten (basex, basey + 152, cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
+#endif
 }
 
 

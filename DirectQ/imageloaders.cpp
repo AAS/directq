@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -29,26 +29,29 @@ byte *gammaramp = NULL;
 
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
 {
-	// wrap this monster so that we can more easily modify it if required
-	hr = QD3DXCreateTextureFromFileInMemoryEx
-	(
-		d3d_Device,
-		data,
-		len,
-		D3DX_DEFAULT,
-		D3DX_DEFAULT,
-		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
-		0,
-		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
-		D3DPOOL_MANAGED,
-		D3DX_FILTER_LINEAR,
-		D3DX_FILTER_BOX,
-		0,
-		NULL,
-		NULL,
-		tex
-	);
+	SAFE_RELEASE (tex[0]);
 
+	// wrap this monster so that we can more easily modify it if required
+	hr = D3DXCreateTextureFromFileInMemoryEx
+		 (
+			 d3d_Device,
+			 data,
+			 len,
+			 D3DX_DEFAULT,
+			 D3DX_DEFAULT,
+			 (flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+			 0,
+			 D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+			 D3DPOOL_MANAGED,
+			 D3DX_FILTER_LINEAR,
+			 D3DX_FILTER_BOX,
+			 0,
+			 NULL,
+			 NULL,
+			 tex
+		 );
+
+	tex[0]->PreLoad ();
 	return hr;
 }
 
@@ -63,7 +66,7 @@ typedef struct pcx_s
 	char	encoding;
 	char	bits_per_pixel;
 	unsigned short	xmin, ymin, xmax, ymax;
-	unsigned short	hres,vres;
+	unsigned short	hres, vres;
 	unsigned char	palette[48];
 	char	reserved;
 	char	color_planes;
@@ -90,7 +93,7 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 
 	fin = f;
 
-	Q_MemCpy (&pcx, fin, sizeof (pcx));
+	memcpy (&pcx, fin, sizeof (pcx));
 	fin += sizeof (pcx);
 
 	if (pcx.manufacturer != 0x0a || pcx.version != 5 || pcx.encoding != 1 || pcx.bits_per_pixel != 8 || pcx.xmax > 320 || pcx.ymax > 256)
@@ -131,6 +134,7 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 				dataByte = *fin++;
 
 				if (x2 > image_width) x2 = image_width;
+
 				while (x < x2) a[x++] = dataByte;
 			}
 			else a[x++] = dataByte;
@@ -155,7 +159,7 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 	}
 
 	// now fill in our fake tga header
-	Q_MemSet (image_rgba, 0, 18);
+	memset (image_rgba, 0, 18);
 	image_rgba[2] = 2;
 	image_rgba[12] = image_width & 255;
 	image_rgba[13] = image_width >> 8;
@@ -195,7 +199,7 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 		return NULL;
 	}
 
-	Q_MemSet (&targa_header, 0, sizeof (TargaHeader));
+	memset (&targa_header, 0, sizeof (TargaHeader));
 
 	targa_header.id_length = f[0];
 	targa_header.colormap_type = f[1];
@@ -259,8 +263,10 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 				switch (targa_header.pixel_size)
 				{
 				case 24:
+
 					if (fin + 3 > enddata)
 						break;
+
 					*pixbuf++ = fin[0];
 					*pixbuf++ = fin[1];
 					*pixbuf++ = fin[2];
@@ -268,8 +274,10 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 					fin += 3;
 					break;
 				case 32:
+
 					if (fin + 4 > enddata)
 						break;
+
 					*pixbuf++ = fin[0];
 					*pixbuf++ = fin[1];
 					*pixbuf++ = fin[2];
@@ -304,16 +312,20 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 					switch (targa_header.pixel_size)
 					{
 					case 24:
+
 						if (fin + 3 > enddata)
 							goto outofdata;
+
 						red = *fin++;
 						green = *fin++;
 						blue = *fin++;
 						alphabyte = 255;
 						break;
 					case 32:
+
 						if (fin + 4 > enddata)
 							goto outofdata;
+
 						red = *fin++;
 						green = *fin++;
 						blue = *fin++;
@@ -321,7 +333,7 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 						break;
 					}
 
-					for(j = 0; j < packetSize; j++)
+					for (j = 0; j < packetSize; j++)
 					{
 						*pixbuf++ = red;
 						*pixbuf++ = green;
@@ -333,6 +345,7 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 						{
 							// run spans across rows
 							column = 0;
+
 							if (row > 0)
 								row--;
 							else goto breakOut;
@@ -345,13 +358,15 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 				else
 				{
 					// non run-length packet
-					for(j = 0; j < packetSize; j++)
+					for (j = 0; j < packetSize; j++)
 					{
 						switch (targa_header.pixel_size)
 						{
 						case 24:
+
 							if (fin + 3 > enddata)
 								goto outofdata;
+
 							*pixbuf++ = fin[0];
 							*pixbuf++ = fin[1];
 							*pixbuf++ = fin[2];
@@ -359,8 +374,10 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 							fin += 3;
 							break;
 						case 32:
+
 							if (fin + 4 > enddata)
 								goto outofdata;
+
 							*pixbuf++ = fin[0];
 							*pixbuf++ = fin[1];
 							*pixbuf++ = fin[2];
@@ -386,16 +403,18 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 					}
 				}
 			}
+
 breakOut:;
 		}
 	}
+
 outofdata:;
 
 	image_width = columns;
 	image_height = rows;
 
 	// now fill in our fake tga header
-	Q_MemSet (image_rgba, 0, 18);
+	memset (image_rgba, 0, 18);
 	image_rgba[2] = 2;
 	image_rgba[12] = image_width & 255;
 	image_rgba[13] = image_width >> 8;
@@ -442,6 +461,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 		for (int i = 0;; i++)
 		{
 			if (!texname[i]) break;
+
 			if (texname[i] == '/') texname[i] = '\\';
 		}
 	}
@@ -461,6 +481,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 
 			// alias and sprite textures don't null term at the extension
 			if (flags & IMAGE_ALIAS) break;
+
 			if (flags & IMAGE_SPRITE) break;
 
 			// other types do
@@ -522,7 +543,6 @@ retry_nonstd:;
 
 	// this is used as a goto target for .link files
 ext_tex_load:;
-
 	HANDLE fh = INVALID_HANDLE_VALUE;
 	int filelen = 0;
 
@@ -531,15 +551,15 @@ ext_tex_load:;
 	{
 		// attempt to open it direct
 		fh = CreateFile
-		(
-			extpath,
-			GENERIC_READ,
-			FILE_SHARE_READ,
-			NULL,
-			OPEN_EXISTING,
-			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
-			NULL
-		);
+			 (
+				 extpath,
+				 GENERIC_READ,
+				 FILE_SHARE_READ,
+				 NULL,
+				 OPEN_EXISTING,
+				 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+				 NULL
+			 );
 
 		filelen = GetFileSize (fh, NULL);
 	}
@@ -598,6 +618,7 @@ ext_tex_load:;
 		// now go round again to load it for real
 		goto ext_tex_load;
 #else
+
 		for (int cc = 0;; cc++)
 		{
 			char fc = COM_FReadChar (fh);
@@ -677,24 +698,24 @@ ext_tex_load:;
 
 void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags)
 {
-	hr = QD3DXCreateTextureFromResourceExA
-	(
-		d3d_Device,
-		NULL,
-		MAKEINTRESOURCE (ResourceID),
-		D3DX_DEFAULT,
-		D3DX_DEFAULT,
-		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
-		0,
-		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
-		D3DPOOL_MANAGED,
-		D3DX_FILTER_LINEAR,
-		D3DX_FILTER_BOX,
-		0,
-		NULL,
-		NULL,
-		tex
-	);
+	hr = D3DXCreateTextureFromResourceExA
+		 (
+			 d3d_Device,
+			 NULL,
+			 MAKEINTRESOURCE (ResourceID),
+			 D3DX_DEFAULT,
+			 D3DX_DEFAULT,
+			 (flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+			 0,
+			 D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+			 D3DPOOL_MANAGED,
+			 D3DX_FILTER_LINEAR,
+			 D3DX_FILTER_BOX,
+			 0,
+			 NULL,
+			 NULL,
+			 tex
+		 );
 
 	if (FAILED (hr))
 	{
@@ -702,24 +723,24 @@ void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceI
 		byte *resdata = NULL;
 		int reslen = Sys_LoadResourceData (ResourceID, (void **) &resdata);
 
-		hr = QD3DXCreateTextureFromFileInMemoryEx
-		(
-			d3d_Device,
-			resdata,
-			reslen,
-			D3DX_DEFAULT,
-			D3DX_DEFAULT,
-			(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
-			0,
-			D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
-			D3DPOOL_MANAGED,
-			D3DX_FILTER_LINEAR,
-			D3DX_FILTER_BOX,
-			0,
-			NULL,
-			NULL,
-			tex
-		);
+		hr = D3DXCreateTextureFromFileInMemoryEx
+			 (
+				 d3d_Device,
+				 resdata,
+				 reslen,
+				 D3DX_DEFAULT,
+				 D3DX_DEFAULT,
+				 (flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+				 0,
+				 D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+				 D3DPOOL_MANAGED,
+				 D3DX_FILTER_LINEAR,
+				 D3DX_FILTER_BOX,
+				 0,
+				 NULL,
+				 NULL,
+				 tex
+			 );
 
 		if (FAILED (hr))
 		{
@@ -729,6 +750,7 @@ void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceI
 		}
 	}
 
+	tex[0]->PreLoad ();
 	// not much more we need to do here...
 }
 
@@ -776,11 +798,11 @@ void D3D_RotateTexels (unsigned int *texels, int width, int height)
 	{
 		for (int w = 0; w < width; w++)
 		{
-			dst[( w * height) + dest_col] = texels[h * width + w];
+			dst[(w * height) + dest_col] = texels[h * width + w];
 		}
 	}
 
-	Q_MemCpy (texels, dst, width * height * sizeof (unsigned int));
+	memcpy (texels, dst, width * height * sizeof (unsigned int));
 	MainZone->Free (dst);
 }
 

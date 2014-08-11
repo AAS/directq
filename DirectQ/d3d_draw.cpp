@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -23,8 +23,291 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
-#include "d3d_vbo.h"
 
+
+void D3DMain_CreateBuffers (void);
+extern LPDIRECT3DINDEXBUFFER9 d3d_MainIBO;
+
+
+typedef struct drawrect_s
+{
+	float sl;
+	float tl;
+	float sh;
+	float th;
+} drawrect_t;
+
+typedef struct
+{
+	struct image_s *tex;
+	drawrect_t picrect;
+	int texwidth;
+	int texheight;
+} glpic_t;
+
+
+qpic_t *conback;
+
+LPDIRECT3DTEXTURE9 char_texture = NULL;
+cvar_t r_smoothcharacters ("r_smoothcharacters", "0", CVAR_ARCHIVE);
+
+// each drawn quad has 4 vertexes and 6 indexes
+#define MAX_DRAW_VERTEXES 4000	// if this is changed then MAX_MAIN_INDEXES in d3d_main.cpp may need to be changed too
+
+LPDIRECT3DVERTEXBUFFER9 d3d_DrawVBO = NULL;
+LPDIRECT3DVERTEXDECLARATION9 d3d_DrawDecl = NULL;
+
+
+typedef struct d3d_drawvertex_s
+{
+	float x, y, z;
+	D3DCOLOR c;
+	float s, t;
+} d3d_drawvertex_t;
+
+typedef struct d3d_drawstate_s
+{
+	int TotalVertexes;
+	int TotalIndexes;
+	int VertsToLock;
+	int ShaderPass;
+	D3DTEXTUREFILTERTYPE DrawFilter;
+	DWORD color2D;
+	image_t *LastTexture;
+} d3d_drawstate_t;
+
+d3d_drawstate_t d3d_DrawState;
+
+void D3DDraw_CreateBuffers (void)
+{
+	if (!d3d_DrawVBO)
+	{
+		hr = d3d_Device->CreateVertexBuffer
+		(
+			MAX_DRAW_VERTEXES * sizeof (d3d_drawvertex_t),
+			D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
+			0,
+			D3DPOOL_DEFAULT,
+			&d3d_DrawVBO,
+			NULL
+		);
+
+		if (FAILED (hr)) Sys_Error ("D3DDraw_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
+
+		D3D_PrelockVertexBuffer (d3d_DrawVBO);
+		d3d_DrawState.TotalVertexes = 0;
+		d3d_DrawState.TotalIndexes = 0;
+	}
+
+	D3DMain_CreateBuffers ();
+
+	if (!d3d_DrawDecl)
+	{
+		D3DVERTEXELEMENT9 d3d_drawlayout[] =
+		{
+			{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+			{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+			{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+			D3DDECL_END ()
+		};
+
+		hr = d3d_Device->CreateVertexDeclaration (d3d_drawlayout, &d3d_DrawDecl);
+		if (FAILED (hr)) Sys_Error ("D3DDraw_CreateBuffers: d3d_Device->CreateVertexDeclaration failed");
+	}
+}
+
+
+void D3DDraw_ReleaseBuffers (void)
+{
+	SAFE_RELEASE (d3d_DrawVBO);
+	SAFE_RELEASE (d3d_DrawDecl);
+}
+
+
+void D3DDraw_SetBuffers (void)
+{
+	// create the buffers if needed
+	D3DDraw_CreateBuffers ();
+
+	// initial states
+	d3d_DrawState.LastTexture = NULL;
+
+	// and set up for drawing
+	D3D_SetVertexDeclaration (d3d_DrawDecl);
+	D3D_SetStreamSource (0, d3d_DrawVBO, 0, sizeof (d3d_drawvertex_t));
+	D3D_SetStreamSource (1, NULL, 0, 0);
+	D3D_SetStreamSource (2, NULL, 0, 0);
+	D3D_SetIndices (d3d_MainIBO);
+}
+
+
+__inline void D3DDraw_Vertex (d3d_drawvertex_t *vert, float x, float y, D3DCOLOR c, float s, float t)
+{
+	// correct the half pixel offset
+	vert->x = x - 0.5f;
+	vert->y = y - 0.5f;
+	vert->z = 0;
+
+	vert->c = c;
+
+	vert->s = s;
+	vert->t = t;
+}
+
+
+typedef struct d3d_drawsurf_s
+{
+	float x;
+	float w;
+	float y;
+	float h;
+	D3DCOLOR c;
+	drawrect_t texrect;
+} d3d_drawsurf_t;
+
+#define MAX_DRAW_SURFS	1024
+
+d3d_drawsurf_t d3d_DrawSurfs[MAX_DRAW_SURFS];
+int d3d_NumDrawSurfs = 0;
+
+void D3DDraw_Flush (void)
+{
+	if (d3d_NumDrawSurfs)
+	{
+		bool vblocked = false;
+		d3d_drawvertex_t *verts = NULL;
+
+		if (d3d_DrawState.TotalVertexes + d3d_DrawState.VertsToLock >= MAX_DRAW_VERTEXES)
+		{
+			hr = d3d_DrawVBO->Lock (0, 0, (void **) &verts, D3DLOCK_DISCARD);
+			if (FAILED (hr)) Sys_Error ("D3DDraw_Flush: failed to lock vertex buffer");
+
+			d3d_DrawState.TotalVertexes = 0;
+			d3d_DrawState.TotalIndexes = 0;
+			vblocked = true;
+		}
+		else if (d3d_DrawState.VertsToLock)
+		{
+			hr = d3d_DrawVBO->Lock (d3d_DrawState.TotalVertexes * sizeof (d3d_drawvertex_t),
+				d3d_DrawState.VertsToLock * sizeof (d3d_drawvertex_t),
+				(void **) &verts,
+				D3DLOCK_NOOVERWRITE);
+
+			if (FAILED (hr)) Sys_Error ("D3DDraw_Flush: failed to lock vertex buffer");
+			vblocked = true;
+		}
+
+		int FirstVertex = d3d_DrawState.TotalVertexes;
+		int FirstIndex = d3d_DrawState.TotalIndexes;
+		int NumVertexes = 0;
+		int NumIndexes = 0;
+
+		for (int i = 0; i < d3d_NumDrawSurfs; i++)
+		{
+			if (vblocked)
+			{
+				d3d_drawsurf_t *ds = &d3d_DrawSurfs[i];
+
+				// index these as strips to help out certain hardware
+				D3DDraw_Vertex (&verts[0], ds->x, ds->y, ds->c, ds->texrect.sl, ds->texrect.tl);
+				D3DDraw_Vertex (&verts[1], ds->x + ds->w, ds->y, ds->c, ds->texrect.sh, ds->texrect.tl);
+				D3DDraw_Vertex (&verts[2], ds->x, ds->y + ds->h, ds->c, ds->texrect.sl, ds->texrect.th);
+				D3DDraw_Vertex (&verts[3], ds->x + ds->w, ds->y + ds->h, ds->c, ds->texrect.sh, ds->texrect.th);
+
+				verts += 4;
+
+				d3d_DrawState.TotalVertexes += 4;
+				d3d_DrawState.TotalIndexes += 6;
+
+				NumVertexes += 4;
+				NumIndexes += 6;
+			}
+		}
+
+		if (vblocked)
+		{
+			hr = d3d_DrawVBO->Unlock ();
+			if (FAILED (hr)) Sys_Error ("D3DDraw_Flush: failed to unlock vertex buffer");
+			d3d_RenderDef.numlock++;
+		}
+
+		// now draw it all
+		D3D_DrawIndexedPrimitive (FirstVertex, NumVertexes, FirstIndex, NumIndexes / 3);
+	}
+
+	d3d_NumDrawSurfs = 0;
+	d3d_DrawState.VertsToLock = 0;
+}
+
+
+void D3DDraw_SubmitQuad (float x, float y, float w, float h, D3DCOLOR c = 0xffffffff,
+						 image_t *tex = NULL, drawrect_t *texrect = NULL)
+{
+	bool switchpass = false;
+
+	// conditions for flushing/switching
+	if (tex != d3d_DrawState.LastTexture) switchpass = true;
+	if (tex && d3d_DrawState.ShaderPass != FX_PASS_DRAWTEXTURED) switchpass = true;
+	if (!tex && d3d_DrawState.ShaderPass != FX_PASS_DRAWCOLORED) switchpass = true;
+
+	if (switchpass)
+	{
+		// switch texture
+		D3DDraw_Flush ();
+
+		if (tex)
+		{
+			D3DHLSL_SetPass (FX_PASS_DRAWTEXTURED);
+			D3DHLSL_SetTexture (0, tex->d3d_Texture);
+			d3d_DrawState.ShaderPass = FX_PASS_DRAWTEXTURED;
+
+			// set the correct filtering mode depending on the type of texture
+			// the MP crew sometimes don't give a fuck for things looking right; it's all about advantage in MP for them
+			if (tex->d3d_Texture == ((glpic_t *) conback->data)->tex->d3d_Texture)
+				D3D_SetTextureMipmap (0, d3d_TexFilter);
+			else if (tex->d3d_Texture == char_texture && !r_smoothcharacters.integer)
+				D3D_SetTextureMipmap (0, D3DTEXF_POINT);
+			else D3D_SetTextureMipmap (0, d3d_DrawState.DrawFilter);
+		}
+		else
+		{
+			D3DHLSL_SetPass (FX_PASS_DRAWCOLORED);
+			d3d_DrawState.ShaderPass = FX_PASS_DRAWCOLORED;
+		}
+
+		d3d_DrawState.LastTexture = tex;
+	}
+
+	if (d3d_NumDrawSurfs >= MAX_DRAW_SURFS) D3DDraw_Flush ();
+	if (d3d_DrawState.VertsToLock >= MAX_DRAW_VERTEXES) D3DDraw_Flush ();
+
+	d3d_drawsurf_t *ds = &d3d_DrawSurfs[d3d_NumDrawSurfs];
+	d3d_NumDrawSurfs++;
+
+	ds->x = x;
+	ds->y = y;
+	ds->w = w;
+	ds->h = h;
+	ds->c = c;
+
+	if (texrect)
+	{
+		ds->texrect.sl = texrect->sl;
+		ds->texrect.tl = texrect->tl;
+		ds->texrect.sh = texrect->sh;
+		ds->texrect.th = texrect->th;
+	}
+
+	d3d_DrawState.VertsToLock += 4;
+}
+
+
+CD3DDeviceLossHandler d3d_DrawBuffersHandler (D3DDraw_ReleaseBuffers, D3DDraw_CreateBuffers);
+
+
+void D3DDraw_Begin2D (void);
+
+drawrect_t charrects[256];
 
 //  scrap allocation
 //  Allocate all the little status bar obejcts into a single texture
@@ -37,7 +320,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // fixme - move to a struct, or lock the texture
 int			scrap_allocated[SCRAP_WIDTH];
-byte		scrap_texels[SCRAP_WIDTH * SCRAP_HEIGHT];
+byte		scrap_texels[SCRAP_WIDTH *SCRAP_HEIGHT];
 bool		scrap_dirty = false;
 image_t		scrap_textures;
 
@@ -47,8 +330,8 @@ void Scrap_Init (void)
 	SAFE_RELEASE (scrap_textures.d3d_Texture);
 
 	// clear texels to correct alpha colour
-	Q_MemSet (scrap_texels, 255, sizeof (scrap_texels));
-	Q_MemSet (scrap_allocated, 0, sizeof (scrap_allocated));
+	memset (scrap_texels, 255, sizeof (scrap_texels));
+	memset (scrap_allocated, 0, sizeof (scrap_allocated));
 
 	scrap_dirty = false;
 }
@@ -60,8 +343,8 @@ void Scrap_Destroy (void)
 	SAFE_RELEASE (scrap_textures.d3d_Texture);
 
 	// clear texels to correct alpha colour
-	Q_MemSet (scrap_texels, 255, sizeof (scrap_texels));
-	Q_MemSet (scrap_allocated, 0, sizeof (scrap_allocated));
+	memset (scrap_texels, 255, sizeof (scrap_texels));
+	memset (scrap_allocated, 0, sizeof (scrap_allocated));
 
 	scrap_dirty = false;
 }
@@ -119,7 +402,8 @@ void Scrap_Upload (void)
 	if (scrap_dirty)
 	{
 		SAFE_RELEASE (scrap_textures.d3d_Texture);
-		D3D_UploadTexture (&scrap_textures.d3d_Texture, scrap_texels, SCRAP_WIDTH, SCRAP_HEIGHT, IMAGE_ALPHA | IMAGE_NOCOMPRESS);
+		D3D_UploadTexture (&scrap_textures.d3d_Texture, scrap_texels,
+			SCRAP_WIDTH, SCRAP_HEIGHT, IMAGE_ALPHA | IMAGE_NOCOMPRESS);
 
 		// SCR_WriteDataToTGA ("scrap.tga", scrap_texels, SCRAP_WIDTH, SCRAP_HEIGHT, 8, 32);
 		scrap_dirty = false;
@@ -150,6 +434,7 @@ void Draw_DumpLumps (void)
 		qpic_t *dat = (qpic_t *) COM_LoadFile (va ("gfx/%s", gfxlmps[i]));
 
 		if (dat->width > 1024) continue;
+
 		if (dat->height > 1024) continue;
 
 		SCR_WriteDataToTGA (va ("%s.tga", gfxlmps[i]), dat->data, dat->width, dat->height, 8, 24);
@@ -166,16 +451,12 @@ qpic_t		*draw_backtile;
 
 int			translate_texture;
 
-LPDIRECT3DTEXTURE9 char_texture = NULL;
 LPDIRECT3DTEXTURE9 char_textures[MAX_CHAR_TEXTURES] = {NULL};	// if this array size is changed the release loop in D3D_ReleaseTextures must be changed also!!!
 LPDIRECT3DTEXTURE9 crosshairtexture = NULL;
 
 typedef struct crosshair_s
 {
-	float l;
-	float t;
-	float r;
-	float b;
+	drawrect_t rect;
 	bool replaced;
 	LPDIRECT3DTEXTURE9 texture;
 } crosshair_t;
@@ -183,34 +464,6 @@ typedef struct crosshair_s
 int d3d_NumCrosshairs = 0;
 crosshair_t *d3d_Crosshairs = NULL;
 
-// faster lookup for char and palette coords
-typedef struct quadcoord_s
-{
-	float s;
-	float t;
-	float smax;
-	float tmax;
-} quadcoord_t;
-
-quadcoord_t quadcoords[256];
-
-typedef struct
-{
-	struct image_s *tex;
-	float	sl, tl, sh, th;
-	float scaled_width;
-	float scaled_height;
-} glpic_t;
-
-
-qpic_t *conback;
-
-int		texels;
-
-// 2d drawing
-DWORD d3d_2DTextureColor = 0xffffffff;
-
-cvar_t r_smoothcharacters ("r_smoothcharacters", "0", CVAR_ARCHIVE);
 
 //=============================================================================
 /* Support Routines */
@@ -250,8 +503,8 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 		// this should only happen once
 		menuplyr_pixels = (byte *) GameZone->Alloc (pic->width * pic->height);
 		menuplyr_pixels_translated = (byte *) GameZone->Alloc (pic->width * pic->height);
-		Q_MemCpy (menuplyr_pixels, pic->data, pic->width * pic->height);
-		Q_MemCpy (menuplyr_pixels_translated, pic->data, pic->width * pic->height);
+		memcpy (menuplyr_pixels, pic->data, pic->width * pic->height);
+		memcpy (menuplyr_pixels_translated, pic->data, pic->width * pic->height);
 	}
 
 	glpic_t *gl = (glpic_t *) pic->data;
@@ -259,12 +512,16 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 
 	// we can't use gl->tex as the return as it would overwrite pic->data would would corrupt the texels
 	// backtile doesn't go in the scrap because it wraps
-	if (!strcmp (name, "gfx/backtile.blah") || !allowscrap)
+	// the conback is unpadded as it has edge artefacts otherwise
+	if (!strcmp (name, "gfx/conback.lmp"))
+		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, 0);
+	else if (!strcmp (name, "gfx/backtile.blah") || !allowscrap)
 		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
 	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE | IMAGE_SCRAP);
 
 	if (!tex)
 	{
+		// this fails if the image is a scrap candidate
 		int		x, y;
 
 		// pad the allocation to prevent linear filtering from causing the edges of adjacent textures to bleed into each other
@@ -307,40 +564,55 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 
 		gl->tex = &scrap_textures;
 
-		gl->scaled_width = pic->width;
-		gl->scaled_height = pic->height;
+		// scrap textures just go at their default sizes
+		gl->picrect.sl = (float) x / (float) SCRAP_WIDTH;
+		gl->picrect.sh = (float) (x + pic->width) / (float) SCRAP_WIDTH;
+		gl->picrect.tl = (float) y / (float) SCRAP_HEIGHT;
+		gl->picrect.th = (float) (y + pic->height) / (float) SCRAP_HEIGHT;
 
-		gl->sl = x / (float) SCRAP_WIDTH;
-		gl->sh = (x + gl->scaled_width) / (float) SCRAP_WIDTH;
-		gl->tl = y / (float) SCRAP_HEIGHT;
-		gl->th = (y + gl->scaled_height) / (float) SCRAP_HEIGHT;
+		gl->texwidth = SCRAP_WIDTH;
+		gl->texheight = SCRAP_HEIGHT;
 	}
 	else
 	{
 noscrap_reload:;
 		gl->tex = tex;
-		gl->sl = 0;
-		gl->tl = 0;
-		gl->sh = 1;
-		gl->th = 1;
 
-		if (gl->tex->flags & IMAGE_PADDED)
+		LPDIRECT3DSURFACE9 texsurf;
+		D3DSURFACE_DESC texdesc;
+		tex->d3d_Texture->GetSurfaceLevel (0, &texsurf);
+		texsurf->GetDesc (&texdesc);
+
+		// rescale everything correctly
+		gl->picrect.sl = 0;
+		gl->picrect.tl = 0;
+
+		// different scale factors here
+		if (d3d_GlobalCaps.supportNonPow2)
 		{
-			gl->scaled_width = D3D_PowerOf2Size (pic->width);
-			gl->scaled_height = D3D_PowerOf2Size (pic->height);
+			gl->picrect.sh = 1;
+			gl->picrect.th = 1;
 		}
 		else
 		{
-			gl->scaled_width = pic->width;
-			gl->scaled_height = pic->height;
+			gl->picrect.sh = (float) pic->width / (float) texdesc.Width;
+			gl->picrect.th = (float) pic->height / (float) texdesc.Height;
 		}
+
+		gl->texwidth = texdesc.Width;
+		gl->texheight = texdesc.Height;
+
+		texsurf->Release ();
 	}
 
 	return pic;
 
 noscrap:;
 	// reload with no scrap
-	tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
+	if (!strcmp (name, "gfx/conback.lmp"))
+		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, 0);
+	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
+
 	goto noscrap_reload;
 }
 
@@ -422,8 +694,8 @@ void Draw_LoadCrosshairs (void)
 	d3d_Crosshairs = (crosshair_t *) scratchbuf;
 
 	// full texcoords for each value
-	float xhairs[] = {0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75};
-	float xhairt[] = {0, 0, 0, 0, 0.5, 0.5, 0.5, 0.5};
+	int xhairs[] = {0, 32, 64, 96, 0, 32, 64, 96};
+	int xhairt[] = {0, 0, 0, 0, 32, 32, 32, 32};
 
 	// load default crosshairs
 	for (int i = 0; i < 10; i++)
@@ -432,19 +704,19 @@ void Draw_LoadCrosshairs (void)
 		{
 			// + sign crosshairs
 			d3d_Crosshairs[i].texture = char_textures[0];
-			d3d_Crosshairs[i].l = quadcoords['+' + (128 * i)].s;
-			d3d_Crosshairs[i].t = quadcoords['+' + (128 * i)].t;
-			d3d_Crosshairs[i].r = quadcoords['+' + (128 * i)].smax;
-			d3d_Crosshairs[i].b = quadcoords['+' + (128 * i)].tmax;
+			d3d_Crosshairs[i].rect.sl = charrects['+' + (128 * i)].sl;
+			d3d_Crosshairs[i].rect.tl = charrects['+' + (128 * i)].tl;
+			d3d_Crosshairs[i].rect.sh = charrects['+' + (128 * i)].sh;
+			d3d_Crosshairs[i].rect.th = charrects['+' + (128 * i)].th;
 		}
 		else
 		{
 			// crosshair images
 			d3d_Crosshairs[i].texture = crosshairtexture;
-			d3d_Crosshairs[i].l = xhairs[i - 2];
-			d3d_Crosshairs[i].t = xhairt[i - 2];
-			d3d_Crosshairs[i].r = xhairs[i - 2] + 0.25f;
-			d3d_Crosshairs[i].b = xhairt[i - 2] + 0.5f;
+			d3d_Crosshairs[i].rect.sl = (float) xhairs[i - 2] / 128.0f;
+			d3d_Crosshairs[i].rect.tl = (float) xhairt[i - 2] / 64.0f;
+			d3d_Crosshairs[i].rect.sh = (float) (xhairs[i - 2] + 32) / 128.0f;
+			d3d_Crosshairs[i].rect.th = (float) (xhairt[i - 2] + 32) / 64.0f;
 		}
 
 		// we need to track if the image has been replaced so that we know to add colour to crosshair 1 and 2 if so
@@ -458,7 +730,7 @@ void Draw_LoadCrosshairs (void)
 	for (int i = 0; ; i++)
 	{
 		// attempt to load one
-		LPDIRECT3DTEXTURE9 newcrosshair;
+		LPDIRECT3DTEXTURE9 newcrosshair = NULL;
 
 		// standard loader; qrack crosshairs begin at 1 and so should we
 		if (!D3D_LoadExternalTexture (&newcrosshair, va ("crosshair%i", i + 1), 0))
@@ -466,10 +738,10 @@ void Draw_LoadCrosshairs (void)
 
 		// fill it in
 		d3d_Crosshairs[i].texture = newcrosshair;
-		d3d_Crosshairs[i].l = 0;
-		d3d_Crosshairs[i].t = 0;
-		d3d_Crosshairs[i].r = 1;
-		d3d_Crosshairs[i].b = 1;
+		d3d_Crosshairs[i].rect.sl = 0;
+		d3d_Crosshairs[i].rect.tl = 0;
+		d3d_Crosshairs[i].rect.sh = 1;
+		d3d_Crosshairs[i].rect.th = 1;
 		d3d_Crosshairs[i].replaced = true;
 
 		// mark a new crosshair
@@ -481,7 +753,7 @@ void Draw_LoadCrosshairs (void)
 
 	// now set them up in memory for real - put them in the main zone so that we can free replacement textures properly
 	d3d_Crosshairs = (crosshair_t *) MainZone->Alloc (d3d_NumCrosshairs * sizeof (crosshair_t));
-	Q_MemCpy (d3d_Crosshairs, scratchbuf, d3d_NumCrosshairs * sizeof (crosshair_t));
+	memcpy (d3d_Crosshairs, scratchbuf, d3d_NumCrosshairs * sizeof (crosshair_t));
 }
 
 
@@ -491,14 +763,16 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	byte *newchars;
 	int i, j, c;
 
+	// SCR_WriteDataToTGA ("conchars.tga", data, w, h, 8, 24);
+
 	// allocate memory for a new charset
 	newchars = (byte *) scratchbuf;
 
 	// clear to all alpha
-	Q_MemSet (newchars, 0, w * h * 4);
+	memset (newchars, 0, w * h * 4);
 
 	// copy them in with better spacing
-	for (i = 0, j = 0; i < w * h; )
+	for (i = 0, j = 0; i < w * h;)
 	{
 		int small_stride = w >> 4;
 		int big_stride = w >> 3;
@@ -536,8 +810,8 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	{
 		for (j = (c * 28); j < (c * 29); j++)
 		{
-			newchars[i * w + j - c] = newchars[i * w + j];
-			newchars[i * w + j + c] = newchars[i * w + j];
+			newchars[i *w + j - c] = newchars[i * w + j];
+			newchars[i *w + j + c] = newchars[i * w + j];
 		}
 	}
 
@@ -545,8 +819,8 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	{
 		for (j = (c * 28); j < (c * 29); j++)
 		{
-			newchars[i * w + j - c] = newchars[i * w + j];
-			newchars[i * w + j + c] = newchars[i * w + j];
+			newchars[i *w + j - c] = newchars[i * w + j];
+			newchars[i *w + j + c] = newchars[i * w + j];
 		}
 	}
 
@@ -554,8 +828,8 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	{
 		for (j = (c * 2); j < (c * 3); j++)
 		{
-			newchars[i * w + j - c] = newchars[i * w + j];
-			newchars[i * w + j + c] = newchars[i * w + j];
+			newchars[i *w + j - c] = newchars[i * w + j];
+			newchars[i *w + j + c] = newchars[i * w + j];
 		}
 	}
 
@@ -572,6 +846,44 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 
 	// now turn them into textures
 	D3D_UploadTexture (&char_textures[0], newchars, 256, 256, IMAGE_ALPHA | IMAGE_NOCOMPRESS);
+
+#if 0
+	// brighten the default chars a little as they can be hard to see
+	D3DLOCKED_RECT lockrect;
+	char_textures[0]->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+	byte *rgba = (byte *) lockrect.pBits;
+
+	for (i = 0; i < 256 * 256; i++, rgba += 4)
+	{
+		for (j = 0; j < 3; j++)
+		{
+			float f = (float) rgba[j] / 255.0f;
+			f *= 1.10;
+			rgba[j] = BYTE_CLAMPF (f);
+		}
+	}
+
+	char_textures[0]->UnlockRect (0);
+	char_textures[0]->AddDirtyRect (NULL);
+#endif
+}
+
+
+void Draw_SetCharrects (int h, int v, int addx, int addy)
+{
+	int yadd = v / 16;
+	int xadd = h / 16;
+
+	for (int y = 0, z = 0; y < v; y += yadd)
+	{
+		for (int x = 0; x < h; x += xadd, z++)
+		{
+			charrects[z].sl = (float) x / (float) h;
+			charrects[z].sh = (float) (x + addx) / (float) h;
+			charrects[z].tl = (float) y / (float) v;
+			charrects[z].th = (float) (y + addy) / (float) v;
+		}
+	}
 }
 
 
@@ -597,11 +909,14 @@ void Draw_Init (void)
 
 	draw_init = true;
 
+	// default chaaracter rectangles for the standard charset
+	Draw_SetCharrects (256, 256, 8, 8);
+
 	// Draw_DumpLumps ();
 
 	qpic_t	*cb;
 	byte	*dest;
-	int		x, y;
+	int		x, y, z;
 	char	ver[40];
 	glpic_t	*gl;
 	int		start;
@@ -623,29 +938,6 @@ void Draw_Init (void)
 		draw_failsafe = (qpic_t *) failsafedata;
 		draw_failsafe->height = failsafedatasize;
 		draw_failsafe->width = failsafedatasize;
-	}
-
-	// lookup table for charset and palette texcoords
-	for (int i = 0; i < 256; i++)
-	{
-		int row, col;
-		float frow, fcol, size;
-
-		// get position in the grid
-		row = i >> 4;
-		col = i & 15;
-
-		// base texcoords relative to grid
-		frow = row * 0.0625f;
-		fcol = col * 0.0625f;
-
-		// this can change depending on the charsewt we're using (see below)
-		size = 0.0625f;
-
-		quadcoords[i].s = fcol;
-		quadcoords[i].t = frow;
-		quadcoords[i].smax = fcol + size;
-		quadcoords[i].tmax = frow + size;
 	}
 
 	draw_chars = (byte *) W_GetLumpName ("conchars");
@@ -676,6 +968,7 @@ void Draw_Init (void)
 
 cvar_t gl_consolefont ("gl_consolefont", "0", CVAR_ARCHIVE);
 
+float font_scale_x = 1, font_scale_y = 1;
 
 __inline int Draw_PrepareCharacter (int x, int y, int num)
 {
@@ -717,6 +1010,24 @@ __inline int Draw_PrepareCharacter (int x, int y, int num)
 		// store back
 		Cvar_Set (&gl_consolefont, gl_consolefont.integer);
 		oldfont = gl_consolefont.integer;
+
+		// to do - set up character rectangles (and scales for external charsets!)
+		if (gl_consolefont.integer > 0)
+		{
+			LPDIRECT3DSURFACE9 texsurf;
+			D3DSURFACE_DESC texdesc;
+			char_texture->GetSurfaceLevel (0, &texsurf);
+			texsurf->GetDesc (&texdesc);
+			Draw_SetCharrects (texdesc.Width, texdesc.Height, texdesc.Width / 16, texdesc.Height / 16);
+			font_scale_x = 128.0f / (float) texdesc.Width;
+			font_scale_y = 128.0f / (float) texdesc.Height;
+			texsurf->Release ();
+		}
+		else
+		{
+			Draw_SetCharrects (256, 256, 8, 8);
+			font_scale_x = font_scale_y = 1;
+		}
 	}
 	else if (!char_textures[gl_consolefont.integer])
 	{
@@ -735,129 +1046,8 @@ __inline int Draw_PrepareCharacter (int x, int y, int num)
 	if (x <= -8) return 0;
 	if (x >= vid.width) return 0;
 
-	// set correct spacing
-	if (char_texture == char_textures[0])
-	{
-		quadcoords[num].smax = quadcoords[num].s + 0.03125f;
-		quadcoords[num].tmax = quadcoords[num].t + 0.03125f;
-	}
-	else
-	{
-		quadcoords[num].smax = quadcoords[num].s + 0.0625f;
-		quadcoords[num].tmax = quadcoords[num].t + 0.0625f;
-	}
-
 	// ok to draw
 	return num;
-}
-
-
-typedef struct d3ddraw_state_s
-{
-	LPDIRECT3DVERTEXDECLARATION9 decl;
-	DWORD addrmode;
-	LPDIRECT3DTEXTURE9 stage0tex;
-} d3ddraw_state_t;
-
-d3ddraw_state_t d3ddraw_state =
-{
-	NULL,
-	0,
-	NULL
-};
-
-
-void D3DDraw_InitState (void)
-{
-	// force the state to toggle first time
-	d3ddraw_state.decl = NULL;
-	d3ddraw_state.addrmode = 0;
-	d3ddraw_state.stage0tex = NULL;
-}
-
-
-void D3DDraw_StateCallback (void *data)
-{
-	// callback from renderer
-	d3ddraw_state_t *ds = (d3ddraw_state_t *) data;
-
-	D3D_SetVertexDeclaration (ds->decl);
-
-	if (!ds->stage0tex)
-	{
-		if (d3d_GlobalCaps.usingPixelShaders)
-		{
-			if (d3d_FXPass == FX_PASS_NOTBEGUN)
-				D3D_BeginShaderPass (FX_PASS_DRAWCOLORED);
-			else if (d3d_FXPass != FX_PASS_DRAWCOLORED)
-			{
-				D3D_EndShaderPass ();
-				D3D_BeginShaderPass (FX_PASS_DRAWCOLORED);
-			}
-		}
-		else
-		{
-			// disable texturing
-			D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
-		}
-	}
-	else
-	{
-		D3D_SetTextureAddressMode (ds->addrmode);
-
-		if (d3d_GlobalCaps.usingPixelShaders)
-		{
-			if (d3d_FXPass == FX_PASS_NOTBEGUN)
-				;	// do nothing (yet)
-			else if (d3d_FXPass == FX_PASS_DRAWTEXTURED)
-				;	// do nothing (yet)
-			else D3D_EndShaderPass ();
-		}
-		else
-		{
-			D3D_SetTexture (0, ds->stage0tex);
-
-			// need to reset explicitly here as it may have been disabled; it will be filtered
-			// by D3D_SetTextureColorMode and also by the d3d runtime if it doesn't need to be set.
-			D3D_SetTextureColorMode (0, D3DTOP_MODULATE);
-		}
-
-		// switch the mip mode on a texture change
-		if (ds->stage0tex == ((glpic_t *) conback->data)->tex->d3d_Texture)
-			D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
-		else if (gl_conscale.value < 1)
-		{
-			if (ds->stage0tex == char_textures[0] && !r_smoothcharacters.integer)
-				D3D_SetTextureMipmap (0, D3DTEXF_POINT, D3DTEXF_NONE);
-			else D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
-		}
-		else D3D_SetTextureMipmap (0, D3DTEXF_POINT, D3DTEXF_NONE);
-
-		if (d3d_GlobalCaps.usingPixelShaders)
-		{
-			d3d_MasterFX->SetTexture ("tmu0Texture", ds->stage0tex);
-
-			if (d3d_FXPass != FX_PASS_DRAWTEXTURED)
-				D3D_BeginShaderPass (FX_PASS_DRAWTEXTURED);
-			else d3d_FXCommitPending = true;
-		}
-	}
-}
-
-
-void D3DDraw_ToggleState (LPDIRECT3DVERTEXDECLARATION9 decl, DWORD addrmode = 0, LPDIRECT3DTEXTURE9 stage0tex = NULL)
-{
-	// no state change
-	if (decl == d3ddraw_state.decl && 
-		addrmode == d3ddraw_state.addrmode && 
-		stage0tex == d3ddraw_state.stage0tex) return;
-
-	// set a new state
-	d3ddraw_state.decl = decl;
-	d3ddraw_state.addrmode = addrmode;
-	d3ddraw_state.stage0tex = stage0tex;
-
-	VBO_AddCallback (D3DDraw_StateCallback, &d3ddraw_state, sizeof (d3ddraw_state_t));
 }
 
 
@@ -874,37 +1064,11 @@ void Draw_Character (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture);
+	// hack
+	image_t tex;
+	tex.d3d_Texture = char_texture;
 
-	quaddef_textured_t q =
-	{
-		x, 8,
-		y, 8,
-		d3d_2DTextureColor,
-		quadcoords[num].s, quadcoords[num].smax,
-		quadcoords[num].t, quadcoords[num].tmax
-	};
-
-	VBO_Add2DQuad (&q);
-}
-
-
-void Draw_InvertCharacter (int x, int y, int num)
-{
-	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
-
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture);
-
-	quaddef_textured_t q =
-	{
-		x, 8,
-		y, 8,
-		d3d_2DTextureColor,
-		quadcoords[num].s, quadcoords[num].smax,
-		quadcoords[num].tmax, quadcoords[num].t
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, 8, 8, d3d_DrawState.color2D, &tex, &charrects[num]);
 }
 
 
@@ -912,66 +1076,17 @@ void Draw_BackwardsCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture);
+	// hack
+	image_t tex;
+	tex.d3d_Texture = char_texture;
 
-	quaddef_textured_t q =
-	{
-		x, 8,
-		y, 8,
-		d3d_2DTextureColor,
-		quadcoords[num].smax, quadcoords[num].s,
-		quadcoords[num].t, quadcoords[num].tmax
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x + 8, y, -8, 8, d3d_DrawState.color2D, &tex, &charrects[num]);
 }
 
 
-void Draw_RotateCharacter (int x, int y, int num)
-{
-	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
-
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture);
-
-	quaddef_textured_t q =
-	{
-		x, 8,
-		y, 8,
-		d3d_2DTextureColor,
-		quadcoords[num].s, quadcoords[num].smax,
-		quadcoords[num].t, quadcoords[num].tmax
-	};
-
-	VBO_Add2DQuad (&q, true);
-}
-
-
-void Draw_VScrollBar (int x, int y, int height, int pos, int scale)
-{
-	int i;
-	float f;
-
-	// take to next lowest multiple of 8
-	int h = height & 0xfff8;
-
-	// body
-	for (i = y; i < (y + h); i += 8)
-		Draw_RotateCharacter (x, i, 129);
-
-	// fill in the last if necessary
-	if (h < height) Draw_RotateCharacter (x, y + height - 8, 129);
-
-	// nothing in the list
-	if (scale < 2) return;
-
-	// get the position
-	f = (height - 8) * pos;
-	f /= (float) (scale - 1);
-	f += (y);
-
-	// position indicator
-	Draw_RotateCharacter (x, f, 131);
-}
+// oh well; it wasn't really used anymore anyway...
+void Draw_RotateCharacter (int x, int y, int num) {}
+void Draw_VScrollBar (int x, int y, int height, int pos, int scale) {}
 
 
 /*
@@ -1010,62 +1125,28 @@ void Draw_DebugChar (char num)
 Draw_Pic
 =============
 */
-float Draw_SubScale (float l, float h, float xy, float wh)
-{
-	return 0;
-}
-
-
 void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int height)
 {
-	glpic_t *gl;
-	float newsl, newtl, newsh, newth;
+	glpic_t *gl = (glpic_t *) pic->data;
 
-	gl = (glpic_t *) pic->data;
-
-	// figure width and height of the source image
-	float picw = gl->scaled_width / (gl->sh - gl->sl);
-	float pich = gl->scaled_height / (gl->th - gl->tl);
-
-	newsl = ((float) srcx / picw) + gl->sl;
-	newsh = ((float) width / picw) + newsl;
-
-	newtl = ((float) srcy / pich) + gl->tl;
-	newth = ((float) height / pich) + newtl;
-
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
-
-	quaddef_textured_t q =
+	drawrect_t rect =
 	{
-		x, width,
-		y, height,
-		d3d_2DTextureColor,
-		newsl, newsh,
-		newtl, newth
+		gl->picrect.sl + (float) srcx / (float) gl->texwidth,
+		gl->picrect.tl + (float) srcy / (float) gl->texheight,
+		gl->picrect.sl + (float) (srcx + width) / (float) gl->texwidth,
+		gl->picrect.tl + (float) (srcy + height) / (float) gl->texheight
 	};
 
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, width, height, d3d_DrawState.color2D, gl->tex, &rect);
 }
 
 
 void Draw_Pic (int x, int y, qpic_t *pic, float alpha)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
+	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMPF (alpha), 255, 255, 255);
 
-	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha * 255), 255, 255, 255);
-
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
-
-	quaddef_textured_t q =
-	{
-		x, gl->scaled_width,
-		y, gl->scaled_height,
-		alphacolor,
-		gl->sl, gl->sh,
-		gl->tl, gl->th
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, pic->width, pic->height, alphacolor, gl->tex, &gl->picrect);
 }
 
 
@@ -1073,42 +1154,29 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
-
-	quaddef_textured_t q =
-	{
-		x, gl->scaled_width,
-		y, gl->scaled_height,
-		d3d_2DTextureColor,
-		gl->sl, gl->sh,
-		gl->tl, gl->th
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, pic->width, pic->height, d3d_DrawState.color2D, gl->tex, &gl->picrect);
 }
 
 
 void Draw_Pic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic)
 {
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, texpic);
+	image_t img;
+	img.d3d_Texture = texpic;
 
-	quaddef_textured_t q =
-	{
-		x, w,
-		y, h,
-		d3d_2DTextureColor,
-		0, 1,
-		0, 1
-	};
+	drawrect_t rect = {0, 0, 1, 1};
 
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, w, h, d3d_DrawState.color2D, &img, &rect);
 }
 
 
 void Draw_Crosshair (int x, int y)
 {
 	// deferred loading because the crosshair texture is not yet up in Draw_Init
-	if (!d3d_Crosshairs) Draw_LoadCrosshairs ();
+	if (!d3d_Crosshairs)
+	{
+		D3DDraw_Flush ();
+		Draw_LoadCrosshairs ();
+	}
 
 	// we don't know about these cvars
 	extern cvar_t crosshair;
@@ -1119,7 +1187,7 @@ void Draw_Crosshair (int x, int y)
 	if (!crosshair.integer) return;
 
 	// get scale
-	int crossscale = (int) (32.0f * scr_crosshairscale.value);
+	float crossscale = (32.0f * scr_crosshairscale.value);
 
 	// - 1 because crosshair 0 is no crosshair
 	int currcrosshair = crosshair.integer - 1;
@@ -1146,11 +1214,11 @@ void Draw_Crosshair (int x, int y)
 		d3d_QuakePalette.standard[cindex].peBlue
 	);
 
-	// classic crosshairs are just drawn with the default colour and fixed scale
+	// classic crosshair
 	if (currcrosshair < 2 && !d3d_Crosshairs[currcrosshair].replaced)
 	{
-		xhaircolor = 0xffffffff;
-		crossscale = 8;
+		Draw_Character (x - 4, y - 4, '+' + 128 * currcrosshair);
+		return;
 	}
 
 	// don't draw it if too small
@@ -1160,40 +1228,10 @@ void Draw_Crosshair (int x, int y)
 	x -= (crossscale / 2);
 	y -= (crossscale / 2);
 
+	image_t img;
+	img.d3d_Texture = d3d_Crosshairs[currcrosshair].texture;
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, d3d_Crosshairs[currcrosshair].texture);
-
-	quaddef_textured_t q =
-	{
-		x, crossscale,
-		y, crossscale,
-		xhaircolor,
-		d3d_Crosshairs[currcrosshair].l,
-		d3d_Crosshairs[currcrosshair].r,
-		d3d_Crosshairs[currcrosshair].t,
-		d3d_Crosshairs[currcrosshair].b
-	};
-
-	VBO_Add2DQuad (&q);
-}
-
-
-void Draw_HalfPic (int x, int y, qpic_t *pic)
-{
-	glpic_t *gl = (glpic_t *) pic->data;
-
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
-
-	quaddef_textured_t q =
-	{
-		x, gl->scaled_width / 2,
-		y, gl->scaled_height / 2,
-		d3d_2DTextureColor,
-		gl->sl, gl->sh,
-		gl->tl, gl->th
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, crossscale, crossscale, xhaircolor, &img, &d3d_Crosshairs[currcrosshair].rect);
 }
 
 
@@ -1219,7 +1257,6 @@ void Draw_TextBox (int x, int y, int width, int height)
 		Draw_Pic (x + i - 8, y + height + 8, box_bm);
 	}
 
-	// finish off
 	Draw_Pic (x + width - 8, y, box_tm);
 	Draw_Pic (x + width - 8, y + height + 8, box_bm);
 	Draw_Pic (x, y + height, box_ml);
@@ -1256,33 +1293,23 @@ void Draw_InvalidateMapshot (void)
 void Draw_MapshotTexture (LPDIRECT3DTEXTURE9 mstex, int x, int y)
 {
 	Draw_TextBox (x - 8, y - 8, 128, 128);
-
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, mstex);
-
-	quaddef_textured_t q =
-	{
-		x, 128,
-		y, 128,
-		0xffffffff,
-		0, 1,
-		0, 1
-	};
-
-	VBO_Add2DQuad (&q);
+	Draw_Pic (x, y, 128, 128, mstex);
 }
 
 
 void Draw_Mapshot (char *name, int x, int y)
 {
+	// flush drawing because we're updating textures here
+	D3DDraw_Flush ();
+
 	if (!name)
 	{
 		// no name supplied so display the console image instead
 		glpic_t *gl = (glpic_t *) conback->data;
 
-		// ugh, can't send it through Draw_MapshotTexture because of padding.
-		// at this kind of scale integer division is hopefully no big deal
+		// the conback is unpadded so use regular texcoords
 		Draw_TextBox (x - 8, y - 8, 128, 128);
-		Draw_Pic (x, y, (128 * gl->scaled_width) / gl->tex->width, (128 * gl->scaled_height) / gl->tex->height, gl->tex->d3d_Texture);
+		Draw_Pic (x, y, 128, 128, gl->tex->d3d_Texture);
 		return;
 	}
 
@@ -1343,6 +1370,9 @@ Only used for the player color selection menu
 */
 void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt, int pants)
 {
+	// flush drawing because we're updating textures here
+	D3DDraw_Flush ();
+
 	// force an update on first entry
 	static int old_shirt = -1;
 	static int old_pants = -1;
@@ -1370,7 +1400,8 @@ void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt,
 	// replace the texture fully
 	glpic_t *gl = (glpic_t *) pic->data;
 	SAFE_RELEASE (gl->tex->d3d_Texture);
-	D3D_UploadTexture (&gl->tex->d3d_Texture, menuplyr_pixels_translated, pic->width, pic->height, (gl->tex->flags & ~IMAGE_32BIT) | IMAGE_NOCOMPRESS);
+	D3D_UploadTexture (&gl->tex->d3d_Texture, menuplyr_pixels_translated,
+		pic->width, pic->height, (gl->tex->flags & ~IMAGE_32BIT) | IMAGE_NOCOMPRESS | IMAGE_ALPHA);
 
 	// and draw it normally
 	Draw_Pic (x, y, pic);
@@ -1385,30 +1416,18 @@ Draw_ConsoleBackground
 */
 void Draw_ConsoleBackground (int lines)
 {
-	int y = (vid.height * 3) >> 2;
-
-	// because the conback needs scaling/etc we need to handle it specially
+	float alpha = 1.125f - ((float) vid.height - (float) lines) / (float) vid.height;
 	glpic_t *gl = (glpic_t *) conback->data;
-	float alpha;
+	D3DCOLOR consolecolor = D3DCOLOR_ARGB (BYTE_CLAMPF (alpha), 255, 255, 255);
 
-	if (lines < y)
-		alpha = (float) lines / y;
-	else alpha = 1;
+	// the conback image is unpadded so use regular texcoords
+	drawrect_t rect = {0, ((float) vid.height - (float) lines) / (float) vid.height, 1, 1};
 
-	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha * 255), 255, 255, 255);
+	D3DDraw_SubmitQuad (0, 0, vid.width, lines, consolecolor, gl->tex, &rect);
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
-
-	quaddef_textured_t q =
-	{
-		0, vid.width,
-		(float) lines - vid.height, vid.height,
-		alphacolor,
-		0, (float) conback->width / (float) gl->scaled_width,
-		0, (float) conback->height / (float) gl->scaled_height
-	};
-
-	VBO_Add2DQuad (&q);
+	// force an update of anything that may have been covered by the console
+	// because hud elements may be arbitrarily located we just update all of it
+	HUD_Changed ();
 }
 
 
@@ -1417,25 +1436,31 @@ void Draw_ConsoleBackground (int lines)
 Draw_TileClear
 
 This repeats a 64*64 tile graphic to fill the screen around a sized down
-refresh window.
+refresh window.  Only drawn when an update is needed and the full screen is
+covered to make certain that we get everything.
 =============
 */
-void Draw_TileClear (int x, int y, int w, int h)
+void Draw_TileClear (float x, float y, float w, float h)
 {
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
+	drawrect_t rect = {x / 64.0f, y / 64.0f, (x + w) / 64.0f, (y + h) / 64.0f};
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuseTex1, D3DTADDRESS_WRAP, gl->tex->d3d_Texture);
+	D3DDraw_SubmitQuad (x, y, w, h, 0xffffffff, gl->tex, &rect);
+}
 
-	quaddef_textured_t q =
-	{
-		x, w,
-		y, h,
-		0xffffffff,
-		x / 64.0, (x + w) / 64.0,
-		y / 64.0, (y + h) / 64.0,
-	};
 
-	VBO_Add2DQuad (&q);
+void Draw_TileClear (void)
+{
+	extern cvar_t cl_sbar;
+
+	if (cls.state != ca_connected) return;
+	if (cl_sbar.integer) return;
+
+	int width = (vid.width - 320) >> 1;
+	int offset = width + 320;
+
+	Draw_TileClear (0, vid.height - sb_lines, width, sb_lines);
+	Draw_TileClear (offset, vid.height - sb_lines, width, sb_lines);
 }
 
 
@@ -1460,16 +1485,7 @@ void Draw_Fill (int x, int y, int w, int h, int c, int alpha)
 		d3d_QuakePalette.standard[c].peBlue
 	);
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuse);
-
-	quaddef_coloured_t q =
-	{
-		x, w,
-		y, h,
-		fillcolor
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, w, h, fillcolor);
 }
 
 
@@ -1477,22 +1493,13 @@ void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alp
 {
 	DWORD fillcolor = D3DCOLOR_ARGB
 	(
-		BYTE_CLAMP (alpha * 255),
-		BYTE_CLAMP (r * 255),
-		BYTE_CLAMP (g * 255),
-		BYTE_CLAMP (b * 255)
+		BYTE_CLAMPF (alpha),
+		BYTE_CLAMPF (r),
+		BYTE_CLAMPF (g),
+		BYTE_CLAMPF (b)
 	);
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuse);
-
-	quaddef_coloured_t q =
-	{
-		x, w,
-		y, h,
-		fillcolor
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (x, y, w, h, fillcolor);
 }
 
 
@@ -1506,16 +1513,8 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (int alpha)
 {
-	D3DDraw_ToggleState (d3d_VDXyzDiffuse);
-
-	quaddef_coloured_t q =
-	{
-		0, vid.width,
-		0, vid.height,
-		D3DCOLOR_ARGB (BYTE_CLAMP (alpha), 0, 0, 0)
-	};
-
-	VBO_Add2DQuad (&q);
+	D3DDraw_SubmitQuad (0, 0, vid.width, vid.height, D3DCOLOR_ARGB (BYTE_CLAMP (alpha), 0, 0, 0));
+	HUD_Changed ();
 }
 
 
@@ -1540,19 +1539,10 @@ void Draw_PolyBlend (void)
 		BYTE_CLAMP (v_blend[2])
 	);
 
-	D3DDraw_ToggleState (d3d_VDXyzDiffuse);
+	// don't go down into sbar territory
+	D3DDraw_SubmitQuad (0, 0, vid.width, vid.height - sb_lines, blendcolor);
 
-	// don't go down into the status bar area
-	quaddef_coloured_t q =
-	{
-		0, vid.width,
-		0, vid.height - sb_lines,
-		blendcolor
-	};
-
-	VBO_Add2DQuad (&q);
-
-	// disable polyblend in case the map changes while a blend is active
+	// ensure
 	v_blend[3] = 0;
 }
 
@@ -1562,7 +1552,7 @@ void D3D_Set2DShade (float shadecolor)
 	if (shadecolor >= 0.99f)
 	{
 		// solid
-		d3d_2DTextureColor = 0xffffffff;
+		d3d_DrawState.color2D = 0xffffffff;
 	}
 	else
 	{
@@ -1570,7 +1560,7 @@ void D3D_Set2DShade (float shadecolor)
 		shadecolor *= 255.0f;
 
 		// fade out
-		d3d_2DTextureColor = D3DCOLOR_ARGB
+		d3d_DrawState.color2D = D3DCOLOR_ARGB
 		(
 			BYTE_CLAMP (shadecolor),
 			BYTE_CLAMP (shadecolor),
@@ -1581,18 +1571,20 @@ void D3D_Set2DShade (float shadecolor)
 }
 
 
-void D3DDraw_PrepareCallback (void *blah)
+void D3DDraw_Begin2D (void)
 {
+	// enforce upload of any textures that went into the scrap
 	Scrap_Upload ();
 
-	if (!d3d_SceneBegun)
-	{
-		// beginscene if necessary
-		d3d_Device->BeginScene ();
-		d3d_SceneBegun = true;
-	}
-
+	// alwats switch to a full-sized viewport even if we're drawing nothing so that
+	// IDirect3DDevice9::Clear can do a fast clear in the next frame
 	D3D_SetViewport (0, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 1);
+
+	D3DMATRIX m;
+
+	// go back to fixed func processing for ID3DXSprite
+	D3DMatrix_Identity (&m);
+	D3DMatrix_OrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
 
 	// disable depth testing and writing
 	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
@@ -1601,71 +1593,37 @@ void D3DDraw_PrepareCallback (void *blah)
 	// no backface culling
 	D3D_BackfaceCull (D3DCULL_NONE);
 
-	if (d3d_GlobalCaps.usingPixelShaders)
-	{
-		extern bool d3d_HLSLBegun;
+	// backtile needs wrap mode explicitly
+	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
 
-		// this may not have been called by r_main
-		if (!d3d_HLSLBegun)
-		{
-			UINT numpasses;
+	// enable alpha blending (always)
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-			d3d_MasterFX->SetTechnique ("MasterRefresh");
-			d3d_MasterFX->Begin (&numpasses, D3DXFX_DONOTSAVESTATE);
-			d3d_MasterFX->SetFloat ("Overbright", r_overbright.integer ? 2.0f : 1.0f);
-			d3d_MasterFX->SetFloatArray ("r_origin", r_origin, 3);
-			d3d_FXPass = FX_PASS_NOTBEGUN;
-			d3d_FXCommitPending = false;
+	// set up shader for drawing; always force a pass switch first time
+	D3DHLSL_SetWorldMatrix (&m);
+	d3d_DrawState.ShaderPass = FX_PASS_NOTBEGUN;
+	d3d_DrawState.color2D = 0xffffffff;
 
-			d3d_HLSLBegun = true;
-		}
+	// set the correct filtering mode to use; don't use linear if we're at normal screen size
+	if (vid.width == d3d_CurrentMode.Width && vid.height == d3d_CurrentMode.Height)
+		d3d_DrawState.DrawFilter = D3DTEXF_POINT;
+	else d3d_DrawState.DrawFilter = d3d_TexFilter;
 
-		if (d3d_FXPass != FX_PASS_NOTBEGUN)
-			D3D_EndShaderPass ();
-
-		D3DXMATRIX m;
-		D3D_LoadIdentity (&m);
-		QD3DXMatrixOrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
-
-		d3d_MasterFX->SetMatrix ("WorldMatrix", &m);
-	}
-	else
-	{
-		D3D_SetTexCoordIndexes (0, 0, 0);
-
-		// revert to standard ortho projections here (simplicity/reuse of vertex decls/shift some load to gpu/etc)
-		D3DXMATRIX m;
-		D3D_LoadIdentity (&m);
-		d3d_Device->SetTransform (D3DTS_VIEW, &m);
-		d3d_Device->SetTransform (D3DTS_WORLD, &m);
-
-		QD3DXMatrixOrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
-		d3d_Device->SetTransform (D3DTS_PROJECTION, &m);
-
-		// modulate alpha always here
-		D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-
-		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
-		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
-
-		D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-		D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
-	}
-
-	// enable alpha blending
-	D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
-}
-
-
-void D3D_Set2D (void)
-{
-	// note - the beginscene check is in the callback
-	D3DDraw_InitState ();
-	VBO_AddCallback (D3DDraw_PrepareCallback);
+	// set up the vertex and index buffers we'll use for drawing
+	D3DDraw_SetBuffers ();
 
 	// do the polyblends here for simplicity
-	// these won't happen in rtt mode
+	// note - this is a good bit faster with this code than doing them in r_main
+	// note 2 - the gun model code assumes that it's the last thing drawn in the 3D view
 	Draw_PolyBlend ();
 }
 
+
+void D3DDraw_End2D (void)
+{
+	D3DDraw_Flush ();
+	d3d_DrawState.color2D = 0xffffffff;
+}

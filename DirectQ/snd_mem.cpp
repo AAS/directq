@@ -3,7 +3,7 @@ Copyright (C) 1996-1997 Id Software, Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 3
+as published by the Free Software Foundation; either version 2
 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
@@ -15,6 +15,7 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
 */
 // snd_mem.c: sound caching
 
@@ -47,47 +48,46 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 		return;
 	}
 
-	stepscale = (float) inrate / shm->speed;	// this is usually 0.5, 1, or 2
+	stepscale = (float)inrate / shm->speed;	// this is usually 0.5, 1, or 2
 
 	outcount = sc->length / stepscale;
 	sc->length = outcount;
-
 	if (sc->loopstart != -1)
 		sc->loopstart = sc->loopstart / stepscale;
 
 	sc->speed = shm->speed;
-
-	if (loadas8bit.integer && 0)
+	if (loadas8bit.value)
 		sc->width = 1;
-	else sc->width = inwidth;
+	else
+		sc->width = inwidth;
 
 	sc->stereo = 0;
 
 	// resample / decimate to the current source rate
 	if (stepscale == 1 && inwidth == 1 && sc->width == 1)
 	{
-		// fast special case - 8 bit source, no resampling is needed
-		for (i = 0; i < outcount; i++)
-			((signed char *) sc->data)[i] = (int) ((unsigned char) (data[i]) - 128);
+		// fast special case
+		for (i=0 ; i<outcount ; i++)
+			((signed char *)sc->data)[i]
+			= (int)( (unsigned char)(data[i]) - 128);
 	}
 	else
 	{
 		// general case
 		samplefrac = 0;
-		fracstep = stepscale * 256;
-
-		for (i = 0; i < outcount; i++)
+		fracstep = stepscale*256;
+		for (i=0 ; i<outcount ; i++)
 		{
 			srcsample = samplefrac >> 8;
 			samplefrac += fracstep;
-
 			if (inwidth == 2)
-				sample = LittleShort (((short *) data)[srcsample]);
-			else sample = (int) ((unsigned char) (data[srcsample]) - 128) << 8;
-
+				sample = LittleShort ( ((short *)data)[srcsample] );
+			else
+				sample = (int)( (unsigned char)(data[srcsample]) - 128) << 8;
 			if (sc->width == 2)
-				((short *) sc->data)[i] = sample;
-			else ((signed char *) sc->data)[i] = sample >> 8;
+				((short *)sc->data)[i] = sample;
+			else
+				((signed char *)sc->data)[i] = sample >> 8;
 		}
 	}
 }
@@ -252,7 +252,7 @@ void DumpChunks(void)
 	data_p=iff_data;
 	do
 	{
-		Q_MemCpy (str, data_p, 4);
+		memcpy (str, data_p, 4);
 		data_p += 4;
 		iff_chunk_len = GetLittleLong();
 		Con_Printf ("0x%x : %s (%d)\n", (int)(data_p - 4), str, iff_chunk_len);
@@ -272,7 +272,7 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 	int     format;
 	int		samples;
 
-	Q_MemSet (&info, 0, sizeof(info));
+	memset (&info, 0, sizeof(info));
 
 	if (!wav)
 		return info;

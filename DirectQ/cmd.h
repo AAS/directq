@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -83,7 +83,7 @@ public:
 typedef enum
 {
 	src_client,		// came in over a net connection as a clc_stringcmd
-					// host_client will be valid during this state.
+	// host_client will be valid during this state.
 	src_command,		// from the command buffer
 	src_allowindirect	// for setting of CVAR_INDIRECT variables
 } cmd_source_t;

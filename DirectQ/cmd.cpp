@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -30,6 +30,28 @@ typedef struct cmdalias_s
 } cmdalias_t;
 
 cmdalias_t	*cmd_alias = NULL;
+
+
+void Cmd_WriteAlias (FILE *f)
+{
+	int i;
+	cmdalias_t *a;
+	char *aliasbuf = (char *) scratchbuf;
+
+	for (a = cmd_alias; a; a = a->next)
+	{
+		strcpy (aliasbuf, a->value);
+
+		for (i = strlen (aliasbuf); i; i--)
+		{
+			if (aliasbuf[i] <= 32 || aliasbuf[i] > 127)
+				aliasbuf[i] = 0;
+			else break;
+		}
+
+		fprintf (f, "alias \"%s\" \"%s\"\n", a->name, aliasbuf);
+	}
+}
 
 
 // possible commands to execute
@@ -99,13 +121,17 @@ void Cmd_BuildCompletionList (void)
 
 	// count the number of cvars and cmds we have
 	for (cvar_t *var = cvar_vars; var; var = var->next) numcomplist++;
+
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next) numcomplist++;
+
 	for (cmdalias_t *ali = cmd_alias; ali; ali = ali->next) numcomplist++;
+
 	for (cvar_alias_t *ali = cvar_alias_vars; ali; ali = ali->next) numcomplist++;
 
 	// alloc space for the completion list (add some overshoot here; we need 1 to NULL terminate the list)
 	// place in zone so that we can rebuild the list if we ever need to.
 	if (complist) Zone_Free (complist);
+
 	complist = (complist_t *) Zone_Alloc ((numcomplist + 1) * sizeof (complist_t));
 
 	// current item we're working on
@@ -257,6 +283,7 @@ void CmdCvarList (bool dumpcmd, bool dumpvar)
 		for (int i = 0; i < numcomplist; i++)
 		{
 			if (complist[i].cmd && dumpcmd) Con_Printf ("%s\n", complist[i].name);
+
 			if (complist[i].var && dumpvar) Con_Printf ("%s\n", complist[i].name);
 		}
 
@@ -298,6 +325,7 @@ void CmdCvarList (bool dumpcmd, bool dumpvar)
 	for (int i = 0; i < numcomplist; i++)
 	{
 		if (complist[i].cmd && dumpcmd) fprintf (f, "%s\n", complist[i].name);
+
 		if (complist[i].var && dumpvar) fprintf (f, "%s\n", complist[i].name);
 	}
 
@@ -404,7 +432,7 @@ void Cbuf_InsertText (char *text)
 	if (templen)
 	{
 		temp = (char *) Zone_Alloc (templen);
-		Q_MemCpy (temp, cmd_text.data, templen);
+		memcpy (temp, cmd_text.data, templen);
 		SZ_Clear (&cmd_text);
 	}
 
@@ -445,10 +473,11 @@ void Cbuf_Execute (void)
 
 			// don't break if inside a quoted string
 			if (!(quotes & 1) &&  text[i] == ';') break;
+
 			if (text[i] == '\n') break;
 		}
 
-		Q_MemCpy (line, text, i);
+		memcpy (line, text, i);
 		line[i] = 0;
 
 		// delete the text from the command buffer and move remaining commands down
@@ -460,7 +489,7 @@ void Cbuf_Execute (void)
 		{
 			i++;
 			cmd_text.cursize -= i;
-			Q_MemCpy (text, text + i, cmd_text.cursize);
+			memcpy (text, text + i, cmd_text.cursize);
 		}
 
 		// execute the command line
@@ -529,6 +558,7 @@ void Cmd_StuffCmds_f (void)
 		if (!com_argv[i]) continue;
 
 		strcat (text, com_argv[i]);
+
 		if (i != com_argc - 1) strcat (text, " ");
 	}
 
@@ -612,7 +642,7 @@ void Cmd_Echo_f (void)
 	int		i;
 
 	for (i = 1; i < Cmd_Argc (); i++)
-		Con_Printf ("%s ",Cmd_Argv (i));
+		Con_Printf ("%s ", Cmd_Argv (i));
 
 	Con_Printf ("\n");
 }
@@ -756,10 +786,10 @@ cmd_source_t	cmd_source;
 Cmd_Init
 ============
 */
-cmd_t Cmd_StuffCmds_Cmd ("stuffcmds",Cmd_StuffCmds_f);
-cmd_t Cmd_Exec_Cmd ("exec",Cmd_Exec_f);
-cmd_t Cmd_Echo_Cmd ("echo",Cmd_Echo_f);
-cmd_t Cmd_Alias_Cmd ("alias",Cmd_Alias_f);
+cmd_t Cmd_StuffCmds_Cmd ("stuffcmds", Cmd_StuffCmds_f);
+cmd_t Cmd_Exec_Cmd ("exec", Cmd_Exec_f);
+cmd_t Cmd_Echo_Cmd ("echo", Cmd_Echo_f);
+cmd_t Cmd_Alias_Cmd ("alias", Cmd_Alias_f);
 cmd_t Cmd_ForwardToServer_Cmd ("cmd", Cmd_ForwardToServer);
 cmd_t Cmd_Wait_Cmd ("wait", Cmd_Wait_f);
 
@@ -791,7 +821,7 @@ char *Cmd_Argv (int arg)
 	if ((unsigned) arg >= cmd_argc)
 		return cmd_null_string;
 
-	return cmd_argv[arg];	
+	return cmd_argv[arg];
 }
 
 
@@ -867,7 +897,7 @@ Cmd_Add
 void Cmd_Add (cmd_t *newcmd)
 {
 	// fail if the command is a variable name
-	if (Cvar_VariableString (newcmd->name)[0]) return;
+	if (Cvar_VariableString (newcmd->name) [0]) return;
 
 	// fail if the command already exists
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next)
@@ -1097,49 +1127,54 @@ void Cmd_ForwardToServer (void)
 						if (cl.items & IT_QUAD)
 						{
 							dst += sprintf (dst, "%s", pq_quad.string);
+
 							if (cl.items & (IT_INVULNERABILITY | IT_INVISIBILITY)) *dst++ = ',';
 						}
 
 						if (cl.items & IT_INVULNERABILITY)
 						{
 							dst += sprintf (dst, "%s", pq_pent.string);
+
 							if (cl.items & IT_INVISIBILITY) *dst++ = ',';
 						}
 
 						if (cl.items & IT_INVISIBILITY) dst += sprintf (dst, "%s", pq_ring.string);
 					}
+
 					break;
 
 				case 'W':
 				case 'w':	// JPG 3.00
+				{
+					int first = 1;
+					int item;
+					char *ch = pq_weapons.string;
+
+					if (cl.stats[STAT_HEALTH] > 0)
 					{
-						int first = 1;
-						int item;
-						char *ch = pq_weapons.string;
-
-						if (cl.stats[STAT_HEALTH] > 0)
+						for (item = IT_SUPER_SHOTGUN; item <= IT_LIGHTNING; item *= 2)
 						{
-							for (item = IT_SUPER_SHOTGUN; item <= IT_LIGHTNING; item *= 2)
+							if (*ch != ':' && (cl.items & item))
 							{
-								if (*ch != ':' && (cl.items & item))
-								{
-									if (!first) *dst++ = ',';
-									first = 0;
+								if (!first) *dst++ = ',';
 
-									while (*ch && *ch != ':')
-										*dst++ = *ch++;
-								}
+								first = 0;
 
-								while (*ch && *ch != ':') *ch++;
-								if (*ch) *ch++;
-								if (!*ch) break;
+								while (*ch && *ch != ':')
+									*dst++ = *ch++;
 							}
-						}
 
-						if (first) dst += sprintf (dst, "%s", pq_noweapons.string);
+							while (*ch && *ch != ':') *ch++;
+
+							if (*ch) *ch++;
+							if (!*ch) break;
+						}
 					}
 
-					break;
+					if (first) dst += sprintf (dst, "%s", pq_noweapons.string);
+				}
+
+				break;
 
 				case '%':
 					*dst++ = '%';
@@ -1158,8 +1193,10 @@ void Cmd_ForwardToServer (void)
 					}
 					else
 					{
-						minutes = cl.time / 60;
-						seconds = cl.time - 60 * minutes;
+						seconds = (int) cl.time;
+						minutes = (int) (cl.time / 60);
+						seconds -= minutes * 60;
+
 						minutes &= 511;
 					}
 
@@ -1182,7 +1219,7 @@ void Cmd_ForwardToServer (void)
 		return;
 	}
 
-	if (stricmp (Cmd_Argv(0), "cmd") != 0)
+	if (stricmp (Cmd_Argv (0), "cmd") != 0)
 	{
 		SZ_Print (&cls.message, Cmd_Argv (0));
 		SZ_Print (&cls.message, " ");

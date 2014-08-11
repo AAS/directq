@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -63,6 +63,7 @@ char *IsURLContainer (char *filename)
 	fclose (f);
 
 	if (!strnicmp (urlname, "http://", 7)) return urlname;
+
 	if (!strnicmp (urlname, "https://", 8)) return urlname;
 
 	return NULL;
@@ -148,9 +149,13 @@ public:
 
 		// set up everything
 		if (FAILED (hr = CoCreateInstance (CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, IID_IGraphBuilder, (void **) &this->ds_Graph))) return;
+
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaControl, (void **) &this->ds_Control))) return;
+
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IBasicAudio, (void **) &this->ds_Audio))) return;
+
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaEvent, (void **) &this->ds_Event))) return;
+
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaPosition, (void **) &this->ds_Position))) return;
 
 		// it's initialized now
@@ -166,12 +171,14 @@ public:
 		{
 			// convert to wide char cos DirectShow requires Wide Chars (bastards!)
 			mbstowcs (WCFileName, urlname, 1023);
+
 			if (FAILED (hr = this->ds_Graph->RenderFile (WCFileName, NULL))) return;
 		}
 		else
 		{
 			// convert to wide char cos DirectShow requires Wide Chars (bastards!)
 			mbstowcs (WCFileName, FileName, 256);
+
 			if (FAILED (hr = this->ds_Graph->RenderFile (WCFileName, NULL))) return;
 		}
 
@@ -197,7 +204,9 @@ public:
 
 		// ensure that we can process events
 		if (!this->Initialized) return;
+
 		if (!this->Playing) return;
+
 		if ((++checkframe) & 7) return;
 
 		// we could be streaming over the web or paused so we need to check position
@@ -225,6 +234,7 @@ public:
 	{
 		// stop playing and abort whatever we were doing
 		if (this->ds_Control) this->ds_Control->Stop ();
+
 		if (this->ds_Graph) this->ds_Graph->Abort ();
 
 		// release them all

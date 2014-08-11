@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -41,17 +41,17 @@ void Chase_Init (void)
 void Chase_Reset (void)
 {
 	// for respawning and teleporting
-//	start position 12 units behind head
+	//	start position 12 units behind head
 }
 
 void TraceLine (vec3_t start, vec3_t end, vec3_t impact)
 {
 	trace_t	trace;
 
-	Q_MemSet (&trace, 0, sizeof(trace));
+	memset (&trace, 0, sizeof (trace));
 	SV_RecursiveHullCheck (cl.worldmodel->brushhdr->hulls, 0, 0, 1, start, end, &trace);
 
-	VectorCopy (trace.endpos, impact);
+	VectorCopy2 (impact, trace.endpos);
 }
 
 
@@ -69,6 +69,7 @@ bool Chase_CheckBrushEdict (entity_t *e, vec3_t checkpoint, int viewcontents)
 
 	// let's not clip against these types
 	if (e->model->type != mod_brush) return true;
+
 	if (e->model->name[0] != '*') return true;
 
 	// derive the bbox
@@ -90,10 +91,15 @@ bool Chase_CheckBrushEdict (entity_t *e, vec3_t checkpoint, int viewcontents)
 
 	// check against bbox
 	if (checkpoint[0] < mins[0]) return true;
+
 	if (checkpoint[1] < mins[1]) return true;
+
 	if (checkpoint[2] < mins[2]) return true;
+
 	if (checkpoint[0] > maxs[0]) return true;
+
 	if (checkpoint[1] > maxs[1]) return true;
+
 	if (checkpoint[2] > maxs[2]) return true;
 
 	// blocked
@@ -123,8 +129,8 @@ void Chase_Adjust (vec3_t chase_dest)
 	// calculate distance between chasecam and original org to establish number of tests we need.
 	// an int is good enough here.:)  add a cvar multiplier to this...
 	int num_tests = sqrt ((r_refdef.vieworg[0] - chase_dest[0]) * (r_refdef.vieworg[0] - chase_dest[0]) +
-					(r_refdef.vieworg[1] - chase_dest[1]) * (r_refdef.vieworg[1] - chase_dest[1]) +
-					(r_refdef.vieworg[2] - chase_dest[2]) * (r_refdef.vieworg[2] - chase_dest[2])) * chase_scale.value;
+						   (r_refdef.vieworg[1] - chase_dest[1]) * (r_refdef.vieworg[1] - chase_dest[1]) +
+						   (r_refdef.vieworg[2] - chase_dest[2]) * (r_refdef.vieworg[2] - chase_dest[2])) * chase_scale.value;
 
 	// take the contents of the view leaf
 	int viewcontents = (Mod_PointInLeaf (r_refdef.vieworg, cl.worldmodel))->contents;
@@ -146,6 +152,7 @@ void Chase_Adjust (vec3_t chase_dest)
 			if (best > 1)
 				best--;
 			else best = num_tests;
+
 			break;
 		}
 	}
@@ -172,7 +179,9 @@ void Chase_Adjust (vec3_t chase_dest)
 		{
 			// adjust, test and put back.
 			chase_dest[chase_vert[test]] -= dest_offset[test & 1];
+
 			if (Chase_Check (chase_dest, viewcontents)) nummatches++;
+
 			chase_dest[chase_vert[test]] += dest_offset[test & 1];
 		}
 
@@ -193,6 +202,7 @@ void Chase_Adjust (vec3_t chase_dest)
 	{
 		chase_nodraw = false;
 		chase_alpha = (chase_length - 150);
+
 		if (chase_alpha > 255) chase_alpha = 255;
 	}
 }
@@ -244,7 +254,7 @@ void Chase_Update (void)
 	r_refdef.viewangles[PITCH] = -atan (stop[2] / dist) / D3DX_PI * 180;
 
 	// move towards destination
-	VectorCopy (chase_dest, r_refdef.vieworg);
+	VectorCopy2 (r_refdef.vieworg, chase_dest);
 }
 
 

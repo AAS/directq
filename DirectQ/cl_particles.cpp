@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -17,102 +17,40 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+// contains all particle code which is actually spawned from the client, i.e. is not really a part of the renderer
+
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
 #include "resource.h"
-#include "d3d_vbo.h"
+#include "particles.h"
 
-
-// particles
-typedef struct partverts_s
-{
-	float xyz[3];
-	DWORD color;
-	float s, t;
-} partverts_t;
-
-
-typedef struct particle_s
-{
-	// driver-usable fields
-	vec3_t		org;
-	float		color;
-
-	// drivers never touch the following fields
-	struct particle_s	*next;
-
-	// velocity increases
-	vec3_t		vel;
-	vec3_t		dvel;
-	float		grav;
-
-	// color ramps
-	int			*colorramp;
-	float		ramp;
-	float		ramptime;
-
-	// remove if < cl.time
-	float		die;
-
-	// behaviour flags
-	int			flags;
-
-	// render adjustable
-	LPDIRECT3DTEXTURE9 tex;
-	float scale;
-	float alpha;
-	float fade;
-	float growth;
-	float scalemod;
-} particle_t;
-
-
-cvar_t r_newparticles ("r_newparticles", "0", CVAR_ARCHIVE);
-cvar_t cl_maxparticles ("cl_maxparticles", "65536", CVAR_ARCHIVE);
-
-// allows us to combine different behaviour types
-// (largely obsolete, replaced by individual particle parameters, retained for noclip type only)
-#define PT_STATIC			0
-#define PT_NOCLIP			(1 << 1)
-
-// default particle texture
-LPDIRECT3DTEXTURE9 particledottexture = NULL;
-
-// initially allocated batch - demo1 requires this number of particles,
-// demo2 requires 2048, demo3 requires 3072 (rounding up to the nearest 1024 in each case)
-// funny, you'd think demo3 would be the particle monster...
-#define PARTICLE_BATCH_SIZE      4096
-
-// extra particles are allocated in batches of this size.  this
-// is more than would be needed most of the time; we'd have to have
-// 3 explosions going off exactly simultaneously to require an allocation
-// beyond this amount.
-#define PARTICLE_EXTRA_SIZE      2048
-
-// we don't expect these to ever be exceeded but we allow it if required
-#define PARTICLE_TYPE_BATCH_SIZE	64
-#define PARTICLE_TYPE_EXTRA_SIZE	32
+particle_t	*free_particles;
+particle_type_t *active_particle_types, *free_particle_types;
 
 // particle colour ramps - the extra values of -1 at the end of each are to protect us if the engine locks for a few seconds
 int		ramp1[] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61, -1, -1, -1, -1, -1};
 int		ramp2[] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66, -1, -1, -1, -1, -1};
 int		ramp3[] = {0x6d, 0x6b, 6, 5, 4, 3, -1, -1, -1, -1, -1};
 
-particle_t	*free_particles;
-particle_type_t *active_particle_types, *free_particle_types;
-
-particle_t	r_defaultparticle;
+// default particle texture
+LPDIRECT3DTEXTURE9 particledottexture = NULL;
 
 int	r_numparticles;
 int r_numallocations;
 
-vec3_t			r_pright, r_pup, r_ppn;
+particle_t	r_defaultparticle;
 
 // these were never used in the alias render
 #define NUMVERTEXNORMALS	162
 
-float *r_avertexnormals = NULL;
+float r_avertexnormals[NUMVERTEXNORMALS][3] =
+{
+#include "anorms.h"
+};
+
+cvar_t cl_maxparticles ("cl_maxparticles", "65536", CVAR_ARCHIVE);
+extern cvar_t sv_gravity;
 
 /*
 ===============
@@ -121,12 +59,6 @@ R_InitParticles
 */
 void R_InitParticles (void)
 {
-	if (!r_avertexnormals)
-	{
-		int len = Sys_LoadResourceData (IDR_ANORMS, (void **) &r_avertexnormals);
-		if (len != 1944) Sys_Error ("Corrupted anorms lump!");
-	}
-
 	// setup default particle state
 	// we need to explicitly set stuff to 0 as memsetting to 0 doesn't
 	// actually equate to a value of 0 with floating point
@@ -206,7 +138,7 @@ particle_type_t *R_NewParticleType (vec3_t spawnorg)
 		pt->numparticles = 0;
 
 		// copy across origin
-		VectorCopy (spawnorg, pt->spawnorg);
+		VectorCopy2 (pt->spawnorg, spawnorg);
 
 		// link it in
 		pt->next = active_particle_types;
@@ -236,6 +168,9 @@ particle_t *R_NewParticle (particle_type_t *pt)
 	particle_t *p;
 	int i;
 
+	// 4096 is the initial batch size so never go lower than that
+	if (cl_maxparticles.integer < 1024) Cvar_Set (&cl_maxparticles, 1024);
+
 	if (free_particles)
 	{
 		// no more particles
@@ -246,7 +181,7 @@ particle_t *R_NewParticle (particle_type_t *pt)
 		free_particles = p->next;
 
 		// set default drawing parms (may be overwritten as desired)
-		Q_MemCpy (p, &r_defaultparticle, sizeof (particle_t));
+		memcpy (p, &r_defaultparticle, sizeof (particle_t));
 
 		// link it in
 		p->next = pt->particles;
@@ -303,32 +238,30 @@ void R_EntityParticles (entity_t *ent)
 	count = 50;
 
 	if (!avelocities[0][0])
-		for (i=0; i<NUMVERTEXNORMALS*3; i++)
-			avelocities[0][i] = (rand()&255) * 0.01;
+		for (i = 0; i < NUMVERTEXNORMALS * 3; i++)
+			avelocities[0][i] = ((rand () & 255) * 0.01) * 0.001f;
 
 	particle_type_t *pt = R_NewParticleType (ent->origin);
 
-	float *norm = r_avertexnormals;
-
-	for (i=0; i<NUMVERTEXNORMALS; i++, norm += 3)
+	for (i = 0; i < NUMVERTEXNORMALS; i++)
 	{
 		angle = cl.time * avelocities[i][0];
-		sy = sin(angle);
-		cy = cos(angle);
+		sy = sin (angle);
+		cy = cos (angle);
 		angle = cl.time * avelocities[i][1];
-		sp = sin(angle);
-		cp = cos(angle);
+		sp = sin (angle);
+		cp = cos (angle);
 		angle = cl.time * avelocities[i][2];
-		sr = sin(angle);
-		cr = cos(angle);
+		sr = sin (angle);
+		cr = cos (angle);
 
-		forward[0] = cp*cy;
-		forward[1] = cp*sy;
+		forward[0] = cp * cy;
+		forward[1] = cp * sy;
 		forward[2] = -sp;
 
 		if (!(p = R_NewParticle (pt))) return;
 
-		p->die = cl.time + 0.001;
+		p->die = cl.time + 0.001f;
 		p->color = 0x6f;
 		p->colorramp = ramp1;
 		p->ramptime = 10;
@@ -336,9 +269,9 @@ void R_EntityParticles (entity_t *ent)
 
 		p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
 
-		p->org[0] = ent->origin[0] + norm[0]*dist + forward[0]*beamlength;			
-		p->org[1] = ent->origin[1] + norm[1]*dist + forward[1]*beamlength;			
-		p->org[2] = ent->origin[2] + norm[2]*dist + forward[2]*beamlength;			
+		p->org[0] = ent->origin[0] + r_avertexnormals[i][0] * dist + forward[0] * beamlength;
+		p->org[1] = ent->origin[1] + r_avertexnormals[i][1] * dist + forward[1] * beamlength;
+		p->org[2] = ent->origin[2] + r_avertexnormals[i][2] * dist + forward[2] * beamlength;
 	}
 }
 
@@ -363,26 +296,28 @@ void R_ReadPointFile_f (void)
 		Con_Printf ("couldn't open %s\n", name);
 		return;
 	}
-	
+
 	Con_Printf ("Reading %s...\n", name);
 	c = 0;
 
 	particle_type_t *pt = R_NewParticleType (vec3_origin);
 
-	for ( ;; )
+	for (;;)
 	{
-		r = fscanf (f,"%f %f %f\n", &org[0], &org[1], &org[2]);
+		r = fscanf (f, "%f %f %f\n", &org[0], &org[1], &org[2]);
+
 		if (r != 3)
 			break;
+
 		c++;
 
 		if (!(p = R_NewParticle (pt))) return;
-		
-		p->die = 99999;
-		p->color = (-c)&15;
+
+		p->die = cl.time + 999999;
+		p->color = (-c) & 15;
 		p->flags |= PT_NOCLIP;
-		VectorCopy (vec3_origin, p->vel);
-		VectorCopy (org, p->org);
+		VectorCopy2 (p->vel, vec3_origin);
+		VectorCopy2 (p->org, org);
 	}
 
 	fclose (f);
@@ -402,7 +337,7 @@ void R_ParseParticleEffect (void)
 	vec3_t		org, dir;
 	int			i, count, color;
 
-	for (i = 0; i < 3; i++) org[i] = MSG_ReadCoord (cl.Protocol);
+	for (i = 0; i < 3; i++) org[i] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 	for (i = 0; i < 3; i++) dir[i] = MSG_ReadChar () * (1.0 / 16);
 
 	count = MSG_ReadByte ();
@@ -492,21 +427,21 @@ void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
 
 	particle_type_t *pt = R_NewParticleType (org);
 
-	for (i=0; i<512; i++)
+	for (i = 0; i < 512; i++)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
-		p->die = cl.time + 0.3;
+		p->die = cl.time + 0.3f;
 		p->color = colorStart + (colorMod % colorLength);
 		colorMod++;
 
 		p->grav = -1;
 		p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
 
-		for (j=0; j<3; j++)
+		for (j = 0; j < 3; j++)
 		{
-			p->org[j] = org[j] + ((rand()%32)-16);
-			p->vel[j] = (rand()%512)-256;
+			p->org[j] = org[j] + ((rand() % 32) - 16);
+			p->vel[j] = (rand() % 512) - 256;
 		}
 	}
 
@@ -525,36 +460,36 @@ void R_BlobExplosion (vec3_t org)
 {
 	int			i, j;
 	particle_t	*p;
-	
+
 	particle_type_t *pt = R_NewParticleType (org);
 
-	for (i=0; i<1024; i++)
+	for (i = 0; i < 1024; i++)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
-		p->die = cl.time + 1 + (rand()&8)*0.05;
+		p->die = cl.time + (1 + (rand () & 8) * 0.05);
 		p->grav = -1;
 
 		if (i & 1)
 		{
 			p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
-			p->color = 66 + rand()%6;
+			p->color = 66 + rand() % 6;
 
-			for (j=0; j<3; j++)
+			for (j = 0; j < 3; j++)
 			{
-				p->org[j] = org[j] + ((rand()%32)-16);
-				p->vel[j] = (rand()%512)-256;
+				p->org[j] = org[j] + ((rand() % 32) - 16);
+				p->vel[j] = (rand() % 512) - 256;
 			}
 		}
 		else
 		{
 			p->dvel[0] = p->dvel[1] = -4;
-			p->color = 150 + rand()%6;
+			p->color = 150 + rand() % 6;
 
-			for (j=0; j<3; j++)
+			for (j = 0; j < 3; j++)
 			{
-				p->org[j] = org[j] + ((rand()%32)-16);
-				p->vel[j] = (rand()%512)-256;
+				p->org[j] = org[j] + ((rand() % 32) - 16);
+				p->vel[j] = (rand() % 512) - 256;
 			}
 		}
 	}
@@ -575,7 +510,7 @@ void R_BloodParticles (vec3_t org, vec3_t dir, int color, int count)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
-		p->die = cl.time + 0.1 * (rand () % 5);
+		p->die = cl.time + (0.1 * (rand () % 5));
 		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
 
@@ -631,7 +566,7 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
-		p->die = cl.time + 0.1 * (rand () % 5);
+		p->die = cl.time + (0.1 * (rand () % 5));
 		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
 
@@ -655,7 +590,7 @@ void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
-		p->die = cl.time + 0.1 * (rand () % 5);
+		p->die = cl.time + (0.1 * (rand () % 5));
 		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
 
@@ -776,8 +711,8 @@ void R_LavaSplash (vec3_t org)
 			for (k = 0; k < 1; k++)
 			{
 				if (!(p = R_NewParticle (pt))) return;
-		
-				p->die = cl.time + 2 + (rand () & 31) * 0.02;
+
+				p->die = cl.time + (2 + (rand () & 31) * 0.02);
 				p->color = 224 + (rand () & 7);
 				p->grav = -1;
 
@@ -820,21 +755,21 @@ void R_TeleportSplash (vec3_t org)
 			for (k = -24; k < 32; k += 4)
 			{
 				if (!(p = R_NewParticle (pt))) return;
-		
-				p->die = cl.time + 0.2 + (rand()&7) * 0.02;
-				p->color = 7 + (rand()&7);
+
+				p->die = cl.time + (0.2 + (rand() & 7) * 0.02);
+				p->color = 7 + (rand() & 7);
 				p->grav = -1;
 
-				dir[0] = j*8;
-				dir[1] = i*8;
-				dir[2] = k*8;
-	
-				p->org[0] = org[0] + i + (rand()&3);
-				p->org[1] = org[1] + j + (rand()&3);
-				p->org[2] = org[2] + k + (rand()&3);
-	
-				VectorNormalize (dir);						
-				vel = 50 + (rand()&63);
+				dir[0] = j * 8;
+				dir[1] = i * 8;
+				dir[2] = k * 8;
+
+				p->org[0] = org[0] + i + (rand() & 3);
+				p->org[1] = org[1] + j + (rand() & 3);
+				p->org[2] = org[2] + k + (rand() & 3);
+
+				VectorNormalize (dir);
+				vel = 50 + (rand() & 63);
 				VectorScale (dir, vel, p->vel);
 			}
 		}
@@ -869,8 +804,8 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		len -= dec;
 
 		if (!(p = R_NewParticle (pt))) return;
-		
-		VectorCopy (vec3_origin, p->vel);
+
+		VectorCopy2 (p->vel, vec3_origin);
 		p->die = cl.time + 2;
 
 		switch (type)
@@ -911,7 +846,7 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		case 3:
 		case 5:
 			// tracer - wizard/hellknight
-			p->die = cl.time + 0.5;
+			p->die = cl.time + 0.5f;
 
 			if (type == 3)
 				p->color = 52 + ((tracercount & 4) << 1);
@@ -919,7 +854,7 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 			tracercount++;
 
-			VectorCopy (start, p->org);
+			VectorCopy2 (p->org, start);
 
 			// split trail left/right
 			if (tracercount & 1)
@@ -937,7 +872,7 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 		case 6:	// voor trail
 			p->color = 9 * 16 + 8 + (rand () & 3);
-			p->die = cl.time + 0.3;
+			p->die = cl.time + 0.3f;
 
 			for (j = 0; j < 3; j++)
 				p->org[j] = start[j] + ((rand () & 15) - 8);
@@ -950,143 +885,32 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 }
 
 
-extern	cvar_t	sv_gravity;
-
-void R_SetupParticleType (particle_type_t *pt)
-{
-	// no particles at all!
-	if (!pt->particles) return;
-
-	// removes expired particles from the active particles list
-	particle_t *p;
-	particle_t *kill;
-
-	// remove from the head of the list
-	for (;;)
-	{
-		kill = pt->particles;
-
-		if (kill && kill->die < cl.time)
-		{
-			pt->particles = kill->next;
-			kill->next = free_particles;
-			free_particles = kill;
-			r_numparticles--;
-			pt->numparticles--;
-
-			continue;
-		}
-
-		break;
-	}
-
-	for (p = pt->particles; p; p = p->next)
-	{
-		// remove from a mid-point in the list
-		for (;;)
-		{
-			kill = p->next;
-
-			if (kill && kill->die < cl.time)
-			{
-				p->next = kill->next;
-				kill->next = free_particles;
-				free_particles = kill;
-				r_numparticles--;
-				pt->numparticles--;
-
-				continue;
-			}
-
-			break;
-		}
-
-		/*
-		it's faster to just render the bastards
-		int pointcontents = Mod_PointInLeaf (p->org, cl.worldmodel)->contents;
-		
-		if (pointcontents == CONTENTS_SKY) p->die = -1;
-		if (pointcontents == CONTENTS_SOLID) p->die = -1;
-		*/
-	}
-}
-
-
-void D3D_AddParticesToAlphaList (void)
-{
-	// 4096 is the initial batch size so never go lower than that
-	if (cl_maxparticles.integer < 1024) Cvar_Set (&cl_maxparticles, 1024);
-
-	// nothing to draw
-	if (!active_particle_types) return;
-
-	// removes expired particles from the active particles list
-	particle_type_t *pt;
-	particle_type_t *kill;
-
-	// remove from the head of the list
-	for (;;)
-	{
-		kill = active_particle_types;
-
-		if (kill && !kill->particles)
-		{
-			// return to the free list
-			active_particle_types = kill->next;
-			kill->next = free_particle_types;
-			kill->numparticles = 0;
-			free_particle_types = kill;
-
-			continue;
-		}
-
-		break;
-	}
-
-	// no types currently active
-	if (!active_particle_types) return;
-
-	for (pt = active_particle_types; pt; pt = pt->next)
-	{
-		// remove from a mid-point in the list
-		for (;;)
-		{
-			kill = pt->next;
-
-			if (kill && !kill->particles)
-			{
-				pt->next = kill->next;
-				kill->next = free_particle_types;
-				kill->numparticles = 0;
-				free_particle_types = kill;
-
-				continue;
-			}
-
-			break;
-		}
-
-		// prepare this type for rendering
-		R_SetupParticleType (pt);
-
-		// add to the draw list
-		D3D_AddToAlphaList (pt);
-	}
-}
-
-
 // update particles after drawing
 void R_UpdateParticles (void)
 {
-	float grav = d3d_RenderDef.frametime * sv_gravity.value * 0.05;
+	static float oldtime = 0;
+
+	if (oldtime > cl.time)
+	{
+		oldtime = cl.time;
+		return;
+	}
+	else if (oldtime == cl.time)
+		return;
+
+	// keep particle updates independent of render times
+	float time = cl.time - oldtime;
+	float grav = time * sv_gravity.value * 0.05f;
+
+	oldtime = cl.time;
 
 	for (particle_type_t *pt = active_particle_types; pt; pt = pt->next)
 	{
 		for (particle_t *p = pt->particles; p; p = p->next)
 		{
 			// fade alpha and increase size
-			p->alpha -= (p->fade * d3d_RenderDef.frametime);
-			p->scale += (p->growth * d3d_RenderDef.frametime);
+			p->alpha -= (p->fade * time);
+			p->scale += (p->growth * time);
 
 			// kill if fully faded or too small
 			if (p->alpha <= 0 || p->scale <= 0)
@@ -1099,7 +923,7 @@ void R_UpdateParticles (void)
 			if (p->colorramp)
 			{
 				// colour ramps
-				p->ramp += p->ramptime * d3d_RenderDef.frametime;
+				p->ramp += p->ramptime * time;
 
 				// adjust color for ramp
 				if (p->colorramp[(int) p->ramp] < 0)
@@ -1112,105 +936,27 @@ void R_UpdateParticles (void)
 			}
 
 			// update origin
-			p->org[0] += p->vel[0] * d3d_RenderDef.frametime;
-			p->org[1] += p->vel[1] * d3d_RenderDef.frametime;
-			p->org[2] += p->vel[2] * d3d_RenderDef.frametime;
+			p->org[0] += p->vel[0] * time;
+			p->org[1] += p->vel[1] * time;
+			p->org[2] += p->vel[2] * time;
 
 			// adjust for gravity
 			p->vel[2] += grav * p->grav;
 
 			// adjust for velocity change
-			p->vel[0] += p->dvel[0] * d3d_RenderDef.frametime;
-			p->vel[1] += p->dvel[1] * d3d_RenderDef.frametime;
-			p->vel[2] += p->dvel[2] * d3d_RenderDef.frametime;
+			p->vel[0] += p->dvel[0] * time;
+			p->vel[1] += p->dvel[1] * time;
+			p->vel[2] += p->dvel[2] * time;
 		}
 	}
 }
 
 
-cvar_t r_drawparticles ("r_drawparticles", "1", CVAR_ARCHIVE);
-
-void D3DRPart_SetTexture (void *data)
+void R_WipeParticles (void)
 {
-	d3d_texturechange_t *tc = (d3d_texturechange_t *) data;
-
-	if (d3d_GlobalCaps.usingPixelShaders)
-	{
-		if (d3d_FXPass == FX_PASS_NOTBEGUN)
-		{
-			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_PARTICLES);
-		}
-		else if (d3d_FXPass == FX_PASS_PARTICLES)
-		{
-			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			d3d_FXCommitPending = true;
-		}
-		else
-		{
-			D3D_EndShaderPass ();
-			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_PARTICLES);
-		}
-	}
-	else D3D_SetTexture (tc->stage, tc->tex);
+	// these need to be wiped immediately on going to a new server
+	active_particle_types = NULL;
+	free_particle_types = NULL;
+	free_particles = NULL;
 }
-
-
-// made this a global because otherwise multiple particle types don't get batched at all!!!
-LPDIRECT3DTEXTURE9 cachedparticletexture = NULL;
-
-// particles were HUGELY inefficient in the VBO so I've put them back to UserPrimitives
-// fixme - most of this to go to the vertex shader
-void R_AddParticleTypeToRender (particle_type_t *pt)
-{
-	if (!pt->particles) return;
-	if (!r_drawparticles.value) return;
-
-	// for rendering
-	vec3_t up, right;
-	float scale;
-
-	// walk the list starting at the first active particle
-	for (particle_t *p = pt->particles; p; p = p->next)
-	{
-		// final sanity check on colour to avoid array bounds errors
-		if (p->color < 0 || p->color > 255) continue;
-
-		if (p->tex != cachedparticletexture)
-		{
-			d3d_texturechange_t tc = {0, p->tex};
-			VBO_AddCallback (D3DRPart_SetTexture, &tc, sizeof (d3d_texturechange_t));
-			cachedparticletexture = p->tex;
-		}
-
-		DWORD pc = D3DCOLOR_ARGB 
-		(
-			BYTE_CLAMP (p->alpha),
-			d3d_QuakePalette.standard[(int) p->color].peRed,
-			d3d_QuakePalette.standard[(int) p->color].peGreen,
-			d3d_QuakePalette.standard[(int) p->color].peBlue
-		);
-
-		if (p->scalemod)
-		{
-			// hack a scale up to keep particles from disappearing
-			// note - all of this *could* go into a vertex shader, but we'd have a pretty heavyweight vertex submission
-			// and we likely wouldn't gain that much from it.
-			scale = (p->org[0] - r_origin[0]) * vpn[0] + (p->org[1] - r_origin[1]) * vpn[1] + (p->org[2] - r_origin[2]) * vpn[2];
-
-			if (scale < 20)
-				scale = 1;
-			else scale = 1 + scale * p->scalemod;
-		}
-		else scale = 1;
-
-		// note - scale each particle individually
-		VectorScale (vup, p->scale, up);
-		VectorScale (vright, p->scale, right);
-
-		VBO_AddParticle (p->org, scale, up, right, pc);
-	}
-}
-
 

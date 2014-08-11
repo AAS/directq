@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -26,9 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 bool bWindowActive = false;
 void AllowAccessibilityShortcutKeys (bool bAllowKeys);
-byte *d400kdata = NULL;
-int d400klen = 0;
-void COM_DecompressFile (char *filename, byte **decompressbuf, int *decompresslen);
 
 int Sys_LoadResourceData (int resourceid, void **resbuf)
 {
@@ -125,7 +122,7 @@ void Sys_Init (void)
 {
 	TIMECAPS tc;
 
-	if (timeGetDevCaps (&tc, sizeof (TIMECAPS)) != TIMERR_NOERROR) 
+	if (timeGetDevCaps (&tc, sizeof (TIMECAPS)) != TIMERR_NOERROR)
 	{
 		MessageBox
 		(
@@ -180,6 +177,10 @@ void Sys_Error (char *error, ...)
 	static int	in_sys_error2 = 0;
 	static int	in_sys_error3 = 0;
 
+#ifdef _DEBUG
+	DebugBreak ();
+#endif
+
 	if (!in_sys_error3)
 	{
 		in_sys_error3 = 1;
@@ -196,13 +197,12 @@ void Sys_Error (char *error, ...)
 	if (!in_sys_error0)
 	{
 		in_sys_error0 = 1;
-		IN_DeactivateMouse ();
-		MessageBox(NULL, text, "Quake Error",
+		MessageBox (NULL, text, "Quake Error",
 					MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
 	}
 	else
 	{
-		MessageBox(NULL, text, "Double Quake Error",
+		MessageBox (NULL, text, "Double Quake Error",
 					MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
 	}
 
@@ -232,52 +232,49 @@ void Sys_Quit (void)
 }
 
 
-// #define USE_QPC
+DWORD Sys_Milliseconds (void)
+{
+	static bool first = true;
+	static DWORD oldtime = 0, basetime = 0, old = 0;
+	DWORD newtime, now;
 
-int lowshift = 0;
-float pfreq = 0;
+	now = timeGetTime () + basetime;
+
+	if (first)
+	{
+		first = false;
+		basetime = now;
+		now = 0;
+	}
+
+	if (now < old)
+	{
+		// wrapped
+		basetime += 0xffffffff;
+		now += 0xffffffff;
+	}
+
+	old = now;
+	newtime = now;
+
+	if (newtime < oldtime)
+		Sys_Error ("Sys_Milliseconds: time running backwards??\n");
+
+	oldtime = newtime;
+
+	return newtime;
+}
+
 
 float Sys_GetNextTime (void)
 {
-#ifdef USE_QPC
-	LARGE_INTEGER pc;
-
-	QueryPerformanceCounter (&pc);
-
-	unsigned int temp = ((unsigned int) pc.LowPart >> lowshift) |
-		   ((unsigned int) pc.HighPart << (32 - lowshift));
-
-	return ((float) temp * pfreq);
-#else
-	return ((float) timeGetTime () / 1000.0f);
-#endif
+	return ((float) Sys_Milliseconds () / 1000.0f);
 }
 
 
 float Sys_GetFirstTime (void)
 {
-#ifdef USE_QPC
-	LARGE_INTEGER pc;
-
-	QueryPerformanceFrequency (&pc);
-
-	unsigned int lowpart = (unsigned int) pc.LowPart;
-	unsigned int highpart = (unsigned int) pc.HighPart;
-
-	while (highpart || (lowpart > 2000000.0))
-	{
-		lowshift++;
-		lowpart >>= 1;
-		lowpart |= (highpart & 1) << 31;
-		highpart >>= 1;
-	}
-
-	pfreq = 1.0f / (float) lowpart;
-
-	return Sys_GetNextTime ();
-#else
-	return ((float) timeGetTime () / 1000.0f);
-#endif
+	return ((float) Sys_Milliseconds () / 1000.0f);
 }
 
 
@@ -289,26 +286,10 @@ Sys_FloatTime
 */
 float Sys_FloatTime (void)
 {
-#ifdef USE_QPC
-	static float starttime = Sys_GetFirstTime ();
-
-	float now = Sys_GetNextTime ();
-
-	return (now - starttime);
-#else
-	static DWORD starttime = timeGetTime ();
-
-	DWORD now = timeGetTime ();
-
-	while (now < starttime)
-	{
-		// handle DWORD wraparound by causing them to re-wrap so that now > starttime
-		now += 65536;
-		starttime += 65536;
-	}
+	static DWORD starttime = Sys_Milliseconds ();
+	DWORD now = Sys_Milliseconds ();
 
 	return ((float) (now - starttime) / 1000.0f);
-#endif
 }
 
 
@@ -324,8 +305,8 @@ void Sys_SendKeyEvents (void)
 		if (!GetMessage (&msg, NULL, 0, 0))
 			Sys_Quit ();
 
-	  	TranslateMessage (&msg);
-	  	DispatchMessage (&msg);
+		TranslateMessage (&msg);
+		DispatchMessage (&msg);
 	}
 }
 
@@ -456,9 +437,6 @@ typedef struct drivespec_s
 	bool valid;
 } drivespec_t;
 
-void Splash_Init (void);
-void Splash_Destroy (void);
-
 void SetQuakeDirectory (void)
 {
 	char currdir[MAX_PATH];
@@ -469,6 +447,7 @@ void SetQuakeDirectory (void)
 
 	// if the current directory is the Quake directory, we search no more
 	GetCurrentDirectory (MAX_PATH, currdir);
+
 	if (ValidateQuakeDirectory (currdir)) return;
 
 	// set up all drives
@@ -518,9 +497,6 @@ void SetQuakeDirectory (void)
 
 	if (conf == IDYES)
 	{
-		// show the splash screen at this point in time so that the user knows something is happening
-		Splash_Init ();
-
 		// second pass does a full scan of each drive
 		for (int d = 0; d < 26; d++)
 		{
@@ -533,17 +509,14 @@ void SetQuakeDirectory (void)
 	}
 
 	// oh shit
-	Splash_Destroy ();
 	MessageBox (NULL, "Could not locate Quake on your PC.\n\nPerhaps you need to move DirectQ.exe into C:\\Quake?", "Error", MB_OK | MB_ICONERROR);
 	Sys_Quit ();
 }
 
 
-void IN_ActivateMouse (void);
-void IN_DeactivateMouse (void);
 int MapKey (int key);
 void ClearAllStates (void);
-LONG CDAudio_MessageHandler(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LONG CDAudio_MessageHandler (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 void VID_SetOSGamma (void);
 void VID_SetAppGamma (void);
@@ -576,12 +549,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 			}
 		}
 
-		// this is needed to force the mouse to be active when alt-tabbing back to a fullscreen display
-		// it occasionally happens with windowed modes too so we always do it anyway
-		IN_DeactivateMouse ();
-		IN_ActivateMouse ();
-
-		IN_ShowMouse (FALSE);
+		IN_SetMouseState (modestate == MS_FULLDIB);
 
 		// restore everything else
 		VID_SetAppGamma ();
@@ -593,9 +561,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 	else
 	{
 		bWindowActive = false;
-		IN_ActivateMouse ();
-		IN_DeactivateMouse ();
-		IN_ShowMouse (TRUE);
+		IN_SetMouseState (modestate == MS_FULLDIB);
 		VID_SetOSGamma ();
 		CDAudio_Pause ();
 		S_ClearBuffer ();
@@ -604,7 +570,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 		if (modestate == MS_FULLDIB)
 		{
 			if (vid_canalttab)
-			{ 
+			{
 				vid_wassuspended = true;
 			}
 		}
@@ -614,7 +580,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 
 STICKYKEYS StartupStickyKeys = {sizeof (STICKYKEYS), 0};
 TOGGLEKEYS StartupToggleKeys = {sizeof (TOGGLEKEYS), 0};
-FILTERKEYS StartupFilterKeys = {sizeof (FILTERKEYS), 0};    
+FILTERKEYS StartupFilterKeys = {sizeof (FILTERKEYS), 0};
 
 
 void AllowAccessibilityShortcutKeys (bool bAllowKeys)
@@ -670,109 +636,72 @@ void AllowAccessibilityShortcutKeys (bool bAllowKeys)
 }
 
 
+void IN_ReadWinMessage (UINT msg, WPARAM wParam);
+
 /* main window procedure */
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-	// wow, this is a WEIRD way of doing a window proc...
-    LONG    lRet = 1;
-	int		fActive, fMinimized, temp;
-	extern unsigned int uiWheelMessage;
+	int fActive, fMinimized, temp;
 
-	if (Msg == uiWheelMessage) Msg = WM_MOUSEWHEEL;
+	switch (Msg)
+	{
+		// events we want to discard
+	case WM_SIZE: return 0;
+	case WM_CREATE: return 0;
+	case WM_ERASEBKGND: return 1; // treachery!!! see your MSDN!
+	case WM_SYSCHAR: return 0;
 
-    switch (Msg)
-    {
 	case WM_SYSCOMMAND:
 		switch (wParam & ~0x0F)
 		{
-        case SC_SCREENSAVE:
-        case SC_MONITORPOWER:
+		case SC_SCREENSAVE:
+		case SC_MONITORPOWER:
 			// prevent from happening
-			break;
+			return 0;
 
 		default:
 			return DefWindowProc (hWnd, Msg, wParam, lParam);
 		}
-		break;
-
-	//case WM_PAINT:
-		//SCR_UpdateScreen ();
-		//break;
-
-	case WM_ERASEBKGND:
-		// don't let windows handle background erasures
-		break;
 
 	case WM_KILLFOCUS:
 		if (modestate == MS_FULLDIB)
 			ShowWindow (d3d_Window, SW_SHOWMINNOACTIVE);
-		break;
 
-	case WM_CREATE:
-		break;
+		return 0;
 
 	case WM_MOVE:
 		// update cursor clip region
 		IN_UpdateClipCursor ();
-		break;
+		return 0;
 
 	case WM_KEYDOWN:
 	case WM_SYSKEYDOWN:
 		Key_Event (MapKey (lParam), true);
-		break;
+		return 0;
 
 	case WM_KEYUP:
 	case WM_SYSKEYUP:
 		Key_Event (MapKey (lParam), false);
-		break;
+		return 0;
 
-	case WM_SYSCHAR:
-		// keep Alt-Space from happening
-		break;
-
-	// this is complicated because Win32 seems to pack multiple mouse events into
-	// one update sometimes, so we always check all states and look for events
+		// this is complicated because Win32 seems to pack multiple mouse events into
+		// one update sometimes, so we always check all states and look for events
+	case WM_MOUSEMOVE:
 	case WM_LBUTTONDOWN:
 	case WM_LBUTTONUP:
 	case WM_RBUTTONDOWN:
 	case WM_RBUTTONUP:
 	case WM_MBUTTONDOWN:
 	case WM_MBUTTONUP:
-	case WM_MOUSEMOVE:
-		temp = 0;
-
-		if (wParam & MK_LBUTTON) temp |= 1;
-		if (wParam & MK_RBUTTON) temp |= 2;
-		if (wParam & MK_MBUTTON) temp |= 4;
-
-		// 3 buttons and we always send even if temp is 0 so that we'll get key up events on them too
-		IN_MouseEvent (temp, 3, false);
-		break;
-
-	// JACK: This is the mouse wheel with the Intellimouse
-	// Its delta is either positive or neg, and we generate the proper
-	// Event.
 	case WM_MOUSEWHEEL:
-		if ((short) HIWORD (wParam) > 0)
-		{
-			Key_Event (K_MWHEELUP, true);
-			Key_Event (K_MWHEELUP, false);
-		}
-		else
-		{
-			Key_Event (K_MWHEELDOWN, true);
-			Key_Event (K_MWHEELDOWN, false);
-		}
+		IN_ReadWinMessage (Msg, wParam);
+		return 0;
 
-		break;
-
-    case WM_SIZE:
-        break;
-
-   	case WM_CLOSE:
+	case WM_CLOSE:
 		if (MessageBox (d3d_Window, "Are you sure you want to quit?", "Confirm Exit", MB_YESNO | MB_SETFOREGROUND | MB_ICONQUESTION) == IDYES)
 			Sys_Quit ();
-	    break;
+
+		return 0;
 
 	case WM_ACTIVATE:
 		fActive = LOWORD (wParam);
@@ -781,33 +710,30 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 		// fix the leftover Alt from any Alt-Tab or the like that switched us away
 		ClearAllStates ();
+		IN_UpdateClipCursor ();
 
-		break;
+		return 0;
 
-   	case WM_DESTROY:
+	case WM_DESTROY:
 		if (d3d_Window)
 			DestroyWindow (d3d_Window);
 
-        PostQuitMessage (0);
-	    break;
+		PostQuitMessage (0);
+		return 0;
 
 	case MM_MCINOTIFY:
-        lRet = CDAudio_MessageHandler (hWnd, Msg, wParam, lParam);
+		return CDAudio_MessageHandler (hWnd, Msg, wParam, lParam);
+
+	default:
 		break;
+	}
 
-    default:
-        // pass all unhandled messages to DefWindowProc
-        lRet = DefWindowProc (hWnd, Msg, wParam, lParam);
-	    break;
-    }
-
-    /* return 1 if handled message, 0 if not */
-    return lRet;
+	// pass all unhandled messages to DefWindowProc
+	return DefWindowProc (hWnd, Msg, wParam, lParam);
 }
 
 
-void Host_Frame (float time);
-void D3D_CreateShadeDots (void);
+void Host_Frame (DWORD time);
 void VID_DefaultMonitorGamma_f (void);
 
 void GetCrashReason (LPEXCEPTION_POINTERS ep);
@@ -845,7 +771,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	wc.cbWndExtra = 0;
 	wc.hInstance = hInstance;
 	wc.hIcon = 0;
-	wc.hCursor = LoadCursor (NULL,IDC_ARROW);
+	wc.hCursor = LoadCursor (NULL, IDC_ARROW);
 	wc.hbrBackground = NULL;
 	wc.lpszMenuName = 0;
 	wc.lpszClassName = D3D_WINDOW_CLASS_NAME;
@@ -892,12 +818,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if (vinfo.dwMajorVersion < 5)
 	{
 		int mret = MessageBox
-		(
-			NULL,
-			"!!! UNSUPPORTED !!!\n\nThis software may run on your Operating System\nbut is NOT officially supported.\n\nCertain pre-requisites are needed.\nNow might be a good time to read the readme.\n\nClick OK if you are sure you want to continue...",
-			"Warning",
-			MB_OKCANCEL | MB_ICONWARNING
-		);
+				   (
+					   NULL,
+					   "!!! UNSUPPORTED !!!\n\nThis software may run on your Operating System\nbut is NOT officially supported.\n\nCertain pre-requisites are needed.\nNow might be a good time to read the readme.\n\nClick OK if you are sure you want to continue...",
+					   "Warning",
+					   MB_OKCANCEL | MB_ICONWARNING
+				   );
 
 		if (mret == IDCANCEL) return 666;
 	}
@@ -936,10 +862,11 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	if (hUser32)
 	{
-		typedef BOOL (WINAPI *LPSetProcessDPIAware) (void);
+		typedef BOOL (WINAPI * LPSetProcessDPIAware) (void);
 		LPSetProcessDPIAware pSetProcessDPIAware = (LPSetProcessDPIAware) GetProcAddress (hUser32, "SetProcessDPIAware");
 
 		if (pSetProcessDPIAware) pSetProcessDPIAware ();
+
 		UNLOAD_LIBRARY (hUser32);
 	}
 
@@ -948,10 +875,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	Pool_Init ();
 
 	global_nCmdShow = nCmdShow;
-
-	// calc aliasmodel shading dotproducts
-	// these are done from here to preserve stack space
-	D3D_CreateShadeDots ();
 
 	// set the directory containing Quake
 	SetQuakeDirectory ();
@@ -998,35 +921,18 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	parms.argc = com_argc;
 	parms.argv = com_argv;
 
-	// initialize the splash screen
-	Splash_Init ();
+	// Save the current sticky/toggle/filter key settings so they can be restored them later
+	SystemParametersInfo (SPI_GETSTICKYKEYS, sizeof (STICKYKEYS), &StartupStickyKeys, 0);
+	SystemParametersInfo (SPI_GETTOGGLEKEYS, sizeof (TOGGLEKEYS), &StartupToggleKeys, 0);
+	SystemParametersInfo (SPI_GETFILTERKEYS, sizeof (FILTERKEYS), &StartupFilterKeys, 0);
 
-    // Save the current sticky/toggle/filter key settings so they can be restored them later
-    SystemParametersInfo (SPI_GETSTICKYKEYS, sizeof (STICKYKEYS), &StartupStickyKeys, 0);
-    SystemParametersInfo (SPI_GETTOGGLEKEYS, sizeof (TOGGLEKEYS), &StartupToggleKeys, 0);
-    SystemParametersInfo (SPI_GETFILTERKEYS, sizeof (FILTERKEYS), &StartupFilterKeys, 0);
- 
-    // Disable when full screen
-    AllowAccessibilityShortcutKeys (false);
+	// Disable when full screen
+	AllowAccessibilityShortcutKeys (false);
 
 	Sys_Init ();
 	Host_Init (&parms);
 
-	float oldtime = Sys_FloatTime ();
-
-	// load our easter egg ;)
-	d400klen = Sys_LoadResourceData (IDR_D400K, (void **) &d400kdata);
-
-	// write it out
-	FILE *f = fopen ("d400k.bin", "wb");
-	fwrite (d400kdata, d400klen, 1, f);
-	fclose (f);
-
-	// decompress to main memory (this will leak 26k, so what?)
-	COM_DecompressFile ("d400k.bin", (byte **) &d400kdata, &d400klen);
-
-	// now remove it
-	DeleteFile ("d400k.bin");
+	DWORD oldtime = Sys_Milliseconds ();
 
 	// main window message loop
 	while (1)
@@ -1042,15 +948,10 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 			else Sleep (NOT_FOCUS_SLEEP);
 		}
 
-		float newtime = Sys_FloatTime ();
+		DWORD newtime = Sys_Milliseconds ();
 
-		// don't update if no time has passed
-		//if (newtime > oldtime)
-		{
-			Host_Frame (newtime - oldtime);
-			oldtime = newtime;
-		}
-		//else Sleep (0);
+		Host_Frame (newtime - oldtime);
+		oldtime = newtime;
 	}
 
 	// success of application

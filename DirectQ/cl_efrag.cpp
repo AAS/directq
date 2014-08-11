@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -84,7 +84,7 @@ void R_SplitEntityOnNode (mnode_t *node)
 		ef = R_GetEFrag ();
 		ef->entity = r_addent;
 
-		// add the entity link	
+		// add the entity link
 		*lastlink = ef;
 		lastlink = &ef->entnext;
 		ef->entnext = NULL;
@@ -93,7 +93,7 @@ void R_SplitEntityOnNode (mnode_t *node)
 		ef->leaf = leaf;
 		ef->leafnext = leaf->efrags;
 		leaf->efrags = ef;
-			
+
 		return;
 	}
 
@@ -110,6 +110,7 @@ void R_SplitEntityOnNode (mnode_t *node)
 
 	// recurse down the contacted sides
 	if (sides & 1) R_SplitEntityOnNode (node->children[0]);
+
 	if (sides & 2) R_SplitEntityOnNode (node->children[1]);
 }
 
@@ -120,6 +121,7 @@ void R_AddEfrags (entity_t *ent)
 	int			i;
 
 	if (!ent->model) return;
+
 	if (ent == cl_entities[0]) return;
 
 	r_addent = ent;

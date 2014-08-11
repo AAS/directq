@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -37,6 +37,7 @@ m*_t structures are in-memory
 #define	EF_BRIGHTLIGHT 			4
 #define	EF_DIMLIGHT 			8
 
+#define EF_FULLBRIGHT			16384
 
 /*
 ==============================================================================
@@ -46,37 +47,21 @@ BRUSH MODELS
 ==============================================================================
 */
 
-typedef struct d3d_texturechange_s
-{
-	DWORD stage;
-	LPDIRECT3DTEXTURE9 tex;
-} d3d_texturechange_t;
 
-
-#define TEXTURECHANGE_LIGHTMAP	0
-#define TEXTURECHANGE_DIFFUSE	1
-#define TEXTURECHANGE_LUMA		2
+#define TEXTURE_LIGHTMAP	0
+#define TEXTURE_DIFFUSE		1
+#define TEXTURE_LUMA		2
 
 typedef struct d3d_modelsurf_s
 {
 	struct msurface_s *surf;
-	struct texture_s *tex;
 	entity_t *ent;
-	d3d_texturechange_t tc[3];
-
-	struct d3d_modelsurf_s *surfchain;
-	struct d3d_modelsurf_s *lightmapchain;
+	LPDIRECT3DTEXTURE9 textures[3];
+	int surfalpha;
+	int shaderpass;
+	int addorder;	// so that we can maintain stability in qsort
 } d3d_modelsurf_t;
 
-
-typedef struct d3d_registeredtexture_s
-{
-	struct texture_s *texture;
-	d3d_modelsurf_t *surfchain;
-} d3d_registeredtexture_t;
-
-extern d3d_registeredtexture_t **d3d_RegisteredTextures;
-extern int d3d_NumRegisteredTextures;
 
 #define	SIDE_FRONT	0
 #define	SIDE_BACK	1
@@ -126,9 +111,6 @@ typedef struct texture_s
 
 	// chains for rendering
 	struct msurface_s *texturechain;
-
-	// registered texture used by this texture
-	d3d_registeredtexture_t *registration;
 } texture_t;
 
 
@@ -143,9 +125,7 @@ typedef struct texture_s
 #define SURF_DRAWTELE		512
 #define SURF_DRAWWATER		1024
 #define SURF_DRAWSLIME		2048
-
-// set after verts have been allocated
-#define SURF_VERTCOMPLETE	65536
+#define SURF_DRAWFENCE		4096
 
 typedef struct medge_s
 {
@@ -161,7 +141,34 @@ typedef struct
 	int			flags;
 } mtexinfo_t;
 
-// note - padding these to make them all the same size makes fuck all difference to speed
+
+typedef struct genericvert_s
+{
+	// heh, this is evil
+	union
+	{
+		struct
+		{
+			float xyz[3];
+
+			union
+			{
+				float tex3[3];
+				struct {DWORD color; float st[2];};
+				struct
+				{
+					union {float tc[2]; float st1[2];};
+					union {float lm[2]; float st2[2];};
+				};
+			};
+		};
+
+		float v[8];
+		byte raw[32];
+	};
+} genericvert_t;
+
+
 typedef struct warpverts_s
 {
 	float v[3];
@@ -206,7 +213,6 @@ typedef struct msurface_s
 	mplane_t	*plane;
 	int			flags;
 
-	int			alphaval;
 	bool		rotated;
 
 	int			firstedge;
@@ -214,12 +220,8 @@ typedef struct msurface_s
 	int			numverts;
 	int			numindexes;
 
-	// subdivision just uses the regular verts and indexes
+	// subdivision just uses the regular verts and indexes now
 	brushpolyvert_t	*verts;
-	unsigned short *indexes;
-
-	// for bmodel transforms
-	D3DMATRIX	*matrix;
 
 	struct msurface_s *texturechain;
 
@@ -252,6 +254,10 @@ typedef struct msurface_s
 	// extents of the surf in world space
 	float		mins[3];
 	float		maxs[3];
+
+	// vertex buffers
+	int			vbframe;
+	int			iboffset;
 
 	// true if the surf intersected the frustum
 	bool		intersect;
@@ -425,8 +431,7 @@ typedef struct
 
 typedef struct aliasmesh_s
 {
-	float s;
-	float t;
+	unsigned short st[2];
 	unsigned short vertindex;
 } aliasmesh_t;
 
@@ -437,16 +442,6 @@ typedef struct aliasskin_s
 	byte				*texels;
 } aliasskin_t;
 
-typedef struct aliaspart_s
-{
-	aliasmesh_t			*meshverts;
-	int					nummesh;
-
-	unsigned short		*indexes;
-	int					numindexes;
-
-	struct aliaspart_s	*next;
-} aliaspart_t;
 
 typedef struct aliashdr_s
 {
@@ -466,10 +461,21 @@ typedef struct aliashdr_s
 	int			vertsperframe;
 	int			numframes;
 
-	aliaspart_t *parts;
+	aliasmesh_t			*meshverts;
+	int					nummesh;
+
+	unsigned short		*indexes;
+	int					numindexes;
+	int					firstindex;
 
 	struct drawvertx_s	**vertexes;
 	maliasframedesc_t	*frames;
+
+	// number of the vertex/index buffer struct to use for this alias model
+	int			buffernum;
+
+	// last params for caching
+	int cacheposes;
 
 	int			skinwidth;
 	int			skinheight;
@@ -480,9 +486,7 @@ typedef struct aliashdr_s
 
 //===================================================================
 
-//
 // Whole model
-//
 
 typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 
@@ -497,7 +501,6 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 
 // mh - special flags
 #define EF_PLAYER	(1 << 21)
-#define EF_NEVEROCCLUDE (1 << 22)
 
 // Quake uses 3 (count 'em!) different types of brush model and we need to distinguish between all of them
 #define MOD_BRUSH_WORLD		0
@@ -563,7 +566,7 @@ typedef struct model_s
 	modtype_t	type;
 	int			numframes;
 	synctype_t	synctype;
-	
+
 	int			flags;
 
 	// volume occupied by the model graphics
@@ -572,7 +575,7 @@ typedef struct model_s
 	vec3_t		mins, maxs;
 	float		radius;
 
-	// solid volume for clipping 
+	// solid volume for clipping
 	bool	clipbox;
 	vec3_t	clipmins, clipmaxs;
 

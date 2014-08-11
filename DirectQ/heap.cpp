@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -25,212 +25,6 @@ int TotalSize = 0;
 int TotalPeak = 0;
 int TotalReserved = 0;
 
-
-/*
-========================================================================================================================
-
-		LIBRARY REPLACEMENT FUNCTIONS
-
-	Fast versions of memcpy and memset that operate on WORD or DWORD boundarys (MS CRT only operates on BYTEs).
-	The Q3A replacements corrupt the command buffer so they're not viable for use here.
-
-	memcmp is only used twice in DQ so it remains CRT.
-
-	Q_MemCpy is also suitable for fast dma block transfers to vertex buffers etc.
-
-========================================================================================================================
-*/
-
-void *Q_MemCpy (void *dst, void *src, int size)
-{
-	void *ret = dst;
-
-	int isize = size / 4;
-
-	// going to 32 slows it down so this seems to be the optimal transfer block size
-	while (isize > 16)
-	{
-		int *d = (int *) dst;
-		int *s = (int *) src;
-
-		d[0] = s[0];
-		d[1] = s[1];
-		d[2] = s[2];
-		d[3] = s[3];
-		d[4] = s[4];
-		d[5] = s[5];
-		d[6] = s[6];
-		d[7] = s[7];
-		d[8] = s[8];
-		d[9] = s[9];
-		d[10] = s[10];
-		d[11] = s[11];
-		d[12] = s[12];
-		d[13] = s[13];
-		d[14] = s[14];
-		d[15] = s[15];
-
-		isize -= 16;
-		size -= 64;
-
-		dst = d + 16;
-		src = s + 16;
-	}
-
-	while (isize > 8)
-	{
-		int *d = (int *) dst;
-		int *s = (int *) src;
-
-		d[0] = s[0];
-		d[1] = s[1];
-		d[2] = s[2];
-		d[3] = s[3];
-		d[4] = s[4];
-		d[5] = s[5];
-		d[6] = s[6];
-		d[7] = s[7];
-
-		isize -= 8;
-		size -= 32;
-
-		dst = d + 8;
-		src = s + 8;
-	}
-
-	while (isize > 4)
-	{
-		int *d = (int *) dst;
-		int *s = (int *) src;
-
-		d[0] = s[0];
-		d[1] = s[1];
-		d[2] = s[2];
-		d[3] = s[3];
-
-		isize -= 4;
-		size -= 16;
-
-		dst = d + 4;
-		src = s + 4;
-	}
-
-	while (size > 8)
-	{
-		byte *d = (byte *) dst;
-		byte *s = (byte *) src;
-
-		d[0] = s[0];
-		d[1] = s[1];
-		d[2] = s[2];
-		d[3] = s[3];
-		d[4] = s[4];
-		d[5] = s[5];
-		d[6] = s[6];
-		d[7] = s[7];
-
-		size -= 8;
-
-		dst = d + 8;
-		src = s + 8;
-	}
-
-	while (size > 4)
-	{
-		byte *d = (byte *) dst;
-		byte *s = (byte *) src;
-
-		d[0] = s[0];
-		d[1] = s[1];
-		d[2] = s[2];
-		d[3] = s[3];
-
-		size -= 4;
-
-		dst = d + 4;
-		src = s + 4;
-	}
-
-	if (size)
-	{
-		byte *d = (byte *) dst;
-		byte *s = (byte *) src;
-
-		switch (size)
-		{
-		case 1:
-			d[0] = s[0];
-			break;
-
-		case 2:
-			d[0] = s[0];
-			d[1] = s[1];
-			break;
-
-		case 3:
-			d[0] = s[0];
-			d[1] = s[1];
-			d[2] = s[2];
-			break;
-
-		case 4:
-			d[0] = s[0];
-			d[1] = s[1];
-			d[2] = s[2];
-			d[3] = s[3];
-			break;
-		}
-	}
-
-	return ret;
-}
-
-
-void *Q_MemSet (void *dst, int val, int size)
-{
-	void *ret = dst;
-
-	union
-	{
-		int _int;
-		short _short;
-		byte _byte[4];
-	} fill4;
-
-	fill4._byte[0] = fill4._byte[1] = fill4._byte[2] = fill4._byte[3] = val;
-
-	if (size >= 4)
-	{
-		int *d = (int *) dst;
-
-		for (int i = 0, sz = size >> 2; i < sz; i++)
-			*d++ = fill4._int;
-
-		dst = d;
-		size -= (size >> 2) << 2;
-	}
-
-	if (size >= 2)
-	{
-		short *d = (short *) dst;
-
-		for (int i = 0, sz = size >> 1; i < sz; i++)
-			*d++ = fill4._short;
-
-		dst = d;
-		size -= (size >> 1) << 1;
-	}
-
-	if (size)
-	{
-		byte *d = (byte *) dst;
-
-		for (int i = 0; i < size; i++)
-			*d++ = fill4._byte[0];
-	}
-
-	return ret;
-}
 
 /*
 ========================================================================================================================
@@ -261,7 +55,7 @@ void *CQuakeZone::Alloc (int size)
 	int *buf = (int *) HeapAlloc (this->hHeap, 0, size + sizeof (int) * 2);
 
 	assert (buf);
-	Q_MemSet (buf, 0, size + sizeof (int) * 2);
+	memset (buf, 0, size + sizeof (int) * 2);
 
 	// mark as no-execute; not critical so fail it silently
 	DWORD dwdummy;
@@ -271,9 +65,11 @@ void *CQuakeZone::Alloc (int size)
 	buf[1] = size;
 
 	this->Size += size;
+
 	if (this->Size > this->Peak) this->Peak = this->Size;
 
 	TotalSize += size;
+
 	if (TotalSize > TotalPeak) TotalPeak = TotalSize;
 
 	return (buf + 2);
@@ -283,6 +79,7 @@ void *CQuakeZone::Alloc (int size)
 void CQuakeZone::Free (void *data)
 {
 	if (!this->hHeap) return;
+
 	if (!data) return;
 
 	int *buf = (int *) data;
@@ -389,7 +186,7 @@ void *CQuakeCache::Alloc (int size)
 void *CQuakeCache::Alloc (void *data, int size)
 {
 	void *buf = this->Heap->Alloc (size);
-	Q_MemCpy (buf, data, size);
+	memcpy (buf, data, size);
 	return buf;
 }
 
@@ -406,7 +203,7 @@ void *CQuakeCache::Alloc (char *name, void *data, int size)
 	strcpy (cache->name, name);
 
 	// copy to the cache buffer
-	if (data) Q_MemCpy (cache->data, data, size);
+	if (data) memcpy (cache->data, data, size);
 
 	// link it in
 	cache->next = this->Head;
@@ -423,6 +220,7 @@ void *CQuakeCache::Check (char *name)
 	{
 		// these should never happen
 		if (!cache->name) continue;
+
 		if (!cache->data) continue;
 
 		if (!stricmp (cache->name, name))
@@ -459,6 +257,7 @@ void CQuakeCache::Flush (void)
 void *Zone_Alloc (int size)
 {
 	if (!MainZone) MainZone = new CQuakeZone ();
+
 	return MainZone->Alloc (size);
 }
 
@@ -552,9 +351,10 @@ void *CQuakeHunk::Alloc (int size)
 	this->LowMark += size;
 
 	// ensure set to 0 memory (bug city otherwise)
-	Q_MemSet (buf, 0, size);
+	memset (buf, 0, size);
 
 	TotalSize += size;
+
 	if (TotalSize > TotalPeak) TotalPeak = TotalSize;
 
 	return buf;
@@ -599,8 +399,11 @@ void Pool_Init (void)
 {
 	// init the pools we want to keep around all the time
 	if (!MainHunk) MainHunk = new CQuakeHunk (128);
+
 	if (!MainCache) MainCache = new CQuakeCache ();
+
 	if (!MainZone) MainZone = new CQuakeZone ();
+
 	if (!MapZone) MapZone = new CQuakeZone ();
 
 	// take a chunk of memory for use by temporary loading functions and other doo-dahs

@@ -20,9 +20,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <windows.h>
 #include "resource.h"
 
-// bitmaps and other image types
-IDR_SPLASH			RCDATA		"splash.png"
-
 IDR_PARTICLEDOT		RCDATA		"particledot.png"
 
 IDR_CROSSHAIR		RCDATA		"CrosshairFont.png"
@@ -33,9 +30,4 @@ IDR_MASTERFX		RCDATA		"fxMaster.fx"
 
 // icons
 IDI_APPICON			ICON		"dq.ico"
-
-// lookup tables
-IDR_ANORMDOTS		RCDATA		"anorm_dots.bin"
-IDR_ANORMS			RCDATA		"anorms.bin"
-IDR_D400K			RCDATA		"d400k.bin"
 

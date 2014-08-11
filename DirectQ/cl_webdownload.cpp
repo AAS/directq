@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -92,14 +92,14 @@ DWORD Web_DoDownload (char *url, char *file, DOWNLOADPROGRESSPROC progress)
 
 	// this one opens a specified URL; we don't use the cache or any UI here
 	if (!(hURL = QInternetOpenUrl
-	(
-		hInternet,
-		url,
-		NULL,
-		0,
-		INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_PRAGMA_NOCACHE | INTERNET_FLAG_RELOAD,
-		0
-	)))
+				  (
+					  hInternet,
+					  url,
+					  NULL,
+					  0,
+					  INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_PRAGMA_NOCACHE | INTERNET_FLAG_RELOAD,
+					  0
+				  )))
 	{
 		errcode = DL_ERR_OPENURLFAIL;
 		goto cleanup_fail;
@@ -230,6 +230,7 @@ DWORD Web_DoDownload (char *url, char *file, DOWNLOADPROGRESSPROC progress)
 
 	// success also falls through here
 cleanup_fail:;
+
 	if (fDownload) fclose (fDownload);
 
 	// if we succeeded we move the temp file to it's final location, otherwise we delete it
@@ -262,6 +263,7 @@ cleanup_fail:;
 	// because QInternetOpen and QInternetOpenUrl must have values for the handles to have values,
 	// QInternetCloseHandle is also guaranteed to have a value here.
 	if (hURL) QInternetCloseHandle (hURL);
+
 	if (hInternet) QInternetCloseHandle (hInternet);
 
 	QInternetOpen = NULL;

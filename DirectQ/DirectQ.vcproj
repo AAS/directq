@@ -4,6 +4,7 @@
 	Version="9.00"
 	Name="DirectQ"
 	ProjectGUID="{AE4C00CC-F232-4917-89D7-5D78E6DF6AEB}"
+	RootNamespace="DirectQ"
 	Keyword="Win32Proj"
 	TargetFrameworkVersion="131072"
 	>
@@ -46,17 +47,12 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				UseUnicodeResponseFiles="false"
 				Optimization="0"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;GLQUAKE;D3D_DEBUG_INFO"
-				BasicRuntimeChecks="3"
-				RuntimeLibrary="1"
-				BufferSecurityCheck="false"
-				TreatWChar_tAsBuiltInType="false"
-				RuntimeTypeInfo="false"
+				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
 				WarningLevel="1"
-				DebugInformationFormat="1"
+				DebugInformationFormat="3"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -79,10 +75,6 @@
 				GenerateDebugInformation="true"
 				ProgramDatabaseFile="$(OutDir)/DirectQ.pdb"
 				SubSystem="2"
-				StackReserveSize="1048576"
-				StackCommitSize="1048576"
-				LargeAddressAware="1"
-				TerminalServerAware="1"
 				RandomizedBaseAddress="1"
 				DataExecutionPrevention="1"
 				TargetMachine="1"
@@ -139,11 +131,10 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				UseUnicodeResponseFiles="false"
+				Optimization="4"
+				FavorSizeOrSpeed="1"
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;GLQUAKE"
 				RuntimeLibrary="0"
-				BufferSecurityCheck="false"
-				TreatWChar_tAsBuiltInType="false"
-				RuntimeTypeInfo="false"
 				UsePrecompiledHeader="0"
 				WarningLevel="1"
 				Detect64BitPortabilityProblems="false"
@@ -167,10 +158,6 @@
 				EnableUAC="false"
 				UACExecutionLevel="2"
 				SubSystem="2"
-				StackReserveSize="1048576"
-				StackCommitSize="1048576"
-				LargeAddressAware="1"
-				TerminalServerAware="1"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				RandomizedBaseAddress="1"
@@ -210,318 +197,366 @@
 			Filter="cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx"
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
-			<File
-				RelativePath=".\cd_win.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\chase.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_demo.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_efrag.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_input.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_main.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_parse.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_tent.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_view.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cl_webdownload.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cmd.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\com_common.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\com_filesystem.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\com_game.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\com_messaging.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\compat.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\console.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\crash.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\crc.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\cvar.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_alias.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_draw.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_enum.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_fog.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_model.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_occlusion.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_rlight.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_rmain.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_rmisc.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_rpart.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_rsurf.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_rtt.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_screen.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_sky.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_sprite.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_state.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_texture.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_vertexbuffer.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_vidnt.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_warp.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\dshow_mp3.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\heap.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\host.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\host_cmd.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\hud.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\imageloaders.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\in_win.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\keys.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\location.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\mathlib.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\md5.c"
-				>
-			</File>
-			<File
-				RelativePath=".\menu_common.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\menu_multiplayer.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\menu_other.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\menu_singleplayer.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\menu_video.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\nehahra.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\net_dgrm.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\net_loop.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\net_main.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\net_win.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\net_wins.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\pr_class.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\pr_cmds.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\pr_edict.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\qunicode.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\snd_dma.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\snd_mem.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\snd_mix.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\snd_win.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\sv_main.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\sv_move.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\sv_phys.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\sv_user.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\sv_world.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\sys_win.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\unzip.c"
-				>
-			</File>
-			<File
-				RelativePath=".\wad.cpp"
-				>
-			</File>
+			<Filter
+				Name="Client"
+				>
+				<File
+					RelativePath=".\chase.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_demo.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_efrag.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_input.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_main.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_parse.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_particles.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_tent.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_view.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cl_webdownload.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="Renderer"
+				>
+				<File
+					RelativePath=".\d3d_alias.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_alpha.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_brush.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_draw.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_enum.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_fog.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_hlsl.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_light.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_main.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_matrix.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_misc.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_model.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_part.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_screen.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_sky.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_state.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_surf.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_texture.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_vidnt.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\d3d_warp.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\imageloaders.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\wad.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="Interface"
+				>
+				<File
+					RelativePath=".\console.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\hud.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\in_win.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\keys.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\menu_common.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\menu_multiplayer.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\menu_other.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\menu_singleplayer.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\menu_video.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="Sound"
+				>
+				<File
+					RelativePath=".\cd_win.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\dshow_mp3.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\snd_dma.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\snd_mem.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\snd_mix.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\snd_win.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="Server"
+				>
+				<File
+					RelativePath=".\sv_main.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\sv_move.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\sv_phys.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\sv_user.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\sv_world.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="Net"
+				>
+				<File
+					RelativePath=".\net_dgrm.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\net_loop.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\net_main.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\net_win.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\net_wins.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="System"
+				>
+				<File
+					RelativePath=".\crash.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\crc.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\heap.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\mathlib.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\md5.c"
+					>
+				</File>
+				<File
+					RelativePath=".\qunicode.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\sys_win.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\unzip.c"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="Hacky Crap"
+				>
+				<File
+					RelativePath=".\compat.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\iplog.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\location.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\nehahra.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="Common"
+				>
+				<File
+					RelativePath=".\cmd.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\com_common.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\com_filesystem.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\com_game.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\com_messaging.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\cvar.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\host.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\host_cmd.cpp"
+					>
+				</File>
+			</Filter>
+			<Filter
+				Name="QC"
+				>
+				<File
+					RelativePath=".\pr_class.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\pr_cmds.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\pr_edict.cpp"
+					>
+				</File>
+			</Filter>
 		</Filter>
 		<Filter
 			Name="Header Files"
@@ -529,15 +564,15 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
+				RelativePath=".\anorms.h"
+				>
+			</File>
+			<File
 				RelativePath=".\bspfile.h"
 				>
 			</File>
 			<File
 				RelativePath=".\cdaudio.h"
-				>
-			</File>
-			<File
-				RelativePath=".\CGdiPlusBitmap.h"
 				>
 			</File>
 			<File
@@ -573,10 +608,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\d3d_vbo.h"
-				>
-			</File>
-			<File
 				RelativePath=".\draw.h"
 				>
 			</File>
@@ -602,6 +633,10 @@
 			</File>
 			<File
 				RelativePath=".\input.h"
+				>
+			</File>
+			<File
+				RelativePath=".\iplog.h"
 				>
 			</File>
 			<File
@@ -646,6 +681,10 @@
 			</File>
 			<File
 				RelativePath=".\net_wins.h"
+				>
+			</File>
+			<File
+				RelativePath=".\particles.h"
 				>
 			</File>
 			<File
@@ -739,14 +778,6 @@
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
 			<File
-				RelativePath=".\anorm_dots.bin"
-				>
-			</File>
-			<File
-				RelativePath=".\anorms.bin"
-				>
-			</File>
-			<File
 				RelativePath=".\CrosshairFont.png"
 				>
 			</File>
@@ -764,10 +795,6 @@
 			</File>
 			<File
 				RelativePath=".\particledot.png"
-				>
-			</File>
-			<File
-				RelativePath=".\splash.png"
 				>
 			</File>
 			<File

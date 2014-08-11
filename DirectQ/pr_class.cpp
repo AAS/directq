@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -28,7 +28,7 @@ cvar_t	pr_builtin_remap ("pr_builtin_remap", "0");
 
 char *pr_opnames[] =
 {
-	"DONE", "MUL_F", "MUL_V", "MUL_FV", "MUL_VF", "DIV", "ADD_F", "ADD_V", "SUB_F", "SUB_V", "EQ_F", "EQ_V", "EQ_S", 
+	"DONE", "MUL_F", "MUL_V", "MUL_FV", "MUL_VF", "DIV", "ADD_F", "ADD_V", "SUB_F", "SUB_V", "EQ_F", "EQ_V", "EQ_S",
 	"EQ_E", "EQ_FNC", "NE_F", "NE_V", "NE_S", "NE_E", "NE_FNC", "LE", "GE", "LT", "GT", "INDIRECT", "INDIRECT",
 	"INDIRECT", "INDIRECT", "INDIRECT", "INDIRECT", "ADDRESS", "STORE_F", "STORE_V", "STORE_S", "STORE_ENT",
 	"STORE_FLD", "STORE_FNC", "STOREP_F", "STOREP_V", "STOREP_S", "STOREP_ENT", "STOREP_FLD", "STOREP_FNC",
@@ -94,11 +94,11 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 
 	// CRC the progs
 	for (int i = 0; i < com_filesize; i++)
-		CRC_ProcessByte (&this->CRC, ((byte *) this->QC)[i]);
+		CRC_ProcessByte (&this->CRC, ((byte *) this->QC) [i]);
 
 	// byte swap the header
 	for (int i = 0; i < sizeof (dprograms_t) / 4; i++)
-		((int *) this->QC)[i] = LittleLong (((int *) this->QC)[i]);
+		((int *) this->QC) [i] = LittleLong (((int *) this->QC) [i]);
 
 	if (this->QC->version != PROG_VERSION) Host_Error ("progs.dat has wrong version number (%i should be %i)", this->QC->version, PROG_VERSION);
 	if (this->QC->crc != PROGHEADER_CRC) Host_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
@@ -146,6 +146,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 			if (pr_ebfs_builtins[j].funcno > pr_numbuiltins) pr_numbuiltins = pr_ebfs_builtins[j].funcno;
 		}
 	}
+
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	for (int i = 0; i < this->QC->numfunctions; i++)
@@ -175,6 +176,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 				else Con_DPrintf ("Can not assign builtin number #%i to %s - function unknown\n", funcno, funcname);
 			}
 		}
+
 		// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 	}
 
@@ -230,8 +232,10 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 		// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  start
 		if (pr_ebfs_builtins[j].default_funcno == PR_DEFAULT_FUNCNO_EXTENSION_FIND)
 			Cvar_Set ("pr_checkextension", pr_ebfs_builtins[j].funcno);
+
 		// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  end
 	}
+
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	for (int i = 0; i < this->QC->numglobaldefs; i++)
@@ -253,7 +257,15 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	}
 
 	for (int i = 0; i < this->QC->numglobals; i++)
+	{
+		if (this->Globals[i] != this->Globals[i])
+		{
+			// Con_Printf ("Got a NaN in Globals at %i\n", i);
+			this->Globals[i] = 0;
+		}
+
 		((int *) this->Globals)[i] = LittleLong (((int *) this->Globals)[i]);
+	}
 
 	FindEdictFieldOffsets ();
 }
@@ -313,6 +325,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 		c = (eval_t *) &this->Globals[(unsigned short) st->c];
 
 		if (!--runaway) this->RunError ("runaway loop error %d");
+
 		if (this->Trace) this->PrintStatement (st);
 
 		switch (st->op)
@@ -339,9 +352,9 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			c->_float = a->_float * b->_float;
 			break;
 		case OP_MUL_V:
-			c->_float = a->vector[0]*b->vector[0]
-					+ a->vector[1]*b->vector[1]
-					+ a->vector[2]*b->vector[2];
+			c->_float = a->vector[0] * b->vector[0]
+						+ a->vector[1] * b->vector[1]
+						+ a->vector[2] * b->vector[2];
 			break;
 		case OP_MUL_FV:
 			c->vector[0] = a->_float * b->vector[0];
@@ -357,10 +370,10 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			c->_float = a->_float / b->_float;
 			break;
 		case OP_BITAND:
-			c->_float = (int)a->_float & (int)b->_float;
+			c->_float = (int) a->_float & (int) b->_float;
 			break;
 		case OP_BITOR:
-			c->_float = (int)a->_float | (int)b->_float;
+			c->_float = (int) a->_float | (int) b->_float;
 			break;
 		case OP_GE:
 			c->_float = a->_float >= b->_float;
@@ -393,7 +406,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			c->_float = !a->function;
 			break;
 		case OP_NOT_ENT:
-			c->_float = (PROG_TO_EDICT(a->edict) == this->EdictPointers[0]);
+			c->_float = (PROG_TO_EDICT (a->edict) == this->EdictPointers[0]);
 			break;
 		case OP_EQ_F:
 			c->_float = a->_float == b->_float;
@@ -404,7 +417,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 						(a->vector[2] == b->vector[2]);
 			break;
 		case OP_EQ_S:
-			c->_float = !strcmp(this->Strings+a->string,this->Strings+b->string);
+			c->_float = !strcmp (this->Strings + a->string, this->Strings + b->string);
 			break;
 		case OP_EQ_E:
 			c->_float = a->_int == b->_int;
@@ -421,7 +434,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 						(a->vector[2] != b->vector[2]);
 			break;
 		case OP_NE_S:
-			c->_float = strcmp(this->Strings+a->string,this->Strings+b->string);
+			c->_float = strcmp (this->Strings + a->string, this->Strings + b->string);
 			break;
 		case OP_NE_E:
 			c->_float = a->_int != b->_int;
@@ -430,7 +443,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			c->_float = a->function != b->function;
 			break;
 
-	//==================
+			//==================
 		case OP_STORE_F:
 		case OP_STORE_ENT:
 		case OP_STORE_FLD:		// integers
@@ -462,7 +475,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			break;
 
 		case OP_ADDRESS:
-			ed = PROG_TO_EDICT(a->edict);
+			ed = PROG_TO_EDICT (a->edict);
 
 			if (ed == (edict_t *) this->EdictPointers[0] && sv.state == ss_active)
 				this->RunError ("CProgsDat::ExecuteProgram: assignment to world entity");
@@ -478,31 +491,35 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 		case OP_LOAD_ENT:
 		case OP_LOAD_S:
 		case OP_LOAD_FNC:
-			ed = PROG_TO_EDICT(a->edict);
+			ed = PROG_TO_EDICT (a->edict);
 
-			a = (eval_t *)((int *)&ed->v + b->_int);
+			a = (eval_t *) ((int *) &ed->v + b->_int);
 			c->_int = a->_int;
 			break;
 
 		case OP_LOAD_V:
-			ed = PROG_TO_EDICT(a->edict);
+			ed = PROG_TO_EDICT (a->edict);
 
-			a = (eval_t *)((int *)&ed->v + b->_int);
+			a = (eval_t *) ((int *) &ed->v + b->_int);
 			c->vector[0] = a->vector[0];
 			c->vector[1] = a->vector[1];
 			c->vector[2] = a->vector[2];
 			break;
 
-	//==================
+			//==================
 
 		case OP_IFNOT:
+
 			if (!a->_int)
 				s += (signed short) st->b - 1;	// offset the s++
+
 			break;
 
 		case OP_IF:
+
 			if (a->_int)
 				s += (signed short) st->b - 1;	// offset the s++
+
 			break;
 
 		case OP_GOTO:
@@ -525,7 +542,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 				if ((st - 1)->op == OP_LOAD_FNC) // OK?
 					ED_Print (ed); // Print owner edict, if any
 				else if (this->GlobalStruct->self)
-					ED_Print (PROG_TO_EDICT(this->GlobalStruct->self));
+					ED_Print (PROG_TO_EDICT (this->GlobalStruct->self));
 
 				this->RunError ("PR_ExecuteProgram2: NULL function");
 			}
@@ -561,16 +578,16 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			{
 				return;		// all done
 			}
+
 			break;
 
 		case OP_STATE:
-			ed = PROG_TO_EDICT(this->GlobalStruct->self);
+			ed = PROG_TO_EDICT (this->GlobalStruct->self);
 			ed->v.nextthink = this->GlobalStruct->time + 0.1;
 
 			if (a->_float != ed->v.frame)
-			{
 				ed->v.frame = a->_float;
-			}
+
 			ed->v.think = b->function;
 			break;
 
@@ -586,7 +603,7 @@ int CProgsDat::EnterFunction (dfunction_t *f)
 	int i, j, c, o;
 
 	this->Stack[this->StackDepth].s = this->XStatement;
-	this->Stack[this->StackDepth].f = this->XFunction;	
+	this->Stack[this->StackDepth].f = this->XFunction;
 	this->StackDepth++;
 
 	if (this->StackDepth >= MAX_STACK_DEPTH) this->RunError ("CProgsDat::EnterFunction: stack overflow (%d, max = %d)", this->StackDepth, MAX_STACK_DEPTH - 1);
@@ -598,7 +615,7 @@ int CProgsDat::EnterFunction (dfunction_t *f)
 		this->RunError ("CProgsDat::EnterFunction: locals stack overflow (%d, max = %d)", this->LocalStackUsed + c, LOCALSTACK_SIZE);
 
 	for (i = 0; i < c; i++)
-		this->LocalStack[this->LocalStackUsed + i] = ((int *) this->Globals)[f->parm_start + i];
+		this->LocalStack[this->LocalStackUsed + i] = ((int *) this->Globals) [f->parm_start + i];
 
 	this->LocalStackUsed += c;
 
@@ -609,7 +626,7 @@ int CProgsDat::EnterFunction (dfunction_t *f)
 	{
 		for (j = 0; j < f->parm_size[i]; j++)
 		{
-			((int *) this->Globals)[o] = ((int *) this->Globals)[OFS_PARM0 + i * 3 + j];
+			((int *) this->Globals) [o] = ((int *) this->Globals) [OFS_PARM0 + i * 3 + j];
 			o++;
 		}
 	}
@@ -634,7 +651,7 @@ int CProgsDat::LeaveFunction (void)
 		this->RunError ("CProgsDat::LeaveFunction: locals stack underflow\n");
 
 	for (i = 0; i < c; i++)
-		((int *) this->Globals)[this->XFunction->parm_start + i] = this->LocalStack[this->LocalStackUsed + i];
+		((int *) this->Globals) [this->XFunction->parm_start + i] = this->LocalStack[this->LocalStackUsed + i];
 
 	// up stack
 	this->StackDepth--;
@@ -661,7 +678,9 @@ void CProgsDat::PrintStatement (dstatement_t *s)
 	else
 	{
 		if (s->a) Con_SafePrintf ("%s", PR_GlobalString ((unsigned short) s->a));
+
 		if (s->b) Con_SafePrintf ("%s", PR_GlobalString ((unsigned short) s->b));
+
 		if (s->c) Con_SafePrintf ("%s", PR_GlobalStringNoContents ((unsigned short) s->c));
 	}
 
@@ -674,8 +693,8 @@ void CProgsDat::RunError (char *error, ...)
 	va_list		argptr;
 	char		string[1024];
 
-	va_start (argptr,error);
-	_vsnprintf (string,1024, error,argptr);
+	va_start (argptr, error);
+	_vsnprintf (string, 1024, error, argptr);
 	va_end (argptr);
 
 	this->PrintStatement (this->Statements + this->XStatement);
@@ -697,7 +716,8 @@ void CProgsDat::Profile (void)
 	int			num;
 	int			i;
 
-	num = 0;	
+	num = 0;
+
 	do
 	{
 		max = 0;
@@ -706,16 +726,19 @@ void CProgsDat::Profile (void)
 		for (i = 0; i < this->QC->numfunctions; i++)
 		{
 			f = &this->Functions[i];
+
 			if (f->profile > max)
 			{
 				max = f->profile;
 				best = f;
 			}
 		}
+
 		if (best)
 		{
 			if (num < 10)
 				Con_Printf ("%7i %s\n", best->profile, this->Strings + best->s_name);
+
 			num++;
 			best->profile = 0;
 		}

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -17,9 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-//
 // modelgen.h: header file for model generation program
-//
 
 // *********************************************************
 // * This file must be identical in the modelgen directory *
@@ -49,14 +47,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // must match definition in spritegn.h
 #ifndef SYNCTYPE_T
 #define SYNCTYPE_T
-typedef enum {ST_SYNC=0, ST_RAND } synctype_t;
+typedef enum {ST_SYNC = 0, ST_RAND} synctype_t;
 #endif
 
-typedef enum { ALIAS_SINGLE=0, ALIAS_GROUP } aliasframetype_t;
+typedef enum { ALIAS_SINGLE = 0, ALIAS_GROUP} aliasframetype_t;
 
-typedef enum { ALIAS_SKIN_SINGLE=0, ALIAS_SKIN_GROUP } aliasskintype_t;
+typedef enum { ALIAS_SKIN_SINGLE = 0, ALIAS_SKIN_GROUP} aliasskintype_t;
 
-typedef struct {
+typedef struct
+{
 	int			ident;
 	int			version;
 	vec3_t		scale;
@@ -103,12 +102,25 @@ typedef struct
 // pre-expanded
 typedef struct drawvertx_s
 {
-	byte	v[3];
+	// this is so that we can assign positions directly instead of one at a time
+	// (when we get vertex compression working we'll send positions as bytes instead of as floats)
+	union
+	{
+		byte	v[4];
+		DWORD	xyz;
+	};
+
+	union
+	{
+		byte	normal4ub[4];
+		DWORD	normal1dw;
+	};
+
 	byte	lightnormalindex;
 	bool	lerpvert;
 } drawvertx_t;
 
-typedef struct 
+typedef struct
 {
 	trivertx_t	bboxmin;	// lightnormal isn't used
 	trivertx_t	bboxmax;	// lightnormal isn't used
@@ -148,5 +160,5 @@ typedef struct
 } daliasskintype_t;
 
 #define IDPOLYHEADER	(('O'<<24)+('P'<<16)+('D'<<8)+'I')
-														// little-endian "IDPO"
+// little-endian "IDPO"
 

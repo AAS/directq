@@ -21,10 +21,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
-#include "d3d_vbo.h"
 
 float d3d_FogColor[4] = {0.3, 0.3, 0.3, 0};
 float d3d_FogDensity = 0;
+char lastworldmodel[64] = {0};
+
+
+// nehahra assumes that these cvars are going to be written to config
+cvar_t gl_fogenable ("gl_fogenable", 0.0f);
+cvar_t gl_fogred ("gl_fogred", 0.3f);
+cvar_t gl_foggreen ("gl_foggreen", 0.3f);
+cvar_t gl_fogblue ("gl_fogblue", 0.3f);
+cvar_t gl_fogdensity ("gl_fogdensity", 0.0f);
 
 void Fog_Update (float density, float r, float g, float b)
 {
@@ -34,6 +42,43 @@ void Fog_Update (float density, float r, float g, float b)
 	d3d_FogColor[1] = g > 1 ? 1 : (g < 0 ? 0 : g);
 	d3d_FogColor[2] = b > 1 ? 1 : (b < 0 ? 0 : b);
 	d3d_FogColor[3] = 0;
+
+	// update cvars
+	if (d3d_FogDensity > 0)
+	{
+		Cvar_Set (&gl_fogenable, 1.0f);
+		Cvar_Set (&gl_fogdensity, d3d_FogDensity);
+	}
+	else Cvar_Set (&gl_fogenable, 0.0f);
+
+	Cvar_Set (&gl_fogred, d3d_FogColor[0]);
+	Cvar_Set (&gl_foggreen, d3d_FogColor[1]);
+	Cvar_Set (&gl_fogblue, d3d_FogColor[2]);
+}
+
+
+void D3DHLSL_EnableFog (bool enabled);
+
+void Fog_FrameCheck (void)
+{
+	// compatibility with old cvar system
+	if (gl_fogenable.value)
+	{
+		// ensure that we have a default density
+		if (gl_fogdensity.value <= 0.0f)
+			Cvar_Set (&gl_fogdensity, 0.01f);
+
+		// copy them out to our values
+		d3d_FogDensity = gl_fogdensity.value;
+		d3d_FogColor[0] = gl_fogred.value;
+		d3d_FogColor[1] = gl_foggreen.value;
+		d3d_FogColor[2] = gl_fogblue.value;
+		d3d_FogColor[3] = 0;
+	}
+
+	if (d3d_FogDensity > 0 && gl_fogenable.value)
+		D3DHLSL_EnableFog (true);
+	else D3DHLSL_EnableFog (false);
 }
 
 
@@ -42,18 +87,26 @@ void Fog_ParseWorldspawn (void)
 	char key[128], value[4096];
 	char *data;
 
-	// initially no fog
+	// if we're on the same map as before we keep the old settings, otherwise we wipe them
+	if (!strcmp (lastworldmodel, cl.worldmodel->name))
+		return;
+
+	// always wipe density
 	d3d_FogDensity = 0.0;
+
+	// to do - possibly change these depending on worldtype?????
+	// should we even wipe these?  or leave them as the player set them???
+	Fog_Update (0, 0.3, 0.3, 0.3);
+
 	data = COM_Parse (cl.worldmodel->brushhdr->entities);
+	strcpy (lastworldmodel, cl.worldmodel->name);
 
 	if (!data) return;
 	if (com_token[0] != '{') return;
 
 	while (1)
 	{
-		data = COM_Parse (data);
-
-		if (!data) return;
+		if (!(data = COM_Parse (data))) return;
 		if (com_token[0] == '}') return;
 
 		if (com_token[0] == '_')
@@ -63,9 +116,7 @@ void Fog_ParseWorldspawn (void)
 		while (key[strlen (key) - 1] == ' ') // remove trailing spaces
 			key[strlen (key) - 1] = 0;
 
-		data = COM_Parse (data);
-
-		if (!data) return; // error
+		if (!(data = COM_Parse (data))) return; // error
 
 		strcpy (value, com_token);
 

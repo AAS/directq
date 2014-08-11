@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -37,13 +37,12 @@ typedef struct d3d_texture_s
 d3d_texture_t *d3d_TextureList = NULL;
 int d3d_NumTextures = 0;
 
-void D3D_Kill3DSceneTexture (void);
-
 // other textures we use
 extern LPDIRECT3DTEXTURE9 char_texture;
 extern LPDIRECT3DTEXTURE9 char_textures[];
 extern LPDIRECT3DTEXTURE9 solidskytexture;
 extern LPDIRECT3DTEXTURE9 alphaskytexture;
+extern LPDIRECT3DTEXTURE9 d3d_ShadedotsTexture;
 LPDIRECT3DTEXTURE9 yahtexture;
 
 // palette hackery
@@ -155,125 +154,334 @@ D3DFORMAT D3D_GetTextureFormat (int flags)
 
 bool d3d_ImagePadded = false;
 
-void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags)
+void D3D_Transfer8BitTexture (byte *src, unsigned *dst, int size, unsigned *palette)
 {
-	if ((flags & IMAGE_SCRAP) && !(flags & IMAGE_32BIT))// && width < 64 && height < 64)
+	while (size > 16)
 	{
-		// load little ones into the scrap
-		texture[0] = NULL;
-		return;
+		dst[0] = palette[src[0]];
+		dst[1] = palette[src[1]];
+		dst[2] = palette[src[2]];
+		dst[3] = palette[src[3]];
+		dst[4] = palette[src[4]];
+		dst[5] = palette[src[5]];
+		dst[6] = palette[src[6]];
+		dst[7] = palette[src[7]];
+		dst[8] = palette[src[8]];
+		dst[9] = palette[src[9]];
+		dst[10] = palette[src[10]];
+		dst[11] = palette[src[11]];
+		dst[12] = palette[src[12]];
+		dst[13] = palette[src[13]];
+		dst[14] = palette[src[14]];
+		dst[15] = palette[src[15]];
+
+		size -= 16;
+		dst += 16;
+		src += 16;
 	}
 
-	// scaled image
-	image_t scaled;
-	byte *padbytes = NULL;
-
-	// explicit NULL
-	texture[0] = NULL;
-
-	// check scaling here first
-	// removed np2 support because it can scale textures weirdly on some (all?) drivers
-	scaled.width = D3D_PowerOf2Size (width);
-	scaled.height = D3D_PowerOf2Size (height);
-
-	// clamp to max texture size
-	if (scaled.width > d3d_DeviceCaps.MaxTextureWidth) scaled.width = d3d_DeviceCaps.MaxTextureWidth;
-	if (scaled.height > d3d_DeviceCaps.MaxTextureHeight) scaled.height = d3d_DeviceCaps.MaxTextureHeight;
-
-	// don't compress if not a multiple of 4 (marcher gets this)
-	if (scaled.width & 3) flags |= IMAGE_NOCOMPRESS;
-	if (scaled.height & 3) flags |= IMAGE_NOCOMPRESS;
-
-	// create the texture at the scaled size
-	hr = d3d_Device->CreateTexture
-	(
-		scaled.width,
-		scaled.height,
-		(flags & IMAGE_MIPMAP) ? 0 : 1,
-		0,
-		D3D_GetTextureFormat (flags),
-		(flags & IMAGE_SYSMEM) ? D3DPOOL_SYSTEMMEM : D3DPOOL_MANAGED,
-		texture,
-		NULL
-	);
-
-	if (FAILED (hr))
+	while (size > 8)
 	{
-		UINT blah = d3d_Device->GetAvailableTextureMem ();
-		Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with %i vram", (blah / 1024) / 1024);
-		return;
+		dst[0] = palette[src[0]];
+		dst[1] = palette[src[1]];
+		dst[2] = palette[src[2]];
+		dst[3] = palette[src[3]];
+		dst[4] = palette[src[4]];
+		dst[5] = palette[src[5]];
+		dst[6] = palette[src[6]];
+		dst[7] = palette[src[7]];
+
+		size -= 8;
+		dst += 8;
+		src += 8;
 	}
 
-	LPDIRECT3DSURFACE9 texsurf = NULL;
-	texture[0]->GetSurfaceLevel (0, &texsurf);
-
-	RECT SrcRect;
-	SrcRect.top = 0;
-	SrcRect.left = 0;
-	SrcRect.bottom = height;
-	SrcRect.right = width;
-
-	DWORD FilterFlags = 0;
-	d3d_ImagePadded = false;
-
-	if (scaled.width == width && scaled.height == height)
+	while (size > 4)
 	{
-		// no need
-		FilterFlags |= D3DX_FILTER_NONE;
-	}
-	else if ((flags & IMAGE_PADDABLE) && !(flags & IMAGE_32BIT))
-	{
-		// create a buffer for padding
-		padbytes = (byte *) Zone_Alloc (scaled.width * scaled.height);
-		byte *dst = padbytes;
-		byte *src = (byte *) data;
+		dst[0] = palette[src[0]];
+		dst[1] = palette[src[1]];
+		dst[2] = palette[src[2]];
+		dst[3] = palette[src[3]];
 
-		for (int y = 0; y < height; y++, dst += scaled.width, src += width)
-			for (int x = 0; x < width; x++) dst[x] = src[x];
-
-		d3d_ImagePadded = true;
-	}
-	else if ((flags & IMAGE_PADDABLE) && (flags & IMAGE_32BIT))
-	{
-		// create a buffer for padding
-		padbytes = (byte *) Zone_Alloc (scaled.width * scaled.height * 4);
-		unsigned int *dst = (unsigned int *) padbytes;
-		unsigned int *src = (unsigned int *) data;
-
-		for (int y = 0; y < height; y++, dst += scaled.width, src += width)
-			for (int x = 0; x < width; x++) dst[x] = src[x];
-
-		d3d_ImagePadded = true;
-	}
-	else
-	{
-		FilterFlags |= D3DX_FILTER_LINEAR; //D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER;
-
-		// it's generally assumed that mipmapped textures should also wrap
-		if (flags & IMAGE_MIPMAP) FilterFlags |= (D3DX_FILTER_MIRROR_U | D3DX_FILTER_MIRROR_V);
+		size -= 4;
+		dst += 4;
+		src += 4;
 	}
 
-	if (d3d_ImagePadded)
-	{
-		// no filter needed now
-		FilterFlags |= D3DX_FILTER_NONE;
+	for (int i = 0; i < size; i++)
+		dst[i] = palette[src[i]];
+}
 
-		// the source data has changed so change these too
-		width = scaled.width;
-		height = scaled.height;
+
+void D3D_Transfer32BitTexture (unsigned *src, unsigned *dst, int size)
+{
+	while (size > 16)
+	{
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = src[3];
+		dst[4] = src[4];
+		dst[5] = src[5];
+		dst[6] = src[6];
+		dst[7] = src[7];
+		dst[8] = src[8];
+		dst[9] = src[9];
+		dst[10] = src[10];
+		dst[11] = src[11];
+		dst[12] = src[12];
+		dst[13] = src[13];
+		dst[14] = src[14];
+		dst[15] = src[15];
+
+		size -= 16;
+		dst += 16;
+		src += 16;
 	}
 
+	while (size > 8)
+	{
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = src[3];
+		dst[4] = src[4];
+		dst[5] = src[5];
+		dst[6] = src[6];
+		dst[7] = src[7];
+
+		size -= 8;
+		dst += 8;
+		src += 8;
+	}
+
+	while (size > 4)
+	{
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = src[3];
+
+		size -= 4;
+		dst += 4;
+		src += 4;
+	}
+
+	for (int i = 0; i < size; i++)
+		dst[i] = src[i];
+}
+
+
+void D3D_Resample8BitTexture (byte *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight, unsigned *palette)
+{
+	int		i, j;
+	byte	*inrow, *inrow2;
+	unsigned	frac, fracstep;
+	unsigned	*p1, *p2;
+	byte		*pix1, *pix2, *pix3, *pix4;
+
+	p1 = (unsigned *) MainHunk->Alloc (outwidth * 4);
+	p2 = (unsigned *) MainHunk->Alloc (outwidth * 4);
+
+	fracstep = inwidth * 0x10000 / outwidth;
+	frac = fracstep >> 2;
+
+	for (i = 0; i < outwidth; i++)
+	{
+		p1[i] = (frac >> 16);
+		frac += fracstep;
+	}
+
+	frac = 3 * (fracstep >> 2);
+
+	for (i = 0; i < outwidth; i++)
+	{
+		p2[i] = (frac >> 16);
+		frac += fracstep;
+	}
+
+	for (i = 0; i < outheight; i++, out += outwidth)
+	{
+		inrow = in + inwidth * (int) ((i + 0.25) * inheight / outheight);
+		inrow2 = in + inwidth * (int) ((i + 0.75) * inheight / outheight);
+		frac = fracstep >> 1;
+
+		for (j = 0; j < outwidth; j++)
+		{
+			pix1 = (byte *) &palette[inrow[p1[j]]];
+			pix2 = (byte *) &palette[inrow[p2[j]]];
+			pix3 = (byte *) &palette[inrow2[p1[j]]];
+			pix4 = (byte *) &palette[inrow2[p2[j]]];
+
+			((byte *) (out + j)) [0] = (pix1[0] + pix2[0] + pix3[0] + pix4[0]) >> 2;
+			((byte *) (out + j)) [1] = (pix1[1] + pix2[1] + pix3[1] + pix4[1]) >> 2;
+			((byte *) (out + j)) [2] = (pix1[2] + pix2[2] + pix3[2] + pix4[2]) >> 2;
+			((byte *) (out + j)) [3] = (pix1[3] + pix2[3] + pix3[3] + pix4[3]) >> 2;
+		}
+	}
+}
+
+
+void D3D_Resample32BitTexture (unsigned *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight)
+{
+	int		i, j;
+	unsigned	*inrow, *inrow2;
+	unsigned	frac, fracstep;
+	unsigned	*p1, *p2;
+	byte		*pix1, *pix2, *pix3, *pix4;
+
+	p1 = (unsigned *) MainHunk->Alloc (outwidth * 4);
+	p2 = (unsigned *) MainHunk->Alloc (outwidth * 4);
+
+	fracstep = inwidth * 0x10000 / outwidth;
+	frac = fracstep >> 2;
+
+	for (i = 0; i < outwidth; i++)
+	{
+		p1[i] = 4 * (frac >> 16);
+		frac += fracstep;
+	}
+
+	frac = 3 * (fracstep >> 2);
+
+	for (i = 0; i < outwidth; i++)
+	{
+		p2[i] = 4 * (frac >> 16);
+		frac += fracstep;
+	}
+
+	for (i = 0; i < outheight; i++, out += outwidth)
+	{
+		inrow = in + inwidth * (int) ((i + 0.25) * inheight / outheight);
+		inrow2 = in + inwidth * (int) ((i + 0.75) * inheight / outheight);
+		frac = fracstep >> 1;
+
+		for (j = 0; j < outwidth; j++)
+		{
+			pix1 = (byte *) inrow + p1[j];
+			pix2 = (byte *) inrow + p2[j];
+			pix3 = (byte *) inrow2 + p1[j];
+			pix4 = (byte *) inrow2 + p2[j];
+
+			((byte *) (out + j)) [0] = (pix1[0] + pix2[0] + pix3[0] + pix4[0]) >> 2;
+			((byte *) (out + j)) [1] = (pix1[1] + pix2[1] + pix3[1] + pix4[1]) >> 2;
+			((byte *) (out + j)) [2] = (pix1[2] + pix2[2] + pix3[2] + pix4[2]) >> 2;
+			((byte *) (out + j)) [3] = (pix1[3] + pix2[3] + pix3[3] + pix4[3]) >> 2;
+		}
+	}
+}
+
+
+unsigned *D3D_GetTexturePalette (PALETTEENTRY *d_8to24table, int flags)
+{
+	static unsigned texturepal[256];
+	static int lastflags = -1;
+
+	// if the type hasn't changed just return the last palette we got
+	if (flags == lastflags) return texturepal;
+
+	// 32 bit images don't need palettes
+	if (flags & IMAGE_32BIT) return texturepal;
+
+	for (int i = 0; i < 256; i++)
+	{
+		byte *dst = (byte *) &texturepal[i];
+
+		// bgra
+		dst[2] = d_8to24table[i].peRed;
+		dst[1] = d_8to24table[i].peGreen;
+		dst[0] = d_8to24table[i].peBlue;
+		dst[3] = d_8to24table[i].peFlags;
+	}
+
+	lastflags = flags;
+
+	return texturepal;
+}
+
+
+void D3D_Pad8BitTexture (byte *data, int width, int height, unsigned *padded, int scaled_width, int scaled_height, unsigned *palette)
+{
+	for (int y = 0; y < height; y++)
+	{
+		for (int x = 0; x < width; x++)
+			padded[x] = palette[data[x]];
+
+		data += width;
+		padded += scaled_width;
+	}
+}
+
+
+void D3D_Pad32BitTexture (unsigned *data, int width, int height, unsigned *padded, int scaled_width, int scaled_height)
+{
+	for (int y = 0; y < height; y++)
+	{
+		for (int x = 0; x < width; x++)
+			padded[x] = data[x];
+
+		data += width;
+		padded += scaled_width;
+	}
+}
+
+
+void TM_AlphaEdgeFix (byte *data, int width, int height)
+{
+	int i, j, n = 0, b, c[3] = {0, 0, 0}, lastrow, thisrow, nextrow, lastpix, thispix, nextpix;
+	byte *dest = data;
+
+	for (i = 0; i < height; i++)
+	{
+		lastrow = width * 4 * ((i == 0) ? height - 1 : i - 1);
+		thisrow = width * 4 * i;
+		nextrow = width * 4 * ((i == height - 1) ? 0 : i + 1);
+
+		for (j = 0; j < width; j++, dest += 4)
+		{
+			if (dest[3]) // not transparent
+				continue;
+
+			lastpix = 4 * ((j == 0) ? width - 1 : j - 1);
+			thispix = 4 * j;
+			nextpix = 4 * ((j == width - 1) ? 0 : j + 1);
+
+			b = lastrow + lastpix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+			b = thisrow + lastpix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+			b = nextrow + lastpix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+			b = lastrow + thispix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+			b = nextrow + thispix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+			b = lastrow + nextpix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+			b = thisrow + nextpix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+			b = nextrow + nextpix; if (data[b + 3]) {c[0] += data[b]; c[1] += data[b + 1]; c[2] += data[b + 2]; n++;}
+
+			// average all non-transparent neighbors
+			if (n)
+			{
+				dest[0] = (byte) (c[0] / n);
+				dest[1] = (byte) (c[1] / n);
+				dest[2] = (byte) (c[2] / n);
+
+				n = c[0] = c[1] = c[2] = 0;
+			}
+		}
+	}
+}
+
+
+void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int scaled_width, int scaled_height, int flags)
+{
 	// default to the standard palette
 	PALETTEENTRY *activepal = d3d_QuakePalette.standard;
 
-	// switch the palette
-//	if (flags & IMAGE_HALFLIFE) activepal = (PALETTEENTRY *) palette;
-
 	// sky has flags & IMAGE_32BIT so it doesn't get paletteized
 	// (not always - solid sky goes up as 8 bits.  it doesn't have IMAGE_BSP however so all is good
-	if ((flags & IMAGE_BSP) || (flags & IMAGE_ALIAS))
+	// nehahra assumes that fullbrights are not available in the engine
+	if (((flags & IMAGE_BSP) || (flags & IMAGE_ALIAS)) && !nehahra)
 	{
-		if (flags & IMAGE_LIQUID)
+		if (flags & IMAGE_FENCE)
+			activepal = d3d_QuakePalette.standard;
+		else if (flags & IMAGE_LIQUID)
 			activepal = d3d_QuakePalette.standard;
 		else if (flags & IMAGE_LUMA)
 			activepal = d3d_QuakePalette.luma;
@@ -281,36 +489,110 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	}
 	else activepal = d3d_QuakePalette.standard;
 
-	hr = QD3DXLoadSurfaceFromMemory
-	(
-		texsurf,
-		NULL,
-		NULL,
-		padbytes ? padbytes : data,
-		(flags & IMAGE_32BIT) ? D3DFMT_A8R8G8B8 : D3DFMT_P8,
-		(flags & IMAGE_32BIT) ? width * 4 : width,
-		(flags & IMAGE_32BIT) ? NULL : activepal,
-		&SrcRect,
-		FilterFlags,
-		0
-	);
+	// now get the final palette in a format we can transfer to the raw data
+	unsigned *palette = D3D_GetTexturePalette (activepal, flags);
 
-	if (FAILED (hr))
+	D3DLOCKED_RECT lockrect;
+	texture[0]->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+	unsigned *trans = (unsigned *) lockrect.pBits;
+
+	// note - we don't check for np2 support here because we also need to account for clamping to max size
+	if (scaled_width == width && scaled_height == height)
 	{
-		Sys_Error ("D3D_UploadTexture: QD3DXLoadSurfaceFromMemory failed");
+		if (flags & IMAGE_32BIT)
+			D3D_Transfer32BitTexture ((unsigned *) data, trans, width * height);
+		else D3D_Transfer8BitTexture ((byte *) data, trans, width * height, palette);
+	}
+	else
+	{
+		int hunkmark = MainHunk->GetLowMark ();
+
+		if (flags & IMAGE_PADDABLE)
+		{
+			// clear texture to alpha
+			memset (trans, 0, scaled_width * scaled_height * 4);
+
+			if (flags & IMAGE_32BIT)
+				D3D_Pad32BitTexture ((unsigned *) data, width, height, trans, scaled_width, scaled_height);
+			else D3D_Pad8BitTexture ((byte *) data, width, height, trans, scaled_width, scaled_height, palette);
+
+			d3d_ImagePadded = true;
+		}
+		else
+		{
+			if (flags & IMAGE_32BIT)
+				D3D_Resample32BitTexture ((unsigned *) data, width, height, trans, scaled_width, scaled_height);
+			else D3D_Resample8BitTexture ((byte *) data, width, height, trans, scaled_width, scaled_height, palette);
+		}
+
+		MainHunk->FreeToLowMark (hunkmark);
+	}
+
+	// fix alpha edges on textures that need them
+	if ((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE))
+		TM_AlphaEdgeFix ((byte *) lockrect.pBits, scaled_width, scaled_height);
+
+	texture[0]->UnlockRect (0);
+	texture[0]->AddDirtyRect (NULL);
+
+	// automatic mipmapping sucks because it doesn't support a box filter
+	if (flags & IMAGE_MIPMAP)
+		D3DXFilterTexture (texture[0], NULL, 0, D3DX_FILTER_BOX);
+
+	texture[0]->PreLoad ();
+}
+
+
+void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags)
+{
+	if ((flags & IMAGE_SCRAP) && !(flags & IMAGE_32BIT)) // && width < 64 && height < 64)
+	{
+		// load little ones into the scrap
+		SAFE_RELEASE (texture[0]);
 		return;
 	}
 
-	texsurf->Release ();
+	// explicit release as we're completely respecifying the texture
+	SAFE_RELEASE (texture[0]);
 
-	// if we padded the image we need to hand back the memory used now
-	if (padbytes) Zone_Free (padbytes);
+	// the scaled sizes are initially equal to the original sizes (for np2 support)
+	int scaled_width = width;
+	int scaled_height = height;
 
-	// good old box filter - triangle is way too slow, linear doesn't work well for mipmapping
-	if (flags & IMAGE_MIPMAP) QD3DXFilterTexture (texture[0], NULL, 0, D3DX_FILTER_BOX);
+	// check scaling here first
+	if (!d3d_GlobalCaps.supportNonPow2)
+	{
+		scaled_width = D3D_PowerOf2Size (width);
+		scaled_height = D3D_PowerOf2Size (height);
+	}
 
-	// tell Direct 3D that we're going to be needing to use this managed resource shortly
-	texture[0]->PreLoad ();
+	// clamp to max texture size (remove pad flag if it needs to clamp)
+	if (scaled_width > d3d_DeviceCaps.MaxTextureWidth) {scaled_width = d3d_DeviceCaps.MaxTextureWidth; flags &= ~IMAGE_PADDABLE;}
+	if (scaled_height > d3d_DeviceCaps.MaxTextureHeight) {scaled_height = d3d_DeviceCaps.MaxTextureHeight; flags &= ~IMAGE_PADDABLE;}
+
+	// create the texture at the scaled size
+	hr = d3d_Device->CreateTexture
+	(
+		scaled_width,
+		scaled_height,
+		(flags & IMAGE_MIPMAP) ? 0 : 1,
+		0,
+		((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE)) ? D3DFMT_A8R8G8B8 : D3DFMT_X8R8G8B8,
+		(flags & IMAGE_SYSMEM) ? D3DPOOL_SYSTEMMEM : D3DPOOL_MANAGED,
+		texture,
+		NULL
+	);
+
+	switch (hr)
+	{
+	case D3DERR_INVALIDCALL: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with D3DERR_INVALIDCALL");
+	case D3DERR_OUTOFVIDEOMEMORY: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with D3DERR_OUTOFVIDEOMEMORY");
+	case E_OUTOFMEMORY: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with E_OUTOFMEMORY");
+	case D3D_OK: break;
+	default: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed (unknown error)");
+	}
+
+	D3D_LoadTextureData (texture, data, width, height, scaled_width, scaled_height, flags);
 }
 
 
@@ -334,8 +616,22 @@ byte sky_purp_alpha[] = {143, 106, 19, 206, 242, 171, 137, 86, 161, 74, 156, 217
 // a poxy game engine.  this ain't industrial espionage, folks!
 byte no_match_hash[] = {0x40, 0xB4, 0x54, 0x7D, 0x9D, 0xDA, 0x9D, 0x0B, 0xCF, 0x42, 0x70, 0xEE, 0xF1, 0x88, 0xBE, 0x99};
 
+// nehahra sends some textures with 0 width and height (eeewww!  more hacks!)
+byte nulldata[] = {255, 255, 255, 255};
+
 image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, int flags)
 {
+	// nehahra sends some textures with 0 width and height (eeewww!  more hacks!)
+	if (!width || !height)
+	{
+		width = 2;
+		height = 2;
+		data = nulldata;
+	}
+
+	// nehahra assumes that fullbrights are not available in the engine
+	if ((flags & IMAGE_LUMA) && nehahra) return NULL;
+
 	// detect water textures
 	if (identifier[0] == '*')
 	{
@@ -426,7 +722,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	tex->height = height;
 	tex->width = width;
 
-	Q_MemCpy (tex->hash, texhash, 16);
+	memcpy (tex->hash, texhash, 16);
 	strcpy (tex->identifier, identifier);
 
 	// change the identifier so that we can load an external texture properly
@@ -461,7 +757,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	// hack the colour for certain models
 	// fix white line at base of shotgun shells box
 	if (COM_CheckHash (texhash, ShotgunShells))
-		Q_MemCpy (tex->data, tex->data + 32 * 31, 32);
+		memcpy (tex->data, tex->data + 32 * 31, 32);
 
 	// try to load an external texture
 	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, tex->identifier, flags);
@@ -474,7 +770,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			// if we got neither a native nor an external luma we must cancel it and return NULL
 			tex->LastUsage = 666;
 			SAFE_RELEASE (tex->d3d_Texture);
-			Q_MemCpy (tex->hash, no_match_hash, 16);
+			memcpy (tex->hash, no_match_hash, 16);
 			return NULL;
 		}
 
@@ -521,10 +817,10 @@ unsigned int *D3D_MakeTexturePalette (miptex_t *mt)
 	// don't gamma-adjust this data
 	for (int i = 0; i < 256; i++)
 	{
-		((byte *) &hlPal[i])[0] = pal[0];
-		((byte *) &hlPal[i])[1] = pal[1];
-		((byte *) &hlPal[i])[2] = pal[2];
-		((byte *) &hlPal[i])[3] = 255;
+		((byte *) &hlPal[i]) [0] = pal[0];
+		((byte *) &hlPal[i]) [1] = pal[1];
+		((byte *) &hlPal[i]) [2] = pal[2];
+		((byte *) &hlPal[i]) [3] = 255;
 		pal += 3;
 	}
 
@@ -536,18 +832,19 @@ unsigned int *D3D_MakeTexturePalette (miptex_t *mt)
 
 
 void R_ReleaseResourceTextures (void);
-void D3D_ShutdownHLSL (void);
-void R_UnloadSkybox (void);
+void D3DHLSL_Shutdown (void);
+void D3DSky_UnloadSkybox (void);
 void Scrap_Destroy (void);
+void D3D_ReleaseLightmaps (void);
 
 // fixme - this needs to fully go through the correct shutdown paths so that aux data is also cleared
 void D3D_ReleaseTextures (void)
 {
+	// some of these now go through the device onloss handlers
+	D3D_ReleaseLightmaps ();
 	Scrap_Destroy ();
-
-	D3D_ShutdownHLSL ();
-
-	R_UnloadSkybox ();
+	D3DHLSL_Shutdown ();
+	D3DSky_UnloadSkybox ();
 
 	// other textures we need to release that we don't define globally
 	extern LPDIRECT3DTEXTURE9 d3d_MapshotTexture;
@@ -562,7 +859,7 @@ void D3D_ReleaseTextures (void)
 
 		// set the hash value to ensure that it will never match
 		// (needed because game changing goes through this path too)
-		Q_MemCpy (tex->texture->hash, no_match_hash, 16);
+		memcpy (tex->texture->hash, no_match_hash, 16);
 	}
 
 	// release player textures
@@ -577,8 +874,6 @@ void D3D_ReleaseTextures (void)
 
 	// standard lightmaps
 	SAFE_DELETE (d3d_Lightmaps);
-
-	D3D_Kill3DSceneTexture ();
 
 	// resource textures
 	R_ReleaseResourceTextures ();
@@ -597,6 +892,7 @@ void D3D_ReleaseTextures (void)
 	SAFE_RELEASE (d3d_MapshotTexture);
 	SAFE_RELEASE (r_notexture);
 	SAFE_RELEASE (yahtexture);
+	SAFE_RELEASE (d3d_ShadedotsTexture);
 }
 
 
@@ -637,7 +933,7 @@ void D3D_FlushTextures (void)
 			SAFE_RELEASE (tex->texture->d3d_Texture);
 
 			// set the hash value to ensure that it will never match
-			Q_MemCpy (tex->texture->hash, no_match_hash, 16);
+			memcpy (tex->texture->hash, no_match_hash, 16);
 
 			// increment number flushed
 			numflush++;
@@ -667,16 +963,16 @@ bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
 	// check for compressed texture formats
 	// rather than using CheckDeviceFormat we actually try to create one and see what happens
 	hr = d3d_Device->CreateTexture
-	(
-		64,
-		64,
-		1,
-		0,
-		textureformat,
-		D3DPOOL_MANAGED,
-		&tex,
-		NULL
-	);
+		 (
+			 64,
+			 64,
+			 1,
+			 0,
+			 textureformat,
+			 D3DPOOL_MANAGED,
+			 &tex,
+			 NULL
+		 );
 
 	if (SUCCEEDED (hr))
 	{
@@ -720,14 +1016,14 @@ int d3d_MaxExternalTextures = 0;
 int d3d_NumExternalTextures = 0;
 
 // gotcha!
-int d3d_ExternalTextureTable[257] = {-1};
+int d3d_ExternalTextureTable[257] = { -1};
 
 // hmmm - can be used for both bsearch and qsort
 // clever boy, bill!
 int D3D_ExternalTextureCompareFunc (const void *a, const void *b)
 {
-	d3d_externaltexture_t *t1 = *(d3d_externaltexture_t **) a;
-	d3d_externaltexture_t *t2 = *(d3d_externaltexture_t **) b;
+	d3d_externaltexture_t *t1 = * (d3d_externaltexture_t **) a;
+	d3d_externaltexture_t *t2 = * (d3d_externaltexture_t **) b;
 
 	return stricmp (t1->basename, t2->basename);
 }
@@ -794,6 +1090,7 @@ void D3D_RegisterExternalTexture (char *texname)
 
 	// not a supported type
 	if (!goodext) return;
+
 	if (d3d_NumExternalTextures == d3d_MaxExternalTextures) return;
 
 	char *typefilter = NULL;
@@ -819,8 +1116,11 @@ void D3D_RegisterExternalTexture (char *texname)
 	if (typefilter)
 	{
 		if (!strnicmp (typefilter, "gloss.", 6)) return;
+
 		if (!strnicmp (typefilter, "norm.", 5)) return;
+
 		if (!strnicmp (typefilter, "normal.", 7)) return;
+
 		if (!strnicmp (typefilter, "bump.", 5)) return;
 	}
 
@@ -843,6 +1143,7 @@ void D3D_RegisterExternalTexture (char *texname)
 	char *checkstuff = strstr (et->texpath, "\\save\\");
 
 	if (!checkstuff) checkstuff = strstr (et->texpath, "\\maps\\");
+
 	if (!checkstuff) checkstuff = strstr (et->texpath, "\\screenshot\\");
 
 	// ignoring textures in maps, save and screenshot
@@ -880,6 +1181,7 @@ void D3D_RegisterExternalTexture (char *texname)
 	for (int i = 0;; i++)
 	{
 		if (!et->basename[i]) break;
+
 		if (et->basename[i] == '/') et->basename[i] = '\\';
 	}
 
@@ -892,6 +1194,7 @@ void D3D_RegisterExternalTexture (char *texname)
 	for (int i = strlen (et->basename); i; i--)
 	{
 		if (et->basename[i] == '/') break;
+
 		if (et->basename[i] == '\\') break;
 
 		if (et->basename[i] == '.')
@@ -927,6 +1230,7 @@ void D3D_ExternalTextureDirectoryRecurse (char *dirname)
 	for (int i = 0;; i++)
 	{
 		if (find_filter[i] == 0) break;
+
 		if (find_filter[i] == '/') find_filter[i] = '\\';
 	}
 
@@ -943,12 +1247,16 @@ void D3D_ExternalTextureDirectoryRecurse (char *dirname)
 	{
 		// not interested
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
+
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
+
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
+
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
 
 		// never these
 		if (!strcmp (FindFileData.cFileName, ".")) continue;
+
 		if (!strcmp (FindFileData.cFileName, "..")) continue;
 
 		// make the new directory or texture name
@@ -1018,7 +1326,7 @@ void D3D_EnumExternalTextures (void)
 
 	// alloc them for real
 	d3d_ExternalTextures = (d3d_externaltexture_t **) GameZone->Alloc (d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
-	Q_MemCpy (d3d_ExternalTextures, scratchbuf, d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
+	memcpy (d3d_ExternalTextures, scratchbuf, d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
 
 	for (int i = 0; i < d3d_NumExternalTextures; i++)
 	{
@@ -1027,11 +1335,13 @@ void D3D_EnumExternalTextures (void)
 		for (int j = 0;; j++)
 		{
 			if (!et->texpath[j]) break;
+
 			if (et->texpath[j] == '\\') et->texpath[j] = '/';
 		}
 
 		// restore drive signifier
 		if (et->texpath[1] == ':' && et->texpath[2] == '/') et->texpath[2] = '\\';
+
 		strlwr (et->texpath);
 	}
 

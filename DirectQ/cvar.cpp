@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -89,10 +89,12 @@ Cvar_VariableString
 char *Cvar_VariableString (char *var_name)
 {
 	cvar_t *var;
-	
+
 	var = Cvar_FindVar (var_name);
+
 	if (!var)
 		return cvar_null_string;
+
 	return var->string;
 }
 
@@ -120,6 +122,7 @@ bool Cvar_SetPrevalidate (cvar_t *var)
 void Cvar_SetBroadcast (cvar_t *var)
 {
 	if (!(var->usage & CVAR_SERVER)) return;
+
 	if (!sv.active) return;
 
 	// add the name of the person who changed it to the message
@@ -321,8 +324,8 @@ cvar_t::cvar_t (void)
 cvar_t::~cvar_t (void)
 {
 	// protect the zone from overflowing if cvars are declared in function scope
-//	Zone_Free (this->name);
-//	Zone_Free (this->string);
+	//	Zone_Free (this->name);
+	//	Zone_Free (this->string);
 }
 
 

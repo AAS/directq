@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -31,16 +31,19 @@ when crossing a water boudnary.
 
 */
 
-cvar_t	scr_ofsx ("scr_ofsx","0");
-cvar_t	scr_ofsy ("scr_ofsy","0");
-cvar_t	scr_ofsz ("scr_ofsz","0");
+float v_time = 0;
+float v_frametime = 0;
+
+cvar_t	scr_ofsx ("scr_ofsx", "0");
+cvar_t	scr_ofsy ("scr_ofsy", "0");
+cvar_t	scr_ofsz ("scr_ofsz", "0");
 
 cvar_t	cl_rollspeed ("cl_rollspeed", "200");
 cvar_t	cl_rollangle ("cl_rollangle", "2.0");
 
-cvar_t	cl_bob ("cl_bob","0.02");
-cvar_t	cl_bobcycle ("cl_bobcycle","0.6");
-cvar_t	cl_bobup ("cl_bobup","0.5");
+cvar_t	cl_bob ("cl_bob", "0.02");
+cvar_t	cl_bobcycle ("cl_bobcycle", "0.6");
+cvar_t	cl_bobup ("cl_bobup", "0.5");
 
 cvar_t	v_kicktime ("v_kicktime", "0.5", CVAR_ARCHIVE);
 cvar_t	v_kickroll ("v_kickroll", "0.6", CVAR_ARCHIVE);
@@ -61,7 +64,7 @@ cvar_t	cl_crossx ("cl_crossx", "0", CVAR_ARCHIVE);
 cvar_t	cl_crossy ("cl_crossy", "0", CVAR_ARCHIVE);
 cvar_t	scr_crosshairscale ("scr_crosshairscale", 1, CVAR_ARCHIVE);
 cvar_t	scr_crosshaircolor ("scr_crosshaircolor", "0", CVAR_ARCHIVE);
-cvar_alias_t	crosshaircolor ("crosshaircolor", &scr_crosshaircolor);
+cvar_alias_t	crosshaircolor ("crosshaircolor", &scr_crosshaircolor);			
 cvar_alias_t	crosshairsize ("crosshairsize", &scr_crosshairscale);
 
 cvar_t	gl_cshiftpercent ("gl_cshiftpercent", "100");
@@ -79,6 +82,7 @@ extern	int			in_forward, in_forward2, in_back;
 V_CalcRoll
 
 Used by view and sv_user
+no time dependencies
 ===============
 */
 vec3_t	forward, right, up;
@@ -88,23 +92,19 @@ float V_CalcRoll (vec3_t angles, vec3_t velocity)
 	float	sign;
 	float	side;
 	float	value;
-	
+
 	AngleVectors (angles, forward, right, up);
 	side = DotProduct (velocity, right);
 	sign = side < 0 ? -1 : 1;
-	side = fabs(side);
-	
+	side = fabs (side);
+
 	value = cl_rollangle.value;
-//	if (cl.inwater)
-//		value *= 6;
 
 	if (side < cl_rollspeed.value)
 		side = side * value / cl_rollspeed.value;
-	else
-		side = value;
-	
-	return side*sign;
-	
+	else side = value;
+
+	return side * sign;
 }
 
 
@@ -114,7 +114,7 @@ V_CalcBob
 
 ===============
 */
-float V_CalcBob (void)
+float V_CalcBob (float time)
 {
 	// prevent division by 0 weirdness
 	if (!cl_bobcycle.value) return 0;
@@ -126,7 +126,7 @@ float V_CalcBob (void)
 	float	bob;
 	float	cycle;
 
-	cycle = cl.time - (int) (cl.time / cl_bobcycle.value) * cl_bobcycle.value;
+	cycle = time - (int) (time / cl_bobcycle.value) * cl_bobcycle.value;
 	cycle /= cl_bobcycle.value;
 
 	if (cycle < cl_bobup.value)
@@ -142,8 +142,8 @@ float V_CalcBob (void)
 		bob = 4;
 	else if (bob < -7)
 		bob = -7;
+
 	return bob;
-	
 }
 
 
@@ -151,17 +151,17 @@ float V_CalcBob (void)
 
 
 cvar_t	v_centermove ("v_centermove", "0.15");
-cvar_t	v_centerspeed ("v_centerspeed","500");
+cvar_t	v_centerspeed ("v_centerspeed", "500");
 
 
 void V_StartPitchDrift (void)
 {
-#if 1
 	if (cl.laststop == cl.time)
 	{
-		return;		// something else is keeping it from drifting
+		// something else is keeping it from drifting
+		return;
 	}
-#endif
+
 	if (cl.nodrift || !cl.pitchvel)
 	{
 		cl.pitchvel = v_centerspeed.value;
@@ -187,35 +187,36 @@ If the user is adjusting pitch manually, either with lookup/lookdown,
 mlook and mouse, or klook and keyboard, pitch drifting is constantly stopped.
 
 Drifting is enabled when the center view key is hit, mlook is released and
-lookspring is non 0, or when 
+lookspring is non 0, or when
 ===============
 */
 void V_DriftPitch (void)
 {
 	float		delta, move;
 
-	if (noclip_anglehack || !cl.onground || cls.demoplayback )
+	if (noclip_anglehack || !cl.onground || cls.demoplayback)
 	{
 		cl.driftmove = 0;
 		cl.pitchvel = 0;
 		return;
 	}
 
-// don't count small mouse motion
+	// don't count small mouse motion
 	if (cl.nodrift)
 	{
-		if ( fabs(cl.cmd.forwardmove) < cl_forwardspeed.value)
+		if (fabs (cl.cmd.forwardmove) < cl_forwardspeed.value)
 			cl.driftmove = 0;
 		else
-			cl.driftmove += host_frametime;
-	
-		if ( cl.driftmove > v_centermove.value)
+			cl.driftmove += v_frametime;
+
+		if (cl.driftmove > v_centermove.value)
 		{
 			V_StartPitchDrift ();
 		}
+
 		return;
 	}
-	
+
 	delta = cl.idealpitch - cl.viewangles[PITCH];
 
 	if (!delta)
@@ -224,10 +225,10 @@ void V_DriftPitch (void)
 		return;
 	}
 
-	move = host_frametime * cl.pitchvel;
-	cl.pitchvel += host_frametime * v_centerspeed.value;
-	
-//Con_Printf ("move: %f (%f)\n", move, host_frametime);
+	move = v_frametime * cl.pitchvel;
+	cl.pitchvel += v_frametime * v_centerspeed.value;
+
+	//Con_Printf ("move: %f (%f)\n", move, v_frametime);
 
 	if (delta > 0)
 	{
@@ -236,6 +237,7 @@ void V_DriftPitch (void)
 			cl.pitchvel = 0;
 			move = delta;
 		}
+
 		cl.viewangles[PITCH] += move;
 	}
 	else if (delta < 0)
@@ -245,6 +247,7 @@ void V_DriftPitch (void)
 			cl.pitchvel = 0;
 			move = -delta;
 		}
+
 		cl.viewangles[PITCH] -= move;
 	}
 }
@@ -254,19 +257,19 @@ void V_DriftPitch (void)
 
 
 /*
-============================================================================== 
- 
-						PALETTE FLASHES 
- 
-============================================================================== 
-*/ 
+==============================================================================
+
+						PALETTE FLASHES
+
+==============================================================================
+*/
 
 
 // default cshifts are too dark in GL so lighten them a little
-cshift_t	cshift_empty = { {130,80,50}, 0 };
-cshift_t	cshift_water = { {130,80,50}, 64 };
-cshift_t	cshift_slime = { {0,25,5}, 96 };
-cshift_t	cshift_lava = { {255,80,0}, 128 };
+cshift_t	cshift_empty = {{130, 80, 50}, 0};
+cshift_t	cshift_water = {{130, 80, 50}, 64};
+cshift_t	cshift_slime = {{0, 25, 5}, 96};
+cshift_t	cshift_lava = {{255, 80, 0}, 128};
 
 int			v_blend[4];
 
@@ -277,7 +280,7 @@ cvar_t cl_damagered ("cl_damagered", "3", CVAR_ARCHIVE);
 V_ParseDamage
 ===============
 */
-void V_ParseDamage (void)
+void V_ParseDamage (float time)
 {
 	int		armor, blood;
 	vec3_t	from;
@@ -291,19 +294,19 @@ void V_ParseDamage (void)
 	blood = MSG_ReadByte ();
 
 	for (i = 0; i < 3; i++)
-		from[i] = MSG_ReadCoord (cl.Protocol);
+		from[i] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
 	count = blood * 0.5 + armor * 0.5;
 
 	if (count < 10) count = 10;
 
-	cl.faceanimtime = cl.time + 0.2;
+	cl.faceanimtime = time + 0.2f;
 	cl.cshifts[CSHIFT_DAMAGE].percent += cl_damagered.value * count;
 
 	if (cl.cshifts[CSHIFT_DAMAGE].percent < 0) cl.cshifts[CSHIFT_DAMAGE].percent = 0;
 	if (cl.cshifts[CSHIFT_DAMAGE].percent > 150) cl.cshifts[CSHIFT_DAMAGE].percent = 150;
 
-	if (armor > blood)		
+	if (armor > blood)
 	{
 		cl.cshifts[CSHIFT_DAMAGE].destcolor[0] = 200;
 		cl.cshifts[CSHIFT_DAMAGE].destcolor[1] = 100;
@@ -331,10 +334,10 @@ void V_ParseDamage (void)
 	AngleVectors (ent->angles, forward, right, up);
 
 	side = DotProduct (from, right);
-	v_dmg_roll = count*side*v_kickroll.value;
+	v_dmg_roll = count * side * v_kickroll.value;
 
 	side = DotProduct (from, forward);
-	v_dmg_pitch = count*side*v_kickpitch.value;
+	v_dmg_pitch = count * side * v_kickpitch.value;
 
 	v_dmg_time = v_kicktime.value;
 }
@@ -347,6 +350,7 @@ V_cshift_f
 */
 void V_cshift_f (void)
 {
+	// fixme - should this write to it's own cshift???
 	cshift_empty.destcolor[0] = atoi (Cmd_Argv (1));
 	cshift_empty.destcolor[1] = atoi (Cmd_Argv (2));
 	cshift_empty.destcolor[2] = atoi (Cmd_Argv (3));
@@ -449,7 +453,7 @@ void V_CalcBlend (void)
 	b = 0;
 	a = 0;
 
-	for (j = 0; j < NUM_CSHIFTS; j++)	
+	for (j = 0; j < NUM_CSHIFTS; j++)
 	{
 		// no shift
 		if (!cl.cshifts[j].percent) continue;
@@ -488,16 +492,17 @@ V_UpdatePalette
 a lot of this can go away with a non-sw renderer
 =============
 */
-void V_UpdatePalette (void)
+void V_UpdatePalette (float frametime)
 {
 	int		i, j;
 	bool	newp;
 	byte	*basepal, *newpal;
 	byte	pal[768];
-	float	r,g,b,a;
+	float	r, g, b, a;
 	int		ir, ig, ib;
 	bool force;
 
+	v_frametime = frametime;
 	V_CalcPowerupCshift ();
 
 	newp = false;
@@ -521,12 +526,14 @@ void V_UpdatePalette (void)
 	}
 
 	// drop the damage value
-	cl.cshifts[CSHIFT_DAMAGE].percent -= host_frametime * 150;
+	cl.cshifts[CSHIFT_DAMAGE].percent -= v_frametime * 150;
+
 	if (cl.cshifts[CSHIFT_DAMAGE].percent <= 0)
 		cl.cshifts[CSHIFT_DAMAGE].percent = 0;
 
 	// drop the bonus value
-	cl.cshifts[CSHIFT_BONUS].percent -= host_frametime * 100;
+	cl.cshifts[CSHIFT_BONUS].percent -= v_frametime * 100;
+
 	if (cl.cshifts[CSHIFT_BONUS].percent <= 0)
 		cl.cshifts[CSHIFT_BONUS].percent = 0;
 
@@ -536,19 +543,21 @@ void V_UpdatePalette (void)
 }
 
 
-/* 
-============================================================================== 
- 
-						VIEW RENDERING 
- 
-============================================================================== 
-*/ 
+/*
+==============================================================================
+
+						VIEW RENDERING
+
+==============================================================================
+*/
 
 float angledelta (float a)
 {
-	a = anglemod(a);
+	a = anglemod (a);
+
 	if (a > 180)
 		a -= 360;
+
 	return a;
 }
 
@@ -558,25 +567,32 @@ CalcGunAngle
 ==================
 */
 void CalcGunAngle (void)
-{	
+{
 	float	yaw, pitch, move;
 	static float oldyaw = 0;
 	static float oldpitch = 0;
-	
+
 	yaw = r_refdef.viewangles[YAW];
 	pitch = -r_refdef.viewangles[PITCH];
 
-	yaw = angledelta(yaw - r_refdef.viewangles[YAW]) * 0.4;
+	yaw = angledelta (yaw - r_refdef.viewangles[YAW]) * 0.4;
+
 	if (yaw > 10)
 		yaw = 10;
+
 	if (yaw < -10)
 		yaw = -10;
-	pitch = angledelta(-pitch - r_refdef.viewangles[PITCH]) * 0.4;
+
+	pitch = angledelta (-pitch - r_refdef.viewangles[PITCH]) * 0.4;
+
 	if (pitch > 10)
 		pitch = 10;
+
 	if (pitch < -10)
 		pitch = -10;
-	move = host_frametime*20;
+
+	move = v_frametime * 20;
+
 	if (yaw > oldyaw)
 	{
 		if (oldyaw + move < yaw)
@@ -587,7 +603,7 @@ void CalcGunAngle (void)
 		if (oldyaw - move > yaw)
 			yaw = oldyaw - move;
 	}
-	
+
 	if (pitch > oldpitch)
 	{
 		if (oldpitch + move < pitch)
@@ -598,16 +614,16 @@ void CalcGunAngle (void)
 		if (oldpitch - move > pitch)
 			pitch = oldpitch - move;
 	}
-	
+
 	oldyaw = yaw;
 	oldpitch = pitch;
 
 	cl.viewent.angles[YAW] = r_refdef.viewangles[YAW] + yaw;
 	cl.viewent.angles[PITCH] = - (r_refdef.viewangles[PITCH] + pitch);
 
-	cl.viewent.angles[ROLL] -= v_idlescale.value * sin(cl.time*v_iroll_cycle.value) * v_iroll_level.value;
-	cl.viewent.angles[PITCH] -= v_idlescale.value * sin(cl.time*v_ipitch_cycle.value) * v_ipitch_level.value;
-	cl.viewent.angles[YAW] -= v_idlescale.value * sin(cl.time*v_iyaw_cycle.value) * v_iyaw_level.value;
+	cl.viewent.angles[ROLL] -= v_idlescale.value * sin (v_time * v_iroll_cycle.value) * v_iroll_level.value;
+	cl.viewent.angles[PITCH] -= v_idlescale.value * sin (v_time * v_ipitch_cycle.value) * v_ipitch_level.value;
+	cl.viewent.angles[YAW] -= v_idlescale.value * sin (v_time * v_iyaw_cycle.value) * v_iyaw_level.value;
 }
 
 /*
@@ -618,7 +634,7 @@ V_BoundOffsets
 void V_BoundOffsets (void)
 {
 	entity_t	*ent;
-	
+
 	ent = cl_entities[cl.viewentity];
 
 	// absolutely bound refresh reletive to entity clipping hull
@@ -648,9 +664,9 @@ Idle swaying
 */
 void V_AddIdle (void)
 {
-	r_refdef.viewangles[ROLL] += v_idlescale.value * sin(cl.time*v_iroll_cycle.value) * v_iroll_level.value;
-	r_refdef.viewangles[PITCH] += v_idlescale.value * sin(cl.time*v_ipitch_cycle.value) * v_ipitch_level.value;
-	r_refdef.viewangles[YAW] += v_idlescale.value * sin(cl.time*v_iyaw_cycle.value) * v_iyaw_level.value;
+	r_refdef.viewangles[ROLL] += v_idlescale.value * sin (v_time * v_iroll_cycle.value) * v_iroll_level.value;
+	r_refdef.viewangles[PITCH] += v_idlescale.value * sin (v_time * v_ipitch_cycle.value) * v_ipitch_level.value;
+	r_refdef.viewangles[YAW] += v_idlescale.value * sin (v_time * v_iyaw_cycle.value) * v_iyaw_level.value;
 }
 
 
@@ -664,15 +680,15 @@ Roll is induced by movement and damage
 void V_CalcViewRoll (void)
 {
 	float		side;
-		
+
 	side = V_CalcRoll (cl_entities[cl.viewentity]->angles, cl.velocity);
 	r_refdef.viewangles[ROLL] += side;
 
 	if (v_dmg_time > 0)
 	{
-		r_refdef.viewangles[ROLL] += v_dmg_time/v_kicktime.value*v_dmg_roll;
-		r_refdef.viewangles[PITCH] += v_dmg_time/v_kicktime.value*v_dmg_pitch;
-		v_dmg_time -= host_frametime;
+		r_refdef.viewangles[ROLL] += v_dmg_time / v_kicktime.value * v_dmg_roll;
+		r_refdef.viewangles[PITCH] += v_dmg_time / v_kicktime.value * v_dmg_pitch;
+		v_dmg_time -= v_frametime;
 	}
 
 	if (cl.stats[STAT_HEALTH] <= 0)
@@ -719,7 +735,7 @@ V_CalcRefdef
 
 ==================
 */
-void V_CalcRefdef (void)
+void V_CalcRefdef (float time)
 {
 	entity_t	*ent, *view;
 	int			i;
@@ -741,7 +757,7 @@ void V_CalcRefdef (void)
 	ent->angles[YAW] = cl.viewangles[YAW];
 	ent->angles[PITCH] = -cl.viewangles[PITCH];
 
-	bob = V_CalcBob ();
+	bob = V_CalcBob (time);
 
 	// refresh position
 	VectorCopy (ent->origin, r_refdef.vieworg);
@@ -797,15 +813,13 @@ void V_CalcRefdef (void)
 
 	if (v_gunkick.value) VectorAdd (r_refdef.viewangles, kickangle, r_refdef.viewangles);
 
-	static float old_steptime = 0;
-	extern cvar_t m_look;
+	static float oldsteptime = 0;
+	extern cvar_t freelook;
 
-	// smooth out stair step ups (if not mouselooking)
-	if (cl.onground && ent->origin[2] - oldz > 0) // && !((in_mlook.state & 1) || m_look.integer))
+	// smooth out stair step ups
+	if (cl.onground && ent->origin[2] - oldz > 0)
 	{
-		float steptime;
-
-		steptime = cl.time - old_steptime;
+		float steptime = time - oldsteptime;
 
 		if (steptime < 0) steptime = 0;
 
@@ -819,7 +833,7 @@ void V_CalcRefdef (void)
 	}
 	else oldz = ent->origin[2];
 
-	old_steptime = cl.time;
+	oldsteptime = time;
 
 	if (chase_active.value) Chase_Update ();
 }
@@ -835,10 +849,14 @@ the entity origin, so any view position inside that will be valid
 */
 extern vrect_t	scr_vrect;
 
-void V_RenderView (void)
+void V_RenderView (float time, float frametime)
 {
 	if (con_forcedup) return;
 	if (cls.state != ca_connected) return;
+	if (!cl.model_precache) return;
+
+	v_time = time;
+	v_frametime = frametime;
 
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1)
@@ -851,15 +869,13 @@ void V_RenderView (void)
 	if (cl.intermission)
 	{
 		// intermission / finale rendering
-		V_CalcIntermissionRefdef ();	
+		V_CalcIntermissionRefdef ();
 	}
 	else
 	{
-		if (!cl.paused /* && (sv.maxclients > 1 || key_dest == key_game) */ )
-			V_CalcRefdef ();
+		if (!cl.paused)
+			V_CalcRefdef (time);
 	}
-
-	R_RenderView ();
 }
 
 

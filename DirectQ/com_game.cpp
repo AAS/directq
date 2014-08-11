@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -20,6 +20,27 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "unzip.h"
+
+void UpdateTitlebarText (char *mapname)
+{
+	extern HWND d3d_Window;
+
+	if (!mapname)
+		SetWindowText (d3d_Window, va ("DirectQ Release %s - Game: %s", DIRECTQ_VERSION, com_gamename));
+	else if (cls.demoplayback)
+	{
+		if (cl.levelname && cl.levelname[0])
+			SetWindowText (d3d_Window, va ("DirectQ Release %s - Game: %s - Demo: %s (%s)", DIRECTQ_VERSION, com_gamename, mapname, cl.levelname));
+		else SetWindowText (d3d_Window, va ("DirectQ Release %s - Game: %s - Demo: %s", DIRECTQ_VERSION, com_gamename, mapname));
+	}
+	else
+	{
+		if (cl.levelname && cl.levelname[0])
+			SetWindowText (d3d_Window, va ("DirectQ Release %s - Game: %s - Map: %s (%s)", DIRECTQ_VERSION, com_gamename, mapname, cl.levelname));
+		else SetWindowText (d3d_Window, va ("DirectQ Release %s - Game: %s - Map: %s", DIRECTQ_VERSION, com_gamename, mapname));
+	}
+}
+
 
 cvar_t com_hipnotic ("com_hipnotic", 0.0f);
 cvar_t com_rogue ("com_rogue", 0.0f);
@@ -70,6 +91,7 @@ void COM_ExecQuakeRC (void)
 
 		// detect comments
 		if (!strncmp (oldrc, "//", 2)) incomment = true;
+
 		if (oldrc[0] == '\n') incomment = false;
 
 		// look for config.cfg - there might be 2 or more spaces between exec and the filename!!!
@@ -102,7 +124,6 @@ void Draw_Init (void);
 void HUD_Init (void);
 void SCR_Init (void);
 void R_InitResourceTextures (void);
-void D3D_Init3DSceneTexture (void);
 void Draw_InvalidateMapshot (void);
 void Menu_SaveLoadInvalidate (void);
 void S_StopAllSounds (bool clear);
@@ -113,9 +134,11 @@ void Menu_DemoPopulate (void);
 void Menu_LoadAvailableSkyboxes (void);
 void SHOWLMP_newgame (void);
 void D3D_VidRestart_f (void);
-void D3D_InitHLSL (void);
-void R_UnloadSkybox (void);
-void Snd_Restart_f (void);
+void D3DSky_UnloadSkybox (void);
+void R_WipeParticles (void);
+void D3DVid_LoseDeviceResources (void);
+void D3DVid_RecoverDeviceResources (void);
+
 
 void COM_UnloadAllStuff (void)
 {
@@ -124,7 +147,7 @@ void COM_UnloadAllStuff (void)
 
 	// disconnect from server and update the screen to keep things nice and clean
 	CL_Disconnect_f ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// prevent screen updates while changing
 	scr_disabled_for_loading = true;
@@ -145,11 +168,12 @@ void COM_UnloadAllStuff (void)
 	SoundCache->Flush ();
 	S_ClearSounds ();
 
-	Snd_Restart_f ();
-
 	SHOWLMP_newgame ();
-	R_UnloadSkybox ();
+	D3DSky_UnloadSkybox ();
 	D3D_ReleaseTextures ();
+	R_WipeParticles ();
+
+	D3DVid_LoseDeviceResources ();
 
 	// do this too...
 	Host_ClearMemory ();
@@ -167,14 +191,16 @@ void COM_LoadAllStuff (void)
 	Draw_Init ();
 	HUD_Init ();
 	SCR_Init ();
+	D3DVid_RecoverDeviceResources ();
 	R_InitResourceTextures ();
-	D3D_Init3DSceneTexture ();
-	D3D_InitHLSL ();
 	Draw_InvalidateMapshot ();
 	Menu_SaveLoadInvalidate ();
 	Menu_MapsPopulate ();
 	Menu_DemoPopulate ();
 	Menu_LoadAvailableSkyboxes ();
+
+	// force a video restart to flush and sync up everything
+	Cbuf_InsertText ("vid_restart\n");
 }
 
 
@@ -183,7 +209,7 @@ void COM_LoadAllStuff (void)
 COM_AddGameDirectory
 
 Sets com_gamedir, adds the directory to the head of the path,
-then loads and adds pak1.pak pak2.pak ... 
+then loads and adds pak1.pak pak2.pak ...
 ================
 */
 int com_numgames = 0;
@@ -217,8 +243,7 @@ void COM_AddGameDirectory (char *dir)
 	}
 
 	// update the window titlebar
-	extern HWND d3d_Window;
-	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s", DIRECTQ_VERSION, com_gamename));
+	UpdateTitlebarText ();
 
 	// add any pak files in the format pak0.pak pak1.pak, ...
 	for (int i = 0; i < 10; i++)
@@ -357,7 +382,7 @@ void COM_AddGameDirectory (char *dir)
 	// add the directory to the search path
 	// this is done last as using a linked list will search in the reverse order to which they
 	// are added, so we ensure that the filesystem overrides pak files
-	search = (searchpath_t *) GameZone->Alloc (sizeof(searchpath_t));
+	search = (searchpath_t *) GameZone->Alloc (sizeof (searchpath_t));
 	Q_strncpy (search->filename, dir, 127);
 	search->next = com_searchpaths;
 	search->pack = NULL;
@@ -383,6 +408,7 @@ void COM_LoadGame (char *gamename)
 	}
 
 	if (!GameZone) GameZone = new CQuakeZone ();
+
 	char basedir[MAX_PATH];
 
 	// -basedir <path>
@@ -554,21 +580,21 @@ void COM_Game_f (void)
 	// can't send cmd_args in direct as we will be modifying it...
 	// matches space allocated for cmd_argv in cmd.cpp
 	// can't alloc this dynamically as it takes down the engine (ouch!) - 80K ain't too bad anyway
-	static char gamedirs[81920];
-	gamedirs[0] = 0;
+	static char mygamedirs[81920];
+	mygamedirs[0] = 0;
 
 	// copy out delimiting with \n so that we can parse the string
 	for (int i = 1; i < Cmd_Argc (); i++)
 	{
 		// we made sure that we had enough space above so we don't need to check for overflow here.
-		strcat (gamedirs, Cmd_Argv (i));
+		strcat (mygamedirs, Cmd_Argv (i));
 
 		// don't forget the delimiter!
-		strcat (gamedirs, "\n");
+		strcat (mygamedirs, "\n");
 	}
 
 	// load using the generated gamedirs string
-	COM_LoadGame (gamedirs);
+	COM_LoadGame (mygamedirs);
 	WasInGameMenu = false;
 }
 

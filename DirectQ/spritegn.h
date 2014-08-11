@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -17,9 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-//
 // spritegn.h: header file for sprite generation program
-//
 
 // **********************************************************
 // * This file must be identical in the spritegen directory *
@@ -27,20 +25,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // * pass data from one to the other via .spr files.        *
 // **********************************************************
 
-//-------------------------------------------------------
-// This program generates .spr sprite package files.
-// The format of the files is as follows:
-//
-// dsprite_t file header structure
-// <repeat dsprite_t.numframes times>
-//   <if spritegroup, repeat dspritegroup_t.numframes times>
-//     dspriteframe_t frame header structure
-//     sprite bitmap
-//   <else (single sprite frame)>
-//     dspriteframe_t frame header structure
-//     sprite bitmap
-// <endrepeat>
-//-------------------------------------------------------
+/*-------------------------------------------------------
+This program generates .spr sprite package files.
+The format of the files is as follows:
+
+dsprite_t file header structure
+<repeat dsprite_t.numframes times>
+<if spritegroup, repeat dspritegroup_t.numframes times>
+ dspriteframe_t frame header structure
+ sprite bitmap
+<else (single sprite frame)>
+ dspriteframe_t frame header structure
+ sprite bitmap
+<endrepeat>
+-------------------------------------------------------*/
 
 #ifdef INCLUDELIBS
 
@@ -64,11 +62,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // must match definition in modelgen.h
 #ifndef SYNCTYPE_T
 #define SYNCTYPE_T
-typedef enum {ST_SYNC=0, ST_RAND } synctype_t;
+typedef enum {ST_SYNC = 0, ST_RAND} synctype_t;
 #endif
 
 // TODO: shorten these?
-typedef struct {
+typedef struct
+{
 	int			ident;
 	int			version;
 	int			type;
@@ -86,26 +85,30 @@ typedef struct {
 #define SPR_ORIENTED				3
 #define SPR_VP_PARALLEL_ORIENTED	4
 
-typedef struct {
+typedef struct
+{
 	int			origin[2];
 	int			width;
 	int			height;
 } dspriteframe_t;
 
-typedef struct {
+typedef struct
+{
 	int			numframes;
 } dspritegroup_t;
 
-typedef struct {
+typedef struct
+{
 	float	interval;
 } dspriteinterval_t;
 
-typedef enum { SPR_SINGLE=0, SPR_GROUP } spriteframetype_t;
+typedef enum { SPR_SINGLE = 0, SPR_GROUP} spriteframetype_t;
 
-typedef struct {
+typedef struct
+{
 	spriteframetype_t	type;
 } dspriteframetype_t;
 
 #define IDSPRITEHEADER	(('P'<<24)+('S'<<16)+('D'<<8)+'I')
-														// little-endian "IDSP"
+// little-endian "IDSP"
 

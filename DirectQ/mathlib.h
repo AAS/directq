@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -39,6 +39,7 @@ extern	int nanmask;
 #define VectorSubtract(vec1,vec2,dst) {(dst)[0]=(vec1)[0]-(vec2)[0];(dst)[1]=(vec1)[1]-(vec2)[1];(dst)[2]=(vec1)[2]-(vec2)[2];}
 #define VectorAdd(vec1,vec2,dst) {(dst)[0]=(vec1)[0]+(vec2)[0];(dst)[1]=(vec1)[1]+(vec2)[1];(dst)[2]=(vec1)[2]+(vec2)[2];}
 #define VectorCopy(src,dst) {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];}
+#define VectorCopy2(dst,src) {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];}
 #define VectorClear(vec) {(vec)[0] = (vec)[1] = (vec)[2] = 0.0f;}
 
 void VectorMA (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
@@ -54,7 +55,7 @@ void CrossProduct (vec3_t v1, vec3_t v2, vec3_t cross);
 float VectorNormalize (vec3_t v);		// returns vector length
 void VectorInverse (vec3_t v);
 void VectorScale (vec3_t in, vec_t scale, vec3_t out);
-int Q_log2(int val);
+int Q_log2 (int val);
 
 void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3]);
 void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4]);
@@ -64,7 +65,7 @@ int GreatestCommonDivisor (int i1, int i2);
 
 void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up);
 int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, struct mplane_s *plane);
-float	anglemod(float a);
+float	anglemod (float a);
 
 #define BOX_ON_PLANE_SIDE(emins, emaxs, p)	\
 	(((p)->type < 3)?						\

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -124,7 +124,7 @@ typedef struct save_game_info_s
 void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 {
 	// blank the save info
-	Q_MemSet (si, 0, sizeof (save_game_info_t));
+	memset (si, 0, sizeof (save_game_info_t));
 
 	// copy the file name
 	strcpy (si->filename, filename);
@@ -177,6 +177,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 
 	// sanity check (in case the save is manually hacked...)
 	if (si->skill > 3) si->skill = 3;
+
 	if (si->skill < 0) si->skill = 0;
 
 	// read bsp mapname
@@ -259,6 +260,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 
 				// end
 				if (com_token[0] == '}') break;
+
 				if (!start) break;
 
 				// copy out key
@@ -269,12 +271,16 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 
 				// fail silently
 				if (!start) break;
+
 				if (com_token[0] == '}') break;
 
 				// interpret - these are stored as floats in the save file
 				if (!stricmp (keyname, "total_secrets")) total_secrets = (int) (atof (com_token) + 0.1f);
+
 				if (!stricmp (keyname, "found_secrets")) num_secrets = (int) (atof (com_token) + 0.1f);
+
 				if (!stricmp (keyname, "total_monsters")) total_kills = (int) (atof (com_token) + 0.1f);
+
 				if (!stricmp (keyname, "killed_monsters")) num_kills = (int) (atof (com_token) + 0.1f);
 			}
 		}
@@ -349,7 +355,12 @@ public:
 		else _snprintf (this->SaveInfo.secrets, 64, "Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
 
 		this->SaveInfo.skill = (int) skill.value;
-		_snprintf (this->SaveInfo.time, 64, "%02i:%02i", (int) (cl.time / 60), (int) (cl.time - (int) (cl.time / 60) * 60));
+
+		int seconds = (int) cl.time;
+		int minutes = (int) (cl.time / 60);
+		seconds -= minutes * 60;
+
+		_snprintf (this->SaveInfo.time, 64, "%02i:%02i", minutes, seconds);
 	}
 
 	CSaveInfo (void)
@@ -381,9 +392,13 @@ void Menu_SaveLoadAddSave (WIN32_FIND_DATA *savefile)
 {
 	// not interested in these types
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) return;
+
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) return;
+
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) return;
+
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) return;
+
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return;
 
 	// attempt to open it
@@ -445,6 +460,7 @@ void Menu_SaveLoadScanSaves (void)
 		for (int i = 0;; i++)
 		{
 			if (!saveloadlist[i]) break;
+
 			Zone_Free (saveloadlist[i]);
 		}
 
@@ -599,7 +615,12 @@ void Menu_SaveLoadOnHover (int initialy, int y, int itemnum)
 		else Menu_Print (220, initialy + 187, va ("Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]));
 
 		Menu_Print (220, initialy + 199, va ("Skill:   %s", SkillNames[(int) skill.value]));
-		Menu_Print (220, initialy + 211, va ("Time:    %02i:%02i", (int) (cl.time / 60), (int) (cl.time - (int) (cl.time / 60) * 60)));
+
+		int seconds = (int) (cl.time);
+		int minutes = (int) (cl.time / 60);
+		seconds -= minutes * 60;
+
+		Menu_Print (220, initialy + 211, va ("Time:    %02i:%02i", minutes, seconds));
 	}
 	else
 	{
@@ -640,11 +661,11 @@ void Menu_SaveLoadOnDelete (int itemnum)
 	}
 
 	int delsave = SCR_ModalMessage
-	(
-		"Are you sure that you want to\ndelete this save?\n",
-		va ("Delete %s", ActiveSaveInfoArray[itemnum]->SaveInfo.filename),
-		MB_YESNO
-	);
+				  (
+					  "Are you sure that you want to\ndelete this save?\n",
+					  va ("Delete %s", ActiveSaveInfoArray[itemnum]->SaveInfo.filename),
+					  MB_YESNO
+				  );
 
 	if (delsave)
 	{
@@ -653,16 +674,18 @@ void Menu_SaveLoadOnDelete (int itemnum)
 
 		_snprintf (delfile, MAX_PATH, "%s\\save\\%s", com_gamedir, ActiveSaveInfoArray[itemnum]->SaveInfo.filename);
 
-		// change / to \\ 
+		// change '/' to '\\' to keep paths consistent
+		// (it doesn't matter if they're 'wrong', weenix loonies, so long as they're *consistent*
 		for (int i = 0;; i++)
 		{
 			if (!delfile[i]) break;
+
 			if (delfile[i] == '/') delfile[i] = '\\';
 		}
 
 		if (!DeleteFile (delfile))
 		{
-			SCR_UpdateScreen ();
+			SCR_UpdateScreen (0);
 			SCR_ModalMessage ("Delete file failed\n", "Error", MB_OK);
 			return;
 		}
@@ -822,6 +845,7 @@ int Menu_SaveLoadCustomDraw (int y)
 void Menu_SaveLoadCustomKey (int key)
 {
 	if (!SaveInfoList) return;
+
 	if (!ActiveScrollbox) return;
 
 	// get what the position is when we come in here

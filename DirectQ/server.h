@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -38,11 +38,11 @@ typedef struct
 	bool	paused;
 	bool	loadgame;			// handle connections specially
 
-	float		time;
 	float		lastchecktime;
+	float		time;
 
 	int			lastcheck;			// used by PF_checkclient
-	
+
 	char		name[64];			// map name
 
 	char		modelname[64];		// maps/<name>.bsp, for model_precache[0]
@@ -65,8 +65,11 @@ typedef struct
 	sizebuf_t	signon;
 	byte		signon_buf[MAX_MSGLEN - 2]; //8192
 
+	float frametime;
+
 	int		signondiff;		// Track extra bytes due to >256 model support, kludge
 	int		Protocol;
+	unsigned PrototcolFlags;
 } server_t;
 
 
@@ -91,21 +94,28 @@ typedef struct client_s
 
 	sizebuf_t		message;			// can be added to at any time,
 										// copied and clear once per frame
-	byte			msgbuf[MAX_MSGLEN];
+
+	byte			*msgbuf;
 	edict_t			*edict;				// GetEdictForNumber(clientnum+1)
 	char			name[32];			// for printing to other people
 	int				colors;
-		
-	float			ping_times[NUM_PING_TIMES];
+
+	float			*ping_times;
 	int				num_pings;			// ping_times[num_pings%NUM_PING_TIMES]
 
-// spawn parms are carried from level to level
-	float			spawn_parms[NUM_SPAWN_PARMS];
+	// spawn parms are carried from level to level
+	float			*spawn_parms;
 
-// client known data for deltas	
+	// DP_SV_CLIENTCAMERA
+	int				clientcamera;
+
+	// client known data for deltas
 	int				old_frags;
 } client_t;
 
+
+// so that we can safely wipe a client_t struct without wrecking pointers
+void Host_SafeWipeClient (client_t *client);
 
 //=============================================================================
 
@@ -235,7 +245,7 @@ void SV_AddClientToServer (struct qsocket_s	*ret);
 void SV_ClientPrintf (char *fmt, ...);
 void SV_BroadcastPrintf (char *fmt, ...);
 
-void SV_Physics (void);
+void SV_Physics (float frametime);
 
 bool SV_CheckBottom (edict_t *ent);
 bool SV_movestep (edict_t *ent, vec3_t move, bool relink);
@@ -245,10 +255,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg);
 void SV_MoveToGoal (void);
 
 void SV_CheckForNewClients (void);
-void SV_RunClients (void);
+void SV_RunClients (float frametime);
 void SV_SaveSpawnparms ();
-#ifdef QUAKE2
-void SV_SpawnServer (char *server, char *startspot);
-#else
 void SV_SpawnServer (char *server);
-#endif
+

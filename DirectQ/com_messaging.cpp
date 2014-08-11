@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -29,10 +29,7 @@ Handles byte ordering and avoids alignment errors
 ==============================================================================
 */
 
-//
 // writing functions
-//
-
 void MSG_WriteChar (sizebuf_t *sb, int c)
 {
 	byte    *buf;
@@ -54,19 +51,19 @@ void MSG_WriteShort (sizebuf_t *sb, int c)
 	byte    *buf;
 
 	buf = (byte *) SZ_GetSpace (sb, 2);
-	buf[0] = c&0xff;
-	buf[1] = c>>8;
+	buf[0] = c & 0xff;
+	buf[1] = c >> 8;
 }
 
 void MSG_WriteLong (sizebuf_t *sb, int c)
 {
 	byte    *buf;
-	
+
 	buf = (byte *) SZ_GetSpace (sb, 4);
-	buf[0] = c&0xff;
-	buf[1] = (c>>8)&0xff;
-	buf[2] = (c>>16)&0xff;
-	buf[3] = c>>24;
+	buf[0] = c & 0xff;
+	buf[1] = (c >> 8) & 0xff;
+	buf[2] = (c >> 16) & 0xff;
+	buf[3] = c >> 24;
 }
 
 void MSG_WriteFloat (sizebuf_t *sb, float f)
@@ -87,7 +84,7 @@ void MSG_WriteString (sizebuf_t *sb, char *s)
 {
 	if (!s)
 		SZ_Write (sb, "", 1);
-	else SZ_Write (sb, s, strlen(s)+1);
+	else SZ_Write (sb, s, strlen (s) + 1);
 }
 
 
@@ -106,15 +103,15 @@ int MSG_ReadChar (void)
 {
 	int     c;
 
-	if (msg_readcount+1 > net_message.cursize)
+	if (msg_readcount + 1 > net_message.cursize)
 	{
 		msg_badread = true;
 		return -1;
 	}
-		
-	c = (signed char)net_message.data[msg_readcount];
+
+	c = (signed char) net_message.data[msg_readcount];
 	msg_readcount++;
-	
+
 	return c;
 }
 
@@ -122,13 +119,13 @@ int MSG_ReadByte (void)
 {
 	int     c;
 
-	if (msg_readcount+1 > net_message.cursize)
+	if (msg_readcount + 1 > net_message.cursize)
 	{
 		msg_badread = true;
 		return -1;
 	}
 
-	c = (unsigned char)net_message.data[msg_readcount];
+	c = (unsigned char) net_message.data[msg_readcount];
 	msg_readcount++;
 
 	return c;
@@ -137,38 +134,38 @@ int MSG_ReadByte (void)
 int MSG_ReadShort (void)
 {
 	int     c;
-	
-	if (msg_readcount+2 > net_message.cursize)
+
+	if (msg_readcount + 2 > net_message.cursize)
 	{
 		msg_badread = true;
 		return -1;
 	}
-		
-	c = (short)(net_message.data[msg_readcount]
-	+ (net_message.data[msg_readcount+1]<<8));
-	
+
+	c = (short) (net_message.data[msg_readcount]
+				 + (net_message.data[msg_readcount+1] << 8));
+
 	msg_readcount += 2;
-	
+
 	return c;
 }
 
 int MSG_ReadLong (void)
 {
 	int     c;
-	
-	if (msg_readcount+4 > net_message.cursize)
+
+	if (msg_readcount + 4 > net_message.cursize)
 	{
 		msg_badread = true;
 		return -1;
 	}
-		
+
 	c = net_message.data[msg_readcount]
-	+ (net_message.data[msg_readcount+1]<<8)
-	+ (net_message.data[msg_readcount+2]<<16)
-	+ (net_message.data[msg_readcount+3]<<24);
-	
+		+ (net_message.data[msg_readcount+1] << 8)
+		+ (net_message.data[msg_readcount+2] << 16)
+		+ (net_message.data[msg_readcount+3] << 24);
+
 	msg_readcount += 4;
-	
+
 	return c;
 }
 
@@ -180,32 +177,35 @@ float MSG_ReadFloat (void)
 		float   f;
 		int     l;
 	} dat;
-	
+
 	dat.b[0] =      net_message.data[msg_readcount];
 	dat.b[1] =      net_message.data[msg_readcount+1];
 	dat.b[2] =      net_message.data[msg_readcount+2];
 	dat.b[3] =      net_message.data[msg_readcount+3];
 	msg_readcount += 4;
-	
+
 	dat.l = LittleLong (dat.l);
 
-	return dat.f;   
+	return dat.f;
 }
 
 char *MSG_ReadString (void)
 {
 	static char     string[2048];
-	int             l,c;
+	int             l, c;
 
 	l = 0;
+
 	do
 	{
 		c = MSG_ReadChar ();
+
 		if (c == -1 || c == 0)
 			break;
+
 		string[l] = c;
 		l++;
-	} while (l < sizeof(string) - 1);
+	} while (l < sizeof (string) - 1);
 
 	string[l] = 0;
 
@@ -225,28 +225,27 @@ int MSG_PeekByte (void)
 	return (unsigned char) net_message.data[msg_readcount];
 }
 
-float MSG_ReadAngle16 (void)
+float MSG_ReadAngle16 (int protocol, unsigned int flags)
 {
-	int val = MSG_ReadShort();
-	return val * (360.0 / 65536);
-}
-
-void MSG_WriteAngle16 (sizebuf_t *sb, float f)
-{
-	int val = (int)f*65536/360;
-	MSG_WriteShort (sb, val & 65535);
-}
-
-
-float MSG_ReadCoord24 (void)
-{
-	return MSG_ReadShort () + ((float) MSG_ReadByte ()) * (1.0 / 255);
+	if (protocol == PROTOCOL_VERSION_RMQ)
+	{
+		if (flags & PRFL_FLOATANGLE)
+			return MSG_ReadFloat(); // make sure
+		else return MSG_ReadShort() * (360.0 / 65536);
+	}
+	else return MSG_ReadShort() * (360.0 / 65536);
 }
 
 
-float MSG_ReadCoord32f (void)
+void MSG_WriteAngle16 (sizebuf_t *sb, float f, int protocol, unsigned int flags)
 {
-	return MSG_ReadFloat ();
+	if (protocol == PROTOCOL_VERSION_RMQ)
+	{
+		if (flags & PRFL_FLOATANGLE)
+			MSG_WriteFloat (sb, f);
+		else MSG_WriteShort (sb, Q_rint (f * 65536.0 / 360.0) & 65535);
+	}
+	else MSG_WriteShort (sb, Q_rint (f * 65536.0 / 360.0) & 65535);
 }
 
 
@@ -257,66 +256,65 @@ void MSG_WriteCoord24 (sizebuf_t *sb, float f)
 }
 
 
-void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol)
+void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol, unsigned flags)
 {
-	if (protocol >= PROTOCOL_VERSION_MH)
-		MSG_WriteFloat (sb, f);
-	else if (protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+	if (protocol == PROTOCOL_VERSION_RMQ)
 	{
-		// coord24 is incredibbly jerky on elevator rides
-		//MSG_WriteCoord24 (sb, f);
-		MSG_WriteFloat (sb, f);
+		if (flags & PRFL_FLOATCOORD)
+			MSG_WriteFloat (sb, f);
+		else if (flags & PRFL_24BITCOORD)
+			MSG_WriteCoord24 (sb, f);
+		else MSG_WriteShort (sb, (int) (f * 8));
 	}
 	else MSG_WriteShort (sb, (int) (f * 8));
 }
 
 
-void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol)
+void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol, unsigned int flags)
 {
-	switch (protocol)
+	if (protocol == PROTOCOL_VERSION_RMQ)
 	{
-	case PROTOCOL_VERSION_MH:
-		MSG_WriteShort (sb, ((int) ((f * 65536) / 360)) & 65535);
-		break;
-
-	case PROTOCOL_VERSION_RMQ_MINUS2:
-		MSG_WriteFloat (sb, f);
-		break;
-
-	default:
-		MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
-		break;
+		if (flags & PRFL_FLOATANGLE)
+			MSG_WriteFloat (sb, f);
+		else if (flags & PRFL_SHORTANGLE)
+			MSG_WriteShort (sb, Q_rint (f * 65536.0 / 360.0) & 65535);
+		else MSG_WriteByte (sb, Q_rint (f * 256.0 / 360.0) & 255); // johnfitz -- use Q_rint instead of (int)
 	}
+	else MSG_WriteByte (sb, Q_rint (f * 256.0 / 360.0) & 255); // johnfitz -- use Q_rint instead of (int)
 }
 
 
-float MSG_ReadCoord (int protocol)
+float MSG_ReadCoord24 (void)
 {
-	if (protocol >= PROTOCOL_VERSION_MH)
-		return MSG_ReadFloat ();
-	else if (protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+	return MSG_ReadShort () + MSG_ReadByte () * (1.0 / 255);
+}
+
+
+float MSG_ReadCoord (int protocol, unsigned flags)
+{
+	if (protocol == PROTOCOL_VERSION_RMQ)
 	{
-		// coord24 is incredibbly jerky on elevator rides
-		//return MSG_ReadCoord24 ();
-		return MSG_ReadFloat ();
+		if (flags & PRFL_FLOATCOORD)
+			return MSG_ReadFloat ();
+		else if (flags & PRFL_24BITCOORD)
+			return MSG_ReadCoord24 ();
+		else return MSG_ReadShort () * (1.0f / 8.0f);
 	}
 	else return MSG_ReadShort () * (1.0f / 8.0f);
 }
 
 
-float MSG_ReadAngle (int protocol)
+float MSG_ReadAngle (int protocol, unsigned int flags) // gb, PROTOCOL_RMQ
 {
-	switch (protocol)
+	if (protocol == PROTOCOL_VERSION_RMQ)
 	{
-	case PROTOCOL_VERSION_MH:
-		return MSG_ReadShort () * (360.0 / 65536);
-
-	case PROTOCOL_VERSION_RMQ_MINUS2:
-		return MSG_ReadFloat ();
-
-	default:
-		return (MSG_ReadChar () * 1.40625f);
+		if (flags & PRFL_FLOATANGLE)
+			return MSG_ReadFloat ();
+		else if (flags & PRFL_SHORTANGLE)
+			return MSG_ReadShort () * (360.0 / 65536);
+		else return MSG_ReadChar () * (360.0 / 256);
 	}
+	else return MSG_ReadChar () * (360.0 / 256);
 }
 
 
@@ -352,7 +350,7 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 		buf->overflowed = true;
 		Con_Printf ("SZ_GetSpace: overflow");
-		SZ_Clear (buf); 
+		SZ_Clear (buf);
 	}
 
 	data = buf->data + buf->cursize;
@@ -363,20 +361,20 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 void SZ_Write (sizebuf_t *buf, void *data, int length)
 {
-	Q_MemCpy (SZ_GetSpace (buf,length), data, length);         
+	memcpy (SZ_GetSpace (buf, length), data, length);
 }
 
 void SZ_Print (sizebuf_t *buf, char *data)
 {
 	int             len;
-	
-	len = strlen(data)+1;
+
+	len = strlen (data) + 1;
 
 	// byte * cast to keep VC++ happy
 	if (buf->data[buf->cursize-1])
-		Q_MemCpy ((byte *)SZ_GetSpace(buf, len),data,len); // no trailing 0
+		memcpy ((byte *) SZ_GetSpace (buf, len), data, len); // no trailing 0
 	else
-		Q_MemCpy ((byte *)SZ_GetSpace(buf, len-1)-1,data,len); // write over trailing 0
+		memcpy ((byte *) SZ_GetSpace (buf, len - 1) - 1, data, len); // write over trailing 0
 }
 
 
@@ -402,19 +400,36 @@ char *COM_Parse (char *data, bool parsefullline)
 	if (!data) return NULL;
 
 	// skip whitespace
-skipwhite:
-	while ((c = *data) <= ' ')
+skipwhite:;
+	while ((c = data[0]) <= ' ')
 	{
 		// eof
 		if (c == 0) return NULL;
+
 		data++;
 	}
 
 	// skip // comments
-	if (c=='/' && data[1] == '/')
+	if (c == '/' && data[1] == '/')
 	{
-		while (*data && *data != '\n')
+		while (data[0] && data[0] != '\n')
 			data++;
+
+		goto skipwhite;
+	}
+
+	// skip /*..*/ comments
+	if (c == '/' && data[1] == '*')
+	{
+		// comment
+		data++;
+
+		while (data[0] && (data[0] != '*' || data[1] != '/'))
+			data++;
+
+		if (data[0]) data++;
+		if (data[0]) data++;
+
 		goto skipwhite;
 	}
 
@@ -425,7 +440,8 @@ skipwhite:
 
 		while (1)
 		{
-			c = *data++;
+			c = data[0];
+			data++;
 
 			if (c == '\"' || !c)
 			{
@@ -444,7 +460,7 @@ skipwhite:
 		com_token[len] = c;
 		data++;
 		len++;
-		c = *data;
+		c = data[0];
 	} while (c > (parsefullline ? 31 : 32));
 
 	com_token[len] = 0;

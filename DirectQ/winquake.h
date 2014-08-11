@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -45,11 +45,6 @@ extern HWND			d3d_Window;
 extern bool		ActiveApp, Minimized;
 
 extern bool	WinNT;
-
-void IN_ShowMouse (BOOL mshow);
-void IN_DeactivateMouse (void);
-void IN_ActivateMouse (void);
-void IN_MouseEvent (int mstate, int numbuttons, bool dinput);
 
 extern bool	winsock_lib_initialized;
 

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -18,9 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 
-//
 // these are the key numbers that should be passed to Key_Event
-//
 #define	K_TAB			9
 #define	K_ENTER			13
 #define	K_ESCAPE		27
@@ -58,9 +56,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define K_PAUSE			255
 
-//
 // mouse buttons generate virtual keys
-//
 #define	K_MOUSE1		200
 #define	K_MOUSE2		201
 #define	K_MOUSE3		202
@@ -70,9 +66,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	K_MOUSE7		206
 #define	K_MOUSE8		207
 
-//
 // joystick buttons
-//
 #define K_JOY1		208
 #define K_JOY2		209
 #define K_JOY3		210

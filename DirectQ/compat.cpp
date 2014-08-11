@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -305,7 +305,7 @@ void Cmd_MakeCompatLayer (void)
 	cmd_t *compatcmd_70 = new cmd_t ("map", NULL);
 	cmd_t *compatcmd_71 = new cmd_t ("restart", NULL);
 	cmd_t *compatcmd_72 = new cmd_t ("changelevel", NULL);
-	cmd_t *compatcmd_73 = new cmd_t ("changelevel2", NULL);
+	// cmd_t *compatcmd_73 = new cmd_t ("changelevel2", NULL);
 	cmd_t *compatcmd_74 = new cmd_t ("connect", NULL);
 	cmd_t *compatcmd_75 = new cmd_t ("reconnect", NULL);
 	cmd_t *compatcmd_76 = new cmd_t ("name", NULL);

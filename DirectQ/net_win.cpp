@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -26,37 +26,37 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 net_driver_t net_drivers[MAX_NET_DRIVERS] =
 {
 	{
-	"Loopback",
-	false,
-	Loop_Init,
-	Loop_Listen,
-	Loop_SearchForHosts,
-	Loop_Connect,
-	Loop_CheckNewConnections,
-	Loop_GetMessage,
-	Loop_SendMessage,
-	Loop_SendUnreliableMessage,
-	Loop_CanSendMessage,
-	Loop_CanSendUnreliableMessage,
-	Loop_Close,
-	Loop_Shutdown
+		"Loopback",
+		false,
+		Loop_Init,
+		Loop_Listen,
+		Loop_SearchForHosts,
+		Loop_Connect,
+		Loop_CheckNewConnections,
+		Loop_GetMessage,
+		Loop_SendMessage,
+		Loop_SendUnreliableMessage,
+		Loop_CanSendMessage,
+		Loop_CanSendUnreliableMessage,
+		Loop_Close,
+		Loop_Shutdown
 	}
 	,
 	{
-	"Datagram",
-	false,
-	Datagram_Init,
-	Datagram_Listen,
-	Datagram_SearchForHosts,
-	Datagram_Connect,
-	Datagram_CheckNewConnections,
-	Datagram_GetMessage,
-	Datagram_SendMessage,
-	Datagram_SendUnreliableMessage,
-	Datagram_CanSendMessage,
-	Datagram_CanSendUnreliableMessage,
-	Datagram_Close,
-	Datagram_Shutdown
+		"Datagram",
+		false,
+		Datagram_Init,
+		Datagram_Listen,
+		Datagram_SearchForHosts,
+		Datagram_Connect,
+		Datagram_CheckNewConnections,
+		Datagram_GetMessage,
+		Datagram_SendMessage,
+		Datagram_SendUnreliableMessage,
+		Datagram_CanSendMessage,
+		Datagram_CanSendUnreliableMessage,
+		Datagram_Close,
+		Datagram_Shutdown
 	}
 };
 

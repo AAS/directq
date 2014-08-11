@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -37,37 +37,114 @@ quakeparms_t host_parms;
 
 bool	host_initialized;		// true if into command execution
 
-float		host_frametime;
 float		realtime;				// without any filtering or bounding
-float		oldrealtime;
+
 int			host_framecount;
 
 client_t	*host_client;			// current client
 
 jmp_buf 	host_abortserver;
 
-cvar_t	host_framerate ("host_framerate","0");	// set for slow motion
+cvar_t	host_framerate ("host_framerate", "0");	// set for slow motion
 cvar_t	sys_ticrate ("sys_ticrate", "0.05");
 
-cvar_t	fraglimit ("fraglimit","0",CVAR_SERVER);
-cvar_t	timelimit ("timelimit","0",CVAR_SERVER);
-cvar_t	teamplay ("teamplay","0",CVAR_SERVER);
+cvar_t	fraglimit ("fraglimit", "0", CVAR_SERVER);
+cvar_t	timelimit ("timelimit", "0", CVAR_SERVER);
+cvar_t	teamplay ("teamplay", "0", CVAR_SERVER);
 
-cvar_t	samelevel ("samelevel","0");
-cvar_t	noexit ("noexit","0",CVAR_SERVER);
+cvar_t	samelevel ("samelevel", "0");
+cvar_t	noexit ("noexit", "0", CVAR_SERVER);
 
-cvar_t	developer ("developer","0");
+cvar_t	developer ("developer", "0");
 
-cvar_t	skill ("skill","1");						// 0 - 3
-cvar_t	deathmatch ("deathmatch","0");			// 0, 1, or 2
-cvar_t	coop ("coop","0");			// 0 or 1
+cvar_t	skill ("skill", "1");						// 0 - 3
+cvar_t	deathmatch ("deathmatch", "0");			// 0, 1, or 2
+cvar_t	coop ("coop", "0");			// 0 or 1
 
-cvar_t	pausable ("pausable","1");
+cvar_t	pausable ("pausable", "1");
 
 cvar_t	temp1 ("temp1", "0");
 cvar_t	temp2 ("temp2", "0");
 cvar_t	temp3 ("temp3", "0");
 cvar_t	temp4 ("temp4", "0");
+
+
+// reserve space for all clients.  these need to be kept in static memory so that the addresses
+// of member variables remain valid during level transitions/etc
+client_t host_svsclients[MAX_SCOREBOARD];
+
+void Host_SafeWipeClient (client_t *client)
+{
+	// copy out anything that uses a pointer in the client_t struct
+	byte *msgbuf = client->msgbuf;
+	float *ping_times = client->ping_times;
+	float *spawn_parms = client->spawn_parms;
+
+	// wipe the contents of what we copied out
+	if (msgbuf) memset (msgbuf, 0, MAX_MSGLEN);
+	if (ping_times) memset (ping_times, 0, sizeof (float) * NUM_PING_TIMES);
+	if (spawn_parms) memset (spawn_parms, 0, sizeof (float) * NUM_SPAWN_PARMS);
+
+	// now we can safely wipe the struct
+	memset (client, 0, sizeof (client_t));
+
+	// and now we restore what we copied out
+	client->msgbuf = msgbuf;
+	client->ping_times = ping_times;
+	client->spawn_parms = spawn_parms;
+}
+
+
+void Host_InitClients (int numclients)
+{
+	client_t *client = host_svsclients;
+
+	for (int i = 0; i < MAX_SCOREBOARD; i++, client++)
+	{
+		// safely wipe the client
+		Host_SafeWipeClient (client);
+
+		if (i < numclients)
+		{
+			if (!client->ping_times)
+				client->ping_times = (float *) MainZone->Alloc (sizeof (float) * NUM_PING_TIMES);
+			else memset (client->ping_times, 0, sizeof (float) * NUM_PING_TIMES);
+
+			if (!client->spawn_parms)
+				client->spawn_parms = (float *) MainZone->Alloc (sizeof (float) * NUM_SPAWN_PARMS);
+			else memset (client->spawn_parms, 0, sizeof (float) * NUM_SPAWN_PARMS);
+
+			// this is going to be an active client so set up memory/etc for it
+			if (!client->msgbuf)
+				client->msgbuf = (byte *) MainZone->Alloc (MAX_MSGLEN);
+			else memset (client->msgbuf, 0, MAX_MSGLEN);
+
+			// set up the new message buffer correctly (this is just harmless paranoia as it's also done in SV_ConnectClient)
+			client->message.data = client->msgbuf;
+		}
+		else
+		{
+			// this is an inactive client so release memory/etc
+			if (client->msgbuf)
+			{
+				MainZone->Free (client->msgbuf);
+				client->msgbuf = NULL;
+			}
+
+			if (client->ping_times)
+			{
+				MainZone->Free (client->ping_times);
+				client->ping_times = NULL;
+			}
+
+			if (client->spawn_parms)
+			{
+				MainZone->Free (client->spawn_parms);
+				client->spawn_parms = NULL;
+			}
+		}
+	}
+}
 
 
 /*
@@ -79,11 +156,11 @@ void Host_EndGame (char *message, ...)
 {
 	va_list		argptr;
 	char		string[1024];
-	
-	va_start (argptr,message);
-	_vsnprintf (string,1024,message,argptr);
+
+	va_start (argptr, message);
+	_vsnprintf (string, 1024, message, argptr);
 	va_end (argptr);
-	Con_DPrintf ("Host_EndGame: %s\n",string);
+	Con_DPrintf ("Host_EndGame: %s\n", string);
 
 	if (sv.active)
 		Host_ShutdownServer (false);
@@ -111,12 +188,13 @@ void Host_Error (char *error, ...)
 
 	if (inerror)
 		Sys_Error ("Host_Error: recursively entered");
+
 	inerror = true;
 
 	SCR_EndLoadingPlaque ();		// reenable screen updates
 
-	va_start (argptr,error);
-	_vsnprintf (string,1024,error,argptr);
+	va_start (argptr, error);
+	_vsnprintf (string, 1024, error, argptr);
 	va_end (argptr);
 
 	Con_Printf ("Host_Error: %s\n", string);
@@ -164,7 +242,8 @@ void Host_FindMaxClients (void)
 		svs.maxclients = MAX_SCOREBOARD;
 
 	// allocate space for the initial clients
-	svs.clients = (client_s *) Zone_Alloc (svs.maxclients * sizeof (client_t));
+	svs.clients = host_svsclients;
+	Host_InitClients (svs.maxclients);
 
 	// if we request more than 1 client we set the appropriate game mode
 	if (svs.maxclients > 1)
@@ -193,6 +272,8 @@ Host_WriteConfiguration
 Writes key bindings and archived cvars
 ===============
 */
+void Cmd_WriteAlias (FILE *f);
+
 void Host_WriteConfiguration (void)
 {
 	FILE	*f;
@@ -203,6 +284,7 @@ void Host_WriteConfiguration (void)
 		while (_fcloseall ());
 
 #if 1
+
 		if (!(f = fopen (va ("%s/directq.cfg", com_gamedir), "w")))
 #else
 		if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
@@ -214,6 +296,7 @@ void Host_WriteConfiguration (void)
 			Sleep (1000);
 
 #if 1
+
 			if (!(f = fopen (va ("%s/directq.cfg", com_gamedir), "w")))
 #else
 			if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
@@ -231,6 +314,7 @@ void Host_WriteConfiguration (void)
 
 		Key_WriteBindings (f);
 		Cvar_WriteVariables (f);
+		Cmd_WriteAlias (f);	// needed for the RMQ hook otherwise it gets wiped
 
 		fclose (f);
 
@@ -249,7 +333,7 @@ cmd_t Host_WriteConfiguration_Cmd ("Host_WriteConfiguration", Host_WriteConfigur
 =================
 SV_ClientPrintf
 
-Sends text across to be displayed 
+Sends text across to be displayed
 FIXME: make this just a stuffed echo?
 =================
 */
@@ -258,8 +342,8 @@ void SV_ClientPrintf (char *fmt, ...)
 	va_list		argptr;
 	char		string[2048];
 
-	va_start (argptr,fmt);
-	_vsnprintf (string, 2048,fmt,argptr);
+	va_start (argptr, fmt);
+	_vsnprintf (string, 2048, fmt, argptr);
 	va_end (argptr);
 
 	MSG_WriteByte (&host_client->message, svc_print);
@@ -279,11 +363,11 @@ void SV_BroadcastPrintf (char *fmt, ...)
 	char		string[1024];
 	int			i;
 
-	va_start (argptr,fmt);
-	_vsnprintf (string, 1024, fmt,argptr);
+	va_start (argptr, fmt);
+	_vsnprintf (string, 1024, fmt, argptr);
 	va_end (argptr);
 
-	for (i=0; i<svs.maxclients; i++)
+	for (i = 0; i < svs.maxclients; i++)
 		if (svs.clients[i].active && svs.clients[i].spawned)
 		{
 			MSG_WriteByte (&svs.clients[i].message, svc_print);
@@ -303,8 +387,8 @@ void Host_ClientCommands (char *fmt, ...)
 	va_list		argptr;
 	char		string[1024];
 
-	va_start (argptr,fmt);
-	_vsnprintf (string, 1020, fmt,argptr);
+	va_start (argptr, fmt);
+	_vsnprintf (string, 1020, fmt, argptr);
 	va_end (argptr);
 
 	MSG_WriteByte (&host_client->message, svc_stufftext);
@@ -334,13 +418,13 @@ void SV_DropClient (bool crash)
 			MSG_WriteByte (&host_client->message, svc_disconnect);
 			NET_SendMessage (host_client->netconnection, &host_client->message);
 		}
-	
+
 		if (host_client->edict && host_client->spawned)
 		{
 			// call the prog function for removing a client
 			// this will set the body to a dead frame, among other things
 			saveSelf = SVProgs->GlobalStruct->self;
-			SVProgs->GlobalStruct->self = EDICT_TO_PROG(host_client->edict);
+			SVProgs->GlobalStruct->self = EDICT_TO_PROG (host_client->edict);
 			SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientDisconnect);
 			SVProgs->GlobalStruct->self = saveSelf;
 		}
@@ -357,10 +441,11 @@ void SV_DropClient (bool crash)
 	net_activeconnections--;
 
 	// send notification to all clients
-	for (i=0, client = svs.clients; i<svs.maxclients; i++, client++)
+	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
 	{
 		if (!client->active)
 			continue;
+
 		MSG_WriteByte (&client->message, svc_updatename);
 		MSG_WriteByte (&client->message, host_client - svs.clients);
 		MSG_WriteString (&client->message, "");
@@ -380,7 +465,7 @@ Host_ShutdownServer
 This only happens at the end of a game, not between levels
 ==================
 */
-void Host_ShutdownServer(bool crash)
+void Host_ShutdownServer (bool crash)
 {
 	int		i;
 	int		count;
@@ -397,7 +482,7 @@ void Host_ShutdownServer(bool crash)
 		CL_Disconnect ();
 
 	// flush any pending messages - like the score!!!
-	float start = Sys_FloatTime ();
+	DWORD dwStart = Sys_Milliseconds ();
 
 	do
 	{
@@ -409,38 +494,40 @@ void Host_ShutdownServer(bool crash)
 			{
 				if (NET_CanSendMessage (host_client->netconnection))
 				{
-					NET_SendMessage(host_client->netconnection, &host_client->message);
+					NET_SendMessage (host_client->netconnection, &host_client->message);
 					SZ_Clear (&host_client->message);
 				}
 				else
 				{
-					NET_GetMessage(host_client->netconnection);
+					NET_GetMessage (host_client->netconnection);
 					count++;
 				}
 			}
 		}
 
-		if ((Sys_FloatTime () - start) > 3) break;
-	}
-	while (count);
+		if ((Sys_Milliseconds () - dwStart) > 3000) break;
+	} while (count);
 
 	// make sure all the clients know we're disconnecting
 	buf.data = (byte *) message;
 	buf.maxsize = 4;
 	buf.cursize = 0;
-	MSG_WriteByte(&buf, svc_disconnect);
-	count = NET_SendToAll(&buf, 5);
+	MSG_WriteByte (&buf, svc_disconnect);
+	count = NET_SendToAll (&buf, 5);
 
 	if (count)
 		Con_Printf ("Host_ShutdownServer: NET_SendToAll failed for %u clients\n", count);
 
-	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
+	for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 		if (host_client->active)
-			SV_DropClient(crash);
+			SV_DropClient (crash);
+
+	// safely wipe the client_t structs
+	for (i = 0; i < svs.maxclients; i++)
+		Host_SafeWipeClient (&svs.clients[i]);
 
 	// clear structures
-	Q_MemSet (&sv, 0, sizeof (sv));
-	Q_MemSet (svs.clients, 0, svs.maxclients * sizeof (client_t));
+	memset (&sv, 0, sizeof (sv));
 }
 
 
@@ -469,7 +556,7 @@ void Cmd_SignalCacheClear_f (void)
 }
 
 cmd_t Cmd_SignalCacheClear ("cacheclear", Cmd_SignalCacheClear_f);
-void D3D_ClearOcclusionQueries (void);
+void CL_ClearCLStruct (void);
 
 void Host_ClearMemory (void)
 {
@@ -487,10 +574,6 @@ void Host_ClearMemory (void)
 		signal_cacheclear = false;
 	}
 
-	// free occlusion queries - this needs to be done before the map pool as
-	// queries contain pointers to entities which must be valid
-	D3D_ClearOcclusionQueries ();
-
 	// clear virtual memory pools for the map
 	MainHunk->Free ();
 
@@ -499,8 +582,8 @@ void Host_ClearMemory (void)
 	MapZone = new CQuakeZone ();
 
 	// wipe the client and server structs
-	Q_MemSet (&sv, 0, sizeof (sv));
-	Q_MemSet (&cl, 0, sizeof (cl));
+	memset (&sv, 0, sizeof (sv));
+	CL_ClearCLStruct ();
 }
 
 
@@ -520,44 +603,16 @@ cvar_alias_t cl_maxfps ("cl_maxfps", &host_maxfps);
 cvar_alias_t sv_maxfps ("sv_maxfps", &host_maxfps);
 cvar_alias_t pq_maxfps ("pq_maxfps", &host_maxfps);
 
-
-bool Host_FilterTime (float time)
-{
-	realtime += time;
-
-	// bound sensibly
-	if (host_maxfps.value < 10) Cvar_Set (&host_maxfps, 10);
-	if (host_maxfps.value > 1000) Cvar_Set (&host_maxfps, 1000);
-
-	if (!cls.timedemo && ((realtime - oldrealtime) < (1.0f / host_maxfps.value)))
-		return false;
-
-	host_frametime = realtime - oldrealtime;
-	oldrealtime = realtime;
-
-	if (host_framerate.value > 0)
-		host_frametime = host_framerate.value;
-	else
-	{
-		// fixme - this is nonsensical...
-		if (host_frametime > 0.1f) host_frametime = 0.1f;
-		if (host_frametime < 0.001f) host_frametime = 0.001f;
-	}
-
-	return true;
-}
-
-
 /*
 ==================
 Host_ServerFrame
 
 ==================
 */
-void Host_ServerFrame (void)
+void Host_ServerFrame (float frametime)
 {
-	// run the world state	
-	SVProgs->GlobalStruct->frametime = host_frametime;
+	// run the world state
+	SVProgs->GlobalStruct->frametime = frametime;
 
 	// set the time and clear the general datagram
 	SV_ClearDatagram ();
@@ -566,11 +621,12 @@ void Host_ServerFrame (void)
 	SV_CheckForNewClients ();
 
 	// read client messages
-	SV_RunClients ();
+	SV_RunClients (frametime);
 
 	// move things around and think
 	// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game)) SV_Physics ();
+	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
+		SV_Physics (frametime);
 
 	// send all messages to the clients
 	SV_SendClientMessages ();
@@ -585,97 +641,108 @@ Runs all active servers
 ==================
 */
 
-void S_FrameCheck (void);
 void CL_SendLagMove (void);
+void IN_ReadKeyboardEvents (void);
 
-cvar_t host_speeds ("host_speeds", "0");
+void SCR_SetTimeout (float timeout);
+void R_UpdateParticles (void);
+void SCR_SetUpToDrawConsole (float frametime);
 
-void Host_Frame (float time)
+void Host_Frame (DWORD time)
 {
 	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver)) return;
 
+	// read the keyboard
+	// IN_ReadKeyboardEvents ();
+
 	// keep the random time dependent
 	rand ();
 
-	// decide the simulation time - don't run too fast, or packets will flood out
-	if (!Host_FilterTime (time))
+	static DWORD dwOldRealTime = 0;
+	static DWORD dwRealTime = 0;				// millisecond version to keep timings steady
+
+	// keep timings steady
+	dwRealTime += time;
+
+	// prevent division by zero (and stalling the host)
+	if (host_maxfps.value < 1) Cvar_Set (&host_maxfps, 1);
+
+	// attempt to compensate for integer division by rounding to the nearest
+	DWORD dwLockTime;
+
+#ifdef _DEBUG
+	// debug builds get to use host_maxfps because it's handy for testing with
+	dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
+#else
+	if (sv.active || cls.demorecording)
+		dwLockTime = (DWORD) ((1000.0f / 72.0f) + 0.5f);
+	else dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
+#endif
+
+	if (!cls.timedemo && (dwRealTime - dwOldRealTime) < dwLockTime)
 	{
 		// JPG - if we're not doing a frame, still check for lagged moves to send
-		if (!sv.active && (cl.movemessages > 2))
-			CL_SendLagMove ();
-
-		return;
+		if (!sv.active && !cls.demoplayback && (cl.movemessages > 2)) CL_SendLagMove ();
 	}
-
-	float begin_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
-
-	// get new key events
-	Sys_SendKeyEvents ();
-
-	// allow mice or other external controllers to add commands
-	IN_Commands ();
-
-	// process console commands
-	Cbuf_Execute ();
-
-	// check for changes in the sound state
-	S_FrameCheck ();
-
-	NET_Poll ();
-
-	CL_SendCmd ();
-
-	float command_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
-
-	// if running the server locally, make intentions now
-	if (sv.active)
+	else
 	{
-		// run a server frame (this can probably go in a separate thread)
-		Host_ServerFrame ();
+		// move these back to DWORDs to keep timings steady; there is a tendency for them to drift at present
+		float host_frametime = (float) (dwRealTime - dwOldRealTime) * 0.001f;
+
+		realtime = (float) dwRealTime * 0.001f;
+		dwOldRealTime = dwRealTime;
+
+		// more integer compensation here
+		// weird things happen if we're running at > 1000 fps and we clamp frametimes to 1 ms so don't do that!
+		if (host_framerate.value > 0)
+			host_frametime = host_framerate.value;
+		else if (host_frametime > 0.1f) host_frametime = 0.1f;
+
+		// run the message loop
+		Sys_SendKeyEvents ();
+
+		// process console commands
+		Cbuf_Execute ();
+
+		NET_Poll ();
+
+		if (sv.active) CL_SendCmd ();
+
+		// if running the server locally, make intentions now
+		if (sv.active)
+			Host_ServerFrame (host_frametime);
+		else CL_SendCmd ();
+
+		// fetch results from server
+		if (cls.state == ca_connected) CL_ReadFromServer (host_frametime);
+
+		// set up the console (FPS dependent)
+		SCR_SetUpToDrawConsole (host_frametime);
+
+		// update display - V_RenderView is now called separately so that SCR_UpdateScreen can be independent of it
+		V_RenderView (cl.time, host_frametime);
+
+		SCR_UpdateScreen (host_frametime);
+
+		// run anything that needs to be done after the screen update
+		// update particles
+		R_UpdateParticles ();
+
+		// update dlights
+		if (cls.signon == SIGNONS) CL_DecayLights ();
+
+		// update sound
+		if (cls.signon == SIGNONS)
+			S_Update (host_frametime, r_origin, vpn, vright, vup);
+		else S_Update (host_frametime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
+
+		// finish sound
+		CDAudio_Update ();
+		MediaPlayer_Update ();
+
+		host_framecount++;
 	}
-
-	float server_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
-
-	// fetch results from server
-	if (cls.state == ca_connected) CL_ReadFromServer ();
-
-	float client_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
-
-	// update sound
-	if (cls.signon == SIGNONS)
-		S_Update (r_origin, vpn, vright, vup);
-	else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
-
-	float sound_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
-
-	// update display
-	SCR_UpdateScreen ();
-
-	float render_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
-
-	// update dlights (should this move to the end of SCR_UpdateScreen?)
-	if (cls.signon == SIGNONS) CL_DecayLights ();
-
-	if (host_speeds.integer && cls.state == ca_connected)
-	{
-		Con_Printf
-		(
-			"Commands %i  Server %i  Client %i  Sound %i  Renderer %i ms\n",
-			(int) ((command_time - begin_time) * 1000.0f),
-			(int) ((server_time - command_time) * 1000.0f),
-			(int) ((client_time - server_time) * 1000.0f),
-			(int) ((sound_time - client_time) * 1000.0f),
-			(int) ((render_time - sound_time) * 1000.0f)
-		);
-	}
-
-	// finish sound
-	S_EndThread ();
-	CDAudio_Update ();
-	MediaPlayer_Update ();
-
-	host_framecount++;
 }
 
 
@@ -691,7 +758,7 @@ void Host_InitVCR (quakeparms_t *parms)
 Host_Init
 ====================
 */
-void D3D_VidInit (void);
+void D3DVid_Init (void);
 bool full_initialized = false;
 void Menu_CommonInit (void);
 void PR_InitBuiltIns (void);
@@ -708,7 +775,7 @@ void Host_Init (quakeparms_t *parms)
 	// hold back some things until we're fully up
 	full_initialized = false;
 
-	Q_MemCpy (&host_parms, parms, sizeof (quakeparms_t));
+	memcpy (&host_parms, parms, sizeof (quakeparms_t));
 	// host_parms = *parms;
 
 	com_argc = parms->argc;
@@ -720,7 +787,7 @@ void Host_Init (quakeparms_t *parms)
 
 	//PR_InitBuiltIns ();
 	Cbuf_Init ();
-	Cmd_Init ();	
+	Cmd_Init ();
 	V_Init ();
 	Chase_Init ();
 	COM_Init (parms->basedir);
@@ -734,7 +801,9 @@ void Host_Init (quakeparms_t *parms)
 	Cbuf_Execute ();
 
 	Host_InitLocal ();
+
 	if (!W_LoadWadFile ("gfx.wad")) Sys_Error ("Could not locate Quake on your computer");
+
 	Key_Init ();
 	Con_Init ();
 	Menu_CommonInit ();
@@ -745,6 +814,7 @@ void Host_Init (quakeparms_t *parms)
 	Mod_Init ();
 	NET_Init ();
 	SV_Init ();
+	IPLog_Init ();	// JPG 1.05 - ip address logging
 
 	Con_SafePrintf ("Exe: "__TIME__" "__DATE__"\n");
 
@@ -752,7 +822,7 @@ void Host_Init (quakeparms_t *parms)
 
 	if (!W_LoadPalette ()) Sys_Error ("Could not locate Quake on your computer");
 
-	D3D_VidInit ();
+	D3DVid_Init ();
 
 	Draw_Init (); SCR_QuakeIsLoading (1, 9);
 	SCR_Init (); SCR_QuakeIsLoading (2, 9);
@@ -772,7 +842,7 @@ void Host_Init (quakeparms_t *parms)
 	// anything allocated after this point will be cleared between maps
 	host_initialized = true;
 
-	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s", DIRECTQ_VERSION, com_gamename));
+	UpdateTitlebarText ();
 }
 
 
@@ -790,6 +860,7 @@ void Host_ShutdownGame (void)
 	scr_disabled_for_loading = true;
 
 	Host_WriteConfiguration ();
+	IPLog_WriteLog ();	// JPG 1.05 - ip loggging
 
 	CDAudio_Shutdown ();
 	MediaPlayer_Shutdown ();

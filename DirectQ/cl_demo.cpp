@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -134,22 +134,24 @@ int CL_GetMessage (void)
 
 	if (cls.demoplayback)
 	{
-		// decide if it is time to grab the next message		
+		// decide if it is time to grab the next message
 		if (cls.signon == SIGNONS)	// allways grab until fully connected
 		{
 			if (cls.timedemo)
 			{
 				if (host_framecount == cls.td_lastframe)
 					return 0;		// allready read this frame's message
+
 				cls.td_lastframe = host_framecount;
-			// if this is the second frame, grab the real td_starttime
-			// so the bogus time on the first frame doesn't count
+
+				// if this is the second frame, grab the real td_starttime
+				// so the bogus time on the first frame doesn't count
 				if (host_framecount == cls.td_startframe + 1)
 					cls.td_starttime = realtime;
 			}
-			else if ( /* cl.time > 0 && */ cl.time <= cl.mtime[0])
+			else
 			{
-				return 0;		// don't need another message yet
+				if (cl.time <= cl.mtime[0]) return 0;
 			}
 		}
 
@@ -160,14 +162,14 @@ int CL_GetMessage (void)
 		// get the next message
 		Success = (COM_FReadFile (demohandle, &net_message.cursize, 4) != -1);
 
-		VectorCopy (cl.mviewangles[0], cl.mviewangles[1]);
+		VectorCopy2 (cl.mviewangles[1], cl.mviewangles[0]);
 
 		for (i = 0; i < 3 && Success; i++)
 		{
 			Success = (COM_FReadFile (demohandle, &f, 4) != -1);
 			cl.mviewangles[0][i] = LittleFloat (f);
 		}
-		
+
 		if (Success)
 		{
 			net_message.cursize = LittleLong (net_message.cursize);
@@ -184,7 +186,7 @@ int CL_GetMessage (void)
 			CL_Disconnect ();
 			return 0;
 		}
-	
+
 		return 1;
 	}
 
@@ -210,7 +212,7 @@ int CL_GetMessage (void)
 	// JPG 1.05 - support for recording demos after connecting
 	if (cls.signon < 2)
 	{
-		Q_MemCpy (demo_head[cls.signon], net_message.data, net_message.cursize);
+		memcpy (demo_head[cls.signon], net_message.data, net_message.cursize);
 		demo_head_size[cls.signon] = net_message.cursize;
 
 		if (!cls.signon)
@@ -220,12 +222,12 @@ int CL_GetMessage (void)
 			*ch++ = svc_print;
 
 			ch += 1 + sprintf
-			(
-				ch,
-				"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n"
-				"\nRecorded on DirectQ Release "DIRECTQ_VERSION"\n"
-				"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n"
-			);
+				  (
+					  ch,
+					  "\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n"
+					  "\nRecorded on DirectQ Release "DIRECTQ_VERSION"\n"
+					  "\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n"
+				  );
 
 			demo_head_size[0] = ch - (char *) demo_head[0];
 		}
@@ -326,12 +328,12 @@ void CL_Record_f (void)
 	}
 	else track = -1;
 
-	_snprintf (name, 128, "%s/%s", com_gamedir, Cmd_Argv(1));
+	_snprintf (name, 128, "%s/%s", com_gamedir, Cmd_Argv (1));
 
 	// start the map up
 	if (c > 2)
 	{
-		Cmd_ExecuteString ( va("map %s", Cmd_Argv(2)), src_command);
+		Cmd_ExecuteString (va ("map %s", Cmd_Argv (2)), src_command);
 
 		// if we couldn't find the map we abort recording
 		if (cls.state != ca_connected) return;
@@ -440,7 +442,7 @@ bool CL_DoPlayDemo (void)
 	CL_Disconnect ();
 
 	// open the demo file
-	Q_strncpy (name, Cmd_Argv(1), 127);
+	Q_strncpy (name, Cmd_Argv (1), 127);
 	COM_DefaultExtension (name, ".dem");
 
 	if (demohandle != INVALID_HANDLE_VALUE)
@@ -459,7 +461,7 @@ bool CL_DoPlayDemo (void)
 		return false;
 	}
 
-    demofile_start = SetFilePointer (demohandle, 0, NULL, FILE_CURRENT);
+	demofile_start = SetFilePointer (demohandle, 0, NULL, FILE_CURRENT);
 
 	cls.demoplayback = true;
 	cls.state = ca_connected;
@@ -511,6 +513,7 @@ void CL_FinishTimeDemo (void)
 	time = realtime - cls.td_starttime;
 
 	if (!time) time = 1;
+
 	float fps = (float) frames / time;
 
 	Con_Printf ("%i frames %5.1f seconds %5.1f fps\n", frames, time, fps);

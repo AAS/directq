@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -107,16 +107,16 @@ void M_BuildTranslationTable (int top, int bottom)
 
 	dest = translationTable;
 	source = identityTable;
-	Q_MemCpy (dest, source, 256);
+	memcpy (dest, source, 256);
 
 	if (top < 128)	// the artists made some backwards ranges.  sigh.
-		Q_MemCpy (dest + TOP_RANGE, source + top, 16);
+		memcpy (dest + TOP_RANGE, source + top, 16);
 	else
 		for (j = 0; j < 16; j++)
 			dest[TOP_RANGE + j] = source[top + 15 - j];
 
 	if (bottom < 128)
-		Q_MemCpy (dest + BOTTOM_RANGE, source + bottom, 16);
+		memcpy (dest + BOTTOM_RANGE, source + bottom, 16);
 	else
 		for (j = 0; j < 16; j++)
 			dest[BOTTOM_RANGE + j] = source[bottom + 15 - j];
@@ -140,7 +140,7 @@ int Menu_SetupCustomDraw (int y)
 
 	// check for an apply change
 	if (setup_shirt != setup_oldshirt || setup_pants != setup_oldpants ||
-		strcmp (dummy_name.string, cl_name.string) || strcmp (dummy_hostname.string, hostname.string))
+			strcmp (dummy_name.string, cl_name.string) || strcmp (dummy_hostname.string, hostname.string))
 		menu_Setup.EnableMenuOptions (TAG_SETUPAPPLY);
 	else menu_Setup.DisableMenuOptions (TAG_SETUPAPPLY);
 
@@ -156,17 +156,9 @@ int Menu_TCPIPProtoDesc (int y)
 	if (selected_protocol == 0)
 		Menu_PrintCenter (y, "Use for best compatibility with all Quake Clients");
 	else if (selected_protocol == 1)
-		Menu_PrintCenter (y, "Extended protocol (models > 256 etc)");
+		Menu_PrintCenter (y, "FitzQuake extended protocol");
 	else if (selected_protocol == 2)
-		Menu_PrintCenter (y, "Extended protocol (models > 256 etc), more accurate");
-	else if (selected_protocol == 3)
-		Menu_PrintCenter (y, "Extended protocol (models > 256 etc)");
-	else if (selected_protocol == 4)
-		Menu_PrintCenter (y, "Extended protocol (sounds > 256), problems with Marcher");
-	else if (selected_protocol == 5)
-		Menu_PrintCenter (y, "Extended protocol (sounds > 256), more compatible but less functional");
-	else if (selected_protocol == 6)
-		Menu_PrintCenter (y, "Extended protocol, as BJP3 but extends coords and angles");
+		Menu_PrintCenter (y, "RMQ extended protocol");
 	else Menu_PrintCenter (y, "Unknown protocol");
 
 	return y + 15;
@@ -519,9 +511,9 @@ void Menu_SListCustomEnter (void)
 			{
 				if (strcmp (hostcache[j].name, hostcache[i].name) < 0)
 				{
-					Q_MemCpy (&temp, &hostcache[j], sizeof (hostcache_t));
-					Q_MemCpy (&hostcache[j], &hostcache[i], sizeof (hostcache_t));
-					Q_MemCpy (&hostcache[i], &temp, sizeof (hostcache_t));
+					memcpy (&temp, &hostcache[j], sizeof (hostcache_t));
+					memcpy (&hostcache[j], &hostcache[i], sizeof (hostcache_t));
+					memcpy (&hostcache[i], &temp, sizeof (hostcache_t));
 				}
 			}
 		}
@@ -529,6 +521,7 @@ void Menu_SListCustomEnter (void)
 
 	// create a scrollbox for it
 	if (MenuSListScrollbox) delete MenuSListScrollbox;
+
 	MenuSListScrollbox = new CScrollBoxProvider (hostCacheCount, 20, 22);
 	MenuSListScrollbox->SetDrawItemCallback (Menu_SListOnDraw);
 	MenuSListScrollbox->SetHoverItemCallback (Menu_SListOnHover);
@@ -604,7 +597,9 @@ int Menu_CustomNameCustomDraw (int y)
 	Menu_PrintCenter (y + 25, "Clear Name");
 
 	if (!custnamechanged) D3D_Set2DShade (0.666f);
+
 	Menu_PrintCenter (y + 40, "Apply Change");
+
 	if (!custnamechanged) D3D_Set2DShade (1.0f);
 
 	return (y + 10);
@@ -687,18 +682,28 @@ void Menu_CustomNameCustomKey (int k)
 	if (!custnamechanged) maxrow = 8;
 
 	if (k == K_UPARROW) custnamerow--;
+
 	if (k == K_RIGHTARROW) custnamecol++;
+
 	if (k == K_DOWNARROW) custnamerow++;
+
 	if (k == K_LEFTARROW) custnamecol--;
+
 	if (k == K_HOME) custnamecol -= 8;
+
 	if (k == K_END) custnamecol += 8;
+
 	if (k == K_PGUP) custnamerow -= 3;
+
 	if (k == K_PGDN) custnamerow += 3;
 
 	// in theory if should be ok here, but let's get paranoid about it, OK?
 	while (custnamerow < 0) custnamerow += (maxrow + 1);
+
 	while (custnamerow > maxrow) custnamerow -= (maxrow + 1);
+
 	while (custnamecol < 0) custnamecol += 32;
+
 	while (custnamecol > 31) custnamecol -= 32;
 
 	if (!custnamerow && !custnamecol)
@@ -737,6 +742,7 @@ void Menu_CustomNameCustomEnter (void)
 	Q_strncpy (funname, cl_name.string, 1023);
 
 	custnamechanged = false;
+
 	if (custnamerow == 9) custnamerow = 8;
 }
 

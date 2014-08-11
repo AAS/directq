@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -133,18 +133,27 @@ bool IsFileNameChar (char c)
 	// true if the char is valid for a file name (excluding alpha numeric)
 	// standard windows disallowed characters
 	if (c == '\\') return false;
+
 	if (c == '/') return false;
+
 	if (c == ':') return false;
+
 	if (c == '*') return false;
+
 	if (c == '?') return false;
+
 	if (c == '"') return false;
+
 	if (c == '<') return false;
+
 	if (c == '>') return false;
+
 	if (c == '|') return false;
 
 	// these are ones we want to disallow in the engine for various reasons
 	// (keeping code simpler, prevention of relative paths, etc etc etc)
 	if (c == ' ') return false;
+
 	if (c == '.') return false;
 
 	return true;
@@ -178,7 +187,7 @@ void Menu_Print (int cx, int cy, char *str)
 {
 	while (*str)
 	{
-		Menu_DrawCharacter (cx, cy, (*str)+128);
+		Menu_DrawCharacter (cx, cy, (*str) + 128);
 		str++;
 		cx += 8;
 	}
@@ -376,12 +385,14 @@ void CQMenuSpinControl::DrawCurrentOptionHighlight (int y)
 	if (this->MenuCvar)
 	{
 		if (this->MenuCvar->value > this->MinVal) drawleft = true;
+
 		if (this->MenuCvar->value < this->MaxVal) drawright = true;
 	}
 	else if (this->StringBuf)
 	{
-		if (*(this->MenuVal) > 0) drawleft = true;
-		if (this->StringBuf[*(this->MenuVal) + 1]) drawright = true;
+		if (* (this->MenuVal) > 0) drawleft = true;
+
+		if (this->StringBuf[* (this->MenuVal) + 1]) drawright = true;
 	}
 
 	int lpos = 160;
@@ -395,6 +406,7 @@ void CQMenuSpinControl::DrawCurrentOptionHighlight (int y)
 	int rpos = lpos + 16 + strlen (this->OutputText) * 8;
 
 	if (drawleft) Menu_DrawBackwardsCharacter (lpos, y, 12 + ((int) (realtime * 2) & 1));
+
 	if (drawright) Menu_DrawCharacter (rpos, y, 12 + ((int) (realtime * 2) & 1));
 }
 
@@ -425,9 +437,9 @@ void CQMenuSpinControl::Draw (int y)
 	}
 	else if (this->StringBuf)
 	{
-		if (!this->StringBuf[*(this->MenuVal)])
+		if (!this->StringBuf[* (this->MenuVal)])
 			this->OutputText[0] = 0;
-		else strcpy (this->OutputText, this->StringBuf[*(this->MenuVal)]);
+		else strcpy (this->OutputText, this->StringBuf[* (this->MenuVal)]);
 	}
 
 	if (!this->MenuCommandText[0])
@@ -481,11 +493,11 @@ void CQMenuSpinControl::Key (int k)
 		case K_LEFTARROW:
 			menu_soundlevel = m_sound_option;
 
-			(*(this->MenuVal))--;
+			(* (this->MenuVal))--;
 
-			if (*(this->MenuVal) < 0)
+			if (* (this->MenuVal) < 0)
 			{
-				*(this->MenuVal) = 0;
+				* (this->MenuVal) = 0;
 				menu_soundlevel = m_sound_deny;
 			}
 
@@ -494,17 +506,18 @@ void CQMenuSpinControl::Key (int k)
 		case K_RIGHTARROW:
 			menu_soundlevel = m_sound_option;
 
-			(*(this->MenuVal))++;
+			(* (this->MenuVal)) ++;
 
-			if (!this->StringBuf[*(this->MenuVal)])
+			if (!this->StringBuf[* (this->MenuVal)])
 			{
-				(*(this->MenuVal))--;
+				(* (this->MenuVal))--;
 				menu_soundlevel = m_sound_deny;
 			}
 
 			break;
 
 		default:
+
 			if (k >= 'A' && k <= 'Z') k += 32;
 
 			if (k >= 'a' && k <= 'z')
@@ -516,7 +529,7 @@ void CQMenuSpinControl::Key (int k)
 					if ((this->StringBuf[i][0] == k) || (this->StringBuf[i][0] == (k - 32)))
 					{
 						menu_soundlevel = m_sound_option;
-						*(this->MenuVal) = i;
+						* (this->MenuVal) = i;
 						break;
 					}
 				}
@@ -545,14 +558,14 @@ CQMenuColourBar::CQMenuColourBar (char *cmdtext, int *colour)
 {
 	this->AllocCommandText (cmdtext);
 	this->Colour = colour;
-	this->Initial = *(this->Colour);
+	this->Initial = * (this->Colour);
 	this->AcceptsInput = true;
 }
 
 
 void CQMenuColourBar::PerformEntryFunction (void)
 {
-	this->Initial = *(this->Colour);
+	this->Initial = * (this->Colour);
 }
 
 
@@ -561,7 +574,7 @@ void CQMenuColourBar::Draw (int y)
 	// text
 	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
-	int colour = *(this->Colour);
+	int colour = * (this->Colour);
 	int intense = colour * 16 + (colour < 8 ? 11 : 4);
 
 	// colour bar
@@ -589,11 +602,11 @@ void CQMenuColourBar::Key (int k)
 	case K_LEFTARROW:
 		menu_soundlevel = m_sound_option;
 
-		(*(this->Colour))--;
+		(* (this->Colour))--;
 
-		if (*(this->Colour) < 0)
+		if (* (this->Colour) < 0)
 		{
-			*(this->Colour) = 0;
+			* (this->Colour) = 0;
 			menu_soundlevel = m_sound_deny;
 		}
 
@@ -602,11 +615,11 @@ void CQMenuColourBar::Key (int k)
 	case K_RIGHTARROW:
 		menu_soundlevel = m_sound_option;
 
-		(*(this->Colour))++;
+		(* (this->Colour)) ++;
 
-		if (*(this->Colour) > 13)
+		if (* (this->Colour) > 13)
 		{
-			*(this->Colour) = 13;
+			* (this->Colour) = 13;
 			menu_soundlevel = m_sound_deny;
 		}
 
@@ -675,6 +688,7 @@ void CQMenuCvarTextbox::Draw (int y)
 	for (int i = 0; i < MAX_TBLENGTH; i++)
 	{
 		if (!this->WorkingText[this->TextStart + i]) break;
+
 		Menu_DrawCharacter (170 + i * 8, y, this->WorkingText[this->TextStart + i]);
 	}
 
@@ -719,6 +733,7 @@ void CQMenuCvarTextbox::Key (int k)
 			this->TextStart = 0;
 			menu_soundlevel = m_sound_deny;
 		}
+
 		break;
 
 	case K_RIGHTARROW:
@@ -742,6 +757,7 @@ void CQMenuCvarTextbox::Key (int k)
 			this->TextStart = strlen (this->WorkingText) - MAX_TBPOS;
 			menu_soundlevel = m_sound_deny;
 		}
+
 		break;
 
 	case K_HOME:
@@ -755,13 +771,17 @@ void CQMenuCvarTextbox::Key (int k)
 		// go to end
 		menu_soundlevel = m_sound_option;
 		this->TextPos = MAX_TBPOS;
+
 		if (this->TextPos > strlen (this->WorkingText)) this->TextPos = strlen (this->WorkingText);
 
 		this->TextStart = strlen (this->WorkingText) - MAX_TBPOS;
+
 		if (this->TextStart < 0) this->TextStart = 0;
+
 		break;
 
 	case K_DEL:
+
 		// prevent deletion if at end of string
 		if (RealTextPos >= strlen (this->WorkingText))
 		{
@@ -782,6 +802,7 @@ void CQMenuCvarTextbox::Key (int k)
 		break;
 
 	case K_BACKSPACE:
+
 		// prevent deletion at start of string
 		if (!RealTextPos)
 		{
@@ -804,9 +825,11 @@ void CQMenuCvarTextbox::Key (int k)
 		}
 
 		if (this->TextPos < 0) this->TextPos = 0;
+
 		break;
 
 	default:
+
 		// non alphanumeric
 		if (k < 32 || k > 127)
 		{
@@ -832,9 +855,13 @@ void CQMenuCvarTextbox::Key (int k)
 		{
 			// check individual flags
 			if ((this->Flags & TBFLAG_ALLOWNUMBERS) && (k >= '0' && k <= '9')) validinput = true;
+
 			if ((this->Flags & TBFLAG_ALLOWLETTERS) && ((k >= 'a' && k <= 'z') || (k >= 'A' && k <= 'Z'))) validinput = true;
+
 			if ((this->Flags & TBFLAG_FILENAMECHARS) && IsFileNameChar (k)) validinput = true;
+
 			if ((this->Flags & TBFLAG_ALLOWSPACE) && k == 32) validinput = true;
+
 			if ((this->Flags & TBFLAG_FOLDERPATH) && (k == '/' || k == '\\') && RealTextPos > 0) validinput = true;
 		}
 
@@ -969,6 +996,7 @@ void CQMenuCursorSubMenu::Key (int k)
 	if (k == K_ENTER)
 	{
 		if (this->SubMenu) Menu_StackPush (this->SubMenu);
+
 		if (this->Command) this->Command ();
 	}
 }
@@ -1018,6 +1046,7 @@ void CQMenuCommand::Key (int k)
 	if (k == K_ENTER)
 	{
 		menu_soundlevel = m_sound_option;
+
 		if (this->Command) this->Command ();
 	}
 }
@@ -1160,7 +1189,7 @@ CQMenuCustomKey::CQMenuCustomKey (int keycapture, menucommandi_t capturefunc, bo
 bool CQMenuCustomKey::CheckStatus (void *stuff)
 {
 	// retrieve the key
-	int k = *((int *) stuff);
+	int k = * ((int *) stuff);
 
 	// execute the capture function
 	if (k == this->KeyCapture)
@@ -1324,6 +1353,7 @@ void CQMenuCvarSlider::Draw (int y)
 
 	// don't go beyond the bounds
 	if (point < 0) point = 0;
+
 	if (point > 1) point = 1;
 
 	// draw indicator
@@ -1437,6 +1467,7 @@ void CQMenuCvarExpSlider::Draw (int y)
 
 	// don't go beyond the bounds
 	if (point < 0) point = 0;
+
 	if (point > 1) point = 1;
 
 	// check for inverse scale
@@ -1649,6 +1680,7 @@ bool CQMenuOption::CanAcceptInput (void)
 {
 	// never accepts input
 	if (!this->Enabled) return false;
+
 	if (!this->Visible) return false;
 
 	// depends on the option type
@@ -1909,6 +1941,7 @@ void CQMenu::Key (int k)
 		break;
 
 	case K_UPARROW:
+
 		while (1)
 		{
 			// go to the previous option
@@ -1925,6 +1958,7 @@ void CQMenu::Key (int k)
 		break;
 
 	case K_DOWNARROW:
+
 		while (1)
 		{
 			// go to the next option
@@ -1944,6 +1978,7 @@ void CQMenu::Key (int k)
 		break;
 
 	default:
+
 		// send it through the option key handler
 		if (this->CurrentOption->CanAcceptInput ())
 			this->CurrentOption->Key (k);
@@ -2021,6 +2056,7 @@ void CScrollBoxProvider::SetDeleteItemCallback (menucommandi_t deleteitemcallbac
 int CScrollBoxProvider::DrawItems (int x, int starty)
 {
 	if (!this->DrawItemCallback) return starty;
+
 	if (!this->NumItems) return starty;
 
 	int initialy = starty;
@@ -2086,13 +2122,17 @@ void CScrollBoxProvider::KeyFunc (int key)
 	switch (key)
 	{
 	case K_DEL:
+
 		if (this->DeleteItemCallback)
 			this->DeleteItemCallback (this->ScrollBoxCurrentItem);
+
 		break;
 
 	case K_ENTER:
+
 		if (this->EnterItemCallback)
 			this->EnterItemCallback (this->ScrollBoxCurrentItem);
+
 		break;
 
 	case K_UPARROW:
@@ -2171,6 +2211,7 @@ void Menu_DrawOption (int x, int y, char *option, bool leftflash, bool rightflas
 	Menu_PrintWhite (x, y, option);
 
 	if (leftflash) Menu_DrawBackwardsCharacter (x - 12, y, 12 + ((int) (realtime * 2) & 1));
+
 	if (rightflash) Menu_DrawCharacter (x + 4 + strlen (option) * 8, y, 12 + ((int) (realtime * 2) & 1));
 }
 
@@ -2371,7 +2412,7 @@ void M_Keydown (int key)
 
 
 // this is just provided as a development aid to have something to stick into unfinished options
-void Menu_NullCommand (void) { /* does nothing */ }
+void Menu_NullCommand (void) { /* does nothing */}
 
 
 void Menu_InitHelpMenu (void);
