@@ -38,8 +38,33 @@ void R_ClearParticles (void);
 void D3DLight_BuildAllLightmaps (void);
 void D3DSky_LoadSkyBox (char *basename, bool feedback);
 
+LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[16] = {NULL};
 LPDIRECT3DTEXTURE9 r_notexture = NULL;
+
 extern LPDIRECT3DTEXTURE9 crosshairtexture;
+extern LPDIRECT3DTEXTURE9 smokepufftexture;
+
+
+void D3DMisc_CreatePalette (void)
+{
+	// reconvert backward ranges to forward so that we can do correct lookups on them
+	for (int i = 0; i < 16; i++)
+	{
+		byte palrow[16];
+
+		for (int j = 0, k = 15; j < 16; j++, k--)
+			palrow[j] = i * 16 + ((i > 7 && i < 14) ? k : j);
+
+		D3D_UploadTexture (&d3d_PaletteRowTextures[i], (byte *) palrow, 16, 1, 0);
+	}
+}
+
+
+void D3DMisc_ReleasePalette (void)
+{
+	for (int i = 0; i < 16; i++)
+		SAFE_RELEASE (d3d_PaletteRowTextures[i]);
+}
 
 
 /*
@@ -73,6 +98,7 @@ void D3DPart_OnRecover (void);
 
 void R_ReleaseResourceTextures (void)
 {
+	SAFE_RELEASE (smokepufftexture);
 	SAFE_RELEASE (crosshairtexture);
 	SAFE_RELEASE (r_notexture);
 
@@ -81,13 +107,21 @@ void R_ReleaseResourceTextures (void)
 }
 
 
+void D3D_MakeAlphaTexture (LPDIRECT3DTEXTURE9 tex);
+
 void R_InitResourceTextures (void)
 {
+	D3DMisc_CreatePalette ();
 	D3DPart_OnRecover ();
 	D3DWarp_WWTexOnRecover ();
 
 	// load any textures contained in exe resources
-	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, 0);
+	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, IMAGE_ALPHA);
+	D3D_LoadResourceTexture ("smokepuff", &smokepufftexture, IDR_SMOKEPUFF, IMAGE_ALPHA);
+
+	// convert them to alpha mask textures
+	D3D_MakeAlphaTexture (crosshairtexture);
+	D3D_MakeAlphaTexture (smokepufftexture);
 
 	// load the notexture properly
 	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->size[0], r_notexture_mip->size[1], IMAGE_MIPMAP);
@@ -224,9 +258,13 @@ void D3DLight_EndBuildingLightmaps (void);
 void D3DBrush_BuildBModelVBOs (void);
 void Host_InitTimers (void);
 void D3DSurf_BuildWorldCache (void);
+void D3DPart_SmokePuffNewMap (void);
 
 void R_NewMap (void)
 {
+	SAFE_DELETE (RenderZone);
+	RenderZone = new CQuakeZone ();
+
 	// set up the pvs arrays (these will already have been done by the server if it's active
 	if (!sv.active) Mod_InitForMap (cl.worldmodel);
 
@@ -269,6 +307,7 @@ void R_NewMap (void)
 	D3DAlpha_NewMap ();
 	Fog_ParseWorldspawn ();
 	D3DAlias_CreateBuffers ();
+	D3DPart_SmokePuffNewMap ();
 
 	// as sounds are now cleared between maps these sounds also need to be
 	// reloaded otherwise the known_sfx will go out of sequence for them

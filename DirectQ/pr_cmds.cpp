@@ -66,9 +66,9 @@ void QC_DebugOutput (char *debugtext, ...)
 }
 
 
-#define	RETURN_EDICT(e) (((int *)SVProgs->Globals)[OFS_RETURN] = EDICT_TO_PROG(e))
+#define	RETURN_EDICT(e) (((int *) SVProgs->Globals)[OFS_RETURN] = EDICT_TO_PROG(e))
 
-cvar_t pr_checkextension ("pr_checkextension", "0");
+cvar_t pr_checkextension ("pr_checkextension", "0", CVAR_INTERNAL);
 
 // 2001-10-20 Extension System by LordHavoc  start
 char *pr_extensions[] =
@@ -1796,7 +1796,10 @@ void PF_WriteLong (void)
 
 void PF_WriteAngle (void)
 {
-	MSG_WriteAngle (WriteDest(), G_FLOAT (OFS_PARM1), sv.Protocol, sv.PrototcolFlags, 0);
+	// demos don't go through here...
+	if (host_client->netconnection->mod == MOD_PROQUAKE && sv.Protocol == PROTOCOL_VERSION_NQ)
+		MSG_WriteAngle8_Old (WriteDest (), G_FLOAT (OFS_PARM1));
+	else MSG_WriteAngle (WriteDest(), G_FLOAT (OFS_PARM1), sv.Protocol, sv.PrototcolFlags, 0);
 }
 
 void PF_WriteCoord (void)

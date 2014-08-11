@@ -55,7 +55,7 @@ void SV_AllocEdicts (int numedicts)
 #endif
 
 	// edictpointers MUST be alloced first so that edicts are a linear array...!
-	if (!SVProgs->EdictPointers) SVProgs->EdictPointers = (edict_t **) MainHunk->Alloc (MAX_EDICTS * sizeof (edict_t *));
+	if (!SVProgs->EdictPointers) SVProgs->EdictPointers = (edict_t **) ServerZone->Alloc (MAX_EDICTS * sizeof (edict_t *));
 
 #if 0
 	edict_t *edbuf = (edict_t *) Pool_Edicts->Alloc (numedicts * SVProgs->EdictSize);
@@ -76,7 +76,7 @@ void SV_AllocEdicts (int numedicts)
 
 #else
 	// edicts are variable sized
-	byte *edbuf = (byte *) MainHunk->Alloc (numedicts * SVProgs->EdictSize);
+	byte *edbuf = (byte *) ServerZone->Alloc (numedicts * SVProgs->EdictSize);
 
 	// can't use edictpointers yet because they have not been set up
 	for (int i = 0; i < numedicts; i++, edbuf += SVProgs->EdictSize)
@@ -89,7 +89,7 @@ void SV_AllocEdicts (int numedicts)
 
 		// this is just test code to ensure that the allocation is valid and that
 		// there is no remaining code assuming that the edicts are in consecutive memory
-		// MainHunk->Alloc ((rand () & 255) + 1);
+		// ServerZone->Alloc ((rand () & 255) + 1);
 	}
 
 #endif
@@ -610,7 +610,7 @@ byte *SV_FatPVS (vec3_t org)
 {
 	fatbytes = (sv.worldmodel->brushhdr->numleafs + 31) >> 3;
 
-	if (!fatpvs) fatpvs = (byte *) MainHunk->Alloc (fatbytes);
+	if (!fatpvs) fatpvs = (byte *) ServerZone->Alloc (fatbytes);
 
 	memset (fatpvs, 0, fatbytes);
 	SV_AddToFatPVS (org, sv.worldmodel->brushhdr->nodes);
@@ -1326,8 +1326,8 @@ int SV_ModelIndex (char *name)
 			return i;
 
 	// fixme - precache it if not already precached!!!
-	if (i == MAX_MODELS || !sv.model_precache[i])
-		Host_Error ("SV_ModelIndex: model %s not precached", name);
+	if (i == MAX_MODELS) Host_Error ("SV_ModelIndex: model %s not precached (i == MAX_MODELS)", name);
+	if (!sv.model_precache[i]) Host_Error ("SV_ModelIndex: model %s not precached (!sv.model_precache[i])", name);
 
 	return i;
 }
@@ -1514,6 +1514,9 @@ void SV_SpawnServer (char *server)
 	edict_t		*ent;
 	int			i;
 
+	SAFE_DELETE (ServerZone);
+	ServerZone = new CQuakeZone ();
+
 	// let's not have any servers with no name
 	if (hostname.string[0] == 0) Cvar_Set ("hostname", "UNNAMED");
 
@@ -1539,6 +1542,7 @@ void SV_SpawnServer (char *server)
 	// set up the new server
 	Host_ClearMemory ();
 
+	// wipe the server (this also correctly NULLs precache lists)
 	memset (&sv, 0, sizeof (sv));
 
 	strcpy (sv.name, server);

@@ -138,7 +138,7 @@ void CL_ParseBeam (model_t *m, int ent, int type, vec3_t start, vec3_t end)
 	// find a free beam
 	if (!cl_free_beams)
 	{
-		cl_free_beams = (beam_t *) MainHunk->Alloc (EXTRA_TEMPENTS * sizeof (beam_t));
+		cl_free_beams = (beam_t *) ClientZone->Alloc (EXTRA_TEMPENTS * sizeof (beam_t));
 
 		for (int i = 1; i < EXTRA_TEMPENTS; i++)
 		{
@@ -548,7 +548,7 @@ entity_t *CL_NewTempEntity (void)
 	if (!cl_free_tempents)
 	{
 		// alloc a new batch of free temp entities if required
-		cl_free_tempents = (tempent_t *) MainHunk->Alloc (sizeof (tempent_t) * EXTRA_TEMPENTS);
+		cl_free_tempents = (tempent_t *) ClientZone->Alloc (sizeof (tempent_t) * EXTRA_TEMPENTS);
 
 		for (int i = 2; i < EXTRA_TEMPENTS - 1; i++)
 			cl_free_tempents[i - 2].next = &cl_free_tempents[i - 1];

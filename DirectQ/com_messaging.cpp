@@ -222,15 +222,28 @@ int MSG_PeekByte (void)
 	return (unsigned char) net_message.data[msg_readcount];
 }
 
+
+void MSG_WriteAngle8_Old (sizebuf_t *sb, float f)
+{
+	MSG_WriteByte (sb, (int) (f * 256 / 360) & 255);
+}
+
+
+float MSG_ReadAngle8_Old (void)
+{
+	return MSG_ReadChar () * (360.0 / 256);
+}
+
+
 float MSG_ReadAngle16 (int protocol, unsigned int flags)
 {
 	if (protocol == PROTOCOL_VERSION_RMQ)
 	{
 		if (flags & PRFL_FLOATANGLE)
-			return MSG_ReadFloat(); // make sure
-		else return MSG_ReadShort() * (360.0 / 65536);
+			return MSG_ReadFloat (); // make sure
+		else return MSG_ReadShort () * (360.0 / 65536);
 	}
-	else return MSG_ReadShort() * (360.0 / 65536);
+	else return MSG_ReadShort () * (360.0 / 65536);
 }
 
 
@@ -389,14 +402,15 @@ float MSG_ReadAngle (int protocol, unsigned int flags) // gb, PROTOCOL_RMQ
 
 void MSG_WriteProQuakeAngle (sizebuf_t *sb, float f)
 {
-	int val = (int) f * 65536 / 360;
+	// fix casting precedence bug
+	int val = (int) ((f * 65536) / 360);
 	MSG_WriteShort (sb, (val & 65535));
 }
 
 
 float MSG_ReadProQuakeAngle (void)
 {
-	int val = MSG_ReadShort ();
+	float val = (float) MSG_ReadShort ();
 	return val * (360.0 / 65536);
 }
 

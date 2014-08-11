@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-void R_RenderView (void);
+void R_RenderView (double frametime);
 void Menu_PrintCenterWhite (int cy, char *str);
 void Menu_PrintWhite (int cx, int cy, char *str);
 void D3D_GenerateTextureList (void);
@@ -112,6 +112,17 @@ cvar_t		scr_shotnamebase ("scr_shotnamebase", "Quake", CVAR_ARCHIVE);
 cvar_t scr_screenshotdir ("scr_screenshotdir", "screenshot/", CVAR_ARCHIVE, COM_ValidateUserSettableDir);
 
 cvar_t	r_automapshot ("r_automapshot", "0", CVAR_ARCHIVE);
+
+// qrack compatibility
+cvar_alias_t scr_sshot_type ("scr_sshot_type", &scr_screenshotformat);
+
+// darkplaces
+cvar_t scr_screenshot_jpeg ("scr_screenshot_jpeg", "1", CVAR_ARCHIVE);
+cvar_t scr_screenshot_png ("scr_screenshot_png", "1", CVAR_ARCHIVE);
+cvar_t scr_screenshot_gammaboost ("scr_screenshot_gammaboost", "1", CVAR_ARCHIVE);
+
+// sanity - it's not a gamma boost, it's a gamma *modification*
+cvar_alias_t scr_screenshot_gamma ("scr_screenshot_gamma", &scr_screenshot_gammaboost);
 
 extern	cvar_t	crosshair;
 
@@ -792,6 +803,299 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 }
 
 
+typedef struct writepcx_s
+{
+    char	manufacturer;
+    char	version;
+    char	encoding;
+    char	bits_per_pixel;
+    unsigned short	xmin,ymin,xmax,ymax;
+    unsigned short	hres,vres;
+    unsigned char	palette[48];
+    char	reserved;
+    char	color_planes;
+    unsigned short	bytes_per_line;
+    unsigned short	palette_type;
+    char	filler[58];
+    unsigned char	data;			// unbounded
+} writepcx_t;
+
+
+void SCR_WriteSurfaceToPCX (char *filename, LPDIRECT3DSURFACE9 rts)
+{
+	D3DSURFACE_DESC surfdesc;
+	D3DLOCKED_RECT lockrect;
+	LPDIRECT3DSURFACE9 surf;
+
+	// get the surface description
+	hr = rts->GetDesc (&surfdesc);
+
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToPCX: Failed to get backbuffer description\n");
+		return;
+	}
+
+	// create a surface to copy to (ensure the dest surface is the correct format!!!)
+	hr = d3d_Device->CreateOffscreenPlainSurface
+	(
+		surfdesc.Width,
+		surfdesc.Height,
+		D3DFMT_X8R8G8B8,	// PCX has no alpha and we rely on the data to be 32-bit
+		D3DPOOL_SCRATCH,
+		&surf,
+		NULL
+	);
+
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToPCX: Failed to create a surface to copy to\n");
+		return;
+	}
+
+	// copy from the rendertarget to system memory
+	hr = D3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToPCX: Failed to copy backbuffer data\n");
+		surf->Release ();
+		return;
+	}
+
+	// lock the surface rect
+	hr = surf->LockRect (&lockrect, NULL, 0);
+
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToPCX: Failed to access backbuffer data\n");
+		surf->Release ();
+		return;
+	}
+
+	// try to open it
+	FILE *f = fopen (filename, "wb");
+
+	// didn't work
+	if (!f)
+	{
+		surf->UnlockRect ();
+		surf->Release ();
+		return;
+	}
+
+	int hunkmark = MainHunk->GetLowMark ();
+	writepcx_t *pcx = (writepcx_t *) MainHunk->Alloc (surfdesc.Width * surfdesc.Height * 2 + 1000);
+
+	pcx->manufacturer = 0x0a;
+	pcx->version = 5;
+ 	pcx->encoding = 1;
+	pcx->bits_per_pixel = 8;
+
+	pcx->xmin = 0;
+	pcx->ymin = 0;
+
+	pcx->xmax = (short) (surfdesc.Width - 1);
+	pcx->ymax = (short) (surfdesc.Height - 1);
+	pcx->hres = 72;
+	pcx->vres = 72;
+
+	memset (pcx->palette, 0, sizeof (pcx->palette));
+	pcx->color_planes = 1;
+	pcx->bytes_per_line = (short) surfdesc.Width;
+	pcx->palette_type = 1;
+	memset (pcx->filler, 0, sizeof (pcx->filler));
+
+	byte *pack = &pcx->data;
+
+	// encode to PCX
+	// adapted from code at http://svn.icculus.org/qshed/trunk/qwalk/
+	for (int y = 0; y < surfdesc.Height; y++)
+	{
+		const unsigned int *pix = ((unsigned int *) lockrect.pBits) + y * surfdesc.Width;
+
+		for (int x = 0; x < surfdesc.Width;)
+		{
+			unsigned int pix_x = (x < surfdesc.Width) ? pix[x] : pix[surfdesc.Width - 1];
+			int runlen = 1;
+
+			for (runlen = 1; runlen < 63 && x + runlen < surfdesc.Width; runlen++)
+				if (pix_x != (((x + runlen) < surfdesc.Width) ? pix[x + runlen] : pix[surfdesc.Width - 1]))
+					break;
+
+			int besti = -1, bestdist = 0xffffff;
+			byte *bgr = (byte *) &pix_x;
+
+			for (int i = 0; i < 256; i++)
+			{
+				int dist = 30 * abs (d3d_QuakePalette.standard[i].peRed - bgr[2]) + 
+					59 * abs (d3d_QuakePalette.standard[i].peGreen - bgr[1]) + 
+					11 * abs (d3d_QuakePalette.standard[i].peBlue - bgr[0]);
+
+				if (besti == -1 || dist < bestdist)
+				{
+					besti = i;
+					bestdist = dist;
+				}
+			}
+
+			byte data = (besti != -1) ? besti : 0;
+
+			if (runlen == 1)
+			{
+                if ((data & 0xc0) == 0xc0)
+                    *pack++ = 0xc1;
+
+                *pack++ = data;
+			}
+			else
+			{
+                *pack++ = 0xc0 | runlen;
+                *pack++ = data;
+			}
+
+			x += runlen;
+		}
+	}
+
+	// unpack to byte * for further compression
+	byte *pbuf = (byte *) MainHunk->Alloc (surfdesc.Width * surfdesc.Height * 2);
+	byte *fin = (byte *) &pcx->data;
+	byte *enddata = pack;
+	pack = &pcx->data;
+
+	for (int y = 0; y < surfdesc.Height; y++)
+	{
+		byte *a = pbuf + y * surfdesc.Width;
+		int x, x2;
+
+		for (x = 0; x < surfdesc.Width && fin < enddata;)
+		{
+			byte dataByte = *fin++;
+
+			if (dataByte >= 0xC0)
+			{
+				if (fin >= enddata) break;
+
+				x2 = x + (dataByte & 0x3F);
+				dataByte = *fin++;
+
+				if (x2 > surfdesc.Width) x2 = surfdesc.Width;
+				while (x < x2) a[x++] = dataByte;
+			}
+			else a[x++] = dataByte;
+		}
+
+		while (x < surfdesc.Width)
+			a[x++] = 0;
+	}
+
+	// now RLE the bastard again for the final version
+	for (int y = 0; y < surfdesc.Height; y++)
+	{
+		const unsigned char *pix = pbuf + y * surfdesc.Width;
+
+		for (int x = 0; x < surfdesc.Width;)
+		{
+			unsigned char pix_x = (x < surfdesc.Width) ? pix[x] : pix[surfdesc.Width - 1];
+			int runlen = 1;
+
+			for (runlen = 1; runlen < 63 && x + runlen < surfdesc.Width; runlen++)
+				if (pix_x != (((x + runlen) < surfdesc.Width) ? pix[x + runlen] : pix[surfdesc.Width - 1]))
+					break;
+
+			if (runlen == 1)
+			{
+                if ((pix_x & 0xc0) == 0xc0)
+                    *pack++ = 0xc1;
+
+                *pack++ = pix_x;
+			}
+			else
+			{
+                *pack++ = 0xc0 | runlen;
+                *pack++ = pix_x;
+			}
+
+			x += runlen;
+		}
+	}
+
+	// write the palette
+	*pack++ = 0x0c;	// palette ID byte
+
+	for (int i = 0; i < 256; i++, pack += 3)
+	{
+		pack[0] = d3d_QuakePalette.standard[i].peRed;
+		pack[1] = d3d_QuakePalette.standard[i].peGreen;
+		pack[2] = d3d_QuakePalette.standard[i].peBlue;
+	}
+
+	// write it out
+	fwrite (pcx, pack - (byte *) pcx, 1, f);
+
+	// done
+	fclose (f);
+	MainHunk->FreeToLowMark (hunkmark);
+
+	// unlock it
+	surf->UnlockRect ();
+	surf->Release ();
+}
+
+
+void SCR_WriteSurfaceToDDS (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fmt)
+{
+	if (fmt == D3DFMT_DXT1 || fmt == D3DFMT_DXT2 || fmt == D3DFMT_DXT3 || fmt == D3DFMT_DXT4 || fmt == D3DFMT_DXT5)
+	{
+		D3DSURFACE_DESC surfdesc;
+		LPDIRECT3DSURFACE9 surf;
+
+		// get the surface description
+		hr = rts->GetDesc (&surfdesc);
+
+		if (FAILED (hr))
+		{
+			Con_Printf ("SCR_WriteSurfaceToDDS: Failed to get backbuffer description\n");
+			return;
+		}
+
+		// create a surface to copy to (ensure the dest surface is the correct format!!!)
+		hr = d3d_Device->CreateOffscreenPlainSurface
+		(
+		// DXT formats don't work with pool_systemmem... ???
+			surfdesc.Width,
+			surfdesc.Height,
+			fmt,
+			D3DPOOL_SCRATCH,
+			&surf,
+			NULL
+		);
+
+		if (FAILED (hr))
+		{
+			Con_Printf ("SCR_WriteSurfaceToDDS: Failed to create a surface to copy to\n");
+			return;
+		}
+
+		// copy from the rendertarget to system memory
+		hr = D3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+		if (FAILED (hr))
+		{
+			Con_Printf ("SCR_WriteSurfaceToDDS: Failed to copy backbuffer data\n");
+			surf->Release ();
+			return;
+		}
+
+		D3DXSaveSurfaceToFile (filename, D3DXIFF_DDS, surf, NULL, NULL);
+
+		surf->Release ();
+	}
+	else Con_Printf ("SCR_WriteSurfaceToDDS : invalid surface format %s\n", D3DTypeToString (fmt));
+}
+
+
 // d3dx doesn't support tga writes (BASTARDS) so we made our own
 void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fmt)
 {
@@ -816,7 +1120,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fm
 			surfdesc.Width,
 			surfdesc.Height,
 			fmt,
-			D3DPOOL_SYSTEMMEM,
+			D3DPOOL_SCRATCH,
 			&surf,
 			NULL
 		);
@@ -851,7 +1155,12 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fm
 		FILE *f = fopen (filename, "wb");
 
 		// didn't work
-		if (!f) return;
+		if (!f)
+		{
+			surf->UnlockRect ();
+			surf->Release ();
+			return;
+		}
 
 		// allocate space for the header
 		byte buffer[18];
@@ -937,6 +1246,10 @@ void SCR_ScreenShot_f (void)
 
 	D3DXIMAGE_FILEFORMAT ssfmt;
 
+	// darkplaces compatibility
+	if (scr_screenshot_jpeg.value) Cvar_Set (&scr_screenshotformat, "jpg");
+	if (scr_screenshot_png.value) Cvar_Set (&scr_screenshotformat, "png");
+
 	if (!stricmp (scr_screenshotformat.string, "bmp"))
 		ssfmt = D3DXIFF_BMP;
 	else if (!stricmp (scr_screenshotformat.string, "tga"))
@@ -947,6 +1260,8 @@ void SCR_ScreenShot_f (void)
 		ssfmt = D3DXIFF_PNG;
 	else if (!stricmp (scr_screenshotformat.string, "dds"))
 		ssfmt = D3DXIFF_DDS;
+	else if (!stricmp (scr_screenshotformat.string, "pcx"))
+		ssfmt = D3DXIFF_FORCE_DWORD;	// there's no D3DXIFF_PCX so this is a hack
 	else
 	{
 		// unimplemented
@@ -989,11 +1304,82 @@ void SCR_ScreenShot_f (void)
 	// get the backbuffer (note - this might be a render to texture surf if it's underwater!!!)
 	d3d_Device->GetRenderTarget (0, &Surf);
 
+	if (scr_screenshot_gammaboost.value != 1.0f)
+	{
+		// copy off the surface, change gamma
+		byte gammatab[256];
+
+		// build a gamma table
+		for (int i = 0; i < 256; i++)
+		{
+			float f = pow ((i + 1) / 256.0f, scr_screenshot_gammaboost.value);
+			float inf = f * 255 + 0.5;
+
+			if (inf < 0) inf = 0;
+			if (inf > 255) inf = 255;
+
+			gammatab[i] = inf;
+		}
+
+		LPDIRECT3DSURFACE9 osps = NULL;
+		D3DSURFACE_DESC surfdesc;
+		D3DLOCKED_RECT lockrect;
+
+		hr = Surf->GetDesc (&surfdesc);
+
+		if (SUCCEEDED (hr))
+		{
+			hr = d3d_Device->CreateOffscreenPlainSurface
+				(surfdesc.Width,
+				surfdesc.Height,
+				D3DFMT_X8R8G8B8,
+				D3DPOOL_SCRATCH,
+				&osps,
+				NULL);
+
+			if (SUCCEEDED (hr))
+			{
+				// copy from the rendertarget to system memory
+				hr = D3DXLoadSurfaceFromSurface (osps, NULL, NULL, Surf, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+				if (SUCCEEDED (hr))
+				{
+					hr = osps->LockRect (&lockrect, NULL, 0);
+
+					if (SUCCEEDED (hr))
+					{
+						byte *data = (byte *) lockrect.pBits;
+
+						for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++, data += 4)
+						{
+							data[0] = gammatab[data[0]];
+							data[1] = gammatab[data[1]];
+							data[2] = gammatab[data[2]];
+						}
+
+						osps->UnlockRect ();
+					}
+
+					Surf->Release ();
+					Surf = osps;
+				}
+				else
+				{
+					osps->Release ();
+				}
+			}
+		}
+	}
+
 	// write to file
 	// d3dx doesn't support tga writes (BASTARDS) so we made our own
 	if (ssfmt == D3DXIFF_TGA)
 		SCR_WriteSurfaceToTGA (checkname, Surf, D3DFMT_X8R8G8B8);
-	else D3DXSaveSurfaceToFileA (checkname, ssfmt, Surf, NULL, NULL);
+	else if (ssfmt == D3DXIFF_DDS)
+		SCR_WriteSurfaceToDDS (checkname, Surf, D3DFMT_DXT1);
+	else if (ssfmt == D3DXIFF_FORCE_DWORD)
+		SCR_WriteSurfaceToPCX (checkname, Surf);	// hack for PCX
+	else D3DXSaveSurfaceToFile (checkname, ssfmt, Surf, NULL, NULL);
 
 	// not releasing is a memory leak!!!
 	Surf->Release ();
@@ -1550,7 +1936,7 @@ void SCR_UpdateScreen (double frametime)
 	{
 		// unfortunate note - there is fps-dependent code in cl_view - the "smooth out stair step-ups" thing
 		V_RenderView ();
-		R_RenderView ();
+		R_RenderView (frametime);
 		V_UpdateCShifts ();
 	}
 

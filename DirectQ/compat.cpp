@@ -73,7 +73,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *gl_texsort_compat = new cvar_t ("gl_texsort", "0", CVAR_COMPAT);
 	cvar_t *gl_smoothmodels_compat = new cvar_t ("gl_smoothmodels", "0", CVAR_COMPAT);
 	cvar_t *gl_affinemodels_compat = new cvar_t ("gl_affinemodels", "0", CVAR_COMPAT);
-	cvar_t *gl_polyblend_compat = new cvar_t ("gl_polyblend", "0", CVAR_COMPAT);
 	cvar_t *gl_playermip_compat = new cvar_t ("gl_playermip", "0", CVAR_COMPAT);
 	cvar_t *gl_nocolors_compat = new cvar_t ("gl_nocolors", "0", CVAR_COMPAT);
 	cvar_t *gl_reporttjunctions_compat = new cvar_t ("gl_reporttjunctions", "0", CVAR_COMPAT);

@@ -132,10 +132,6 @@ void Sys_Error (char *error, ...)
 	static int	in_sys_error2 = 0;
 	static int	in_sys_error3 = 0;
 
-#ifdef _DEBUG
-	DebugBreak ();
-#endif
-
 	if (!in_sys_error3)
 	{
 		in_sys_error3 = 1;
@@ -675,8 +671,13 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 	case WM_PAINT:
 		// minimal WM_PAINT processing
-		// this always generates a valid update rect so just validate it
-		ValidateRect (hWnd, NULL);
+		// based on http://msdn.microsoft.com/en-us/library/dd369065%28v=VS.85%29.aspx
+		{
+			PAINTSTRUCT ps;
+			BeginPaint (hWnd, &ps);
+			EndPaint (hWnd, &ps);
+		}
+
 		return 0;
 
 	case WM_INPUT:
@@ -781,7 +782,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 void Host_Frame (DWORD time);
 void VID_DefaultMonitorGamma_f (void);
-
 void GetCrashReason (LPEXCEPTION_POINTERS ep);
 
 // fixme - run shutdown through here (or else consolidate the restoration stuff in a separate function)
@@ -803,15 +803,60 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 {
 	InitCommonControls ();
 
+	// init memory pools
+	// these need to be up as early as possible as other things in the startup use them
+	Heap_Init ();
+
 	// this is useless for error diagnosis but at least restores gamma on a crash
 	SetUnhandledExceptionFilter (TildeDirectQ);
 
 	if ((hwndSplash = CreateDialog (hInstance, MAKEINTRESOURCE (IDD_DIALOG1), NULL, NULL)) != NULL)
 	{
-		ShowWindow (hwndSplash, SW_SHOWDEFAULT);
-		UpdateWindow (hwndSplash);
-		SetForegroundWindow (hwndSplash);
-		Sleep (750);
+		// we can only specify the dimensions in dialog units in the .rc file which are dependent on font-sizes in the system,
+		// and which are therefore totally crap and inappropriate for a splash screen, so let's set the real size manually.
+		RECT DesktopRect;
+		SystemParametersInfo (SPI_GETWORKAREA, 0, &DesktopRect, 0);
+
+		// if the bitmap size changes these will also need to change
+		// (init to 0 so we can check if we got the bitmap OK)
+		int SPLASHW = 0;
+		int SPLASHH = 0;
+
+		// so load the bitmap to check them
+		HBITMAP hBitmap = LoadBitmap (hInstance, MAKEINTRESOURCE (IDB_DQLOGO256));
+
+		if (hBitmap)
+		{
+			BITMAP bm;
+
+			if (GetObject (hBitmap, sizeof (BITMAP), &bm))
+			{
+				SPLASHW = bm.bmWidth;
+				SPLASHH = bm.bmHeight;
+			}
+
+			DeleteObject (hBitmap);
+		}
+
+		// only show the splash if we got the bitmap
+		if (SPLASHW && SPLASHH)
+		{
+			// center it in the work area
+			int x = ((DesktopRect.right - DesktopRect.left) - SPLASHW) >> 1;
+			int y = ((DesktopRect.bottom - DesktopRect.top) - SPLASHH) >> 1;
+
+			SetWindowPos (hwndSplash, NULL, x, y, SPLASHW, SPLASHH, SWP_NOZORDER);
+
+			ShowWindow (hwndSplash, SW_SHOWDEFAULT);
+			UpdateWindow (hwndSplash);
+			SetForegroundWindow (hwndSplash);
+
+			// make sure that we pump the message loop so that the dialog will show before we go to sleep
+			Sys_SendKeyEvents ();
+
+			// and sleep for a short while so that the player can see the dialog
+			Sleep (750);
+		}
 	}
 
 	// in case we ever need it for anything...
@@ -922,10 +967,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		UNLOAD_LIBRARY (hUser32);
 	}
 
-	// init memory pools
-	// these need to be up as early as possible as other things in the startup use them
-	Pool_Init ();
-
 	global_nCmdShow = nCmdShow;
 
 	// set the directory containing Quake
@@ -989,22 +1030,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	// init the timers
 	timeBeginPeriod (1);
-	DWORD oldtime = Sys_Milliseconds ();
 
+	DWORD oldtime = Sys_Milliseconds ();
 	MSG msg;
 
-	// prime the message
-	PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE);
-
-	// restructured main loop inspired by http://www.mvps.org/directx/articles/writing_the_game_loop.htm
-	while (msg.message != WM_QUIT)
+	while (true)
 	{
-		while (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
-		{
-			TranslateMessage (&msg);
-			DispatchMessage (&msg);
-		}
-
 		// note - a normal frame needs to be run even if paused otherwise we'll never be able to unpause!!!
 		if (cl.paused)
 			Sleep (PAUSE_SLEEP);
@@ -1023,19 +1054,28 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 				Sleep (0);
 		}
 
+		if (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE) != 0)
+		{
+			if (msg.message == WM_QUIT)
+				break;
+			else
+			{
+				TranslateMessage (&msg);
+				DispatchMessage (&msg);
+			}
+		}
+
 		// RMQ engine timer; more limited resolution than QPC but virtually immune to resolution problems at very high FPS
 		// and gives ultra-smooth performance
 		DWORD newtime = Sys_Milliseconds ();
-		DWORD time = newtime - oldtime;
 
-		Host_Frame (time);
-
+		Host_Frame (newtime - oldtime);
 		oldtime = newtime;
 	}
 
 	// run through correct shutdown
 	timeEndPeriod (1);
-	Sys_Quit (msg.wParam);
-	return 0;
+	Sys_Quit ((int) msg.wParam);
+	return (int) msg.wParam;
 }
 

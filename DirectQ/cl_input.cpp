@@ -453,7 +453,7 @@ void CL_SendMove (usercmd_t *cmd)
 	MSG_WriteByte (buf, clc_move);
 	MSG_WriteFloat (buf, cl.mtime[0]);	// so server can get ping times
 
-	if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION_NQ)
+	if (!cls.demoplayback && cls.netcon->mod == MOD_PROQUAKE && cl.Protocol == PROTOCOL_VERSION_NQ)
 	{
 		MSG_WriteProQuakeAngle (buf, cl.viewangles[0]);
 		MSG_WriteProQuakeAngle (buf, cl.viewangles[1]);

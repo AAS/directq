@@ -54,7 +54,7 @@ cvar_t	noexit ("noexit", "0", CVAR_SERVER);
 
 cvar_t	developer ("developer", "0");
 
-cvar_t	skill ("skill", "1");						// 0 - 3
+cvar_t	skill ("skill", "1", CVAR_INTERNAL);						// 0 - 3
 cvar_t	deathmatch ("deathmatch", "0");			// 0, 1, or 2
 cvar_t	coop ("coop", "0");			// 0 or 1
 
@@ -583,13 +583,9 @@ void Host_ClearMemory (void)
 		signal_cacheclear = false;
 	}
 
-	// clear virtual memory pools for the map
+	// this is now just used for short lived temp allocations during loading, so instead of wiping it fully we
+	// just reset the lowmark back to 0
 	MainHunk->FreeToLowMark (0);
-	// MainHunk->Free ();
-
-	// this is not used in the current code but we'll keep it around in case we ever need it
-	SAFE_DELETE (MapZone);
-	MapZone = new CQuakeZone ();
 
 	// wipe the client and server structs
 	memset (&sv, 0, sizeof (sv));

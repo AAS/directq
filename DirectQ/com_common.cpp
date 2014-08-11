@@ -25,7 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // used for generating md5 hashes
 #include <wincrypt.h>
 
-CQuakeZone *GameZone;
+CQuakeZone *GameZone = NULL;
 
 static bool listsortascorder = false;
 
@@ -430,5 +430,18 @@ bool COM_StringContains (char *str1, char *str2)
 
 	// not found
 	return false;
+}
+
+
+char *COM_ShiftTextColor (char *str)
+{
+	for (int i = 0;; i++)
+	{
+		if (!str[i]) break;
+
+		str[i] = (str[i] + 128) & 255;
+	}
+
+	return str;
 }
 

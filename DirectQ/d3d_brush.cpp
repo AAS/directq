@@ -414,7 +414,7 @@ void D3DBrush_BuildBModelVBOs (void)
 		if (FAILED (hr)) Sys_Error ("D3DBrush_BuildBModelVBOs : failed to unlock index buffer");
 
 		mod->brushhdr->NumDrawCalls = numdc;
-		mod->brushhdr->DrawCalls = (d3d_drawcall_t *) MainHunk->Alloc (sizeof (d3d_drawcall_t) * numdc);
+		mod->brushhdr->DrawCalls = (d3d_drawcall_t *) RenderZone->Alloc (sizeof (d3d_drawcall_t) * numdc);
 		memcpy (mod->brushhdr->DrawCalls, (minsurfs + numvbosurfaces), sizeof (d3d_drawcall_t) * numdc);
 
 		// Con_Printf ("model %s has %i draw calls (%i v %i s)\n", mod->name, numdc, numvbovertexes, numvbosurfaces);
@@ -431,11 +431,7 @@ cvar_t r_surfbatchcutoff ("r_surfbatchcutoff", "1");
 void D3DBrush_FlushSurfaces (void)
 {
 	D3D_SetVertexDeclaration (d3d_SurfDecl);
-
-	D3D_SetStreamSource (0, NULL, 0, 0);
-	D3D_SetStreamSource (1, NULL, 0, 0);
-	D3D_SetStreamSource (2, NULL, 0, 0);
-	D3D_SetIndices (NULL);
+	D3D_UnbindStreams ();
 
 	if (d3d_NumBrushSurfs > r_surfbatchcutoff.integer)
 	{
@@ -725,11 +721,7 @@ void D3DBrush_DrawVBOSurfaces (void)
 void D3DBrush_ShowNodesBegin (void)
 {
 	D3D_SetVertexDeclaration (d3d_NodeDecl);
-
-	D3D_SetStreamSource (0, NULL, 0, 0);
-	D3D_SetStreamSource (1, NULL, 0, 0);
-	D3D_SetStreamSource (2, NULL, 0, 0);
-	D3D_SetIndices (NULL);
+	D3D_UnbindStreams ();
 
 	D3DHLSL_SetPass (FX_PASS_DRAWCOLORED);
 	D3DHLSL_CheckCommit ();

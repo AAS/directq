@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
+extern LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[];
+
 void D3DLight_LightPoint (entity_t *e, float *c);
 
 cvar_t r_aliaslightscale ("r_aliaslightscale", "1", CVAR_ARCHIVE);
@@ -277,7 +279,7 @@ mesh_set_drawflags:;
 		if (!strcmp (name, "progs/flame.mdl") || !strcmp (name, "progs/flame2.mdl"))
 			hdr->drawflags |= (AM_NOSHADOW | AM_FULLBRIGHT);
 		else if (!strcmp (name, "progs/eyes.mdl"))
-			hdr->drawflags |= (AM_NOSHADOW | AM_EYES);
+			hdr->drawflags |= AM_EYES;
 		else if (!strcmp (name, "progs/bolt.mdl"))
 			hdr->drawflags |= AM_NOSHADOW;
 		else if (!strncmp (Name, "flame", 5) || !strncmp (Name, "torch", 5) || !strcmp (name, "progs/missile.mdl") ||
@@ -659,6 +661,9 @@ CD3DDeviceLossHandler d3d_AliasBuffersHandler (D3DAlias_ReleaseBuffers, D3DAlias
 
 typedef struct d3d_aliasstate_s
 {
+	LPDIRECT3DTEXTURE9 lastcmap;
+	LPDIRECT3DTEXTURE9 lastshirt;
+	LPDIRECT3DTEXTURE9 lastpants;
 	image_t *lasttexture;
 	image_t *lastluma;
 	aliashdr_t *lastmodel;
@@ -697,13 +702,23 @@ void D3DAlias_SetupLighting (entity_t *ent, float *shadevector, float *shadeligh
 }
 
 
+// fix terminal spellcheck failure in the original cvar
+cvar_alias_t gl_doubleeyes_spellcheck ("gl_doubleeyes", &gl_doubleeyes);
+
 void D3DAlias_TransformFinal (entity_t *ent, aliashdr_t *hdr)
 {
-	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.value)
+	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.value > 0.0f)
 	{
 		// the scaling needs to be included at this time
-		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2] - (22 + 8));
-		D3DMatrix_Scale (&ent->matrix, hdr->scale[0] * 2.0f, hdr->scale[1] * 2.0f, hdr->scale[2] * 2.0f);
+		float sc = gl_doubleeyes.value + 1.0f;
+
+		// position the eyes consistently
+		D3DMatrix_Translate (&ent->matrix,
+			hdr->scale_origin[0] * sc,
+			hdr->scale_origin[1] * sc,
+			hdr->scale_origin[2] * sc - (gl_doubleeyes.value * 25.0f));
+
+		D3DMatrix_Scale (&ent->matrix, hdr->scale[0] * sc, hdr->scale[1] * sc, hdr->scale[2] * sc);
 	}
 	else
 	{
@@ -1122,6 +1137,9 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 
 	d3d_AliasState.lasttexture = NULL;
 	d3d_AliasState.lastluma = NULL;
+	d3d_AliasState.lastcmap = NULL;
+	d3d_AliasState.lastshirt = NULL;
+	d3d_AliasState.lastpants = NULL;
 
 	for (int i = 0; i < numents; i++)
 	{
@@ -1140,14 +1158,11 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 
 		if (!stateset)
 		{
-			// we need the third texture unit for player skins
 			D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
 			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
-			D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
 
 			D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
 			D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
-			D3D_SetTextureAddress (2, D3DTADDRESS_CLAMP);
 
 			D3D_SetVertexDeclaration (d3d_AliasDecl);
 
@@ -1158,17 +1173,41 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 		if (ent->lerppose[LERP_CURR] < 0) ent->lerppose[LERP_CURR] = 0;
 		if (ent->lerppose[LERP_LAST] < 0) ent->lerppose[LERP_LAST] = 0;
 
-		if (ent->model->flags & EF_PLAYER)
+		if ((ent->model->flags & EF_PLAYER) && state->cmapimage && !gl_nocolors.value)
 		{
-			int top = ent->playerskin & 0xf0;
-			int bottom = (ent->playerskin & 15) << 4;
+			// convert player skin colours back to 0..15 range each
+			// the new palette texture will automatically handle backward ranges
+			int shirt = (ent->playerskin & 0xf0) >> 4;
+			int pants = ent->playerskin & 15;
 
-			// backward ranges are already correct so jump to the brighest of a forward range
-			if (top < 128) top += 15;
-			if (bottom < 128) bottom += 15;
+			if (state->cmapimage->d3d_Texture != d3d_AliasState.lastcmap)
+			{
+				// the colormap must always go in tmu2
+				D3DHLSL_SetTexture (2, state->cmapimage->d3d_Texture);
+				d3d_AliasState.lastcmap = state->cmapimage->d3d_Texture;
+			}
 
-			D3DHLSL_SetFloatArray ("shirtcolor", d3d_QuakePalette.colorfloat[top], 4);
-			D3DHLSL_SetFloatArray ("pantscolor", d3d_QuakePalette.colorfloat[bottom], 4);
+			if (d3d_PaletteRowTextures[shirt] != d3d_AliasState.lastshirt)
+			{
+				// each row of the palette is a separate texture to prevent bilerp bleeding
+				D3DHLSL_SetTexture (3, d3d_PaletteRowTextures[shirt]);		// and the palette into tmu3
+				d3d_AliasState.lastshirt = d3d_PaletteRowTextures[shirt];
+			}
+
+			if (d3d_PaletteRowTextures[pants] != d3d_AliasState.lastpants)
+			{
+				// each row of the palette is a separate texture to prevent bilerp bleeding
+				D3DHLSL_SetTexture (4, d3d_PaletteRowTextures[pants]);		// and the palette into tmu4
+				d3d_AliasState.lastpants = d3d_PaletteRowTextures[pants];
+			}
+
+			D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
+			D3D_SetTextureMipmap (3, d3d_TexFilter, D3DTEXF_NONE);
+			D3D_SetTextureMipmap (4, d3d_TexFilter, D3DTEXF_NONE);
+
+			D3D_SetTextureAddress (2, D3DTADDRESS_CLAMP);
+			D3D_SetTextureAddress (3, D3DTADDRESS_CLAMP);
+			D3D_SetTextureAddress (4, D3DTADDRESS_CLAMP);
 		}
 
 		// update textures if necessary
@@ -1181,13 +1220,11 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 			}
 			else if (state->lumaimage)
 			{
-				if ((ent->model->flags & EF_PLAYER) && state->cmapimage)
+				if ((ent->model->flags & EF_PLAYER) && state->cmapimage && !gl_nocolors.value)
 				{
 					if (gl_fullbrights.integer)
 						D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA);
 					else D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA_NOLUMA);
-
-					D3DHLSL_SetTexture (2, state->cmapimage->d3d_Texture);
 				}
 				else
 				{
@@ -1201,11 +1238,8 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 			}
 			else
 			{
-				if ((ent->model->flags & EF_PLAYER) && state->cmapimage)
-				{
+				if ((ent->model->flags & EF_PLAYER) && state->cmapimage && !gl_nocolors.value)
 					D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_NOLUMA);
-					D3DHLSL_SetTexture (2, state->cmapimage->d3d_Texture);	// the colormap must always go in tmu2
-				}
 				else D3DHLSL_SetPass (FX_PASS_ALIAS_NOLUMA);
 
 				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);

@@ -29,6 +29,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "menu_common.h"
 
+char *sshot_formats[] = {"TGA", "BMP", "PNG", "DDS", "JPG", "PCX", NULL};
+int sshot_format_number = 0;
+extern cvar_t scr_screenshotformat;
+extern cvar_t scr_screenshot_jpeg;
+extern cvar_t scr_screenshot_png;
+
 char **menu_videomodes = NULL;
 int menu_videomodenum = 0;
 
@@ -402,6 +408,39 @@ int Menu_VideoCustomDraw (int y)
 
 	Menu_VideoEncodeTextureFilter ();
 
+	for (int i = 0; ; i++)
+	{
+		if (!sshot_formats[i])
+		{
+			// invalid format so default back to tga
+			sshot_format_number = 0;
+			Cvar_Set (&scr_screenshotformat, "tga");
+			break;
+		}
+
+		if (i == sshot_format_number)
+		{
+			if (!stricmp (sshot_formats[i], "jpg"))
+			{
+				Cvar_Set (&scr_screenshot_jpeg, 1.0f);
+				Cvar_Set (&scr_screenshot_png, 0.0f);
+			}
+			else if (!stricmp (sshot_formats[i], "png"))
+			{
+				Cvar_Set (&scr_screenshot_jpeg, 0.0f);
+				Cvar_Set (&scr_screenshot_png, 1.0f);
+			}
+			else
+			{
+				Cvar_Set (&scr_screenshot_jpeg, 0.0f);
+				Cvar_Set (&scr_screenshot_png, 0.0f);
+			}
+
+			Cvar_Set (&scr_screenshotformat, sshot_formats[i]);
+			break;
+		}
+	}
+
 	// no anisotropic filtering available
 	if (d3d_DeviceCaps.MaxAnisotropy < 2) return y;
 
@@ -422,6 +461,27 @@ int Menu_VideoCustomDraw (int y)
 
 void Menu_VideoCustomEnter (void)
 {
+	if (scr_screenshot_jpeg.value) Cvar_Set (&scr_screenshotformat, "jpg");
+	if (scr_screenshot_png.value) Cvar_Set (&scr_screenshotformat, "png");
+
+	for (int i = 0; ; i++)
+	{
+		if (!sshot_formats[i])
+		{
+			// invalid format so default back to tga
+			sshot_format_number = 0;
+			Cvar_Set (&scr_screenshotformat, "tga");
+			break;
+		}
+
+		if (!stricmp (scr_screenshotformat.string, sshot_formats[i]))
+		{
+			// found a format
+			sshot_format_number = i;
+			break;
+		}
+	}
+
 	// decode the video mode and set currently selected stuff
 	Menu_VideoDecodeVideoMode ();
 
@@ -467,6 +527,11 @@ extern cvar_t r_optimizealiasmodels;
 extern cvar_t r_cachealiasmodels;
 extern cvar_t gl_softwarequakemipmaps;
 
+extern cvar_t idgamma_gamma;
+extern cvar_t idgamma_intensity;
+extern cvar_t idgamma_saturation;
+extern cvar_t idgamma_modifyfullbrights;
+
 void Menu_VideoBuild (void)
 {
 	menu_Video.AddOption (new CQMenuCustomDraw (Menu_VideoCustomDraw));
@@ -483,6 +548,7 @@ void Menu_VideoBuild (void)
 	menu_Video.AddOption (new CQMenuSpacer ());
 	menu_Video.AddOption (new CQMenuTitle ("Configure Video Options"));
 
+	menu_Video.AddOption (new CQMenuSpinControl ("Screenshot Format", &sshot_format_number, sshot_formats));
 	menu_Video.AddOption (new CQMenuSpinControl ("Texture Filter", &texfiltermode, &filtermodes[1]));
 	menu_Video.AddOption (new CQMenuSpinControl ("Mipmap Filter", &mipfiltermode, filtermodes));
 	menu_Video.AddOption (new CQMenuCvarToggle ("SW Quake Mipmapping", &gl_softwarequakemipmaps, 0, 1));
@@ -520,6 +586,13 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (new CQMenuCvarToggle ("Optimize MDL Files", &r_optimizealiasmodels, 0, 1));
 		menu_Video.AddOption (new CQMenuCvarToggle ("Cache Mesh to Disk", &r_cachealiasmodels, 0, 1));
 	}
+
+	menu_Video.AddOption (new CQMenuSpacer ());
+	menu_Video.AddOption (new CQMenuTitle ("IDGamma Settings"));
+	menu_Video.AddOption (new CQMenuCvarSlider ("Intensity", &idgamma_intensity, 0.1f, 2.0f, 0.1f));	// 0.1 .. 10.0
+	menu_Video.AddOption (new CQMenuCvarSlider ("Gamma", &idgamma_gamma, 0.1f, 1.0f, 0.05f));	// 0.1 .. 1.0
+	menu_Video.AddOption (new CQMenuCvarSlider ("Saturation", &idgamma_saturation, 1, 3, 1));	// none/little/medium/full
+	menu_Video.AddOption (new CQMenuCvarToggle ("Modify Fullbrights", &idgamma_modifyfullbrights, 0, 1));
 }
 
 

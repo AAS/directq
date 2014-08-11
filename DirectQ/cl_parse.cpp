@@ -125,7 +125,7 @@ int cl_entityallocs = 0;
 
 entity_t *CL_AllocEntity (void)
 {
-	entity_t *ent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
+	entity_t *ent = (entity_t *) ClientZone->Alloc (sizeof (entity_t));
 
 	// set it's allocation number
 	// allocnumbers deliberately start at 1 as number 0 is used for signifying an entity that should not be occluded
@@ -382,7 +382,10 @@ void CL_DoWebDownload (char *filename)
 	// moved up to here because it could never be called in the old code!!!
 	if (cls.download.disconnect)
 	{
+		Con_Printf ("\n"DIVIDER_LINE"\n");
 		Con_Printf ("Download aborted\n");
+		Con_Printf (DIVIDER_LINE"\n\n");
+
 		cls.download.disconnect = false;
 		CL_Disconnect_f ();
 		return;
@@ -391,8 +394,45 @@ void CL_DoWebDownload (char *filename)
 	// check the result
 	if (DLResult == DL_ERR_NO_ERROR)
 	{
+		// bugfix - if the map isn't on the server the server may give it a 404 page which would report as OK, so we need to
+		// verify and validate the file as a BSP file.  this also fixes work PCs where crap like websense is in place.
+		FILE *f = fopen (va ("%s/%s", com_gamedir, filename), "rb");
+
+		if (f)
+		{
+			dheader_t h;
+			fread (&h, sizeof (dheader_t), 1, f);
+			fclose (f);
+
+			switch (h.version)
+			{
+			case Q1_BSPVERSION:
+			case PR_BSPVERSION:
+				break;
+
+			default:
+				DeleteFile (va ("%s/%s", com_gamedir, filename));
+
+				Con_Printf ("\n"DIVIDER_LINE"\n");
+				Con_Printf ("Couldn't recognise %s as a BSP file\n"
+					"Perhaps it is not on the server and you got a 404 page?\n", filename);
+				Con_Printf (DIVIDER_LINE"\n\n");
+				return;
+			}
+		}
+		else
+		{
+			// this should never happen
+			Con_Printf ("\n"DIVIDER_LINE"\n");
+			Con_Printf ("Failed to download %s\n", filename);
+			Con_Printf (DIVIDER_LINE"\n\n");
+			return;
+		}
+
 		// now we know it worked
-		Con_Printf ("\nDownload succesful\n");
+		Con_Printf ("\n"DIVIDER_LINE"\n");
+		Con_Printf ("\nDownload %s succesful\n", filename);
+		Con_Printf (DIVIDER_LINE"\n\n");
 
 		// reconnect after each success
 		extern char server_name[MAX_QPATH];
@@ -403,7 +443,9 @@ void CL_DoWebDownload (char *filename)
 	}
 	else
 	{
+		Con_Printf ("\n"DIVIDER_LINE"\n");
 		Con_Printf ("\nDownload failed with error:\n  %s\n", Web_GetErrorString (DLResult));
+		Con_Printf (DIVIDER_LINE"\n\n");
 		return;
 	}
 }
@@ -1167,7 +1209,7 @@ CL_ParseServerMessage
 =====================
 */
 void Fog_ParseServerMessage (void);
-void Fog_Update (float density, float r, float g, float b);
+void Fog_Update (float density, float r, float g, float b, float time);
 
 void CL_ParseServerMessage (void)
 {
@@ -1525,8 +1567,8 @@ void CL_ParseServerMessage (void)
 
 		case svc_fog:
 			if (MSG_ReadByte ())
-				Fog_Update (MSG_ReadFloat (), (MSG_ReadByte () / 255.0), (MSG_ReadByte () / 255.0), (MSG_ReadByte () / 255.0));
-			else Fog_Update (0, 0, 0, 0);
+				Fog_Update (MSG_ReadFloat (), (MSG_ReadByte () / 255.0), (MSG_ReadByte () / 255.0), (MSG_ReadByte () / 255.0), 0);
+			else Fog_Update (0, 0, 0, 0, 0);
 
 			break;
 

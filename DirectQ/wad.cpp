@@ -217,6 +217,87 @@ miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 void D3D_MakeQuakePalettes (byte *palette);
 void PaletteFromColormap (byte *pal, byte *map);
 
+cvar_t idgamma_gamma ("idgamma_gamma", "1", CVAR_ARCHIVE | CVAR_RESTART);
+cvar_t idgamma_intensity ("idgamma_intensity", "1", CVAR_ARCHIVE | CVAR_RESTART);
+cvar_t idgamma_saturation ("idgamma_saturation", "1", CVAR_ARCHIVE | CVAR_RESTART);
+cvar_t idgamma_modifyfullbrights ("idgamma_modifyfullbrights", "1", CVAR_ARCHIVE | CVAR_RESTART);
+
+void W_ApplyIDGamma (byte *palette)
+{
+	// no change
+	if (idgamma_gamma.value == 1.0f && idgamma_intensity.value == 1.0f) return;
+
+	// trap division by zero
+	if (idgamma_gamma.value < 0.001f) return;
+	if (idgamma_intensity.value < 0.001f) return;
+
+	// http://vbutuzov.selfip.com/Games/QUAKE/ID1/IDGAMMA.BAS
+	float ax = (255.0f * 3.0f) / (2.0f + idgamma_intensity.value);
+
+	float M = (255.0f - ax) / (255.0f - ax / (idgamma_intensity.value));
+	float Bx = 255.0f * (1.0f - M);
+
+	float offset = (255.0f - (255.0f * idgamma_gamma.value)) / (3 * idgamma_intensity.value);
+
+	for (int i = 0; i < 256; i++, palette += 3)
+	{
+		float r = palette[0];
+		float g = palette[1];
+		float b = palette[2];
+
+		if ((i < 224 || idgamma_modifyfullbrights.value) && i != 255)
+		{
+			r += offset;
+			g += offset;
+			b += offset;
+
+			float Max = r;
+
+			if (g > Max) Max = g;
+			if (b > Max) Max = b;
+
+			float Mult = idgamma_intensity.value;
+
+			Max *= idgamma_intensity.value;
+
+			// trap division by zero
+			if (Max < 0.001) continue;
+
+			if (Max > ax && idgamma_saturation.integer < 3)
+			{
+				if (idgamma_saturation.integer == 2)
+				{
+					if (Max > 255)
+					{
+						Mult = Mult * (255.0f + Max + Max) / (Max + Max + Max);
+					}
+				}
+				else
+				{
+					float Avg1 = (r + g + b) / 3.0f;
+					float Avg2 = idgamma_intensity.value * Avg1;
+
+					if (Avg2 > ax && Avg1 > 0)
+					{
+						Avg2 = M * (Avg1 / idgamma_intensity.value) + Bx;
+						Mult = Avg2 / Avg1;
+					}
+				}
+			}
+
+			// correct integer rounding
+			r = (r * Mult) + 0.5f;
+			g = (g * Mult) + 0.5f;
+			b = (b * Mult) + 0.5f;
+		}
+
+		palette[0] = BYTE_CLAMP (r);
+		palette[1] = BYTE_CLAMP (g);
+		palette[2] = BYTE_CLAMP (b);
+	}
+}
+
+
 bool W_LoadPalette (void)
 {
 	// these need to be statics so that they can be freed OK
@@ -233,6 +314,7 @@ bool W_LoadPalette (void)
 	{
 		vid.colormap = colormap;
 		PaletteFromColormap (palette, vid.colormap);
+		W_ApplyIDGamma (palette);
 		D3D_MakeQuakePalettes (palette);
 
 		return true;

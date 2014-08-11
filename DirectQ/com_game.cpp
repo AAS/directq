@@ -88,6 +88,9 @@ void D3DVid_LoseDeviceResources (void);
 void D3DVid_RecoverDeviceResources (void);
 void D3DVid_ClearScreen (void);
 void Cmd_ClearAlias_f (void);
+void D3DMisc_CreatePalette (void);
+void D3DMisc_ReleasePalette (void);
+
 
 void COM_UnloadAllStuff (void)
 {
@@ -128,6 +131,7 @@ void COM_UnloadAllStuff (void)
 	CL_WipeParticles ();
 
 	D3DVid_LoseDeviceResources ();
+	D3DMisc_ReleasePalette ();
 
 	// do this too...
 	Host_ClearMemory ();
@@ -150,6 +154,7 @@ void COM_LoadAllStuff (void)
 	SCR_Init ();
 	D3DVid_RecoverDeviceResources ();
 	R_InitResourceTextures ();
+	D3DMisc_CreatePalette ();
 
 	// now run a screen update to reassure the user that something did actually happen
 	D3DVid_ClearScreen ();

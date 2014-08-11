@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
+float d3d_FogOldColor[4] = {0.3, 0.3, 0.3, 0};
+float d3d_FogOldDensity = 0;
 float d3d_FogColor[4] = {0.3, 0.3, 0.3, 0};
 float d3d_FogDensity = 0;
 char lastworldmodel[64] = {0};
@@ -66,7 +68,7 @@ void D3DFog_UpdateCvars (cvar_t *var)
 }
 
 
-void Fog_Update (float density, float r, float g, float b)
+void Fog_Update (float density, float r, float g, float b, float time)
 {
 	d3d_FogDensity = density > 1 ? 1 : (density < 0 ? 0 : density);
 
@@ -115,10 +117,11 @@ void Fog_ParseWorldspawn (void)
 
 	// always wipe density
 	d3d_FogDensity = 0.0;
+	d3d_FogOldDensity = 0.0;
 
 	// to do - possibly change these depending on worldtype?????
 	// should we even wipe these?  or leave them as the player set them???
-	Fog_Update (0, 0.3, 0.3, 0.3);
+	Fog_Update (0, 0.3, 0.3, 0.3, 0);
 
 	data = COM_Parse (cl.worldmodel->brushhdr->entities);
 	strcpy (lastworldmodel, cl.worldmodel->name);
@@ -145,7 +148,7 @@ void Fog_ParseWorldspawn (void)
 		if (!strcmp ("fog", key))
 		{
 			sscanf (value, "%f %f %f %f", &d3d_FogDensity, &d3d_FogColor[0], &d3d_FogColor[1], &d3d_FogColor[2]);
-			Fog_Update (d3d_FogDensity, d3d_FogColor[0], d3d_FogColor[1], d3d_FogColor[2]);
+			Fog_Update (d3d_FogDensity, d3d_FogColor[0], d3d_FogColor[1], d3d_FogColor[2], 0);
 		}
 	}
 }
@@ -159,11 +162,9 @@ void Fog_ParseServerMessage (void)
 	red = MSG_ReadByte () / 255.0;
 	green = MSG_ReadByte () / 255.0;
 	blue = MSG_ReadByte () / 255.0;
+	time = max (0.0, MSG_ReadShort () / 100.0);
 
-	// swallow a short (time)
-	MSG_ReadShort ();
-
-	Fog_Update (density, red, green, blue);
+	Fog_Update (density, red, green, blue, time);
 }
 
 
@@ -189,9 +190,9 @@ void D3D_Fog_f (void)
 		Con_Printf ("   \"blue\" is \"%g\"\n", d3d_FogColor[2]);
 		break;
 
-	case 2: Fog_Update (atof (Cmd_Argv (1)), d3d_FogColor[0], d3d_FogColor[1], d3d_FogColor[2]); break;
-	case 4: Fog_Update (d3d_FogDensity, atof (Cmd_Argv (1)), atof (Cmd_Argv (2)), atof (Cmd_Argv (3))); break;
-	case 5: Fog_Update (atof (Cmd_Argv (1)), atof (Cmd_Argv (2)), atof (Cmd_Argv (3)), atof (Cmd_Argv (4))); break;
+	case 2: Fog_Update (atof (Cmd_Argv (1)), d3d_FogColor[0], d3d_FogColor[1], d3d_FogColor[2], 0); break;
+	case 4: Fog_Update (d3d_FogDensity, atof (Cmd_Argv (1)), atof (Cmd_Argv (2)), atof (Cmd_Argv (3)), 0); break;
+	case 5: Fog_Update (atof (Cmd_Argv (1)), atof (Cmd_Argv (2)), atof (Cmd_Argv (3)), atof (Cmd_Argv (4)), 0); break;
 	}
 }
 

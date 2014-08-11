@@ -771,6 +771,8 @@ void Menu_InitMultiplayerMenu (void)
 	extern cvar_t pq_moveup;
 	extern cvar_t cl_fullpitch;
 	extern cvar_t pq_scoreboard_pings;
+	extern cvar_t pq_timer;
+	extern cvar_t pq_teamscores;
 
 	// top level menu
 	menu_Multiplayer.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
@@ -817,6 +819,8 @@ void Menu_InitMultiplayerMenu (void)
 	menu_Setup.AddOption (new CQMenuCvarToggle ("Jump is Move Up", &pq_moveup, 0, 1));
 	menu_Setup.AddOption (new CQMenuCvarToggle ("Full View Pitch", &cl_fullpitch, 0, 1));
 	menu_Setup.AddOption (new CQMenuCvarToggle ("Ping in Scoreboard", &pq_scoreboard_pings, 0, 1));
+	menu_Setup.AddOption (new CQMenuCvarToggle ("Match Timer", &pq_timer, 0, 1));
+	menu_Setup.AddOption (new CQMenuCvarToggle ("Show Team Scores", &pq_teamscores, 0, 1));
 
 	// start a new game
 	menu_TCPIPNewGame.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));

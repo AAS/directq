@@ -665,7 +665,7 @@ int Menu_EffectsCustomDraw (int y)
 }
 
 
-char *ShotTypes[] = {"TGA", "BMP", "PNG", "DDS", "JPG", NULL};
+char *ShotTypes[] = {"TGA", "BMP", "PNG", "DDS", "JPG", "PCX", NULL};
 int shottype_number = 0;
 int old_shottype_number = 0;
 

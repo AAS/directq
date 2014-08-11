@@ -57,7 +57,7 @@ void R_SplitEntityOnNode (mnode_t *node, r_efragdef_t *ed)
 		mleaf_t *leaf = (mleaf_t *) node;
 
 		// efrags can be just allocated as required without needing to be pulled from a list (cleaner)
-		efrag_t *ef = (efrag_t *) MainHunk->Alloc (sizeof (efrag_t));
+		efrag_t *ef = (efrag_t *) ClientZone->Alloc (sizeof (efrag_t));
 		ef->entity = ed->addent;
 
 		// set the leaf links

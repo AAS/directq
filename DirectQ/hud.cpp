@@ -31,6 +31,12 @@ extern cvar_t	scr_crosshairscale;
 extern cvar_t	scr_crosshaircolor;
 extern cvar_t	scr_viewsize;
 
+cvar_t	pq_timer ("pq_timer", 1.0f, CVAR_ARCHIVE);
+cvar_t	pq_teamscores ("pq_teamscores", 1.0f, CVAR_ARCHIVE);
+
+cvar_t	hud_match_x ("hud_match_x", 0.0f);
+cvar_t	hud_match_y ("hud_match_y", 0.0f);
+
 #define STAT_MINUS		10	// num frame for '-' stats digit
 
 qpic_t		*sb_nums[2][11];
@@ -438,11 +444,38 @@ int hud_scoreboardbottom[MAX_SCOREBOARD];
 int hud_scoreboardcount[MAX_SCOREBOARD];
 int hud_scoreboardlines;
 
-/*
-===============
-HUD_SortFrags
-===============
-*/
+
+void HUD_SortTeamFrags (void)
+{
+	int		i, j, k;
+
+	// sort by frags
+	hud_scoreboardlines = 0;
+
+	for (i = 0; i < 14; i++)
+	{
+		if (cl.teamscores[i].colors)
+		{
+			hud_fragsort[hud_scoreboardlines] = i;
+			hud_scoreboardlines++;
+		}
+	}
+
+	for (i = 0; i < hud_scoreboardlines; i++)
+	{
+		for (j = 0; j < hud_scoreboardlines - 1 - i; j++)
+		{
+			if (cl.teamscores[hud_fragsort[j]].frags < cl.teamscores[hud_fragsort[j + 1]].frags)
+			{
+				k = hud_fragsort[j];
+				hud_fragsort[j] = hud_fragsort[j + 1];
+				hud_fragsort[j + 1] = k;
+			}
+		}
+	}
+}
+
+
 void HUD_SortFrags (void)
 {
 	int		i, j, k;
@@ -487,13 +520,17 @@ void HUD_DrawFrags (void)
 	if (!(hud_ibar[cl_sbar.integer].flags & HUD_VISIBLE)) return;
 
 	int i, k, l;
-	int top, bottom;
-	int x, y, f;
+	int x, y;
 	int xofs;
 	char num[12];
 	scoreboard_t *s;
 
-	HUD_SortFrags ();
+	// JPG - check to see if we should sort teamscores instead
+	bool teamscores = pq_teamscores.value && cl.teamgame;
+
+	if (teamscores)
+		HUD_SortTeamFrags ();
+	else HUD_SortFrags ();
 
 	// draw the text (only room for 4)
 	l = hud_scoreboardlines <= 4 ? hud_scoreboardlines : 4;
@@ -504,31 +541,91 @@ void HUD_DrawFrags (void)
 	xofs = HUD_GetX (&hud_ibar[cl_sbar.integer]);
 	y = HUD_GetY (&hud_ibar[cl_sbar.integer]);
 
+	// JPG - check to see if we need to draw the timer
+	if (pq_timer.value && (cl.minutes != 255))
+	{
+		int colors, ent, minutes, seconds, mask; // JPG - added these
+		int match_time; // JPG - added this
+
+		// not needed with new positioning...
+		// if (l > 2) l = 2;
+		mask = 0;
+
+		if (cl.minutes == 254)
+		{
+			strcpy (num, "    SD");
+			mask = 128;
+		}
+		else if (cl.minutes || cl.seconds)
+		{
+			if (cl.seconds >= 128)
+				sprintf (num, " -0:%02d", cl.seconds - 128);
+			else
+			{
+				if (cl.match_pause_time)
+					match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.match_pause_time - cl.last_match_time));
+				else match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.time - cl.last_match_time));
+
+				minutes = match_time / 60;
+				seconds = match_time - 60 * minutes;
+				sprintf (num, "%3d:%02d", minutes, seconds);
+
+				if (!minutes) mask = 128;
+			}
+		}
+		else
+		{
+			minutes = cl.time / 60;
+			seconds = cl.time - 60 * minutes;
+			minutes = minutes & 511;
+			sprintf (num, "%3d:%02d", minutes, seconds);
+		}
+
+		int matchx = (xofs + 175 + (6 * 8)) - (strlen (num) * 8) + hud_match_x.value;
+		int matchy = y - 16 + hud_match_y.value;
+
+		for (i = 0; i < 6; i++)
+			Draw_Character (matchx + i * 8, matchy, num[i] + mask);
+	}
+
 	for (i = 0; i < l; i++)
 	{
 		k = hud_fragsort[i];
-		s = &cl.scores[k];
 
-		if (!s->name[0]) continue;
+		int colors;
+		int frags;
+
+		if (teamscores)
+		{
+			colors = cl.teamscores[k].colors;
+			frags = cl.teamscores[k].frags;
+		}
+		else
+		{
+			if (!(s = &cl.scores[k])->name[0]) continue;
+
+			colors = s->colors;
+			frags = s->frags;
+		}
 
 		// draw background
-		top = s->colors & 0xf0;
-		bottom = (s->colors & 15) << 4;
-		top = HUD_ColorForMap (top);
-		bottom = HUD_ColorForMap (bottom);
+		int top = HUD_ColorForMap (colors & 0xf0);
+		int bottom = HUD_ColorForMap ((colors & 15) << 4);
 
 		Draw_Fill (xofs + x * 8 + 10, y + 1, 28, 4, top);
 		Draw_Fill (xofs + x * 8 + 10, y + 5, 28, 3, bottom);
 
 		// draw number
-		f = s->frags;
-		_snprintf (num, 12, "%3i", f);
+		_snprintf (num, 12, "%3i", frags);
 
 		Draw_Character (xofs + (x + 1) * 8, y, num[0]);
 		Draw_Character (xofs + (x + 2) * 8, y, num[1]);
 		Draw_Character (xofs + (x + 3) * 8, y, num[2]);
 
-		if (k == cl.viewentity - 1)
+		int ent = cl.viewentity - 1;
+
+		// identify team or player
+		if ((teamscores && ((colors & 15) == (cl.scores[ent].colors & 15))) || (!teamscores && (k == ent)))
 		{
 			Draw_Character (xofs + x * 8 + 6, y, 16);
 			Draw_Character (xofs + (x + 4) * 8, y, 17);

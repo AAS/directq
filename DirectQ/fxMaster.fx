@@ -109,14 +109,12 @@ struct DrawVert
 
 float4 PSDrawTextured (DrawVert Input) : COLOR0
 {
-	clip (Input.Color.a + 0.003922f);
 	return tex2D (tmu0Sampler, Input.Tex0) * Input.Color;
 }
 
 
 float4 PSDrawColored (DrawVert Input) : COLOR0
 {
-	clip (Input.Color.a + 0.003922f);
 	return Input.Color;
 }
 
@@ -257,13 +255,14 @@ float4 PSAliasLumaNoLuma (VertAliasPS Input) : COLOR0
 }
 
 
-float4 shirtcolor;
-float4 pantscolor;
-
 float4 GetColormapColor (VertAliasPS Input)
 {
+	// and this, ladies and gentlemen, is one reason why Quake sucks but Quake II doesn't...
 	float4 colormap = tex2D (tmu2Sampler, Input.Tex0);
-	return (tex2D (tmu0Sampler, Input.Tex0) * colormap.r) + (shirtcolor * colormap.g) + (pantscolor * colormap.b);
+
+	return (tex2D (tmu0Sampler, Input.Tex0) * (1.0f - (colormap.r + colormap.a))) +
+		(tex2D (tmu3Sampler, float2 (colormap.g, 0)) * colormap.r) +
+		(tex2D (tmu4Sampler, float2 (colormap.b, 0)) * colormap.a);
 }
 
 
@@ -591,9 +590,7 @@ float4 PSSprite (PSParticleVert Input) : COLOR0
 	float4 color = texcolor * Input.Color;
 #endif
 
-	clip (texcolor.a + 0.003922f);
-
-	color.a = texcolor.a;
+	// color.a = texcolor.a;
 	return color;
 }
 
@@ -622,7 +619,6 @@ float4 PSParticles (PSParticleVert Input) : COLOR0
 
 	// procedurally generate the particle dot for good speed and per-pixel accuracy at any scale
 	color.a = (1.0f - ((Input.Tex0.x * Input.Tex0.x) + (Input.Tex0.y * Input.Tex0.y))) * 1.5f;
-	clip (color.a);
 	return color;
 }
 
@@ -648,8 +644,8 @@ PSParticleVert VSSprite (VertSprite Input)
 // only used for vs_2_0 Shader instancing
 #define NumBatchInstances 120
 
-float4 PartInstancePosition[NumBatchInstances] : PARTINSTANCEPOSITION : register(c9);
-float4 PartInstanceColor[NumBatchInstances] : PARTINSTANCECOLOR : register(c129);
+float4 PartInstancePosition[NumBatchInstances] : PARTINSTANCEPOSITION;
+float4 PartInstanceColor[NumBatchInstances] : PARTINSTANCECOLOR;
 
 PSParticleVert VSParticles (VertParticle Input)
 {
@@ -694,7 +690,7 @@ float4 PSDrawCorona (PSCoronaVert Input) : COLOR0
 {
 	float4 color = Input.Color;
 	color.a = 1.0f - ((Input.Tex0.x * Input.Tex0.x) + (Input.Tex0.y * Input.Tex0.y));
-	clip (color.a);
+	// clip (color.a);
 	color.a = pow (color.a, 3.0f);
 	return color;
 }

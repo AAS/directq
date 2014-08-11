@@ -471,7 +471,7 @@ void SV_ReadClientMove (usercmd_t *move)
 	host_client->num_pings++;
 
 	// read current angles
-	if ((host_client->netconnection->mod == MOD_PROQUAKE) && sv.Protocol == PROTOCOL_VERSION_NQ)
+	if (host_client->netconnection->mod == MOD_PROQUAKE && sv.Protocol == PROTOCOL_VERSION_NQ)
 	{
 		for (i = 0; i < 3; i++)
 			angle[i] = MSG_ReadProQuakeAngle ();

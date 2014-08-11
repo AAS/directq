@@ -1404,7 +1404,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	MSG_WriteByte (&net_message, 10 * MOD_PROQUAKE_VERSION);
 
 #if 0
-
 	if (cl_cheatfree)
 	{
 		MSG_WriteByte (&net_message, JQF_CHEATFREE);

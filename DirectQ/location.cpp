@@ -59,11 +59,17 @@ void LOC_LoadLocations (void)
 	char *locdata = locdataload;
 	Con_DPrintf ("Loading %s\n", locname);
 
-	locations = (location_t *) MainHunk->Alloc (sizeof (location_t));
+	// these are dynamically sized so they go on the hunk
+	locations = (location_t *) scratchbuf;
 	location_t *l = locations;
+	memset (l, 0, sizeof (location_t));
 
-	while (1)
+	int maxlocations = SCRATCHBUF_SIZE / sizeof (location_t);
+
+	while (true)
 	{
+		if (numlocations >= maxlocations) break;
+
 		// parse a line from the LOC string
 		if (!(locdata = COM_Parse (locdata, COM_PARSE_LINE))) break;
 
@@ -121,10 +127,19 @@ void LOC_LoadLocations (void)
 			Con_DPrintf ("Read location %s\n", l->name);
 
 			// set up a new empty location (this may not be used...)
-			l = (location_t *) MainHunk->Alloc (sizeof (location_t));
+			l++;
+			memset (l, 0, sizeof (location_t));
 			numlocations++;
 		}
 	}
+
+	if (numlocations > 0)
+	{
+		l = (location_t *) ClientZone->Alloc (numlocations * sizeof (location_t));
+		memcpy (l, locations, numlocations * sizeof (location_t));
+		locations = l;
+	}
+	else locations = NULL;
 
 	Zone_Free (locdataload);
 	Con_DPrintf ("Read %i locations\n", numlocations);

@@ -326,7 +326,15 @@ void IN_UpdateClipCursor (void)
 		windowinfo.cbSize = sizeof (WINDOWINFO);
 		GetWindowInfo (d3d_Window, &windowinfo);
 
-		ClipCursor (&windowinfo.rcClient);
+		// clip to a 2x2 region center-screen to prevent the mouse from going outside the client region if we miss a window message in-game
+		RECT cliprect;
+
+		cliprect.left = windowinfo.rcClient.left + ((windowinfo.rcClient.right - windowinfo.rcClient.left) >> 1) - 1;
+		cliprect.top = windowinfo.rcClient.top + ((windowinfo.rcClient.bottom - windowinfo.rcClient.top) >> 1) - 1;
+		cliprect.right = cliprect.left + 2;
+		cliprect.bottom = cliprect.top + 2;
+
+		ClipCursor (&cliprect); //windowinfo.rcClient);
 	}
 }
 
@@ -405,6 +413,13 @@ void IN_UnacquireMouse (void)
 		in_mouseacquired = false;
 
 		SystemParametersInfo (SPI_SETMOUSE, 0, originalmouseparms, 0);
+
+		// sending WM_MOUSEMOVE doesn't work for correcting the cursor from busy to standard arrow, so
+		// instead we hide it again, pump messages for a while, then show it again and pump some more messages
+		ShowCursor (FALSE);
+		Sys_SendKeyEvents ();
+		ShowCursor (TRUE);
+		Sys_SendKeyEvents ();
 	}
 }
 

@@ -25,7 +25,6 @@ int TotalSize = 0;
 int TotalPeak = 0;
 int TotalReserved = 0;
 
-
 /*
 ========================================================================================================================
 
@@ -58,6 +57,7 @@ void *CQuakeZone::Alloc (int size)
 	memset (buf, 0, size + sizeof (int) * 2);
 
 	// mark as no-execute; not critical so fail it silently
+	// note that HeapAlloc uses VirtualAlloc behind the scenes, so this is valid
 	DWORD dwdummy;
 	BOOL ret = VirtualProtect (buf, size, PAGE_READWRITE, &dwdummy);
 
@@ -86,6 +86,9 @@ void CQuakeZone::Free (void *data)
 	buf -= 2;
 
 	assert (buf[0] == HEAP_MAGIC);
+
+	// this should never happen but let's protect release builds anyway...
+	if (buf[0] != HEAP_MAGIC) return;
 
 	this->Size -= buf[1];
 	TotalSize -= buf[1];
@@ -119,6 +122,7 @@ void CQuakeZone::Discard (void)
 	if (this->hHeap)
 	{
 		TotalSize -= this->Size;
+		this->Size = 0;
 		HeapDestroy (this->hHeap);
 		this->hHeap = NULL;
 	}
@@ -128,6 +132,12 @@ void CQuakeZone::Discard (void)
 CQuakeZone::~CQuakeZone (void)
 {
 	this->Discard ();
+}
+
+
+float CQuakeZone::GetSizeMB (void)
+{
+	return (((float) this->Size) / 1024.0f) / 1024.0f;
 }
 
 
@@ -157,7 +167,6 @@ CQuakeCache::CQuakeCache (void)
 {
 	// so that the check in Init is valid
 	this->Heap = NULL;
-
 	this->Init ();
 }
 
@@ -165,6 +174,12 @@ CQuakeCache::CQuakeCache (void)
 CQuakeCache::~CQuakeCache (void)
 {
 	SAFE_DELETE (this->Heap);
+}
+
+
+float CQuakeCache::GetSizeMB (void)
+{
+	return this->Heap->GetSizeMB ();
 }
 
 
@@ -220,7 +235,6 @@ void *CQuakeCache::Check (char *name)
 	{
 		// these should never happen
 		if (!cache->name) continue;
-
 		if (!cache->data) continue;
 
 		if (!stricmp (cache->name, name))
@@ -323,6 +337,11 @@ void CQuakeHunk::FreeToLowMark (int mark)
 	this->LowMark = mark;
 }
 
+float CQuakeHunk::GetSizeMB (void)
+{
+	return (((float) this->LowMark) / 1024.0f) / 1024.0f;
+}
+
 
 void *CQuakeHunk::Alloc (int size, BOOL memset0)
 {
@@ -392,19 +411,25 @@ void CQuakeHunk::Initialize (void)
 ========================================================================================================================
 */
 
+CQuakeHunk *MainHunks[2] = {NULL, NULL};
+
 CQuakeHunk *MainHunk = NULL;
-CQuakeZone *MapZone = NULL;
 CQuakeCache *MainCache = NULL;
 CQuakeZone *MainZone = NULL;
 
+// keep these zones separate so that we can release memory correctly at the appropriate times
+CQuakeZone *ServerZone = NULL;
+CQuakeZone *RenderZone = NULL;
+CQuakeZone *ClientZone = NULL;
+CQuakeZone *ModelZone = NULL;
 
-void Pool_Init (void)
+
+void Heap_Init (void)
 {
 	// init the pools we want to keep around all the time
-	if (!MainHunk) MainHunk = new CQuakeHunk (512);
+	if (!MainHunk) MainHunk = new CQuakeHunk (64);
 	if (!MainCache) MainCache = new CQuakeCache ();
 	if (!MainZone) MainZone = new CQuakeZone ();
-	if (!MapZone) MapZone = new CQuakeZone ();
 
 	// take a chunk of memory for use by temporary loading functions and other doo-dahs
 	scratchbuf = (byte *) Zone_Alloc (SCRATCHBUF_SIZE);
@@ -419,16 +444,30 @@ void Pool_Init (void)
 ========================================================================================================================
 */
 
-void Virtual_Report_f (void)
+extern CQuakeCache *SoundCache;
+extern CQuakeZone *SoundHeap;
+extern CQuakeZone *IPLogZone;
+extern CQuakeZone *PrecacheHeap;
+
+void Heap_Report_f (void)
 {
-	Con_Printf ("Memory Usage:\n");
-	Con_Printf (" Allocated %6.2f MB\n", ((((float) TotalSize) / 1024.0f) / 1024.0f));
-	Con_Printf (" Reserved  %6.2f MB\n", ((((float) TotalReserved) / 1024.0f) / 1024.0f));
+	Con_Printf ("Memory Usage:\n\n");
+
+	if (MainZone) Con_Printf ("      Zone %6.2f MB\n", (MainZone->GetSizeMB () + IPLogZone->GetSizeMB ()));
+	if (MainHunk) Con_Printf ("      Hunk %6.2f MB\n", MainHunk->GetSizeMB ());
+	if (GameZone) Con_Printf ("      Game %6.2f MB\n", GameZone->GetSizeMB ());
+	if (ServerZone) Con_Printf ("    Server %6.2f MB\n", ServerZone->GetSizeMB ());
+	if (ClientZone) Con_Printf ("    Client %6.2f MB\n", (ClientZone->GetSizeMB () + PrecacheHeap->GetSizeMB ()));
+	if (ClientZone) Con_Printf ("     Sound %6.2f MB\n", (SoundCache->GetSizeMB () + SoundHeap->GetSizeMB ()));
+	if (RenderZone) Con_Printf ("  Renderer %6.2f MB\n", RenderZone->GetSizeMB ());
+	if (ModelZone) Con_Printf ("    Models %6.2f MB\n", ModelZone->GetSizeMB ());
+	if (MainCache) Con_Printf ("     Cache %6.2f MB\n", MainCache->GetSizeMB ());
+
 	Con_Printf ("\n");
-	//int pmsize = MainHunk->GetLowMark ();
-	//Con_Printf ("MainHunk occupies %6.2f MB\n", ((((float) pmsize) / 1024.0f) / 1024.0f));
+	Con_Printf ("     Total %6.2f MB\n", ((((float) TotalSize) / 1024.0f) / 1024.0f));
+	Con_Printf ("\n");
 }
 
 
-cmd_t Heap_Report_Cmd ("heap_report", Virtual_Report_f);
+cmd_t Heap_Report_Cmd ("heap_report", Heap_Report_f);
 

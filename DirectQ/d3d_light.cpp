@@ -28,16 +28,24 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 int LightmapWidth = -1;
 int LightmapHeight = -1;
 
+typedef struct q_d3dlockedrect_s
+{
+	INT Pitch;
+	byte *Data;
+} q_d3dlockedrect_t;
+
+
 typedef struct d3d_lightmap_s
 {
 	LPDIRECT3DTEXTURE9 Texture;
 	RECT DirtyRect;
-	byte *Data;
+	// byte *Data;
+	q_d3dlockedrect_t LockedRect;
 	unsigned short *Allocated;
 } d3d_lightmap_t;
 
 d3d_lightmap_t d3d_Lightmaps[MAX_LIGHTMAPS];
-
+int d3d_LightHunkMark = 0;
 byte lm_gammatable[256];
 
 void D3DLight_BuildGammaTable (cvar_t *var)
@@ -955,22 +963,24 @@ void D3DLight_BuildLightmap (msurface_t *surf, int texnum)
 	// if the light wasn't updated then don't update the texture
 	if (!updated) return;
 
-	if (!d3d_Lightmaps[texnum].Data)
+	if (!d3d_Lightmaps[texnum].LockedRect.Data)
 	{
 		D3DLOCKED_RECT lockrect;
 
-		hr = d3d_Lightmaps[texnum].Texture->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+		hr = d3d_Lightmaps[texnum].Texture->LockRect (0, (D3DLOCKED_RECT *) &d3d_Lightmaps[texnum].LockedRect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
 
 		// if we didn't get a lock we just don't bother updating it
-		if (FAILED (hr)) return;
-
-		d3d_Lightmaps[texnum].Data = (byte *) lockrect.pBits;
+		if (FAILED (hr))
+		{
+			d3d_Lightmaps[texnum].LockedRect.Data = NULL;
+			return;
+		}
 	}
 
 	int t;
 	int shift = (kurok ? 6 : 7) + r_overbright.integer;
 	int stride = (LightmapWidth << 2) - (surf->smax << 2);
-	byte *dest = d3d_Lightmaps[texnum].Data + surf->LightBase;
+	byte *dest = d3d_Lightmaps[texnum].LockedRect.Data + surf->LightBase;
 	int add = (1 << shift) >> 1; // round lighting to the nearest to help prevent stair steps
 
 	bl = d3d_BlockLights;
@@ -1039,9 +1049,9 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 	for (int texnum = 0; texnum < MAX_LIGHTMAPS; texnum++)
 	{
 		// it's unsafe to use the scratch buffer for this because it happens during map loading and other loads
-		// may also want to use it for their own stuff; we'll just put it on the zone instead
+		// may also want to use it for their own stuff; we'll just put it on the hunk instead
 		if (!d3d_Lightmaps[texnum].Allocated)
-			d3d_Lightmaps[texnum].Allocated = (unsigned short *) MainZone->Alloc (LightmapWidth * sizeof (unsigned short));
+			d3d_Lightmaps[texnum].Allocated = (unsigned short *) MainHunk->Alloc (LightmapWidth * sizeof (unsigned short));
 
 		int best = LightmapHeight;
 
@@ -1140,19 +1150,6 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 }
 
 
-void D3DLight_BumpLightmaps (void)
-{
-	// prevent allocations in preceding lightmaps
-	for (int i = 0; i < MAX_LIGHTMAPS; i++)
-	{
-		if (!d3d_Lightmaps[i].Allocated) continue;
-
-		for (int j = 0; j < LightmapWidth; j++)
-			d3d_Lightmaps[i].Allocated[j] = 65535;
-	}
-}
-
-
 void D3DLight_CreateSurfaceLightmaps (model_t *mod)
 {
 	brushhdr_t *hdr = mod->brushhdr;
@@ -1206,6 +1203,9 @@ void D3DLight_BeginBuildingLightmaps (void)
 	// set up the default styles so that (most) lightmaps won't have to be regenerated the first time they're seen
 	R_SetDefaultLightStyles ();
 
+	// get the initial hunk mark so that we can do the allocation buffers
+	d3d_LightHunkMark = MainHunk->GetLowMark ();
+
 	if (LightmapWidth < 0 || LightmapHeight < 0)
 	{
 		LightmapWidth = LIGHTMAP_WIDTH;
@@ -1232,18 +1232,14 @@ void D3DLight_BeginBuildingLightmaps (void)
 	for (int i = 0; i < MAX_LIGHTMAPS; i++)
 	{
 		// ensure that the lightmap is unlocked
-		if (d3d_Lightmaps[i].Data)
+		if (d3d_Lightmaps[i].LockedRect.Data)
 		{
 			d3d_Lightmaps[i].Texture->UnlockRect (0);
-			d3d_Lightmaps[i].Data = NULL;
+			d3d_Lightmaps[i].LockedRect.Data = NULL;
 		}
 
 		// clear down allocation buffers
-		if (d3d_Lightmaps[i].Allocated)
-		{
-			MainZone->Free (d3d_Lightmaps[i].Allocated);
-			d3d_Lightmaps[i].Allocated = NULL;
-		}
+		d3d_Lightmaps[i].Allocated = NULL;
 	}
 }
 
@@ -1254,20 +1250,16 @@ void D3DLight_EndBuildingLightmaps (void)
 	for (int i = 0; i < MAX_LIGHTMAPS; i++)
 	{
 		// clear down allocation buffers
-		if (d3d_Lightmaps[i].Allocated)
-		{
-			MainZone->Free (d3d_Lightmaps[i].Allocated);
-			d3d_Lightmaps[i].Allocated = NULL;
-		}
+		d3d_Lightmaps[i].Allocated = NULL;
 
 		// update any lightmaps which were created and release any left over which were unused
-		if (d3d_Lightmaps[i].Data)
+		if (d3d_Lightmaps[i].LockedRect.Data)
 		{
 			// dirty the entire texture rectangle
 			d3d_Lightmaps[i].Texture->UnlockRect (0);
 			d3d_Lightmaps[i].Texture->AddDirtyRect (NULL);
 			d3d_Lightmaps[i].Texture->PreLoad ();
-			d3d_Lightmaps[i].Data = NULL;
+			d3d_Lightmaps[i].LockedRect.Data = NULL;
 		}
 		else
 		{
@@ -1281,6 +1273,8 @@ void D3DLight_EndBuildingLightmaps (void)
 		d3d_Lightmaps[i].DirtyRect.top = LightmapHeight;
 		d3d_Lightmaps[i].DirtyRect.bottom = 0;
 	}
+
+	MainHunk->FreeToLowMark (d3d_LightHunkMark);
 }
 
 
@@ -1346,27 +1340,22 @@ void D3DLight_UpdateLightmaps (void)
 	{
 		if (!d3d_Lightmaps[i].Texture) continue;
 
-		// clear down allocation buffers
-		if (d3d_Lightmaps[i].Allocated)
-		{
-			MainZone->Free (d3d_Lightmaps[i].Allocated);
-			d3d_Lightmaps[i].Allocated = NULL;
-		}
+		// clear down allocation buffers (ensure)
+		d3d_Lightmaps[i].Allocated = NULL;
 
 		// update any lightmaps which were modified
-		if (d3d_Lightmaps[i].Data)
+		if (d3d_Lightmaps[i].LockedRect.Data)
 		{
-			RECT *DirtyRect = &d3d_Lightmaps[i].DirtyRect;
-
 			d3d_Lightmaps[i].Texture->UnlockRect (0);
-			d3d_Lightmaps[i].Texture->AddDirtyRect (DirtyRect);
+			d3d_Lightmaps[i].Texture->AddDirtyRect (&d3d_Lightmaps[i].DirtyRect);
+			d3d_Lightmaps[i].Texture->PreLoad ();
 
-			DirtyRect->left = LightmapWidth;
-			DirtyRect->right = 0;
-			DirtyRect->top = LightmapHeight;
-			DirtyRect->bottom = 0;
+			d3d_Lightmaps[i].DirtyRect.left = LightmapWidth;
+			d3d_Lightmaps[i].DirtyRect.right = 0;
+			d3d_Lightmaps[i].DirtyRect.top = LightmapHeight;
+			d3d_Lightmaps[i].DirtyRect.bottom = 0;
 
-			d3d_Lightmaps[i].Data = NULL;
+			d3d_Lightmaps[i].LockedRect.Data = NULL;
 		}
 	}
 }
@@ -1376,18 +1365,14 @@ void D3DLight_ReleaseLightmaps (void)
 {
 	for (int i = 0; i < MAX_LIGHTMAPS; i++)
 	{
-		// clear down allocation buffers
-		if (d3d_Lightmaps[i].Allocated)
-		{
-			MainZone->Free (d3d_Lightmaps[i].Allocated);
-			d3d_Lightmaps[i].Allocated = NULL;
-		}
+		// clear down allocation buffers (ensure)
+		d3d_Lightmaps[i].Allocated = NULL;
 
 		// ensure that the lightmap is unlocked
-		if (d3d_Lightmaps[i].Data)
+		if (d3d_Lightmaps[i].LockedRect.Data)
 		{
 			d3d_Lightmaps[i].Texture->UnlockRect (0);
-			d3d_Lightmaps[i].Data = NULL;
+			d3d_Lightmaps[i].LockedRect.Data = NULL;
 		}
 
 		SAFE_RELEASE (d3d_Lightmaps[i].Texture);

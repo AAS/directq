@@ -354,10 +354,6 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 
 void D3DHLSL_Init (void)
 {
-	// no PS with < 3 TMUs
-	if (d3d_GlobalCaps.NumTMUs < 3)
-		Sys_Error ("Num TMUs < 3");
-
 	// now set up effects
 	vs_version = (char *) D3DXGetVertexShaderProfile (d3d_Device);
 	ps_version = (char *) D3DXGetPixelShaderProfile (d3d_Device);

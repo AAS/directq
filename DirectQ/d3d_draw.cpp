@@ -129,12 +129,7 @@ void D3DDraw_DrawBatch (void)
 	if (d3d_NumDrawSurfs)
 	{
 		D3DDraw_OnRecover ();
-
-		D3D_SetStreamSource (0, NULL, 0, 0);
-		D3D_SetStreamSource (1, NULL, 0, 0);
-		D3D_SetStreamSource (2, NULL, 0, 0);
-		D3D_SetIndices (NULL);
-
+		D3D_UnbindStreams ();
 		D3D_SetVertexDeclaration (d3d_DrawDecl);
 
 		drawvert_t *verts = (drawvert_t *) scratchbuf;
@@ -1494,14 +1489,16 @@ Draw_PolyBlend
 */
 void Draw_PolyBlend (void)
 {
-	if (!gl_polyblend.value) return;
+	if (!(gl_polyblend.value > 0.0f)) return;
 	if (v_blend[3] < 1) return;
 
 	D3DDraw_SetSize (&vid.sbarsize);
 
+	float alpha = (float) v_blend[3] * gl_polyblend.value;
+
 	DWORD blendcolor = D3DCOLOR_ARGB
 	(
-		BYTE_CLAMP (v_blend[3]),
+		BYTE_CLAMP (alpha),
 		BYTE_CLAMP (v_blend[0]),
 		BYTE_CLAMP (v_blend[1]),
 		BYTE_CLAMP (v_blend[2])

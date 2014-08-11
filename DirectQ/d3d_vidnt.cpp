@@ -596,7 +596,7 @@ void D3DVid_Restart_f (void)
 	Cbuf_InsertText ("\n");
 	Cbuf_Execute ();
 
-	// Con_Printf ("reset video mode\n");
+	Con_Printf ("reset video mode\n");
 }
 
 
@@ -644,9 +644,6 @@ void D3DVid_EnumerateVideoModes (void)
 
 	int MaxWindowWidth = WorkArea.right - WorkArea.left;
 	int MaxWindowHeight = WorkArea.bottom - WorkArea.top;
-
-	// get a valid pointer for the first mode in the list
-	d3d_ModeList = (D3DDISPLAYMODE *) MainHunk->Alloc (0);
 
 	// get the count of modes for this format
 	int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, d3d_DesktopMode.Format);
@@ -1000,10 +997,12 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_CLAMP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_CLAMP to run DirectQ");
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_WRAP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_WRAP to run DirectQ");
 
-	// check for TMU support - Anything less than 4 TMUs is not d3d9 hardware (d3d9 actually guarantees 8)
-	if (d3d_DeviceCaps.MaxTextureBlendStages < 4) Sys_Error ("You need a device with at least 4 TMUs to run DirectQ");
-	if (d3d_DeviceCaps.MaxSimultaneousTextures < 4) Sys_Error ("You need a device with at least 4 TMUs to run DirectQ");
+	// D3D9 guarantees 16 streams and 8 TMUs - don't bother checking TMUs
 	if (d3d_DeviceCaps.MaxStreams < 4) Sys_Error ("You need a device with at least 4 Vertex Streams to run DirectQ");
+
+	// software t&l reports 0 for the max vertex shader constant registers
+	if (d3d_DeviceCaps.MaxVertexShaderConst < 256 && d3d_DeviceCaps.MaxVertexShaderConst > 0)
+		Sys_Error ("You need a device with at least 256 Vertex Shader Constant Registers to run DirectQ");
 
 	// check for z buffer support
 	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_ALWAYS)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
@@ -1174,12 +1173,6 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 			tex = NULL;
 		}
 	}
-
-	// tmus; take the lower of what's available as we need to work with them all
-	d3d_GlobalCaps.NumTMUs = 666;
-
-	if (d3d_DeviceCaps.MaxTextureBlendStages < d3d_GlobalCaps.NumTMUs) d3d_GlobalCaps.NumTMUs = d3d_DeviceCaps.MaxTextureBlendStages;
-	if (d3d_DeviceCaps.MaxSimultaneousTextures < d3d_GlobalCaps.NumTMUs) d3d_GlobalCaps.NumTMUs = d3d_DeviceCaps.MaxSimultaneousTextures;
 
 	d3d_GlobalCaps.supportInstancing = false;
 

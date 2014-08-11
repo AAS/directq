@@ -69,14 +69,14 @@ int r_numcachedworldnodes = 0;
 
 void D3DSurf_BuildWorldCache (void)
 {
-	r_cachedworldsurfaces = (msurface_t **) MainHunk->Alloc (cl.worldmodel->brushhdr->numsurfaces * sizeof (msurface_t *));
+	r_cachedworldsurfaces = (msurface_t **) RenderZone->Alloc (cl.worldmodel->brushhdr->numsurfaces * sizeof (msurface_t *));
 	r_numcachedworldsurfaces = 0;
 
-	r_cachedworldleafs = (mleaf_t **) MainHunk->Alloc (cl.worldmodel->brushhdr->numleafs * sizeof (mleaf_t *));
+	r_cachedworldleafs = (mleaf_t **) RenderZone->Alloc (cl.worldmodel->brushhdr->numleafs * sizeof (mleaf_t *));
 	r_numcachedworldleafs = 0;
 
 	// not doing anything with this yet...
-	//r_cachedworldnodes = (mnode_t **) MainHunk->Alloc (cl.worldmodel->brushhdr->numnodes * sizeof (mnode_t *));
+	//r_cachedworldnodes = (mnode_t **) RenderZone->Alloc (cl.worldmodel->brushhdr->numnodes * sizeof (mnode_t *));
 	//r_numcachedworldnodes = 0;
 
 	// always rebuild the world
@@ -105,7 +105,7 @@ void D3DSurf_RegisterTextureChain (image_t *image)
 
 void D3DSurf_FinishTextureChains (void)
 {
-	d3d_TextureChains = (d3d_modelsurf_t **) MainHunk->Alloc (d3d_NumTextureChains * sizeof (d3d_modelsurf_t *));
+	d3d_TextureChains = (d3d_modelsurf_t **) RenderZone->Alloc (d3d_NumTextureChains * sizeof (d3d_modelsurf_t *));
 	// Con_Printf ("registered %i texture chains\n", d3d_NumTextureChains);
 }
 
@@ -126,11 +126,11 @@ int d3d_NumModelSurfs = 0;
 
 void D3D_ModelSurfsBeginMap (void)
 {
-	d3d_ModelSurfs = (d3d_modelsurf_t **) MainHunk->Alloc (MAX_MODELSURFS * sizeof (d3d_modelsurf_t *));
+	d3d_ModelSurfs = (d3d_modelsurf_t **) RenderZone->Alloc (MAX_MODELSURFS * sizeof (d3d_modelsurf_t *));
 
 	// allocate an initial batch
 	for (int i = 0; i < 4096; i++)
-		d3d_ModelSurfs[i] = (d3d_modelsurf_t *) MainHunk->Alloc (sizeof (d3d_modelsurf_t));
+		d3d_ModelSurfs[i] = (d3d_modelsurf_t *) RenderZone->Alloc (sizeof (d3d_modelsurf_t));
 
 	d3d_NumModelSurfs = 0;
 }
@@ -192,7 +192,7 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, entity_t *ent = NULL,
 
 	// allocate as required
 	if (!d3d_ModelSurfs[d3d_NumModelSurfs])
-		d3d_ModelSurfs[d3d_NumModelSurfs] = (d3d_modelsurf_t *) MainHunk->Alloc (sizeof (d3d_modelsurf_t));
+		d3d_ModelSurfs[d3d_NumModelSurfs] = (d3d_modelsurf_t *) RenderZone->Alloc (sizeof (d3d_modelsurf_t));
 
 	// take the next modelsurf
 	d3d_modelsurf_t *ms = d3d_ModelSurfs[d3d_NumModelSurfs];
@@ -725,6 +725,7 @@ void R_MarkLeaves (void)
 	mnode_t	*node;
 	int		i;
 	extern	byte *mod_novis;
+	msurface_t **mark;
 
 	// viewleaf hasn't changed or we're drawing with a locked PVS
 	if ((d3d_RenderDef.oldviewleaf == d3d_RenderDef.viewleaf) || r_lockpvs.value) return;
@@ -735,10 +736,25 @@ void R_MarkLeaves (void)
 	// rebuild the world lists
 	d3d_RenderDef.rebuildworld = true;
 
+	bool nearwaterportal = false;
+	mleaf_t *leaf = d3d_RenderDef.viewleaf;
+
+	for (i = 0, mark = leaf->firstmarksurface; i < leaf->nummarksurfaces; i++, mark++)
+	{
+		if ((*mark)->flags & SURF_DRAWTURB)
+		{
+			// one is all we need
+			nearwaterportal = true;
+			break;
+		}
+	}
+
 	// add in visible leafs - we always add the fat PVS to ensure that client visibility
 	// is the same as that which was used by the server; R_CullBox will take care of unwanted leafs
 	if (r_novis.integer)
 		R_LeafVisibility (NULL);
+	else if (nearwaterportal)
+		R_LeafVisibility (Mod_FatPVS (r_refdef.vieworigin));
 	else R_LeafVisibility (Mod_LeafPVS (d3d_RenderDef.viewleaf, cl.worldmodel));
 
 	// no old viewleaf so can't make a transition check
@@ -750,7 +766,7 @@ void R_MarkLeaves (void)
 			// if we're still in the same contents we still have the same contents colour
 			d3d_RenderDef.viewleaf->contentscolor = d3d_RenderDef.oldviewleaf->contentscolor;
 		}
-		else if (!r_novis.integer)
+		else if (!r_novis.integer && !nearwaterportal)
 		{
 			// we've had a contents transition so merge the old pvs with the new
 			R_LeafVisibility (Mod_LeafPVS (d3d_RenderDef.oldviewleaf, cl.worldmodel));

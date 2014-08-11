@@ -134,6 +134,9 @@ bool Cvar_SetPrevalidate (cvar_t *var)
 
 void Cvar_SetCommon (cvar_t *var)
 {
+	// don't bug the player
+	if (var->usage & CVAR_INTERNAL) return;
+
 	// be friendly and notify the player if this change can't take effect immediately
 	if ((var->usage & CVAR_RESTART) && cvar_initialized)
 		Con_Printf ("You will need to restart DirectQ for this change to take effect\n");
@@ -143,6 +146,11 @@ void Cvar_SetCommon (cvar_t *var)
 
 	if ((var->usage & CVAR_MAP) && (cls.state == ca_connected))
 		Con_Printf ("You will need to reload the current map for this change to take effect\n");
+
+	// don't spam this if the server stuffcmds it
+	// (this spams for every cvar that ain't archived which is crap, crap, crap, crap)
+	//if (!(var->usage & CVAR_ARCHIVE) && cvar_initialized && key_dest == key_console)
+	//	Con_Printf ("You will need to add %s to your autoexec for this change to persist\n", COM_ShiftTextColor (va ("\"%s\" \"%s\"", var->name, var->string)));
 
 	if (var->callback) var->callback (var);
 
@@ -198,7 +206,10 @@ void Cvar_Set (cvar_t *var, char *value)
 		var->string = (char *) Zone_Alloc (strlen (value) + 1);
 		strcpy (var->string, value);
 		var->value = atof (var->string);
-		var->integer = (int) var->value;
+
+		if (var->value < 0)
+			var->integer = (int) (var->value - 0.5f);
+		else var->integer = (int) (var->value + 0.5f);
 
 		Cvar_SetCommon (var);
 	}
@@ -215,7 +226,10 @@ void Cvar_Set (cvar_t *var, float value)
 	{
 		// store back to the cvar
 		var->value = value;
-		var->integer = (int) var->value;
+
+		if (var->value < 0)
+			var->integer = (int) (var->value - 0.5f);
+		else var->integer = (int) (var->value + 0.5f);
 
 		// copy out the value to a temp buffer
 		char valbuf[32];
@@ -244,6 +258,29 @@ void Cvar_Set (char *var_name, char *value)
 	Cvar_Set (Cmd_FindCvar (var_name), value);
 }
 
+
+void Cvar_SetA (char *var_name, char *value)
+{
+	cvar_t *var = Cmd_FindCvar (var_name);
+
+	if (var)
+	{
+		Cvar_Set (var, value);
+		var->usage |= CVAR_ARCHIVE;
+	}
+}
+
+
+void Cvar_SetA_f (void)
+{
+	if (Cmd_Argc () != 3)
+		return;
+
+	Cvar_SetA (Cmd_Argv (1), Cmd_Argv (2));
+}
+
+
+cmd_t cmd_CvarSetA ("seta", Cvar_SetA_f);
 
 /*
 ============

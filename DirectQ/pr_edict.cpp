@@ -812,7 +812,7 @@ char *ED_NewString (char *string)
 	int		i, l;
 
 	l = strlen (string) + 1;
-	newstring = (char *) MainHunk->Alloc (l);
+	newstring = (char *) ServerZone->Alloc (l);
 	new_p = newstring;
 
 	for (i = 0; i < l; i++)
@@ -1122,15 +1122,15 @@ void SV_AddEntityStat (edict_t *ed)
 
 	if (!es)
 	{
-		es = (entitystat_t *) MainHunk->Alloc (sizeof (entitystat_t));
+		es = (entitystat_t *) ServerZone->Alloc (sizeof (entitystat_t));
 
 		es->next = sv_levelstats.entitystats;
 		sv_levelstats.entitystats = es;
 
-		es->name = (char *) MainHunk->Alloc (strlen (classname) + 1);
+		es->name = (char *) ServerZone->Alloc (strlen (classname) + 1);
 		strcpy (es->name, classname);
 
-		es->firstword = (char *) MainHunk->Alloc (strlen (classname) + 1);
+		es->firstword = (char *) ServerZone->Alloc (strlen (classname) + 1);
 		strcpy (es->firstword, classname);
 
 		for (int i = 0;; i++)
@@ -1319,7 +1319,7 @@ void ED_LoadFromFile (char *data)
 
 	Con_DPrintf ("%i entities with %i inhibited\n", ed_number, inhibit);
 
-	sv_levelstats.sorted = (entitystat_t **) MainHunk->Alloc (sv_levelstats.numenttypes * sizeof (entitystat_t *));
+	sv_levelstats.sorted = (entitystat_t **) ServerZone->Alloc (sv_levelstats.numenttypes * sizeof (entitystat_t *));
 	int nument = 0;
 
 	for (entitystat_t *find = sv_levelstats.entitystats; find; find = find->next)

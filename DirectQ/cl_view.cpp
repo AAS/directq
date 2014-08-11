@@ -377,42 +377,31 @@ void V_UpdateCShifts (void)
 {
 	int		i, j;
 
-	V_CalcPowerupCshift ();
-
-	// this will be true if the overall blend needs changing
-	bool newp = false;
-
-	for (i = 0; i < NUM_CSHIFTS; i++)
+	if (cl.intermission)
 	{
-		if (cl.cshifts[i].percent != cl.prev_cshifts[i].percent)
-		{
-			newp = true;
-			cl.prev_cshifts[i].percent = cl.cshifts[i].percent;
-		}
-
-		for (j = 0; j < 3; j++)
-		{
-			if (cl.cshifts[i].destcolor[j] != cl.prev_cshifts[i].destcolor[j])
-			{
-				newp = true;
-				cl.prev_cshifts[i].destcolor[j] = cl.cshifts[i].destcolor[j];
-			}
-		}
-	}
-
-	// drop the damage value
-	cl.cshifts[CSHIFT_DAMAGE].percent -= cl.frametime * 150;
-
-	if (cl.cshifts[CSHIFT_DAMAGE].percent <= 0)
+		// certain cshifts are removed on intermission
+		// (we keep contents as the intermission camera may be underwater)
 		cl.cshifts[CSHIFT_DAMAGE].percent = 0;
-
-	// drop the bonus value
-	cl.cshifts[CSHIFT_BONUS].percent -= cl.frametime * 100;
-
-	if (cl.cshifts[CSHIFT_BONUS].percent <= 0)
 		cl.cshifts[CSHIFT_BONUS].percent = 0;
+		cl.cshifts[CSHIFT_POWERUP].percent = 0;
+	}
+	else
+	{
+		// drop the damage value
+		cl.cshifts[CSHIFT_DAMAGE].percent -= cl.frametime * 150;
 
-	if (!newp) return;
+		if (cl.cshifts[CSHIFT_DAMAGE].percent <= 0)
+			cl.cshifts[CSHIFT_DAMAGE].percent = 0;
+
+		// drop the bonus value
+		cl.cshifts[CSHIFT_BONUS].percent -= cl.frametime * 100;
+
+		if (cl.cshifts[CSHIFT_BONUS].percent <= 0)
+			cl.cshifts[CSHIFT_BONUS].percent = 0;
+
+		// add powerups
+		V_CalcPowerupCshift ();
+	}
 
 	V_CalcBlend ();
 }

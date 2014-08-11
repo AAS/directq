@@ -461,7 +461,7 @@ void Cbuf_Execute (void)
 
 	while (cmd_text.cursize)
 	{
-		// find a \n or; line break
+		// find a \n or ; line break
 		text = (char *) cmd_text.data;
 
 		quotes = 0;
@@ -590,21 +590,10 @@ void Cmd_StuffCmds_f (void)
 }
 
 
-/*
-===============
-Cmd_Exec_f
-===============
-*/
-void Cmd_Exec_f (void)
+void Cmd_ExecFile (char *name)
 {
-	if (Cmd_Argc () != 2)
-	{
-		Con_SafePrintf ("exec <filename> : execute a script file\n");
-		return;
-	}
-
 	char cfgfile[128];
-	Q_strncpy (cfgfile, Cmd_Argv (1), 127);
+	Q_strncpy (cfgfile, name, 127);
 	char *f = (char *) COM_LoadFile (cfgfile);
 
 	if (!f)
@@ -623,12 +612,32 @@ void Cmd_Exec_f (void)
 	Con_SafePrintf ("execing \"%s\"\n", cfgfile);
 
 	// fix if a config file isn't \n terminated
+	Cbuf_InsertText (va ("//%s\n", cfgfile));
 	Cbuf_InsertText (f);
 	Cbuf_InsertText ("\n");
 	Zone_Free (f);
+}
 
-	// OK, I was stupid and didn't know how Cbuf_InsertText worked.  shoot me.
-	if (!stricmp (cfgfile, "config.cfg")) Cbuf_InsertText ("exec directq.cfg\n");
+
+/*
+===============
+Cmd_Exec_f
+===============
+*/
+void Cmd_Exec_f (void)
+{
+	if (Cmd_Argc () != 2)
+	{
+		Con_SafePrintf ("exec <filename> : execute a script file\n");
+		return;
+	}
+
+	char *name = Cmd_Argv (1);
+
+	// these need to go in reverse order otherwise config.cfg will overwrite directq.cfg
+	if (!stricmp (name, "config.cfg")) Cmd_ExecFile ("directq.cfg");
+
+	Cmd_ExecFile (name);
 }
 
 
@@ -1164,8 +1173,7 @@ void Cmd_ForwardToServer (void)
 					{
 						if (cl.stats[STAT_ROCKETS] < 5)
 							dst += sprintf (dst, "%s", pq_needrox.string);
-						else
-							dst += sprintf (dst, "%s", pq_haverl.string);
+						else dst += sprintf (dst, "%s", pq_haverl.string);
 					}
 					else dst += sprintf (dst, "%s", pq_needrl.string);
 

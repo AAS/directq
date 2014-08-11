@@ -771,7 +771,7 @@ void Host_Loadgame_f (void)
 	for (i = 0; i < MAX_LIGHTSTYLES; i++)
 	{
 		fscanf (f, "%s\n", str);
-		sv.lightstyles[i] = (char *) MainHunk->Alloc (strlen (str) + 1);
+		sv.lightstyles[i] = (char *) ServerZone->Alloc (strlen (str) + 1);
 		strcpy (sv.lightstyles[i], str);
 	}
 
@@ -876,8 +876,7 @@ void Host_Name_f (void)
 
 	if (Cmd_Argc () == 2)
 		newName = Cmd_Argv (1);
-	else
-		newName = Cmd_Args();
+	else newName = Cmd_Args ();
 
 	newName[15] = 0;
 
@@ -907,7 +906,6 @@ void Host_Name_f (void)
 		IPLog_Add ((a << 16) | (b << 8) | c, newName);
 
 	// send notification to all clients
-
 	MSG_WriteByte (&sv.reliable_datagram, svc_updatename);
 	MSG_WriteByte (&sv.reliable_datagram, host_client - svs.clients);
 	MSG_WriteString (&sv.reliable_datagram, host_client->name);
@@ -1366,10 +1364,29 @@ void Host_Spawn_f (void)
 	ent = GetEdictForNumber (1 + (host_client - svs.clients));
 	MSG_WriteByte (&host_client->message, svc_setangle);
 
+	// broken - fix from R00k
+#if 0
 	for (i = 0; i < 2; i++)
 		MSG_WriteAngle (&host_client->message, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
 
 	MSG_WriteAngle (&host_client->message, 0, sv.Protocol, sv.PrototcolFlags, 2);
+#else
+	// demos don't go through here...
+	if (host_client->netconnection->mod == MOD_PROQUAKE && sv.Protocol == PROTOCOL_VERSION_NQ)
+	{
+		for (i = 0; i < 2; i++)
+			MSG_WriteAngle8_Old (&host_client->message, ent->v.angles[i]);
+
+		MSG_WriteAngle8_Old (&host_client->message, 0);	
+	}	
+	else
+	{
+		for (i = 0; i < 2; i++)
+			MSG_WriteAngle (&host_client->message, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
+
+		MSG_WriteAngle (&host_client->message, 0, sv.Protocol, sv.PrototcolFlags, 2);
+	}
+#endif
 
 	SV_WriteClientdataToMessage (sv_player, &host_client->message);
 

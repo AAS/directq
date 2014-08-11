@@ -88,7 +88,7 @@ void R_ClearParticles (void)
 	int i;
 
 	// particles
-	free_particles = (particle_t *) MainHunk->Alloc (PARTICLE_BATCH_SIZE * sizeof (particle_t));
+	free_particles = (particle_t *) ClientZone->Alloc (PARTICLE_BATCH_SIZE * sizeof (particle_t));
 
 	for (i = 1; i < PARTICLE_BATCH_SIZE; i++)
 	{
@@ -97,7 +97,7 @@ void R_ClearParticles (void)
 	}
 
 	// particle type chains
-	free_particle_types = (particle_type_t *) MainHunk->Alloc (PARTICLE_TYPE_BATCH_SIZE * sizeof (particle_type_t));
+	free_particle_types = (particle_type_t *) ClientZone->Alloc (PARTICLE_TYPE_BATCH_SIZE * sizeof (particle_type_t));
 	active_particle_types = NULL;
 
 	for (i = 1; i < PARTICLE_TYPE_BATCH_SIZE; i++)
@@ -141,7 +141,7 @@ particle_type_t *R_NewParticleType (vec3_t spawnorg)
 	}
 
 	// alloc some more free particles
-	free_particle_types = (particle_type_t *) MainHunk->Alloc (PARTICLE_TYPE_EXTRA_SIZE * sizeof (particle_type_t));
+	free_particle_types = (particle_type_t *) ClientZone->Alloc (PARTICLE_TYPE_EXTRA_SIZE * sizeof (particle_type_t));
 
 	// link them up
 	for (i = 0; i < PARTICLE_TYPE_EXTRA_SIZE; i++)
@@ -182,7 +182,7 @@ particle_t *R_NewParticle (particle_type_t *pt)
 	}
 
 	// alloc some more free particles
-	free_particles = (particle_t *) MainHunk->Alloc (PARTICLE_EXTRA_SIZE * sizeof (particle_t));
+	free_particles = (particle_t *) ClientZone->Alloc (PARTICLE_EXTRA_SIZE * sizeof (particle_t));
 
 	// link them up
 	for (i = 0; i < PARTICLE_EXTRA_SIZE; i++)
@@ -894,6 +894,10 @@ void R_SetupParticleType (particle_type_t *pt)
 	// this is the count of particles that will be drawn this frame
 	pt->numactiveparticles = 0;
 
+	// begin a new bounding box for this type
+	pt->mins[0] = pt->mins[1] = pt->mins[2] = 9999999;
+	pt->maxs[0] = pt->maxs[1] = pt->maxs[2] = -9999999;
+
 	// remove from the head of the list
 	for (;;)
 	{
@@ -913,6 +917,13 @@ void R_SetupParticleType (particle_type_t *pt)
 
 		break;
 	}
+
+	// particle updating has been moved back to here to preserve cache-friendliness
+	extern cvar_t sv_gravity;
+	float grav = cl.frametime * sv_gravity.value * 0.025f;
+	float gravchange;
+	float velchange[3];
+	float gravtime = cl.frametime * 0.5f;
 
 	for (p = pt->particles; p; p = p->next)
 	{
@@ -939,6 +950,69 @@ void R_SetupParticleType (particle_type_t *pt)
 		// sanity check on colour to avoid array bounds errors
 		if (p->color < 0) p->color = 0;
 		if (p->color > 255) p->color = 255;
+
+		// re-eval bbox
+		for (int i = 0; i < 3; i++)
+		{
+			if (p->org[i] < pt->mins[i]) pt->mins[i] = p->org[i];
+			if (p->org[i] > pt->maxs[i]) pt->maxs[i] = p->org[i];
+		}
+
+		// particle updating has been moved back to here to preserve cache-friendliness
+		// also to ensure updates happen even if we've been bbculled
+		// fade alpha and increase size
+		p->alpha -= (p->fade * cl.frametime);
+		p->scale += (p->growth * cl.frametime);
+
+		// kill if fully faded or too small
+		if (p->alpha <= 0 || p->scale <= 0)
+		{
+			// no further adjustments needed
+			p->die = -1;
+			continue;
+		}
+
+		if (p->colorramp)
+		{
+			// colour ramps
+			p->ramp += p->ramptime * cl.frametime;
+
+			// adjust color for ramp
+			if (p->colorramp[(int) p->ramp] < 0)
+			{
+				// no further adjustments needed
+				p->die = -1;
+				continue;
+			}
+			else p->color = p->colorramp[(int) p->ramp];
+		}
+
+		// framerate independent delta factors
+		gravchange = grav * p->grav;
+		velchange[0] = p->dvel[0] * gravtime;
+		velchange[1] = p->dvel[1] * gravtime;
+		velchange[2] = p->dvel[2] * gravtime;
+
+		// adjust for gravity (framerate independent)
+		p->vel[2] += gravchange;
+
+		// adjust for velocity change (framerate-independent)
+		p->vel[0] += velchange[0];
+		p->vel[1] += velchange[1];
+		p->vel[2] += velchange[2];
+
+		// update origin (framerate-independent)
+		p->org[0] += p->vel[0] * cl.frametime;
+		p->org[1] += p->vel[1] * cl.frametime;
+		p->org[2] += p->vel[2] * cl.frametime;
+
+		// adjust for gravity (framerate independent)
+		p->vel[2] += gravchange;
+
+		// adjust for velocity change (framerate-independent)
+		p->vel[0] += velchange[0];
+		p->vel[1] += velchange[1];
+		p->vel[2] += velchange[2];
 
 		// count the active particles for this type
 		pt->numactiveparticles++;
@@ -1000,7 +1074,7 @@ void D3D_AddParticesToAlphaList (void)
 		// prepare this type for rendering
 		R_SetupParticleType (pt);
 
-		if (pt->numactiveparticles)
+		if (pt->numactiveparticles && !R_CullBox (pt->mins, pt->maxs, frustum))
 		{
 			// add to the draw list (only if there's something to draw)
 			D3DAlpha_AddToList (pt);

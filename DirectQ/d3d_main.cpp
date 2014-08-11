@@ -22,8 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
+
 cvar_t gl_fullbrights ("gl_fullbrights", "1", CVAR_ARCHIVE);
-cvar_t r_draworder ("r_draworder", "1");
+cvar_t r_draworder ("r_draworder", "0");
 cvar_t r_colorfilter ("r_colorfilter", "7");
 
 void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf)
@@ -168,7 +169,7 @@ cvar_t	r_dynamic ("r_dynamic", "1");
 cvar_t	gl_cull ("gl_cull", "1");
 cvar_t	gl_smoothmodels ("gl_smoothmodels", "1");
 cvar_t	gl_affinemodels ("gl_affinemodels", "0");
-cvar_t	gl_polyblend ("gl_polyblend", "1");
+cvar_t	gl_polyblend ("gl_polyblend", "1", CVAR_ARCHIVE);
 cvar_t	gl_nocolors ("gl_nocolors", "0");
 cvar_t	gl_doubleeyes ("gl_doubleeys", "1");
 cvar_t	gl_clear ("gl_clear", "0");
@@ -703,13 +704,13 @@ void D3DMain_SetupD3D (void)
 
 	if (r_draworder.value)
 	{
-		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
-		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 0.0f, 1);
+		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
 	}
 	else
 	{
-		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 0.0f, 1);
-		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
+		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
+		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
 	}
 
 	// set up the scaled viewport taking account of the status bar area
@@ -985,7 +986,9 @@ void D3DRMain_HLSLSetup (void)
 }
 
 
-void R_RenderView (void)
+void D3DPart_DrawSmokePuffs (double frametime);
+
+void R_RenderView (double frametime)
 {
 	double dTime1 = 0, dTime2 = 0;
 
@@ -1033,6 +1036,8 @@ void R_RenderView (void)
 
 	// optionally show bboxes
 	D3DOC_ShowBBoxes ();
+
+	D3DPart_DrawSmokePuffs (frametime);
 
 	// the viewmodel comes last
 	// note - the gun model code assumes that it's the last thing drawn in the 3D view

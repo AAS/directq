@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
+extern LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[];
+
 void D3DTexture_MipChange (cvar_t *var);
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
 cvar_t gl_softwarequakemipmaps ("gl_softwarequakemipmaps", "0", 0, D3DTexture_MipChange);
@@ -181,6 +183,12 @@ void D3D_MakeQuakePalettes (byte *palette)
 		d3d_QuakePalette.colorfloat[i][1] = (float) rgb[1] / 255.0f;
 		d3d_QuakePalette.colorfloat[i][2] = (float) rgb[2] / 255.0f;
 		d3d_QuakePalette.colorfloat[i][3] = (float) alpha / 255.0f;
+
+		int gs = ((int) d3d_QuakePalette.standard[i].peRed * 30 +
+			(int) d3d_QuakePalette.standard[i].peGreen * 59 + 
+			(int) d3d_QuakePalette.standard[i].peBlue * 11) / 100;
+
+		d3d_QuakePalette.greyscale[i] = BYTE_CLAMP (gs);
 	}
 
 	// correct alpha colour
@@ -871,6 +879,9 @@ void D3D_ReleaseTextures (void)
 
 	SAFE_RELEASE (skyboxcubemap);
 
+	for (int i = 0; i < 16; i++)
+		SAFE_RELEASE (d3d_PaletteRowTextures[i]);
+
 	// resource textures
 	R_ReleaseResourceTextures ();
 
@@ -1503,4 +1514,30 @@ void D3DTexture_RegisterChains (void)
 	D3DSurf_FinishTextureChains ();
 }
 
+
+void D3D_MakeAlphaTexture (LPDIRECT3DTEXTURE9 tex)
+{
+	D3DSURFACE_DESC surfdesc;
+	D3DLOCKED_RECT lockrect;
+
+	hr = tex->GetLevelDesc (0, &surfdesc);
+
+	if (FAILED (hr)) return;
+
+	hr = tex->LockRect (0, &lockrect, NULL, 0);
+
+	if (FAILED (hr)) return;
+
+	byte *data = (byte *) lockrect.pBits;
+
+	for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++, data += 4)
+	{
+		data[3] = data[0];
+		data[0] = 255;
+		data[1] = 255;
+		data[2] = 255;
+	}
+
+	tex->UnlockRect (0);
+}
 

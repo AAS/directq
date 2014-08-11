@@ -419,11 +419,6 @@ int D3DRTT_RescaleDimension (int dim)
 
 void D3DRTT_CreateRTTTexture (void)
 {
-	int i = D3DRTT_RescaleDimension (480);
-	i = D3DRTT_RescaleDimension (500);
-	i = D3DRTT_RescaleDimension (512);
-	i = D3DRTT_RescaleDimension (520);
-
 	hr = d3d_Device->CreateTexture
 	(
 		D3DRTT_RescaleDimension (d3d_CurrentMode.Width),
@@ -572,11 +567,13 @@ void D3DRTT_EndScene (void)
 	DWORD blendcolor = D3DCOLOR_ARGB (0, 255, 255, 255);
 
 	// and add the v_blend if there is one
-	if (v_blend[3])
+	if (v_blend[3] && gl_polyblend.value > 0.0f)
 	{
+		float alpha = (float) v_blend[3] * gl_polyblend.value;
+
 		blendcolor = D3DCOLOR_ARGB
 		(
-			BYTE_CLAMP (v_blend[3]),
+			BYTE_CLAMP (alpha),
 			BYTE_CLAMP (v_blend[0]),
 			BYTE_CLAMP (v_blend[1]),
 			BYTE_CLAMP (v_blend[2])

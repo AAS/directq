@@ -23,7 +23,7 @@ extern byte *scratchbuf;
 #define SCRATCHBUF_SIZE 0x100000
 
 // interface
-void Pool_Init (void);
+void Heap_Init (void);
 
 void *Zone_Alloc (int size);
 void Zone_FreeMemory (void *ptr);
@@ -40,6 +40,7 @@ public:
 	~CQuakeHunk (void);
 	void *Alloc (int size, BOOL memset0 = TRUE);
 	void Free (void);
+	float GetSizeMB (void);
 
 	int GetLowMark (void);
 	void FreeToLowMark (int mark);
@@ -65,6 +66,7 @@ public:
 	void Free (void *data);
 	void Compact (void);
 	void Discard (void);
+	float GetSizeMB (void);
 
 private:
 	void EnsureHeap (void);
@@ -84,6 +86,7 @@ public:
 	void *Alloc (char *name, void *data, int size);
 	void *Check (char *name);
 	void Flush (void);
+	float GetSizeMB (void);
 
 private:
 	void Init (void);
@@ -95,6 +98,11 @@ private:
 // space buffers
 extern CQuakeHunk *MainHunk;
 extern CQuakeZone *GameZone;
-extern CQuakeZone *MapZone;
 extern CQuakeCache *MainCache;
 extern CQuakeZone *MainZone;
+
+extern CQuakeZone *ServerZone;
+extern CQuakeZone *ClientZone;
+extern CQuakeZone *RenderZone;
+extern CQuakeZone *ModelZone;
+

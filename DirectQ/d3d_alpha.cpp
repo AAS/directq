@@ -67,7 +67,7 @@ int d3d_NumAlphaList = 0;
 
 void D3DAlpha_NewMap (void)
 {
-	d3d_AlphaList = (d3d_alphalist_t **) MainHunk->Alloc (MAX_ALPHA_ITEMS * sizeof (d3d_alphalist_t *));
+	d3d_AlphaList = (d3d_alphalist_t **) RenderZone->Alloc (MAX_ALPHA_ITEMS * sizeof (d3d_alphalist_t *));
 }
 
 
@@ -88,7 +88,7 @@ float D3DAlpha_GetDist (float *origin)
 void D3DAlpha_AddToList (int type, void *data, float dist)
 {
 	if (d3d_NumAlphaList == MAX_ALPHA_ITEMS) return;
-	if (!d3d_AlphaList[d3d_NumAlphaList]) d3d_AlphaList[d3d_NumAlphaList] = (d3d_alphalist_t *) MainHunk->Alloc (sizeof (d3d_alphalist_t));
+	if (!d3d_AlphaList[d3d_NumAlphaList]) d3d_AlphaList[d3d_NumAlphaList] = (d3d_alphalist_t *) RenderZone->Alloc (sizeof (d3d_alphalist_t));
 
 	d3d_AlphaList[d3d_NumAlphaList]->Type = type;
 	d3d_AlphaList[d3d_NumAlphaList]->data = data;

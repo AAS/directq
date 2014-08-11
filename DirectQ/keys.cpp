@@ -538,9 +538,7 @@ void Key_Console (int key)
 		do
 		{
 			history_line = (history_line - 1) & (CMDLINES - 1);
-		}
-		while (history_line != edit_line
-				&& !key_lines[history_line][1]);
+		} while (history_line != edit_line && !key_lines[history_line][1]);
 
 		if (history_line == edit_line)
 			history_line = (edit_line + 1) & (CMDLINES - 1);
@@ -557,9 +555,7 @@ void Key_Console (int key)
 		do
 		{
 			history_line = (history_line + 1) & (CMDLINES - 1);
-		}
-		while (history_line != edit_line
-				&& !key_lines[history_line][1]);
+		} while (history_line != edit_line && !key_lines[history_line][1]);
 
 		if (history_line == edit_line)
 		{
@@ -694,7 +690,7 @@ void Key_Console (int key)
 	}
 
 	// non-printable
-	if (key < 32 || key > 127) return;
+	if ((key & 127) < 32) return;
 
 	if (key_linepos < MAXCMDLINE - 1)
 	{
@@ -1111,7 +1107,8 @@ void Key_Event (int key, bool down)
 			return;
 		}
 
-		if (key >= 200 && !keybindings[key])
+		// only display this in-game
+		if (key >= 200 && !keybindings[key] && key_dest == key_game)
 			Con_Printf ("%s is unbound, hit F4 to set.\n", Key_KeynumToString (key));
 	}
 

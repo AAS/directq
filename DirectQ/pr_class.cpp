@@ -21,8 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "pr_class.h"
 
 // 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes  start
-cvar_t	pr_builtin_find ("pr_builtin_find", "0");
-cvar_t	pr_builtin_remap ("pr_builtin_remap", "0");
+cvar_t	pr_builtin_find ("pr_builtin_find", "0", CVAR_INTERNAL);
+cvar_t	pr_builtin_remap ("pr_builtin_remap", "0", CVAR_INTERNAL);
 // 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes  end
 
 
@@ -57,10 +57,10 @@ CProgsDat::~CProgsDat (void)
 CProgsDat::CProgsDat (void)
 {
 	// set up the stack
-	this->Stack = (prstack_t *) MainHunk->Alloc ((MAX_STACK_DEPTH + 1) * sizeof (prstack_t));
+	this->Stack = (prstack_t *) ServerZone->Alloc ((MAX_STACK_DEPTH + 1) * sizeof (prstack_t));
 	this->StackDepth = 0;
 
-	this->LocalStack = (int *) MainHunk->Alloc (LOCALSTACK_SIZE * sizeof (int));
+	this->LocalStack = (int *) ServerZone->Alloc (LOCALSTACK_SIZE * sizeof (int));
 	this->LocalStackUsed = 0;
 
 	// ExecuteProgram explicitly checks for this->QC non-NULL now so here we set it to NULL
@@ -223,7 +223,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	pr_numbuiltins++;
 
 	// allocate and initialize builtin list for execution time
-	pr_builtins = (builtin_t *) MainHunk->Alloc (pr_numbuiltins * sizeof (builtin_t));
+	pr_builtins = (builtin_t *) ServerZone->Alloc (pr_numbuiltins * sizeof (builtin_t));
 
 	for (int i = 0; i < pr_numbuiltins; i++)
 		pr_builtins[i] = pr_ebfs_builtins[0].function;

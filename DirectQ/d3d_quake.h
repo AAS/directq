@@ -39,6 +39,7 @@ typedef struct palettedef_s
 
 	D3DCOLOR standard32[256];
 	float colorfloat[256][4];
+	byte greyscale[256];
 	int darkindex;
 } palettedef_t;
 
@@ -271,7 +272,6 @@ typedef struct d3d_global_caps_s
 	DWORD DiscardLock;
 	DWORD NoOverwriteLock;
 	int MaxExtents;
-	int NumTMUs;
 } d3d_global_caps_t;
 
 extern d3d_global_caps_t d3d_GlobalCaps;

@@ -29,7 +29,6 @@ void D3DSky_InitTextures (miptex_t *mt);
 void D3DAlias_MakeAliasMesh (char *name, byte *hash, aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles);
 void D3DLight_BeginBuildingLightmaps (void);
 void D3DLight_CreateSurfaceLightmaps (model_t *mod);
-void D3DLight_BumpLightmaps (void);
 
 void Mod_LoadSpriteModel (model_t *mod, void *buffer);
 void Mod_LoadBrushModel (model_t *mod, void *buffer);
@@ -95,12 +94,12 @@ Mod_InitForMap
 void Mod_InitForMap (model_t *mod)
 {
 	// only alloc as much as we actually need
-	mod_novis = (byte *) MainHunk->Alloc ((mod->brushhdr->numleafs + 7) / 8, FALSE);
+	mod_novis = (byte *) ModelZone->Alloc ((mod->brushhdr->numleafs + 7) / 8);
 	memset (mod_novis, 0xff, (mod->brushhdr->numleafs + 7) / 8);
-	checkpvs = (byte *) MainHunk->Alloc ((mod->brushhdr->numleafs + 7) / 8, FALSE);
+	checkpvs = (byte *) ModelZone->Alloc ((mod->brushhdr->numleafs + 7) / 8);
 
 	fatbytes = (mod->brushhdr->numleafs + 31) >> 3;
-	fatpvs = (byte *) MainHunk->Alloc (fatbytes, FALSE);
+	fatpvs = (byte *) ModelZone->Alloc (fatbytes);
 }
 
 
@@ -250,6 +249,9 @@ void Mod_ClearAll (void)
 {
 	int		i;
 
+	SAFE_DELETE (ModelZone);
+	ModelZone = new CQuakeZone ();
+
 	// NULL the structs
 	for (i = 0; i < MAX_MOD_KNOWN; i++)
 		mod_known[i] = NULL;
@@ -288,7 +290,7 @@ model_t *Mod_FindName (char *name)
 
 		// allocate a model
 		// this is also done for cached models as the mod_known array is managed separately
-		mod_known[i] = (model_t *) MainHunk->Alloc (sizeof (model_t));
+		mod_known[i] = (model_t *) ModelZone->Alloc (sizeof (model_t));
 
 		Q_strncpy (mod_known[i]->name, name, 63);
 		mod_known[i]->needload = true;
@@ -458,8 +460,8 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 	m = (dmiptexlump_t *) (mod_base + l->fileofs);
 
 	mod->brushhdr->numtextures = m->nummiptex;
-	mod->brushhdr->textures = (texture_t **) MainHunk->Alloc (mod->brushhdr->numtextures * sizeof (texture_t *));
-	tx = (texture_t *) MainHunk->Alloc (sizeof (texture_t) * mod->brushhdr->numtextures);
+	mod->brushhdr->textures = (texture_t **) ModelZone->Alloc (mod->brushhdr->numtextures * sizeof (texture_t *));
+	tx = (texture_t *) ModelZone->Alloc (sizeof (texture_t) * mod->brushhdr->numtextures);
 
 	for (i = 0; i < m->nummiptex; i++, tx++)
 	{
@@ -772,7 +774,7 @@ void Mod_LoadLighting (model_t *mod, byte *mod_base, lump_t *l)
 	}
 
 	// expand size to 3 component
-	mod->brushhdr->lightdata = (byte *) MainHunk->Alloc (l->filelen * 3, FALSE);
+	mod->brushhdr->lightdata = (byte *) ModelZone->Alloc (l->filelen * 3);
 
 	// check for a lit file
 	if (Mod_LoadLITFile (mod, l))
@@ -812,7 +814,7 @@ void Mod_LoadEntities (model_t *mod, byte *mod_base, lump_t *l)
 	}
 
 	// resolve missing NULL term in entities lump; VPA will automatically 0 the memory so no need to do so ourselves.
-	mod->brushhdr->entities = (char *) MainHunk->Alloc (l->filelen + 1);
+	mod->brushhdr->entities = (char *) ModelZone->Alloc (l->filelen + 1);
 	memcpy (mod->brushhdr->entities, mod_base + l->fileofs, l->filelen);
 }
 
@@ -834,7 +836,7 @@ void Mod_LoadSubmodels (model_t *mod, byte *mod_base, lump_t *l)
 		Host_Error ("MOD_LoadBmodel: LUMP_SUBMODELS funny lump size in %s", mod->name);
 
 	count = l->filelen / sizeof (*in);
-	out = (dmodel_t *) MainHunk->Alloc (count * sizeof (*out));
+	out = (dmodel_t *) ModelZone->Alloc (count * sizeof (*out));
 
 	mod->brushhdr->submodels = out;
 	mod->brushhdr->numsubmodels = count;
@@ -878,7 +880,7 @@ void Mod_LoadTexinfo (model_t *mod, byte *mod_base, lump_t *l)
 		Host_Error ("MOD_LoadBmodel: LUMP_TEXINFO funny lump size in %s", mod->name);
 
 	count = l->filelen / sizeof (texinfo_t);
-	out = (mtexinfo_t *) MainHunk->Alloc (count * sizeof (mtexinfo_t));
+	out = (mtexinfo_t *) ModelZone->Alloc (count * sizeof (mtexinfo_t));
 
 	mod->brushhdr->texinfo = out;
 	mod->brushhdr->numtexinfo = count;
@@ -1107,7 +1109,7 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 	}
 
 	int count = l->filelen / sizeof (*face);
-	msurface_t *surf = (msurface_t *) MainHunk->Alloc (count * sizeof (msurface_t));
+	msurface_t *surf = (msurface_t *) ModelZone->Alloc (count * sizeof (msurface_t));
 
 	mod->brushhdr->surfaces = surf;
 	mod->brushhdr->numsurfaces = count;
@@ -1179,8 +1181,8 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 	// this is done as a second pass so that we can batch alloc the buffers for vertexes and indexes
 	// which will load maps faster than if we do lots of small allocations
 	// note that in DirectQ there are no longer any differences between surface types at this stage
-	brushpolyvert_t *verts = (brushpolyvert_t *) MainHunk->Alloc (totalverts * sizeof (brushpolyvert_t), FALSE);
-	unsigned short *indexes = (unsigned short *) MainHunk->Alloc (totalindexes * sizeof (unsigned short), FALSE);
+	brushpolyvert_t *verts = (brushpolyvert_t *) ModelZone->Alloc (totalverts * sizeof (brushpolyvert_t));
+	unsigned short *indexes = (unsigned short *) ModelZone->Alloc (totalindexes * sizeof (unsigned short));
 	int firstvertex = 0;
 
 	for (int i = 0; i < count; i++)
@@ -1256,12 +1258,12 @@ void Mod_LoadVisLeafsNodes (model_t *mod, byte *mod_base, lump_t *v, lump_t *l, 
 
 	if (v->filelen)
 	{
-		visdata = (byte *) MainHunk->Alloc (v->filelen, FALSE);
+		visdata = (byte *) ModelZone->Alloc (v->filelen);
 		memcpy (visdata, mod_base + v->fileofs, v->filelen);
 	}
 
 	// nodes and leafs need to be in consecutive memory - see comment in R_LeafVisibility
-	lout = (mleaf_t *) MainHunk->Alloc ((leafcount * sizeof (mleaf_t)) + (nodecount * sizeof (mnode_t)));
+	lout = (mleaf_t *) ModelZone->Alloc ((leafcount * sizeof (mleaf_t)) + (nodecount * sizeof (mnode_t)));
 	mod->brushhdr->leafs = lout;
 
 	for (i = 0; i < leafcount; i++, lin++, lout++)
@@ -1399,7 +1401,7 @@ void Mod_LoadClipnodes (model_t *mod, byte *mod_base, lump_t *l)
 		Host_Error ("MOD_LoadBmodel: LUMP_CLIPNODES funny lump size in %s", mod->name);
 
 	count = l->filelen / sizeof (dclipnode_t);
-	out = (mclipnode_t *) MainHunk->Alloc (count * sizeof (mclipnode_t));
+	out = (mclipnode_t *) ModelZone->Alloc (count * sizeof (mclipnode_t));
 
 	mod->brushhdr->clipnodes = out;
 	mod->brushhdr->numclipnodes = count;
@@ -1471,7 +1473,7 @@ void Mod_MakeHull0 (model_t *mod)
 
 	in = mod->brushhdr->nodes;
 	count = mod->brushhdr->numnodes;
-	out = (mclipnode_t *) MainHunk->Alloc (count * sizeof (mclipnode_t));
+	out = (mclipnode_t *) ModelZone->Alloc (count * sizeof (mclipnode_t));
 
 	hull->clipnodes = out;
 	hull->firstclipnode = 0;
@@ -1510,7 +1512,7 @@ void Mod_LoadMarksurfaces (model_t *mod, byte *mod_base, lump_t *l)
 		Host_Error ("MOD_LoadBmodel: LUMP_MARKSURFACES funny lump size in %s", mod->name);
 
 	count = l->filelen / sizeof (*in);
-	out = (msurface_t **) MainHunk->Alloc (count * sizeof (*out), FALSE);
+	out = (msurface_t **) ModelZone->Alloc (count * sizeof (*out));
 
 	mod->brushhdr->marksurfaces = out;
 	mod->brushhdr->nummarksurfaces = count;
@@ -1549,7 +1551,7 @@ void Mod_LoadPlanes (model_t *mod, byte *mod_base, lump_t *l)
 
 	// was count * 2; i believe this was to make extra space for a possible expansion of planes * 2 in
 	// order to precache both orientations of each plane and not have to use the SURF_PLANEBACK stuff.
-	out = (mplane_t *) MainHunk->Alloc (count * sizeof (mplane_t));
+	out = (mplane_t *) ModelZone->Alloc (count * sizeof (mplane_t));
 
 	mod->brushhdr->planes = out;
 	mod->brushhdr->numplanes = count;
@@ -1685,7 +1687,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	Mod_SetupBModelFromDisk (header);
 
 	// alloc space for a brush header
-	mod->brushhdr = (brushhdr_t *) MainHunk->Alloc (sizeof (brushhdr_t));
+	mod->brushhdr = (brushhdr_t *) ModelZone->Alloc (sizeof (brushhdr_t));
 
 	// store the version for correct hull checking
 	mod->brushhdr->bspversion = header->version;
@@ -1719,10 +1721,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	D3DLight_CreateSurfaceLightmaps (mod);
 
 	if (!d3d_RenderDef.WorldModelLoaded)
-	{
-		//D3DLight_BumpLightmaps ();
 		d3d_RenderDef.WorldModelLoaded = true;
-	}
 
 	Mod_RecalcNodeBBox (mod->brushhdr->nodes);
 	Mod_CalcBModelBBox (mod, mod->brushhdr);
@@ -1745,7 +1744,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	// subsequent passes fill in the submodel slot grabbed at the end of the previous pass.
 	// the last pass doesn't need to grab a submodel slot as everything is already filled in
 	// fucking hell, he wasn't joking!
-	brushhdr_t *smheaders = (brushhdr_t *) MainHunk->Alloc (sizeof (brushhdr_t) * mod->brushhdr->numsubmodels);
+	brushhdr_t *smheaders = (brushhdr_t *) ModelZone->Alloc (sizeof (brushhdr_t) * mod->brushhdr->numsubmodels);
 
 	for (i = 0; i < mod->brushhdr->numsubmodels; i++)
 	{
@@ -2040,17 +2039,17 @@ image_t *Mod_LoadPlayerColormap (char *name, model_t *mod, aliashdr_t *pheader, 
 		else base = true;
 
 		// these are greyscale colours so we can just take the red channel (the others are equal anyway)
-		pixels[2] = base ? 255 : 0;
+		pixels[2] = shirt ? 255 : 0;
 		pixels[1] = shirt ? d3d_QuakePalette.standard[texels[j] - 16].peRed : 0;
 		pixels[0] = pants ? d3d_QuakePalette.standard[texels[j] - 96].peRed : 0;
-		pixels[3] = 255;
+		pixels[3] = pants ? 255 : 0;
 	}
 
 	image_t *img = D3D_LoadTexture (va ("%s_colormap", name),
 		pheader->skinwidth, pheader->skinheight,
-		(byte *) rgba, IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_32BIT);
+		(byte *) rgba, IMAGE_ALPHA | IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_32BIT);
 
-	// SCR_WriteDataToTGA ("playerskin.tga", (byte *) rgba, pheader->skinwidth, pheader->skinheight, 32, 24);
+	// SCR_WriteDataToTGA ("playerskin.tga", (byte *) rgba, pheader->skinwidth, pheader->skinheight, 32, 32);
 
 	MainZone->Free (rgba);
 
@@ -2196,6 +2195,10 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 
 	mod->flags = pinmodel->flags;
 	mod->type = mod_alias;
+
+	// darkplaces extends model flags so here we must clear the extra ones so that we can safely add our own
+	// (this is only relevant if an MDL was made with extended DP flags)
+	mod->flags &= 255;
 
 	// even if we alloced from the cache we still fill it in
 	// endian-adjust and copy the data, starting with the alias model header

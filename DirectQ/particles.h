@@ -60,6 +60,8 @@ typedef struct particle_type_s
 	int numparticles;
 	int numactiveparticles;
 	vec3_t spawnorg;
+	vec3_t mins;
+	vec3_t maxs;
 	struct particle_type_s *next;
 } particle_type_t;
 

@@ -204,13 +204,6 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 	D3DXVECTOR4 *positions = (D3DXVECTOR4 *) scratchbuf;
 	D3DXVECTOR4 *colours = (positions + MAX_PARTICLE_BATCH);
 
-	// particle updating has been moved back to here to preserve cache-friendliness
-	extern cvar_t sv_gravity;
-	float grav = cl.frametime * sv_gravity.value * 0.025f;
-	float gravchange;
-	float velchange[3];
-	float gravtime = cl.frametime * 0.5f;
-
 	// walk the list starting at the first active particle
 	for (particle_t *p = pt->particles; p; p = p->next)
 	{
@@ -230,61 +223,6 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		colours[d3d_NumDrawSprites].w = p->alpha;
 
 		d3d_NumDrawSprites++;
-
-		// particle updating has been moved back to here to preserve cache-friendliness
-		// fade alpha and increase size
-		p->alpha -= (p->fade * cl.frametime);
-		p->scale += (p->growth * cl.frametime);
-
-		// kill if fully faded or too small
-		if (p->alpha <= 0 || p->scale <= 0)
-		{
-			// no further adjustments needed
-			p->die = -1;
-			continue;
-		}
-
-		if (p->colorramp)
-		{
-			// colour ramps
-			p->ramp += p->ramptime * cl.frametime;
-
-			// adjust color for ramp
-			if (p->colorramp[(int) p->ramp] < 0)
-			{
-				// no further adjustments needed
-				p->die = -1;
-				continue;
-			}
-			else p->color = p->colorramp[(int) p->ramp];
-		}
-
-		// framerate independent delta factors
-		gravchange = grav * p->grav;
-		velchange[0] = p->dvel[0] * gravtime;
-		velchange[1] = p->dvel[1] * gravtime;
-		velchange[2] = p->dvel[2] * gravtime;
-
-		// adjust for gravity (framerate independent)
-		p->vel[2] += gravchange;
-
-		// adjust for velocity change (framerate-independent)
-		p->vel[0] += velchange[0];
-		p->vel[1] += velchange[1];
-		p->vel[2] += velchange[2];
-
-		// update origin (framerate-independent)
-		p->org[0] += p->vel[0] * cl.frametime;
-		p->org[1] += p->vel[1] * cl.frametime;
-		p->org[2] += p->vel[2] * cl.frametime;
-
-		// adjust for gravity (framerate independent)
-		p->vel[2] += gravchange;
-
-		// adjust for velocity change (framerate-independent)
-		p->vel[0] += velchange[0];
-		p->vel[1] += velchange[1];
-		p->vel[2] += velchange[2];
 	}
 }
 
@@ -443,12 +381,7 @@ void D3DSprite_DrawBatch (void)
 	if (d3d_NumDrawSprites)
 	{
 		D3DSprite_OnRecover ();
-
-		D3D_SetStreamSource (0, NULL, 0, 0);
-		D3D_SetStreamSource (1, NULL, 0, 0);
-		D3D_SetStreamSource (2, NULL, 0, 0);
-		D3D_SetIndices (NULL);
-
+		D3D_UnbindStreams ();
 		D3D_SetVertexDeclaration (d3d_SpriteDecl);
 
 		spritevert_t *verts = (spritevert_t *) scratchbuf;
@@ -636,4 +569,220 @@ void D3DSprite_End (void)
 	D3DSprite_DrawBatch ();
 }
 
+
+LPDIRECT3DTEXTURE9 smokepufftexture = NULL;
+
+
+typedef struct r_smokepuff_s
+{
+	float origin[3];
+	float size;
+	float alpha;
+	double time;
+
+	struct r_smokepuff_s *next;
+} r_smokepuff_t;
+
+r_smokepuff_t *r_freesmokepuffs = NULL;
+r_smokepuff_t *r_activesmokepuffs = NULL;
+
+void D3DPart_SmokePuffNewMap (void)
+{
+	r_freesmokepuffs = NULL;
+	r_activesmokepuffs = NULL;
+}
+
+
+void D3DPart_AddSmokePuff (float *origin, int numpuffs, int spread)
+{
+	for (int i = 0; i < numpuffs; i++)
+	{
+		if (!r_freesmokepuffs)
+		{
+			r_freesmokepuffs = (r_smokepuff_t *) RenderZone->Alloc (128 * sizeof (r_smokepuff_t));
+
+			for (int j = 0; j < 127; j++)
+			{
+				r_freesmokepuffs[j].next = &r_freesmokepuffs[j + 1];
+				r_freesmokepuffs[j + 1].next = NULL;
+			}
+		}
+
+		r_smokepuff_t *sp = r_freesmokepuffs;
+		r_freesmokepuffs = sp->next;
+
+		sp->next = r_activesmokepuffs;
+		r_activesmokepuffs = sp;
+
+		sp->origin[0] = origin[0] + (rand () % spread) - (rand () % spread);
+		sp->origin[1] = origin[1] + (rand () % spread) - (rand () % spread);
+		sp->origin[2] = origin[2] + ((rand () % spread) - (rand () % spread)) / 2;
+
+		sp->size = 1;
+		sp->alpha = 255 - (rand () & 255);
+		sp->time = cl.time;
+	}
+}
+
+
+void D3DPart_DrawSmokePuffs (double frametime)
+{
+	if (!r_activesmokepuffs) return;
+
+	for (;;)
+	{
+		r_smokepuff_t *kill = r_activesmokepuffs;
+
+		if (kill && kill->alpha < 0)
+		{
+			r_activesmokepuffs = kill->next;
+			kill->next = r_freesmokepuffs;
+			r_freesmokepuffs = kill;
+			continue;
+		}
+
+		break;
+	}
+
+	if (!r_activesmokepuffs) return;
+
+	bool stateset = false;
+	int numpuffs = 0;
+
+	spritevert_t *verts = (spritevert_t *) scratchbuf;
+	unsigned short *indexes = (unsigned short *) (verts + 4096);
+	float up[3], right[3], p_up[3], p_right[3], p_upright[3];
+
+	VectorScale (r_viewvectors.up, 1.5, up);
+	VectorScale (r_viewvectors.right, 1.5, right);
+
+	for (r_smokepuff_t *sp = r_activesmokepuffs; sp; sp = sp->next)
+	{
+		for (;;)
+		{
+			r_smokepuff_t *kill = sp->next;
+
+			if (kill && kill->alpha < 0)
+			{
+				sp->next = kill->next;
+				kill->next = r_freesmokepuffs;
+				r_freesmokepuffs = kill;
+				continue;
+			}
+
+			break;
+		}
+
+		if (!stateset)
+		{
+			D3DSprite_OnRecover ();
+
+			D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
+			D3D_SetTextureMipmap (0, d3d_TexFilter);
+
+			D3DHLSL_SetAlpha (1.0f);
+			D3DHLSL_SetPass (FX_PASS_SPRITE);
+
+			D3D_UnbindStreams ();
+			D3D_SetVertexDeclaration (d3d_SpriteDecl);
+
+			D3DHLSL_SetTexture (0, smokepufftexture);
+
+			// enable blending
+			D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+			D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+			D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+			D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+			D3D_BackfaceCull (D3DCULL_NONE);
+
+			stateset = true;
+		}
+
+		// check for overflow
+		if (numpuffs > 1024)
+		{
+			verts = (spritevert_t *) scratchbuf;
+			indexes = (unsigned short *) (verts + 4096);
+
+			D3DHLSL_CheckCommit ();
+
+			d3d_Device->DrawIndexedPrimitiveUP (D3DPT_TRIANGLELIST, 0, numpuffs * 4,
+				numpuffs * 2, indexes, D3DFMT_INDEX16, verts, sizeof (spritevert_t));
+
+			d3d_RenderDef.numdrawprim++;
+
+			numpuffs = 0;
+		}
+
+		// billboard and add to the list
+		D3DCOLOR color = D3DCOLOR_ARGB (BYTE_CLAMP (sp->alpha), 255, 255, 255);
+
+		verts[0].xyz[0] = sp->origin[0] - up[0] * sp->size - right[0] * sp->size;
+		verts[0].xyz[1] = sp->origin[1] - up[1] * sp->size - right[1] * sp->size;
+		verts[0].xyz[2] = sp->origin[2] - up[2] * sp->size - right[2] * sp->size;
+		verts[0].color = color;
+		verts[0].st[0] = 0;
+		verts[0].st[1] = 0;
+
+		verts[1].xyz[0] = sp->origin[0] - up[0] * sp->size + right[0] * sp->size;
+		verts[1].xyz[1] = sp->origin[1] - up[1] * sp->size + right[1] * sp->size;
+		verts[1].xyz[2] = sp->origin[2] - up[2] * sp->size + right[2] * sp->size;
+		verts[1].color = color;
+		verts[1].st[0] = 1;
+		verts[1].st[1] = 0;
+
+		verts[2].xyz[0] = sp->origin[0] + up[0] * sp->size + right[0] * sp->size;
+		verts[2].xyz[1] = sp->origin[1] + up[1] * sp->size + right[1] * sp->size;
+		verts[2].xyz[2] = sp->origin[2] + up[2] * sp->size + right[2] * sp->size;
+		verts[2].color = color;
+		verts[2].st[0] = 1;
+		verts[2].st[1] = 1;
+
+		verts[3].xyz[0] = sp->origin[0] + up[0] * sp->size - right[0] * sp->size;
+		verts[3].xyz[1] = sp->origin[1] + up[1] * sp->size - right[1] * sp->size;
+		verts[3].xyz[2] = sp->origin[2] + up[2] * sp->size - right[2] * sp->size;
+		verts[3].color = color;
+		verts[3].st[0] = 0;
+		verts[3].st[1] = 1;
+
+		indexes[0] = (numpuffs * 4) + 0;
+		indexes[1] = (numpuffs * 4) + 1;
+		indexes[2] = (numpuffs * 4) + 2;
+		indexes[3] = (numpuffs * 4) + 0;
+		indexes[4] = (numpuffs * 4) + 2;
+		indexes[5] = (numpuffs * 4) + 3;
+
+		// fade alpha
+		sp->alpha -= frametime * 333.0f;
+		sp->size += frametime * 16.666f;
+		sp->origin[2] += frametime * 6.66f;
+
+		numpuffs++;
+		verts += 4;
+		indexes += 6;
+	}
+
+	if (numpuffs)
+	{
+		verts = (spritevert_t *) scratchbuf;
+		indexes = (unsigned short *) (verts + 4096);
+
+		D3DHLSL_CheckCommit ();
+
+		d3d_Device->DrawIndexedPrimitiveUP (D3DPT_TRIANGLELIST, 0, numpuffs * 4,
+			numpuffs * 2, indexes, D3DFMT_INDEX16, verts, sizeof (spritevert_t));
+
+		d3d_RenderDef.numdrawprim++;
+	}
+
+	// draw anything left over
+	if (stateset)
+	{
+		D3D_BackfaceCull (D3DCULL_CCW);
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+		D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
+	}
+}
 

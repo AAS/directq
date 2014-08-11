@@ -19,38 +19,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // cvar.h
 
-/*
-
-cvar_t variables are used to hold scalar or string variables that can be changed or displayed at the console or
-prog code as well as accessed directly in C code.
-
-it is sufficient to initialize a cvar_t with just the first two fields, or
-you can add a CVAR_ARCHIVE flag for variables that you want saved to the configuration
-file when the game is quit:
-
-cvar_t	r_draworder ("r_draworder","1");
-cvar_t	scr_screensize ("screensize","1",CVAR_ARCHIVE);
-
-Cvars will register themselves on creation, so there is no need to call Cvar_Register on them.
-
-C code usually just references a cvar in place:
-if ( r_draworder.value )
-
-It could optionally ask for the value to be looked up for a string name:
-if (Cvar_VariableValue ("r_draworder"))
-
-Interpreted prog code can access cvars with the cvar(name) or
-cvar_set (name, value) internal functions:
-teamplay = cvar("teamplay");
-cvar_set ("registered", "1");
-
-The user can access cvars from the console in two ways:
-r_draworder			prints the current value
-r_draworder 0		sets the current value to 0
-Cvars are restricted from having the same names as commands to keep this
-interface from being ambiguous.
-*/
-
 typedef void (*cvarcallback_t) (class cvar_t *var);
 
 // changes are broadcast to all clients
@@ -90,6 +58,9 @@ typedef void (*cvarcallback_t) (class cvar_t *var);
 
 // if this cvar is changed then the map must be reloaded
 #define CVAR_MAP			2048
+
+// internal use only, don't bug the player with messages
+#define CVAR_INTERNAL		4096
 
 class cvar_t
 {

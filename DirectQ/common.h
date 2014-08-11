@@ -107,6 +107,9 @@ float MSG_ReadAngle16 (int protocol, unsigned flags);
 void MSG_WriteProQuakeAngle (sizebuf_t *sb, float f);
 float MSG_ReadProQuakeAngle (void);
 
+void MSG_WriteAngle8_Old (sizebuf_t *sb, float f);
+float MSG_ReadAngle8_Old (void);
+
 extern	int			msg_readcount;
 extern	bool	msg_badread;		// set if a read goes beyond end of message
 
@@ -236,3 +239,4 @@ extern searchpath_t    *com_searchpaths;
 bool COM_ValidateContentFolderCvar (class cvar_t *var);
 void COM_ValidateUserSettableDir (class cvar_t *var);
 
+char *COM_ShiftTextColor (char *str);
