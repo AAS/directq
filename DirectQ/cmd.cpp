@@ -35,7 +35,6 @@ cmdalias_t	*cmd_alias = NULL;
 // possible commands to execute
 static cmd_t *cmd_functions = NULL;
 
-
 void Cmd_Inc_f (void)
 {
 	switch (Cmd_Argc ())
@@ -134,7 +133,11 @@ void Cmd_BuildCompletionList (void)
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next, complistcurrent++)
 	{
 		// replace NULL function commands with a dummy that does nothing
-		if (!cmd->function) cmd->function = Cmd_Compat;
+		if (!cmd->function)
+		{
+			cmd->usage = CMD_COMPAT;
+			cmd->function = Cmd_Compat;
+		}
 
 		complistcurrent->name = cmd->name;
 		complistcurrent->als = NULL;
@@ -184,7 +187,7 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 		if (cl->var && (cl->var->usage & CVAR_COMPAT)) continue;
 
 		// skip compatibility commands
-		if (cl->cmd && !(cl->cmd->function)) continue;
+		if (cl->cmd && (cl->cmd->usage == CMD_COMPAT)) continue;
 
 		assert (cl->name);
 		assert ((cl->als || cl->cmd || cl->var));
@@ -870,22 +873,17 @@ void Cmd_Add (cmd_t *newcmd)
 	{
 		if (!strcmp (newcmd->name, cmd->name))
 		{
-			// if the incoming command has the same name as a compatibility command
-			// we stomp the compatibility command
-			if (!cmd->function)
-			{
-				cmd->function = newcmd->function;
-				return;
-			}
-
-			// if the incoming command is a compatibility command we stomp it
-			if (!newcmd->function)
-				return;
-
 			// silent fail
 			return;
 		}
 	}
+
+	if (!newcmd->function)
+	{
+		newcmd->function = Cmd_Compat;
+		newcmd->usage = CMD_COMPAT;
+	}
+	else newcmd->usage = CMD_NORMAL;
 
 	// link in
 	newcmd->next = cmd_functions;
@@ -950,7 +948,7 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 		if (cl->cmd)
 		{
 			// skip compatibility commands
-			if (!cl->cmd->function) return;
+			if (cl->cmd->usage == CMD_COMPAT) return;
 
 			if (full_initialized)
 			{
@@ -1225,7 +1223,17 @@ cmd_t::cmd_t (char *cmdname, xcommand_t cmdcmd)
 	this->name = (char *) Zone_Alloc (strlen (cmdname) + 1);
 
 	strcpy (this->name, cmdname);
-	this->function = cmdcmd;
+
+	if (cmdcmd)
+	{
+		this->function = cmdcmd;
+		this->usage = CMD_NORMAL;
+	}
+	else
+	{
+		this->function = Cmd_Compat;
+		this->usage = CMD_COMPAT;
+	}
 
 	// just add it
 	Cmd_Add (this);

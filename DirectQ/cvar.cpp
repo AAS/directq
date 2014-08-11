@@ -76,6 +76,7 @@ cvar_t *Cvar_FindVar (char *var_name)
 	return NULL;
 }
 
+
 /*
 ============
 Cvar_VariableValue
@@ -223,27 +224,8 @@ static void Cvar_Register (cvar_t *variable)
 	// first check to see if it has already been defined
 	cvar_t *check = Cvar_FindVar (variable->name);
 
-	if (check)
-	{
-		// if the new variable is compatible one then silently ignore it
-		if (variable->usage & CVAR_COMPAT) return;
-
-		if (check->usage & CVAR_COMPAT)
-		{
-			// stomp the old variable with the new one
-			Zone_Free (check->name);
-			Zone_Free (check->string);
-
-			check->name = variable->name;
-			check->string = variable->string;
-			check->usage = variable->usage;
-			check->value = variable->value;
-			check->integer = variable->integer;
-		}
-
-		// silently ignore
-		return;
-	}
+	// silently ignore it
+	if (check) return;
 
 	// unhack (note: this is not actually necessary as the game isn't up yet, but for the
 	// sake of correctness we do it anyway)

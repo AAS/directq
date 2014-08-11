@@ -712,6 +712,9 @@ void Menu_MapsPopulate (void);
 void Menu_DemoPopulate (void);
 void Menu_LoadAvailableSkyboxes (void);
 void SCR_QuakeIsLoading (int stage, int maxstage);
+void Cvar_MakeCompatLayer (void);
+void Cmd_MakeCompatLayer (void);
+
 
 void Host_Init (quakeparms_t *parms)
 {
@@ -723,6 +726,10 @@ void Host_Init (quakeparms_t *parms)
 
 	com_argc = parms->argc;
 	com_argv = parms->argv;
+
+	// build the compatibility layers
+	Cvar_MakeCompatLayer ();
+	Cmd_MakeCompatLayer ();
 
 	//PR_InitBuiltIns ();
 	Cbuf_Init ();

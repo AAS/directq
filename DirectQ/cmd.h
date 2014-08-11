@@ -68,12 +68,16 @@ not apropriate.
 
 typedef void (*xcommand_t) (void);
 
+#define CMD_NORMAL		0
+#define CMD_COMPAT		1
+
 class cmd_t
 {
 public:
 	cmd_t (char *cmdname, xcommand_t cmdcmd);
 
 	char			*name;
+	int				usage;
 	xcommand_t		function;
 	cmd_t *next;
 };

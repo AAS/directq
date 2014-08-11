@@ -811,7 +811,7 @@ void D3D_RunOcclusionQueries (entity_t **ents, int numents)
 
 	numoccluded = 0;
 
-	//if (d3d_NumOcclusionQueries) Con_Printf ("%i occlusion queries\n", d3d_NumOcclusionQueries);
+	// if (d3d_NumOcclusionQueries) Con_Printf ("%i occlusion queries\n", d3d_NumOcclusionQueries);
 
 	for (int i = 0; i < numents; i++)
 	{

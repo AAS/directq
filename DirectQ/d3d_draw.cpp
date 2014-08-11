@@ -827,13 +827,19 @@ void Draw_Crosshair (int x, int y, int size)
 	D3D_EndFlatDraw ();
 
 	// bind it (modulate by color)
+#if 1
 	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, crosshairtexture, xhaircolor);
 	D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 	D3D_DrawFlatPoly (x, y, size, size, xhaircolor, s, t, s + 0.25, t + 0.25);
-	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 
 	// end this
 	D3D_EndFlatDraw ();
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+#else
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, crosshairtexture);
+#endif
 }
 
 
