@@ -872,7 +872,7 @@ bool ED_ParseEpair (void *base, ddef_t *key, char *s)
 				v++;
 
 			*v = 0;
-			((float *) d) [i] = atof (w);
+			((float *) d)[i] = atof (w);
 			w = v = v + 1;
 		}
 

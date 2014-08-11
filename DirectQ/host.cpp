@@ -368,11 +368,13 @@ void SV_BroadcastPrintf (char *fmt, ...)
 	va_end (argptr);
 
 	for (i = 0; i < svs.maxclients; i++)
+	{
 		if (svs.clients[i].active && svs.clients[i].spawned)
 		{
 			MSG_WriteByte (&svs.clients[i].message, svc_print);
 			MSG_WriteString (&svs.clients[i].message, string);
 		}
+	}
 }
 
 /*
@@ -642,8 +644,6 @@ Runs all active servers
 */
 
 void CL_SendLagMove (void);
-void IN_ReadKeyboardEvents (void);
-
 void SCR_SetTimeout (float timeout);
 void R_UpdateParticles (void);
 void SCR_SetUpToDrawConsole (float frametime);
@@ -652,9 +652,6 @@ void Host_Frame (DWORD time)
 {
 	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver)) return;
-
-	// read the keyboard
-	// IN_ReadKeyboardEvents ();
 
 	// keep the random time dependent
 	rand ();
@@ -670,6 +667,21 @@ void Host_Frame (DWORD time)
 
 	// attempt to compensate for integer division by rounding to the nearest
 	DWORD dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
+	float host_frametime = 0;
+
+	Sys_SendKeyEvents ();
+
+	// on a local server we run this stuff immediately
+	if (sv.active)
+	{
+		// prevent wacky physics
+		dwLockTime = (DWORD) ((1000.0f / 72.0f) + 0.5f);
+
+		IN_Commands ();
+		Cbuf_Execute ();
+		NET_Poll ();
+		CL_SendCmd ();
+	}
 
 	if (!cls.timedemo && (dwRealTime - dwOldRealTime) < dwLockTime)
 	{
@@ -679,7 +691,7 @@ void Host_Frame (DWORD time)
 	else
 	{
 		// move these back to DWORDs to keep timings steady; there is a tendency for them to drift at present
-		float host_frametime = (float) (dwRealTime - dwOldRealTime) * 0.001f;
+		host_frametime = (float) (dwRealTime - dwOldRealTime) * 0.001f;
 
 		realtime = (float) dwRealTime * 0.001f;
 		dwOldRealTime = dwRealTime;
@@ -690,20 +702,19 @@ void Host_Frame (DWORD time)
 			host_frametime = host_framerate.value;
 		else if (host_frametime > 0.1f) host_frametime = 0.1f;
 
-		// run the message loop
-		Sys_SendKeyEvents ();
-
-		// process console commands
-		Cbuf_Execute ();
-
-		NET_Poll ();
-
-		if (sv.active) CL_SendCmd ();
-
-		// if running the server locally, make intentions now
 		if (sv.active)
+		{
+			// the server frame must run at the filtered speed to keep physics consistent
 			Host_ServerFrame (host_frametime);
-		else CL_SendCmd ();
+		}
+		else
+		{
+			// on a remote server we run client stuff at the filtered speed
+			IN_Commands ();
+			Cbuf_Execute ();
+			NET_Poll ();
+			CL_SendCmd ();
+		}
 
 		// fetch results from server
 		if (cls.state == ca_connected) CL_ReadFromServer (host_frametime);
@@ -712,9 +723,8 @@ void Host_Frame (DWORD time)
 		SCR_SetUpToDrawConsole (host_frametime);
 
 		// update display - V_RenderView is now called separately so that SCR_UpdateScreen can be independent of it
+		// this needs to run at the filtered speed so that events such as stair step-ups are handled correctly
 		V_RenderView (cl.time, host_frametime);
-
-		SCR_UpdateScreen (host_frametime);
 
 		// run anything that needs to be done after the screen update
 		// update particles
@@ -723,17 +733,23 @@ void Host_Frame (DWORD time)
 		// update dlights
 		if (cls.signon == SIGNONS) CL_DecayLights ();
 
-		// update sound
-		if (cls.signon == SIGNONS)
-			S_Update (host_frametime, r_origin, vpn, vright, vup);
-		else S_Update (host_frametime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
-
-		// finish sound
-		CDAudio_Update ();
-		MediaPlayer_Update ();
-
 		host_framecount++;
 	}
+
+	// get the new time for stuff we always run last
+	host_frametime = (float) time * 0.001f;
+
+	// update refresh
+	SCR_UpdateScreen (host_frametime);
+
+	// update sound
+	if (cls.signon == SIGNONS)
+		S_Update (host_frametime, r_origin, vpn, vright, vup);
+	else S_Update (host_frametime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
+
+	// finish sound
+	CDAudio_Update ();
+	MediaPlayer_Update ();
 }
 
 

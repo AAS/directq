@@ -242,37 +242,25 @@ struct VertAliasVS
 struct VertAliasPS
 {
 	float4 Position : POSITION0;
-	float3 Normal : TEXCOORD0;
-	float2 Tex0 : TEXCOORD1;
+	float4 Color : COLOR0;
+	float2 Tex0 : TEXCOORD0;
 
 #ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD2;
+	float4 FogPosition : TEXCOORD1;
 #endif
 };
 
 
-float4 EvalAliasLight (VertAliasPS Input)
-{
-	/*
-	float4 ShadeDot = tex2D (tmu2Sampler, float2 (dot (Normal, ShadeVector) * -1.0f, 0.0f));
-	return float4 (AmbientLight + ShadeDot.xyz * ShadeLight, 1.0f);
-	*/
-
-	return float4 (ShadeLight * dot (Input.Normal, ShadeVector) + AmbientLight, 1.0f);
-}
-
-
 float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 {
-	float4 ShadeColor = EvalAliasLight (Input);
-	// return ShadeColor;
+	// return Input.Color;
 
 #ifdef hlsl_fog
 	float4 fullbright = tex2D (tmu1Sampler, Input.Tex0) * 0.5;
-	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) * ShadeColor) * Overbright);
+	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Input.Color * Overbright);
 	color = FogCalc (color + fullbright, Input.FogPosition) + fullbright;
 #else
-	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) * ShadeColor) * Overbright) + tex2D (tmu1Sampler, Input.Tex0);
+	float4 color = (tex2D (tmu0Sampler, Input.Tex0) * (Input.Color * Overbright)) + tex2D (tmu1Sampler, Input.Tex0);
 #endif
 
 	color.a = AlphaVal;
@@ -282,8 +270,7 @@ float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 
 float4 PSAliasNoLuma (VertAliasPS Input) : COLOR0
 {
-	float4 ShadeColor = EvalAliasLight (Input);
-	float4 color = (tex2D (tmu0Sampler, Input.Tex0) * ShadeColor) * Overbright;
+	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Input.Color * Overbright);
 
 #ifdef hlsl_fog
 	color = FogCalc (color, Input.FogPosition);
@@ -310,9 +297,13 @@ VertAliasPS VSAliasVS (VertAliasVS Input)
 	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
 #endif
 
-	// switch lighting to per-pixel and interpolate the two sets of normals in the vertex shader
-	// let HLSL optimize this as a mad instruction.
-	Output.Normal = ((Input.CurrNormal.xyz * currlerp.y) - currlerp.x) + ((Input.LastNormal.xyz * lastlerp.y) - lastlerp.x);
+	// interpolate the two sets of normals in the vertex shader; let HLSL optimize this as a mad instruction.
+	float lightcos = dot (((Input.CurrNormal.xyz * currlerp.y) - currlerp.x) + ((Input.LastNormal.xyz * lastlerp.y) - lastlerp.x), ShadeVector);
+
+	if (lightcos < 0)
+		Output.Color = float4 (1, 1, 1, 1) - float4 (AmbientLight + ShadeLight * lightcos, 0);
+	else Output.Color = float4 (1, 1, 1, 1) - float4 (AmbientLight, 0);
+
 	Output.Tex0 = Input.Tex0;
 
 	return Output;

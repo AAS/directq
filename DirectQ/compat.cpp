@@ -115,7 +115,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *coop_compat = new cvar_t ("coop", "0", CVAR_COMPAT);
 	cvar_t *pausable_compat = new cvar_t ("pausable", "0", CVAR_COMPAT);
 	cvar_t *temp1_compat = new cvar_t ("temp1", "0", CVAR_COMPAT);
-	cvar_t *m_filter_compat = new cvar_t ("m_filter", "0", CVAR_COMPAT);
 	cvar_t *in_joystick_compat = new cvar_t ("joystick", "0", CVAR_COMPAT);
 	cvar_t *joy_name_compat = new cvar_t ("joyname", "0", CVAR_COMPAT);
 	cvar_t *joy_advanced_compat = new cvar_t ("joyadvanced", "0", CVAR_COMPAT);
@@ -303,11 +302,7 @@ void Cmd_MakeCompatLayer (void)
 	cmd_t *compatcmd_68 = new cmd_t ("notarget", NULL);
 	cmd_t *compatcmd_69 = new cmd_t ("fly", NULL);
 	cmd_t *compatcmd_70 = new cmd_t ("map", NULL);
-	cmd_t *compatcmd_71 = new cmd_t ("restart", NULL);
-	cmd_t *compatcmd_72 = new cmd_t ("changelevel", NULL);
 	// cmd_t *compatcmd_73 = new cmd_t ("changelevel2", NULL);
-	cmd_t *compatcmd_74 = new cmd_t ("connect", NULL);
-	cmd_t *compatcmd_75 = new cmd_t ("reconnect", NULL);
 	cmd_t *compatcmd_76 = new cmd_t ("name", NULL);
 	cmd_t *compatcmd_77 = new cmd_t ("noclip", NULL);
 	cmd_t *compatcmd_78 = new cmd_t ("version", NULL);

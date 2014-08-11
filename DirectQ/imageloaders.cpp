@@ -25,33 +25,30 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 D3DFORMAT D3D_GetTextureFormat (int flags);
 
-byte *gammaramp = NULL;
-
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
 {
 	SAFE_RELEASE (tex[0]);
 
 	// wrap this monster so that we can more easily modify it if required
 	hr = D3DXCreateTextureFromFileInMemoryEx
-		 (
-			 d3d_Device,
-			 data,
-			 len,
-			 D3DX_DEFAULT,
-			 D3DX_DEFAULT,
-			 (flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
-			 0,
-			 D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
-			 D3DPOOL_MANAGED,
-			 D3DX_FILTER_LINEAR,
-			 D3DX_FILTER_BOX,
-			 0,
-			 NULL,
-			 NULL,
-			 tex
-		 );
+	(
+		d3d_Device,
+		data,
+		len,
+		D3DX_DEFAULT,
+		D3DX_DEFAULT,
+		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+		0,
+		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+		D3DPOOL_MANAGED,
+		D3DX_FILTER_LINEAR,
+		D3DX_FILTER_BOX,
+		0,
+		NULL,
+		NULL,
+		tex
+	);
 
-	tex[0]->PreLoad ();
 	return hr;
 }
 
@@ -679,15 +676,8 @@ ext_tex_load:;
 			}
 		}
 
-		// the reason for failure may be because the compressed format was unsupported for the texture dimensions,
-		// so try it again without compression before giving up
-		hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
-
-		if (FAILED (hr))
-		{
-			Zone_Free (filebuf);
-			return false;
-		}
+		Zone_Free (filebuf);
+		return false;
 	}
 
 	// load succeeded

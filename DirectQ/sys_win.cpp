@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include "shlobj.h"
 
+SYSTEM_INFO SysInfo;
 bool bWindowActive = false;
 void AllowAccessibilityShortcutKeys (bool bAllowKeys);
 
@@ -636,7 +637,7 @@ void AllowAccessibilityShortcutKeys (bool bAllowKeys)
 }
 
 
-void IN_ReadWinMessage (UINT msg, WPARAM wParam);
+void IN_ReadRawInput (HRAWINPUT ri_Handle);
 
 /* main window procedure */
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
@@ -650,6 +651,10 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	case WM_CREATE: return 0;
 	case WM_ERASEBKGND: return 1; // treachery!!! see your MSDN!
 	case WM_SYSCHAR: return 0;
+
+	case WM_INPUT:
+		IN_ReadRawInput ((HRAWINPUT) lParam);
+		return 0;
 
 	case WM_SYSCOMMAND:
 		switch (wParam & ~0x0F)
@@ -672,29 +677,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	case WM_MOVE:
 		// update cursor clip region
 		IN_UpdateClipCursor ();
-		return 0;
-
-	case WM_KEYDOWN:
-	case WM_SYSKEYDOWN:
-		Key_Event (MapKey (lParam), true);
-		return 0;
-
-	case WM_KEYUP:
-	case WM_SYSKEYUP:
-		Key_Event (MapKey (lParam), false);
-		return 0;
-
-		// this is complicated because Win32 seems to pack multiple mouse events into
-		// one update sometimes, so we always check all states and look for events
-	case WM_MOUSEMOVE:
-	case WM_LBUTTONDOWN:
-	case WM_LBUTTONUP:
-	case WM_RBUTTONDOWN:
-	case WM_RBUTTONUP:
-	case WM_MBUTTONDOWN:
-	case WM_MBUTTONUP:
-	case WM_MOUSEWHEEL:
-		IN_ReadWinMessage (Msg, wParam);
 		return 0;
 
 	case WM_CLOSE:
@@ -760,6 +742,9 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	InitCommonControls ();
 	SetUnhandledExceptionFilter (TildeDirectQ);
 
+	// in case we ever need it for anything...
+	GetSystemInfo (&SysInfo);
+
 	// set up and register the window class (d3d doesn't need CS_OWNDC)
 	// do this before anything else so that we'll have it available for the splash too
 	WNDCLASS wc;
@@ -818,12 +803,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if (vinfo.dwMajorVersion < 5)
 	{
 		int mret = MessageBox
-				   (
-					   NULL,
-					   "!!! UNSUPPORTED !!!\n\nThis software may run on your Operating System\nbut is NOT officially supported.\n\nCertain pre-requisites are needed.\nNow might be a good time to read the readme.\n\nClick OK if you are sure you want to continue...",
-					   "Warning",
-					   MB_OKCANCEL | MB_ICONWARNING
-				   );
+		(
+			NULL,
+			"!!! UNSUPPORTED !!!\n\nThis software may run on your Operating System\nbut is NOT officially supported.\n\nCertain pre-requisites are needed.\nNow might be a good time to read the readme.\n\nClick OK if you are sure you want to continue...",
+			"Warning",
+			MB_OKCANCEL | MB_ICONWARNING
+		);
 
 		if (mret == IDCANCEL) return 666;
 	}

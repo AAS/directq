@@ -313,10 +313,10 @@ void D3D_Resample8BitTexture (byte *in, int inwidth, int inheight, unsigned *out
 			pix3 = (byte *) &palette[inrow2[p1[j]]];
 			pix4 = (byte *) &palette[inrow2[p2[j]]];
 
-			((byte *) (out + j)) [0] = (pix1[0] + pix2[0] + pix3[0] + pix4[0]) >> 2;
-			((byte *) (out + j)) [1] = (pix1[1] + pix2[1] + pix3[1] + pix4[1]) >> 2;
-			((byte *) (out + j)) [2] = (pix1[2] + pix2[2] + pix3[2] + pix4[2]) >> 2;
-			((byte *) (out + j)) [3] = (pix1[3] + pix2[3] + pix3[3] + pix4[3]) >> 2;
+			((byte *) (out + j))[0] = (pix1[0] + pix2[0] + pix3[0] + pix4[0]) >> 2;
+			((byte *) (out + j))[1] = (pix1[1] + pix2[1] + pix3[1] + pix4[1]) >> 2;
+			((byte *) (out + j))[2] = (pix1[2] + pix2[2] + pix3[2] + pix4[2]) >> 2;
+			((byte *) (out + j))[3] = (pix1[3] + pix2[3] + pix3[3] + pix4[3]) >> 2;
 		}
 	}
 }
@@ -363,10 +363,10 @@ void D3D_Resample32BitTexture (unsigned *in, int inwidth, int inheight, unsigned
 			pix3 = (byte *) inrow2 + p1[j];
 			pix4 = (byte *) inrow2 + p2[j];
 
-			((byte *) (out + j)) [0] = (pix1[0] + pix2[0] + pix3[0] + pix4[0]) >> 2;
-			((byte *) (out + j)) [1] = (pix1[1] + pix2[1] + pix3[1] + pix4[1]) >> 2;
-			((byte *) (out + j)) [2] = (pix1[2] + pix2[2] + pix3[2] + pix4[2]) >> 2;
-			((byte *) (out + j)) [3] = (pix1[3] + pix2[3] + pix3[3] + pix4[3]) >> 2;
+			((byte *) (out + j))[0] = (pix1[0] + pix2[0] + pix3[0] + pix4[0]) >> 2;
+			((byte *) (out + j))[1] = (pix1[1] + pix2[1] + pix3[1] + pix4[1]) >> 2;
+			((byte *) (out + j))[2] = (pix1[2] + pix2[2] + pix3[2] + pix4[2]) >> 2;
+			((byte *) (out + j))[3] = (pix1[3] + pix2[3] + pix3[3] + pix4[3]) >> 2;
 		}
 	}
 }
@@ -817,10 +817,10 @@ unsigned int *D3D_MakeTexturePalette (miptex_t *mt)
 	// don't gamma-adjust this data
 	for (int i = 0; i < 256; i++)
 	{
-		((byte *) &hlPal[i]) [0] = pal[0];
-		((byte *) &hlPal[i]) [1] = pal[1];
-		((byte *) &hlPal[i]) [2] = pal[2];
-		((byte *) &hlPal[i]) [3] = 255;
+		((byte *) &hlPal[i])[0] = pal[0];
+		((byte *) &hlPal[i])[1] = pal[1];
+		((byte *) &hlPal[i])[2] = pal[2];
+		((byte *) &hlPal[i])[3] = 255;
 		pal += 3;
 	}
 

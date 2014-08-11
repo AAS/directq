@@ -57,7 +57,7 @@ void D3D_SetRenderState (D3DRENDERSTATETYPE State, DWORD Value)
 void D3D_SetRenderStatef (D3DRENDERSTATETYPE State, float Value)
 {
 	// some states require float input
-	D3D_SetRenderState (State, ((DWORD *) &Value) [0]);
+	D3D_SetRenderState (State, ((DWORD *) &Value)[0]);
 }
 
 

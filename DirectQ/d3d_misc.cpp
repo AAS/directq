@@ -230,7 +230,7 @@ void D3DSky_RevalidateSkybox (void);
 void D3D_ModelSurfsBeginMap (void);
 void R_FixupBModelBBoxes (void);
 void Fog_ParseWorldspawn (void);
-void IN_FlushInput (void);
+void IN_ClearStates (void);
 void D3DAlias_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
 
@@ -323,7 +323,7 @@ void R_NewMap (void)
 	d3d_RenderDef.visframecount = 0;
 
 	// flush all the input buffers and go back to a default state
-	IN_FlushInput ();
+	IN_ClearStates ();
 }
 
 

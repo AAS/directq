@@ -398,12 +398,9 @@ CQuakeZone *MainZone = NULL;
 void Pool_Init (void)
 {
 	// init the pools we want to keep around all the time
-	if (!MainHunk) MainHunk = new CQuakeHunk (128);
-
+	if (!MainHunk) MainHunk = new CQuakeHunk (512);
 	if (!MainCache) MainCache = new CQuakeCache ();
-
 	if (!MainZone) MainZone = new CQuakeZone ();
-
 	if (!MapZone) MapZone = new CQuakeZone ();
 
 	// take a chunk of memory for use by temporary loading functions and other doo-dahs

@@ -814,11 +814,12 @@ void V_CalcRefdef (float time)
 	if (v_gunkick.value) VectorAdd (r_refdef.viewangles, kickangle, r_refdef.viewangles);
 
 	static float oldsteptime = 0;
-	extern cvar_t freelook;
+	static bool wasonground = false;
 
 	// smooth out stair step ups
-	if (cl.onground && ent->origin[2] - oldz > 0)
+	if (cl.onground && wasonground && ent->origin[2] - oldz > 0)
 	{
+#define STEP_DELTA	12.0f
 		float steptime = time - oldsteptime;
 
 		if (steptime < 0) steptime = 0;
@@ -826,7 +827,7 @@ void V_CalcRefdef (float time)
 		oldz += steptime * 80;
 
 		if (oldz > ent->origin[2]) oldz = ent->origin[2];
-		if (ent->origin[2] - oldz > 12) oldz = ent->origin[2] - 12;
+		if (ent->origin[2] - oldz > STEP_DELTA) oldz = ent->origin[2] - STEP_DELTA;
 
 		r_refdef.vieworg[2] += oldz - ent->origin[2];
 		view->origin[2] += oldz - ent->origin[2];
@@ -834,6 +835,7 @@ void V_CalcRefdef (float time)
 	else oldz = ent->origin[2];
 
 	oldsteptime = time;
+	wasonground = cl.onground;
 
 	if (chase_active.value) Chase_Update ();
 }

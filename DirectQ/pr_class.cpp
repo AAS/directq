@@ -94,11 +94,11 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 
 	// CRC the progs
 	for (int i = 0; i < com_filesize; i++)
-		CRC_ProcessByte (&this->CRC, ((byte *) this->QC) [i]);
+		CRC_ProcessByte (&this->CRC, ((byte *) this->QC)[i]);
 
 	// byte swap the header
 	for (int i = 0; i < sizeof (dprograms_t) / 4; i++)
-		((int *) this->QC) [i] = LittleLong (((int *) this->QC) [i]);
+		((int *) this->QC)[i] = LittleLong (((int *) this->QC)[i]);
 
 	if (this->QC->version != PROG_VERSION) Host_Error ("progs.dat has wrong version number (%i should be %i)", this->QC->version, PROG_VERSION);
 	if (this->QC->crc != PROGHEADER_CRC) Host_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
@@ -615,7 +615,7 @@ int CProgsDat::EnterFunction (dfunction_t *f)
 		this->RunError ("CProgsDat::EnterFunction: locals stack overflow (%d, max = %d)", this->LocalStackUsed + c, LOCALSTACK_SIZE);
 
 	for (i = 0; i < c; i++)
-		this->LocalStack[this->LocalStackUsed + i] = ((int *) this->Globals) [f->parm_start + i];
+		this->LocalStack[this->LocalStackUsed + i] = ((int *) this->Globals)[f->parm_start + i];
 
 	this->LocalStackUsed += c;
 
@@ -626,7 +626,7 @@ int CProgsDat::EnterFunction (dfunction_t *f)
 	{
 		for (j = 0; j < f->parm_size[i]; j++)
 		{
-			((int *) this->Globals) [o] = ((int *) this->Globals) [OFS_PARM0 + i * 3 + j];
+			((int *) this->Globals)[o] = ((int *) this->Globals)[OFS_PARM0 + i * 3 + j];
 			o++;
 		}
 	}
@@ -651,7 +651,7 @@ int CProgsDat::LeaveFunction (void)
 		this->RunError ("CProgsDat::LeaveFunction: locals stack underflow\n");
 
 	for (i = 0; i < c; i++)
-		((int *) this->Globals) [this->XFunction->parm_start + i] = this->LocalStack[this->LocalStackUsed + i];
+		((int *) this->Globals)[this->XFunction->parm_start + i] = this->LocalStack[this->LocalStackUsed + i];
 
 	// up stack
 	this->StackDepth--;

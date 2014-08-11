@@ -530,6 +530,7 @@ void SCR_DrawNet (void)
 {
 	if (realtime - cl.lastrecievedmessage < 0.3f) return;
 	if (cls.demoplayback) return;
+	if (sv.active) return;
 
 	Draw_Pic (vid.width - 168, 4, scr_net);
 }
@@ -664,7 +665,7 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 
 		if (srcbpp == 8)
 			outcolor = (byte *) &d3d_QuakePalette.standard32[data[i]];
-		else outcolor = (byte *) & ((unsigned *) data) [i];
+		else outcolor = (byte *) & ((unsigned *) data)[i];
 
 		if (dstbpp == 24)
 			fwrite (outcolor, 3, 1, f);
@@ -756,7 +757,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 	for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++)
 	{
 		// retrieve the data
-		byte *data = (byte *) &((unsigned *) lockrect.pBits) [i];
+		byte *data = (byte *) &((unsigned *) lockrect.pBits)[i];
 
 		// write it out
 		fwrite (data, 3, 1, f);
@@ -1249,8 +1250,6 @@ Displays a text string in the center of the screen and waits for a Y or N
 keypress.
 ==================
 */
-void ClearAllStates (void);
-
 int SCR_ModalMessage (char *text, char *caption, int flags)
 {
 	// prevent being called recursively

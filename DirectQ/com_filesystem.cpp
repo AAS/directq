@@ -761,7 +761,7 @@ static byte *COM_LoadFile (char *path, class CQuakeHunk *spacebuf, class CQuakeZ
 		return NULL;
 	}
 
-	((byte *) buf) [len] = 0;
+	((byte *) buf)[len] = 0;
 	int Success = COM_FReadFile (fh, buf, len);
 	COM_FCloseFile (&fh);
 

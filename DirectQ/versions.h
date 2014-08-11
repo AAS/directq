@@ -28,14 +28,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // DirectSound version used - failing to specify this will #ifdef out important stuff in newer SDKs
 #define DIRECTSOUND_VERSION 0x0800
 
-// leaving this out just throws a warning but we'll define it to avoid that
-#define DIRECTINPUT_VERSION	0x0800
-
 // here we define a windows version to ensure that we'll always compile OK for the minimum supported platform
+// we support windows XP as a minimum
 #define WINVER 0x0501
 #define _WIN32_WINNT 0x0501
 
 // this is the current version of DirectQ
-#define DIRECTQ_VERSION "1.8.7 (Beta 2)"
+#define DIRECTQ_VERSION "1.8.7 (Beta 3)"
 
 #endif

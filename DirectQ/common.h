@@ -103,6 +103,8 @@ float MSG_ReadCoord (int protocol, unsigned flags);
 float MSG_ReadAngle (int protocol, unsigned flags);
 void MSG_WriteAngle16 (sizebuf_t *sb, float f, int protocol, unsigned flags);
 float MSG_ReadAngle16 (int protocol, unsigned flags);
+void MSG_WriteProQuakeAngle (sizebuf_t *sb, float f);
+float MSG_ReadProQuakeAngle (void);
 
 extern	int			msg_readcount;
 extern	bool	msg_badread;		// set if a read goes beyond end of message

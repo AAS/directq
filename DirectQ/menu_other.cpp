@@ -29,7 +29,6 @@ extern cvar_t scr_screenshotformat;
 extern cvar_t r_lerporient;
 extern cvar_t r_lerpframe;
 extern cvar_t r_lerplightstyle;
-extern cvar_t m_filter;
 extern cvar_t freelook;
 extern cvar_t chase_back;
 extern cvar_t chase_up;

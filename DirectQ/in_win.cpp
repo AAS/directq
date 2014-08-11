@@ -21,278 +21,273 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "winquake.h"
-#include <dinput.h>
-
-#pragma comment (lib, "dinput8.lib")
 
 // mouse variables
-cvar_t m_filter ("m_filter", "0", CVAR_ARCHIVE);
 cvar_t freelook ("freelook", "1", CVAR_ARCHIVE);
-cvar_t m_directinput ("m_directinput", "1", CVAR_ARCHIVE);
+extern cvar_t cl_fullpitch;
 
 bool mouselooking;
 
-static int originalmouseparms[3] = {0, 0, 0};
-static int newmouseparms[3] = {0, 0, 0};
-
 bool mouseinitialized = false;
 bool in_mouseacquired = false;
-bool in_directinput = false;
 extern bool keybind_grab;
 
-RECT in_rect;
-int in_center_x;
-int in_center_y;
+void IN_StartupJoystick (void);
+void Joy_AdvancedUpdate_f (void);
 
-LPDIRECTINPUT8 di_Object = NULL;
-LPDIRECTINPUTDEVICE8 di_Mouse = NULL;
-
-#define DINPUT_BUFFERSIZE 64
-DIDEVICEOBJECTDATA di_Data[64] = {0, 0, 0, 0, NULL};
-
-int in_buttonstate = 0;
-int in_oldbuttonstate = 0;
-
-void CenterCursor (void)
-{
-	// and center it (using screen-relative coords)
-	SetCursorPos (in_center_x, in_center_y);
-}
+cmd_t joyadvancedupdate ("joyadvancedupdate", Joy_AdvancedUpdate_f);
 
 
 /*
-===========
-IN_MouseEvent
-===========
+========================================================================================================================
+
+						KEYBOARD and MOUSE
+
+========================================================================================================================
 */
-void IN_MouseEvent (int mstate, int numbuttons)
+
+/*
+===================================================================
+
+KEY MAPPING
+
+moved from gl_vidnt.c
+shiftscantokey was unused
+
+===================================================================
+*/
+byte scantokey[128] =
 {
-	int	i;
-
-	if (in_mouseacquired)
-	{
-		// perform button actions
-		for (i = 0; i < numbuttons; i++)
-		{
-			if ((mstate & (1 << i)) && !(in_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, true);
-			if (!(mstate & (1 << i)) && (in_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, false);
-		}
-
-		in_oldbuttonstate = mstate;
-	}
-}
-
-
-void IN_ReadWinMessage (UINT msg, WPARAM wParam)
-{
-	if (!in_directinput)
-	{
-		if (msg == WM_MOUSEWHEEL)
-		{
-			if ((short) HIWORD (wParam) > 0)
-			{
-				Key_Event (K_MWHEELUP, true);
-				Key_Event (K_MWHEELUP, false);
-			}
-			else
-			{
-				Key_Event (K_MWHEELDOWN, true);
-				Key_Event (K_MWHEELDOWN, false);
-			}
-		}
-		else
-		{
-			if (wParam & MK_LBUTTON) in_buttonstate |= 1;
-			if (wParam & MK_RBUTTON) in_buttonstate |= 2;
-			if (wParam & MK_MBUTTON) in_buttonstate |= 4;
-
-			// 3 buttons and we always send even if temp is 0 so that we'll get key up events on them too
-			IN_MouseEvent (in_buttonstate, 3);
-			in_buttonstate = 0;
-		}
-	}
-}
-
-
-DWORD di_Buttons[] =
-{
-	DIMOFS_BUTTON0, DIMOFS_BUTTON1,
-	DIMOFS_BUTTON2, DIMOFS_BUTTON3,
-	DIMOFS_BUTTON4, DIMOFS_BUTTON5,
-	DIMOFS_BUTTON6, DIMOFS_BUTTON7
+	// scancode to quake key table
+	// 0     1     2     3     4     5     6     7     8     9     a     b     c     d     e     f
+	0x00, 0x1b, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x2d, 0x3d, 0x7f, 0x09,		// 0x0
+	0x71, 0x77, 0x65, 0x72, 0x74, 0x79, 0x75, 0x69, 0x6f, 0x70, 0x5b, 0x5d, 0x0d, 0x85, 0x61, 0x73,		// 0x1
+	0x64, 0x66, 0x67, 0x68, 0x6a, 0x6b, 0x6c, 0x3b, 0x27, 0x60, 0x86, 0x5c, 0x7a, 0x78, 0x63, 0x76,		// 0x2
+	0x62, 0x6e, 0x6d, 0x2c, 0x2e, 0x2f, 0x86, 0x2a, 0x84, 0x20, 0x99, 0x87, 0x88, 0x89, 0x8a, 0x8b,		// 0x3
+	0x8c, 0x8d, 0x8e, 0x8f, 0x90, 0xff, 0x00, 0x97, 0x80, 0x96, 0x2d, 0x82, 0x35, 0x83, 0x2b, 0x98,		// 0x4
+	0x81, 0x95, 0x93, 0x94, 0x00, 0x00, 0x00, 0x91, 0x92, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,		// 0x5
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,		// 0x6
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00		// 0x7
 };
 
-#define DICHECKBUTTON(b) \
-	case (FIELD_OFFSET(DIMOUSESTATE, rgbButtons) + (b)): \
-		if (di_Data[i].dwData & 0x80) \
-			in_buttonstate |= (1 << (b)); \
-		else in_buttonstate &= ~(1 << (b)); \
-		break;
 
-void IN_ReadDirectInput (int *mx, int *my)
+
+int IN_MapKey (int key)
 {
-	if (!in_directinput) return;
+	if (key > 127)
+		return 0;
 
-	// attempt to acquire the mouse in case something elsewhere caused it to be lost
-	di_Mouse->Acquire ();
+	if (scantokey[key] == 0)
+		Con_DPrintf ("key 0x%02x has no translation\n", key);
 
-	for (int read = 0;; read++)
+	return scantokey[key];
+}
+
+
+bool in_keydown[256] = {false};
+
+void IN_StartupKeyboard (void)
+{
+	RAWINPUTDEVICE ri_Keyboard;
+
+	ri_Keyboard.usUsagePage = 1;
+	ri_Keyboard.usUsage = 6;
+	ri_Keyboard.dwFlags = RIDEV_NOLEGACY;
+	ri_Keyboard.hwndTarget = NULL;
+
+	if (!RegisterRawInputDevices (&ri_Keyboard, 1, sizeof (RAWINPUTDEVICE)))
 	{
-		// read the full buffer
-		DWORD dwElements = 64;
-		hr = di_Mouse->GetDeviceData (sizeof (DIDEVICEOBJECTDATA), di_Data, &dwElements, 0);
-
-		switch (hr)
-		{
-		case DI_BUFFEROVERFLOW:
-			Con_Printf ("dinput buffer overflow\n");
-		case DI_OK:
-			// success conditions
-			break;
-
-		case DIERR_INPUTLOST:
-			// this is a recoverable error
-			Con_Printf ("dinput device lost\n");
-			di_Mouse->Acquire ();
-			return;
-
-		case E_PENDING:
-		case DIERR_NOTACQUIRED:
-		case DIERR_INVALIDPARAM:
-		case DIERR_NOTINITIALIZED:
-		case DIERR_NOTBUFFERED:
-		default:
-			// these are unrecoverable errors
-			Con_Printf ("unrecoverable dinput condition\n");
-			return;
-		}
-
-		// if no elements were read we've got to the end of the buffer
-		if (dwElements < 1) break;
-
-		for (int i = 0; i < dwElements; i++)
-		{
-			// let's see what happened
-			switch (di_Data[i].dwOfs)
-			{
-			case DIMOFS_X:
-				mx[0] += di_Data[i].dwData;
-				break;
-
-			case DIMOFS_Y:
-				my[0] += di_Data[i].dwData;
-				break;
-
-			case DIMOFS_Z:
-				if ((int) di_Data[i].dwOfs < 0)
-				{
-					// mwheeldown
-					Key_Event (K_MWHEELDOWN, true);
-					Key_Event (K_MWHEELDOWN, false);
-				}
-				else if ((int) di_Data[i].dwOfs > 0)
-				{
-					// mwheelup
-					Key_Event (K_MWHEELUP, true);
-					Key_Event (K_MWHEELUP, false);
-				}
-
-				break;
-
-			DICHECKBUTTON (0);
-			DICHECKBUTTON (1);
-			DICHECKBUTTON (2);
-			DICHECKBUTTON (3);
-			DICHECKBUTTON (4);
-			DICHECKBUTTON (5);
-			DICHECKBUTTON (6);
-			DICHECKBUTTON (7);
-
-			default:
-				break;
-			}
-		}
+		Sys_Error ("IN_StartupKeyboard : Failed to register for raw input");
 	}
 }
 
 
-/*
-===========
-IN_MouseMove
-===========
-*/
-void IN_MouseMove (usercmd_t *cmd)
+void IN_ShutdownKeyboard (void)
+{
+	RAWINPUTDEVICE ri_Keyboard;
+
+	ri_Keyboard.usUsagePage = 1;
+	ri_Keyboard.usUsage = 6;
+	ri_Keyboard.dwFlags = RIDEV_REMOVE;
+	ri_Keyboard.hwndTarget = NULL;
+
+	// allow this to fail silently as it happens during shutdown
+	RegisterRawInputDevices (&ri_Keyboard, 1, sizeof (RAWINPUTDEVICE));
+}
+
+
+void IN_ReadKeyboard (RAWKEYBOARD *ri_Keyboard)
+{
+	// clear extra bits
+	ri_Keyboard->Flags &= RI_KEY_BREAK;
+
+	int key = IN_MapKey (ri_Keyboard->MakeCode > 127 ? 0 : ri_Keyboard->MakeCode);
+
+	if (!ri_Keyboard->Flags && !in_keydown[key])
+	{
+		Key_Event (key, true);
+		in_keydown[key] = true;
+	}
+	else if ((ri_Keyboard->Flags & RI_KEY_BREAK) && in_keydown[key])
+	{
+		Key_Event (key, false);
+		in_keydown[key] = false;
+	}
+}
+
+
+void IN_ClearKeyState (int k)
+{
+	Key_Event (k, false);
+	in_keydown[k] = false;
+}
+
+
+typedef struct in_mousestate_s
+{
+	long mx;
+	long my;
+} in_mousestate_t;
+
+in_mousestate_t in_mousestate = {0, 0};
+
+
+void IN_MouseMove (usercmd_t *cmd, float movetime)
 {
 	if (ActiveApp && !Minimized)
 	{
 		// if the mouse isn't active or there was no movement accumulated we don't run this
 		if (!in_mouseacquired) return;
 
-		extern cvar_t cl_fullpitch;
-		POINT cursorpos;
-		int mx = 0, my = 0;
-
-		if (in_directinput)
+		if (in_mousestate.mx || in_mousestate.my)
 		{
-			IN_ReadDirectInput (&mx, &my);
+			float mx = (float) in_mousestate.mx * sensitivity.value * 2.0f;
+			float my = (float) in_mousestate.my * sensitivity.value * 2.0f;
 
-			// hack - these are on a different scale to the screen scale
-			// in the absence of an api to do the conversion we just roughly double them
-			// works for me!
-			mx *= (sensitivity.value * 2.5f);
-			my *= (sensitivity.value * 2.5f);
+			mouselooking = freelook.integer || (in_mlook.state & 1);
 
-			// run mouse events here
-			// directinput supports up to 8 buttons, raw input only up to 5
-			// but the extra bits won't be set anyway...
-			// we need to always run them even if there are no events this frame as there may be old events to clear
-			IN_MouseEvent (in_buttonstate, 8);
-		}
-		else
-		{
-			GetCursorPos (&cursorpos);
+			if ((in_strafe.state & 1) || (lookstrafe.value && mouselooking))
+				cmd->sidemove += m_side.value * mx;
+			else cl.viewangles[YAW] -= m_yaw.value * mx;
 
-			mx = (cursorpos.x - in_center_x) * sensitivity.value;
-			my = (cursorpos.y - in_center_y) * sensitivity.value;
-		}
+			if (mouselooking) V_StopPitchDrift ();
 
-		if (!mx && !my) return;
-
-		mouselooking = freelook.integer || (in_mlook.state & 1);
-
-		if ((in_strafe.state & 1) || (lookstrafe.value && mouselooking))
-			cmd->sidemove += m_side.value * mx;
-		else cl.viewangles[YAW] -= m_yaw.value * mx;
-
-		if (mouselooking) V_StopPitchDrift ();
-
-		if (mouselooking && !(in_strafe.state & 1))
-		{
-			cl.viewangles[PITCH] += m_pitch.value * my;
-
-			if (cl_fullpitch.integer)
+			if (mouselooking && !(in_strafe.state & 1))
 			{
-				if (cl.viewangles[PITCH] > 90) cl.viewangles[PITCH] = 90;
-				if (cl.viewangles[PITCH] < -90) cl.viewangles[PITCH] = -90;
+				cl.viewangles[PITCH] += m_pitch.value * my;
+
+				if (cl_fullpitch.integer)
+				{
+					if (cl.viewangles[PITCH] > 90) cl.viewangles[PITCH] = 90;
+					if (cl.viewangles[PITCH] < -90) cl.viewangles[PITCH] = -90;
+				}
+				else
+				{
+					if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
+					if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
+				}
 			}
 			else
 			{
-				if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
-				if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
+				if ((in_strafe.state & 1) && noclip_anglehack)
+					cmd->upmove -= m_forward.value * my;
+				else cmd->forwardmove -= m_forward.value * my;
 			}
+		}
+
+		// reset the accumulated positions
+		in_mousestate.mx = 0;
+		in_mousestate.my = 0;
+	}
+}
+
+
+typedef struct ri_mousebutton_s
+{
+	int ri_downflag;
+	int ri_upflag;
+	int quakekey;
+	bool down;
+} ri_mousebutton_t;
+
+ri_mousebutton_t ri_mousebuttons[5] =
+{
+	{RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, K_MOUSE1, false},
+	{RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP, K_MOUSE2, false},
+	{RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, K_MOUSE3, false},
+	{RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, K_MOUSE4, false},
+	{RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, K_MOUSE5, false},
+};
+
+
+void IN_ClearMouse (void)
+{
+	for (int i = 0; i < 5; i++)
+	{
+		if (ri_mousebuttons[i].down)
+		{
+			Key_Event (ri_mousebuttons[i].quakekey, false);
+			ri_mousebuttons[i].down = false;
+		}
+	}
+}
+
+
+void IN_ReadMouse (RAWMOUSE *ri_Mouse)
+{
+	// read and accumulate the movement
+	in_mousestate.mx += ri_Mouse->lLastX;
+	in_mousestate.my += ri_Mouse->lLastY;
+
+	// 5 mouse buttons and we check them all
+	for (int i = 0; i < 5; i++)
+	{
+		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_downflag) && !ri_mousebuttons[i].down)
+		{
+			Key_Event (ri_mousebuttons[i].quakekey, true);
+			ri_mousebuttons[i].down = true;
+		}
+
+		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_upflag) && ri_mousebuttons[i].down)
+		{
+			Key_Event (ri_mousebuttons[i].quakekey, false);
+			ri_mousebuttons[i].down = false;
+		}
+	}
+
+	// track the wheel
+	if (ri_Mouse->usButtonFlags & RI_MOUSE_WHEEL)
+	{
+		// this needs to cast to a short so that we can catch the proper delta
+		if ((short) ri_Mouse->usButtonData > 0)
+		{
+			Key_Event (K_MWHEELUP, true);
+			Key_Event (K_MWHEELUP, false);
 		}
 		else
 		{
-			if ((in_strafe.state & 1) && noclip_anglehack)
-				cmd->upmove -= m_forward.value * my;
-			else cmd->forwardmove -= m_forward.value * my;
+			Key_Event (K_MWHEELDOWN, true);
+			Key_Event (K_MWHEELDOWN, false);
 		}
-
-		// force the cursor back to the center so that there's room for it to move again
-		// this also blocks WM_MOUSEMOVE messages so that the movement back doesn't accumulate
-		// to the overall movement.
-		CenterCursor ();
 	}
+}
+
+
+void IN_ReadRawInput (HRAWINPUT ri_Handle)
+{
+	UINT bufsize = 0;
+	RAWINPUT ri_Buffer;
+
+	// the second call will fail if we don't make the first
+	GetRawInputData (ri_Handle, RID_INPUT, NULL, &bufsize, sizeof (RAWINPUTHEADER));
+	GetRawInputData (ri_Handle, RID_INPUT, &ri_Buffer, &bufsize, sizeof (RAWINPUTHEADER));
+
+	// and read the appropriate device type
+	if (ri_Buffer.header.dwType == RIM_TYPEMOUSE)
+		IN_ReadMouse (&ri_Buffer.data.mouse);
+	else if (ri_Buffer.header.dwType == RIM_TYPEKEYBOARD)
+		IN_ReadKeyboard (&ri_Buffer.data.keyboard);
+	else Con_DPrintf ("Unknown raw input device\n");
 }
 
 
@@ -320,12 +315,11 @@ void IN_UpdateClipCursor (void)
 		// this seems to be the only way to get the client coords relative to the screen;
 		// oh well, at least there is a way and it's not too onerous
 		WINDOWINFO windowinfo;
+
 		windowinfo.cbSize = sizeof (WINDOWINFO);
 		GetWindowInfo (d3d_Window, &windowinfo);
-		memcpy (&in_rect, &windowinfo.rcClient, sizeof (RECT));
 
-		in_center_x = in_rect.left + ((in_rect.right - in_rect.left) >> 1);
-		in_center_y = in_rect.top + ((in_rect.bottom - in_rect.top) >> 1);
+		ClipCursor (&windowinfo.rcClient);
 	}
 }
 
@@ -340,24 +334,6 @@ void IN_StartupMouse (void)
 	if (COM_CheckParm ("-nomouse")) return;
 
 	mouseinitialized = true;
-	SystemParametersInfo (SPI_GETMOUSE, 0, originalmouseparms, 0);
-
-	// to do - also cvar-ize these!
-	if (COM_CheckParm ("-noforcemspd"))
-		newmouseparms[2] = originalmouseparms[2];
-
-	if (COM_CheckParm ("-noforcemaccel"))
-	{
-		newmouseparms[0] = originalmouseparms[0];
-		newmouseparms[1] = originalmouseparms[1];
-	}
-
-	if (COM_CheckParm ("-noforcemparms"))
-	{
-		newmouseparms[0] = originalmouseparms[0];
-		newmouseparms[1] = originalmouseparms[1];
-		newmouseparms[2] = originalmouseparms[2];
-	}
 }
 
 
@@ -373,6 +349,8 @@ void IN_Init (void)
 	// this was for windows 95 and NT 3.5.1 - see "about mouse input" in your MSDN
 	// uiWheelMessage = RegisterWindowMessage ("MSWHEEL_ROLLMSG");
 	IN_StartupMouse ();
+	IN_StartupKeyboard ();
+	IN_StartupJoystick ();
 }
 
 
@@ -383,118 +361,43 @@ IN_ClearStates
 */
 void IN_ClearStates (void)
 {
-	// send an up event for any keys that are still down
-	for (int i = 0; i < 8; i++)
-		if (in_oldbuttonstate & (1 << i)) Key_Event (K_MOUSE1 + i, false);
+	// clear button states
+	IN_ClearMouse ();
 
-	in_buttonstate = 0;
-	in_oldbuttonstate = 0;
+	// clear movement states
+	in_mousestate.mx = 0;
+	in_mousestate.my = 0;
 }
 
 
-void IN_FlushInput (void)
+void IN_RegisterRawInputMouse (void)
 {
-	IN_ClearStates ();
+	RAWINPUTDEVICE ri_Mouse;
 
-	if (in_directinput)
+	ri_Mouse.usUsagePage = 1;
+	ri_Mouse.usUsage = 2;
+	ri_Mouse.dwFlags = RIDEV_NOLEGACY;
+	ri_Mouse.hwndTarget = NULL;
+
+	if (!RegisterRawInputDevices (&ri_Mouse, 1, sizeof (RAWINPUTDEVICE)))
 	{
-		// attempt to acquire the mouse in case something elsewhere caused it to be lost
-		di_Mouse->Acquire ();
-
-		for (int read = 0;; read++)
-		{
-			// read the full buffer
-			DWORD dwElements = 64;
-			hr = di_Mouse->GetDeviceData (sizeof (DIDEVICEOBJECTDATA), di_Data, &dwElements, 0);
-
-			switch (hr)
-			{
-			case DI_BUFFEROVERFLOW:
-			case DI_OK:
-				// success conditions
-				break;
-
-			case DIERR_INPUTLOST:
-			case E_PENDING:
-			case DIERR_NOTACQUIRED:
-			case DIERR_INVALIDPARAM:
-			case DIERR_NOTINITIALIZED:
-			case DIERR_NOTBUFFERED:
-			default:
-				// failure conditions
-				return;
-			}
-
-			// if no elements were read we've got to the end of the buffer
-			if (dwElements < 1) break;
-		}
+		Sys_Error ("IN_RegisterRawInputMouse : Failed to register for raw input");
 	}
 }
 
 
-void IN_UnregisterDirectInput (void)
+void IN_UnregisterRawInputMouse (void)
 {
-	// this also needs to be called whenever directinput fails so it's been split out
-	if (di_Mouse)
+	RAWINPUTDEVICE ri_Mouse;
+
+	ri_Mouse.usUsagePage = 1;
+	ri_Mouse.usUsage = 2;
+	ri_Mouse.dwFlags = RIDEV_REMOVE;
+	ri_Mouse.hwndTarget = NULL;
+
+	if (!RegisterRawInputDevices (&ri_Mouse, 1, sizeof (RAWINPUTDEVICE)))
 	{
-		di_Mouse->Unacquire ();
-		di_Mouse->Release ();
-		di_Mouse = NULL;
-	}
-
-	if (di_Object)
-	{
-		di_Object->Release ();
-		di_Object = NULL;
-	}
-}
-
-
-void IN_RegisterInput (void)
-{
-	if (m_directinput.integer > 1)
-	{
-		in_directinput = false;
-		DIPROPDWORD	dipdw = {{sizeof (DIPROPDWORD), sizeof (DIPROPHEADER), 0, DIPH_DEVICE}, DINPUT_BUFFERSIZE};
-
-		if (FAILED (DirectInput8Create (GetModuleHandle (NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (LPVOID *) &di_Object, NULL)))
-			return;
-
-		if (FAILED (di_Object->CreateDevice (GUID_SysMouse, &di_Mouse, NULL)))
-		{
-			IN_UnregisterDirectInput ();
-			return;
-		}
-
-		if (FAILED (di_Mouse->SetDataFormat (&c_dfDIMouse2)))
-		{
-			IN_UnregisterDirectInput ();
-			return;
-		}
-
-		if (FAILED (di_Mouse->SetCooperativeLevel (d3d_Window, DISCL_NONEXCLUSIVE | DISCL_BACKGROUND)))
-		{
-			IN_UnregisterDirectInput ();
-			return;
-		}
-
-		if (FAILED (di_Mouse->SetProperty (DIPROP_BUFFERSIZE, &dipdw.diph)))
-		{
-			IN_UnregisterDirectInput ();
-			return;
-		}
-
-		in_directinput = true;
-	}
-}
-
-
-void IN_UnregisterInput (void)
-{
-	if (in_directinput)
-	{
-		IN_UnregisterDirectInput ();
-		in_directinput = false;
+		Sys_Error ("IN_UnregisterRawInputMouse : Failed to unregister for raw input");
 	}
 }
 
@@ -503,12 +406,9 @@ void IN_UnacquireMouse (void)
 {
 	if (in_mouseacquired)
 	{
-		IN_UnregisterInput ();
-		CenterCursor ();
 		ShowCursor (TRUE);
 		ClipCursor (NULL);
-		ReleaseCapture ();
-		SystemParametersInfo (SPI_SETMOUSE, 0, originalmouseparms, SPIF_SENDCHANGE);
+		IN_UnregisterRawInputMouse ();
 
 		IN_ClearStates ();
 		in_mouseacquired = false;
@@ -520,11 +420,8 @@ void IN_AcquireMouse (void)
 {
 	if (!in_mouseacquired)
 	{
-		CenterCursor ();
 		ShowCursor (FALSE);
-		SystemParametersInfo (SPI_SETMOUSE, 0, newmouseparms, SPIF_SENDCHANGE);
-		SetCapture (d3d_Window);
-		IN_RegisterInput ();
+		IN_RegisterRawInputMouse ();
 
 		IN_ClearStates ();
 		in_mouseacquired = true;
@@ -544,17 +441,8 @@ called once per frame before beginning to render
 */
 void IN_SetMouseState (bool fullscreen)
 {
-	static int in_oldmouse = -1;
-
 	// no mouse to set the state for
 	if (!mouseinitialized) return;
-
-	if (m_directinput.integer != in_oldmouse)
-	{
-		// input type has changed
-		IN_UnacquireMouse ();
-		in_oldmouse = m_directinput.integer;
-	}
 
 	if (keybind_grab)
 	{
@@ -587,41 +475,506 @@ IN_Shutdown
 void IN_Shutdown (void)
 {
 	IN_UnacquireMouse ();
+	IN_ShutdownKeyboard ();
 }
 
 
-int VK_to_QuakeKey[256] =
+/*
+========================================================================================================================
+
+						JOYSTICK
+
+========================================================================================================================
+*/
+
+
+// joystick defines and variables
+// where should defines be moved?
+#define JOY_ABSOLUTE_AXIS	0x00000000		// control like a joystick
+#define JOY_RELATIVE_AXIS	0x00000010		// control like a mouse, spinner, trackball
+#define	JOY_MAX_AXES		6				// X, Y, Z, R, U, V
+#define JOY_AXIS_X			0
+#define JOY_AXIS_Y			1
+#define JOY_AXIS_Z			2
+#define JOY_AXIS_R			3
+#define JOY_AXIS_U			4
+#define JOY_AXIS_V			5
+
+
+enum _ControlList
 {
-//	0		1		2		3		4		5		6		7		8		9		a		b		c		d		e		f
-	200,	201,	0,		202,	203,	204,	0,		0,		0,		0,		0,		0,		0,		0,		0,		0,
-	0,		0,		0,		0,		0,		0,		0,		0,		0,		0,		0,		27,		0,		0,		'0',	'1',
-	'2',	'3',	'4',	'5',	'6',	'7',	'8',	'9'
+	AxisNada = 0, AxisForward, AxisLook, AxisSide, AxisTurn
 };
 
-
-bool gasks_keydown[256] = {false};
-
-void IN_ReadKeyboardEvents (void)
+DWORD dwAxisFlags[JOY_MAX_AXES] =
 {
-	for (int i = 0; i < 8; i++)
-	{
-		unsigned short ks = (unsigned short) GetAsyncKeyState (i);
+	JOY_RETURNX, JOY_RETURNY, JOY_RETURNZ, JOY_RETURNR, JOY_RETURNU, JOY_RETURNV
+};
 
-		if (ks & 0x8000)
+DWORD	dwAxisMap[JOY_MAX_AXES];
+DWORD	dwControlMap[JOY_MAX_AXES];
+PDWORD	pdwRawValue[JOY_MAX_AXES];
+
+
+// none of these cvars are saved over a session
+// this means that advanced controller configuration needs to be executed
+// each time.  this avoids any problems with getting back to a default usage
+// or when changing from one controller to another.  this way at least something
+// works.
+cvar_t	in_joystick ("joystick", "0", CVAR_ARCHIVE);
+cvar_t	joy_name ("joyname", "joystick");
+cvar_t	joy_advanced ("joyadvanced", "0");
+cvar_t	joy_advaxisx ("joyadvaxisx", "0");
+cvar_t	joy_advaxisy ("joyadvaxisy", "0");
+cvar_t	joy_advaxisz ("joyadvaxisz", "0");
+cvar_t	joy_advaxisr ("joyadvaxisr", "0");
+cvar_t	joy_advaxisu ("joyadvaxisu", "0");
+cvar_t	joy_advaxisv ("joyadvaxisv", "0");
+cvar_t	joy_forwardthreshold ("joyforwardthreshold", "0.15");
+cvar_t	joy_sidethreshold ("joysidethreshold", "0.15");
+cvar_t	joy_pitchthreshold ("joypitchthreshold", "0.15");
+cvar_t	joy_yawthreshold ("joyyawthreshold", "0.15");
+cvar_t	joy_forwardsensitivity ("joyforwardsensitivity", "-1.0");
+cvar_t	joy_sidesensitivity ("joysidesensitivity", "-1.0");
+cvar_t	joy_pitchsensitivity ("joypitchsensitivity", "1.0");
+cvar_t	joy_yawsensitivity ("joyyawsensitivity", "-1.0");
+cvar_t	joy_wwhack1 ("joywwhack1", "0.0");
+cvar_t	joy_wwhack2 ("joywwhack2", "0.0");
+
+bool		joy_avail, joy_advancedinit, joy_haspov;
+DWORD		joy_oldbuttonstate, joy_oldpovstate;
+
+int			joy_id;
+DWORD		joy_flags;
+DWORD		joy_numbuttons;
+
+static JOYINFOEX	ji;
+
+
+/*
+===============
+IN_StartupJoystick
+===============
+*/
+void IN_StartupJoystick (void)
+{
+	int			i, numdevs;
+	JOYCAPS		jc;
+	MMRESULT	mmr;
+
+	// assume no joystick
+	joy_avail = false;
+
+	// abort startup if user requests no joystick
+	if (COM_CheckParm ("-nojoy")) return;
+
+	// verify joystick driver is present
+	if ((numdevs = joyGetNumDevs ()) == 0)
+	{
+		Con_Printf ("\njoystick not found -- driver not present\n\n");
+		return;
+	}
+
+	// cycle through the joystick ids for the first valid one
+	for (joy_id = 0; joy_id < numdevs; joy_id++)
+	{
+		memset (&ji, 0, sizeof (ji));
+
+		ji.dwSize = sizeof (ji);
+		ji.dwFlags = JOY_RETURNCENTERED;
+
+		if ((mmr = joyGetPosEx (joy_id, &ji)) == JOYERR_NOERROR)
+			break;
+	}
+
+	// abort startup if we didn't find a valid joystick
+	if (mmr != JOYERR_NOERROR)
+	{
+		Con_Printf ("\njoystick not found -- no valid joysticks (%x)\n\n", mmr);
+		return;
+	}
+
+	// get the capabilities of the selected joystick
+	// abort startup if command fails
+	memset (&jc, 0, sizeof (jc));
+
+	if ((mmr = joyGetDevCaps (joy_id, &jc, sizeof (jc))) != JOYERR_NOERROR)
+	{
+		Con_Printf ("\njoystick not found -- invalid joystick capabilities (%x)\n\n", mmr);
+		return;
+	}
+
+	// save the joystick's number of buttons and POV status
+	joy_numbuttons = jc.wNumButtons;
+	joy_haspov = jc.wCaps & JOYCAPS_HASPOV;
+
+	// old button and POV states default to no buttons pressed
+	joy_oldbuttonstate = joy_oldpovstate = 0;
+
+	// mark the joystick as available and advanced initialization not completed
+	// this is needed as cvars are not available during initialization
+	joy_avail = true;
+	joy_advancedinit = false;
+	Con_Printf ("\njoystick detected\n\n");
+}
+
+
+/*
+===========
+RawValuePointer
+===========
+*/
+PDWORD RawValuePointer (int axis)
+{
+	switch (axis)
+	{
+	case JOY_AXIS_X:
+		return &ji.dwXpos;
+
+	case JOY_AXIS_Y:
+		return &ji.dwYpos;
+
+	case JOY_AXIS_Z:
+		return &ji.dwZpos;
+
+	case JOY_AXIS_R:
+		return &ji.dwRpos;
+
+	case JOY_AXIS_U:
+		return &ji.dwUpos;
+
+	case JOY_AXIS_V:
+	default:
+		return &ji.dwVpos;
+	}
+}
+
+
+/*
+===========
+Joy_AdvancedUpdate_f
+===========
+*/
+void Joy_AdvancedUpdate_f (void)
+{
+	// called once by IN_ReadJoystick and by user whenever an update is needed
+	// cvars are now available
+	int	i;
+	DWORD dwTemp;
+
+	// initialize all the maps
+	for (i = 0; i < JOY_MAX_AXES; i++)
+	{
+		dwAxisMap[i] = AxisNada;
+		dwControlMap[i] = JOY_ABSOLUTE_AXIS;
+		pdwRawValue[i] = RawValuePointer (i);
+	}
+
+	if (joy_advanced.value == 0.0)
+	{
+		// default joystick initialization
+		// 2 axes only with joystick control
+		dwAxisMap[JOY_AXIS_X] = AxisTurn;
+		// dwControlMap[JOY_AXIS_X] = JOY_ABSOLUTE_AXIS;
+
+		dwAxisMap[JOY_AXIS_Y] = AxisForward;
+		// dwControlMap[JOY_AXIS_Y] = JOY_ABSOLUTE_AXIS;
+	}
+	else
+	{
+		if (strcmp (joy_name.string, "joystick") != 0)
 		{
-			if (!gasks_keydown[i])
-			{
-				Con_Printf ("%i\n", i);
-				Key_Event (VK_to_QuakeKey[i], true);
-				gasks_keydown[i] = true;
-			}
+			// notify user of advanced controller
+			Con_Printf ("\n%s configured\n\n", joy_name.string);
 		}
-		else if (gasks_keydown[i])
+
+		// advanced initialization here
+		// data supplied by user via joy_axisn cvars
+		dwTemp = (DWORD) joy_advaxisx.value;
+		dwAxisMap[JOY_AXIS_X] = dwTemp & 0x0000000f;
+		dwControlMap[JOY_AXIS_X] = dwTemp & JOY_RELATIVE_AXIS;
+
+		dwTemp = (DWORD) joy_advaxisy.value;
+		dwAxisMap[JOY_AXIS_Y] = dwTemp & 0x0000000f;
+		dwControlMap[JOY_AXIS_Y] = dwTemp & JOY_RELATIVE_AXIS;
+
+		dwTemp = (DWORD) joy_advaxisz.value;
+		dwAxisMap[JOY_AXIS_Z] = dwTemp & 0x0000000f;
+		dwControlMap[JOY_AXIS_Z] = dwTemp & JOY_RELATIVE_AXIS;
+
+		dwTemp = (DWORD) joy_advaxisr.value;
+		dwAxisMap[JOY_AXIS_R] = dwTemp & 0x0000000f;
+		dwControlMap[JOY_AXIS_R] = dwTemp & JOY_RELATIVE_AXIS;
+
+		dwTemp = (DWORD) joy_advaxisu.value;
+		dwAxisMap[JOY_AXIS_U] = dwTemp & 0x0000000f;
+		dwControlMap[JOY_AXIS_U] = dwTemp & JOY_RELATIVE_AXIS;
+
+		dwTemp = (DWORD) joy_advaxisv.value;
+		dwAxisMap[JOY_AXIS_V] = dwTemp & 0x0000000f;
+		dwControlMap[JOY_AXIS_V] = dwTemp & JOY_RELATIVE_AXIS;
+	}
+
+	// compute the axes to collect from DirectInput
+	joy_flags = JOY_RETURNCENTERED | JOY_RETURNBUTTONS | JOY_RETURNPOV;
+
+	for (i = 0; i < JOY_MAX_AXES; i++)
+	{
+		if (dwAxisMap[i] != AxisNada)
 		{
-			Key_Event (VK_to_QuakeKey[i], false);
-			gasks_keydown[i] = false;
+			joy_flags |= dwAxisFlags[i];
 		}
 	}
 }
 
 
+/*
+===========
+IN_Commands
+===========
+*/
+void IN_Commands (void)
+{
+	DWORD buttonstate, povstate;
+
+	if (!joy_avail)
+		return;
+
+	// loop through the joystick buttons
+	// key a joystick event or auxillary event for higher number buttons for each state change
+	buttonstate = ji.dwButtons;
+
+	for (int i = 0; i < joy_numbuttons; i++)
+	{
+		if ((buttonstate & (1 << i)) && !(joy_oldbuttonstate & (1 << i))) Key_Event (K_JOY1 + i, true);
+		if (!(buttonstate & (1 << i)) && (joy_oldbuttonstate & (1 << i))) Key_Event (K_JOY1 + i, false);
+	}
+
+	joy_oldbuttonstate = buttonstate;
+
+	if (joy_haspov)
+	{
+		// convert POV information into 4 bits of state information
+		// this avoids any potential problems related to moving from one
+		// direction to another without going through the center position
+		povstate = 0;
+
+		if (ji.dwPOV != JOY_POVCENTERED)
+		{
+			if (ji.dwPOV == JOY_POVFORWARD) povstate |= 0x01;
+			if (ji.dwPOV == JOY_POVRIGHT) povstate |= 0x02;
+			if (ji.dwPOV == JOY_POVBACKWARD) povstate |= 0x04;
+			if (ji.dwPOV == JOY_POVLEFT) povstate |= 0x08;
+		}
+
+		// determine which bits have changed and key an auxillary event for each change
+		for (int i = 0; i < 4; i++)
+		{
+			if ((povstate & (1 << i)) && !(joy_oldpovstate & (1 << i))) Key_Event (K_POV1 + i, true);
+			if (!(povstate & (1 << i)) && (joy_oldpovstate & (1 << i))) Key_Event (K_POV1 + i, false);
+		}
+
+		joy_oldpovstate = povstate;
+	}
+}
+
+
+/*
+===============
+IN_ReadJoystick
+===============
+*/
+bool IN_ReadJoystick (void)
+{
+	memset (&ji, 0, sizeof (ji));
+
+	ji.dwSize = sizeof (ji);
+	ji.dwFlags = joy_flags;
+
+	if (joyGetPosEx (joy_id, &ji) == JOYERR_NOERROR)
+	{
+		// this is a hack -- there is a bug in the Logitech WingMan Warrior DirectInput Driver
+		// rather than having 32768 be the zero point, they have the zero point at 32668
+		// go figure -- anyway, now we get the full resolution out of the device
+		if (joy_wwhack1.value != 0.0)
+			ji.dwUpos += 100;
+
+		return true;
+	}
+	else
+	{
+		// read error occurred
+		// turning off the joystick seems too harsh for 1 read error,\
+		// but what should be done?
+		// Con_Printf ("IN_ReadJoystick: no response\n");
+		// joy_avail = false;
+		return false;
+	}
+}
+
+
+/*
+===========
+IN_JoyMove
+===========
+*/
+void IN_JoyMove (usercmd_t *cmd, float movetime)
+{
+	float	speed, aspeed;
+	float	fAxisValue, fTemp;
+	int		i;
+
+	// complete initialization if first time in
+	// this is needed as cvars are not available at initialization time
+	if (joy_advancedinit != true)
+	{
+		Joy_AdvancedUpdate_f ();
+		joy_advancedinit = true;
+	}
+
+	// verify joystick is available and that the user wants to use it
+	if (!joy_avail || !in_joystick.value)
+		return;
+
+	// collect the joystick data, if possible
+	if (IN_ReadJoystick () != true)
+		return;
+
+	if (in_speed.state & 1)
+		speed = cl_movespeedkey.value;
+	else speed = 1;
+
+	aspeed = speed * movetime;
+	mouselooking = freelook.integer || (in_mlook.state & 1);
+
+	// loop through the axes
+	for (i = 0; i < JOY_MAX_AXES; i++)
+	{
+		// get the floating point zero-centered, potentially-inverted data for the current axis
+		fAxisValue = (float) * pdwRawValue[i];
+
+		// move centerpoint to zero
+		fAxisValue -= 32768.0;
+
+		if (joy_wwhack2.value != 0.0)
+		{
+			if (dwAxisMap[i] == AxisTurn)
+			{
+				// this is a special formula for the Logitech WingMan Warrior
+				// y=ax^b; where a = 300 and b = 1.3
+				// also x values are in increments of 800 (so this is factored out)
+				// then bounds check result to level out excessively high spin rates
+				fTemp = 300.0 * pow (abs (fAxisValue) / 800.0, 1.3);
+
+				if (fTemp > 14000.0)
+					fTemp = 14000.0;
+
+				// restore direction information
+				fAxisValue = (fAxisValue > 0.0) ? fTemp : -fTemp;
+			}
+		}
+
+		// convert range from -32768..32767 to -1..1
+		fAxisValue /= 32768.0;
+
+		switch (dwAxisMap[i])
+		{
+		case AxisForward:
+			if ((joy_advanced.value == 0.0) && mouselooking)
+			{
+				// user wants forward control to become look control
+				if (fabs (fAxisValue) > joy_pitchthreshold.value)
+				{
+					// if mouse invert is on, invert the joystick pitch value
+					// only absolute control support here (joy_advanced is false)
+					if (m_pitch.value < 0.0)
+						cl.viewangles[PITCH] -= (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
+					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
+
+					V_StopPitchDrift ();
+				}
+				else
+				{
+					// no pitch movement
+					// disable pitch return-to-center unless requested by user
+					// *** this code can be removed when the lookspring bug is fixed
+					// *** the bug always has the lookspring feature on
+					if (!lookspring.value == 0.0) V_StopPitchDrift ();
+				}
+			}
+			else
+			{
+				// user wants forward control to be forward control
+				if (fabs (fAxisValue) > joy_forwardthreshold.value)
+					cmd->forwardmove += (fAxisValue * joy_forwardsensitivity.value) * speed * cl_forwardspeed.value;
+			}
+
+			break;
+
+		case AxisSide:
+			if (fabs (fAxisValue) > joy_sidethreshold.value)
+				cmd->sidemove += (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
+
+			break;
+
+		case AxisTurn:
+			if ((in_strafe.state & 1) || (lookstrafe.value && mouselooking))
+			{
+				// user wants turn control to become side control
+				if (fabs (fAxisValue) > joy_sidethreshold.value)
+					cmd->sidemove -= (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
+			}
+			else
+			{
+				// user wants turn control to be turn control
+				if (fabs (fAxisValue) > joy_yawthreshold.value)
+				{
+					if (dwControlMap[i] == JOY_ABSOLUTE_AXIS)
+						cl.viewangles[YAW] += (fAxisValue * joy_yawsensitivity.value) * aspeed * cl_yawspeed.value;
+					else cl.viewangles[YAW] += (fAxisValue * joy_yawsensitivity.value) * speed * 180.0;
+				}
+			}
+
+			break;
+
+		case AxisLook:
+			if (mouselooking)
+			{
+				if (fabs (fAxisValue) > joy_pitchthreshold.value)
+				{
+					// pitch movement detected and pitch movement desired by user
+					if (dwControlMap[i] == JOY_ABSOLUTE_AXIS)
+						cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
+					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * speed * 180.0;
+
+					V_StopPitchDrift ();
+				}
+				else
+				{
+					// no pitch movement
+					// disable pitch return-to-center unless requested by user
+					// *** this code can be removed when the lookspring bug is fixed
+					// *** the bug always has the lookspring feature on
+					if (!lookspring.value) V_StopPitchDrift ();
+				}
+			}
+
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	// bounds check pitch
+	if (cl_fullpitch.integer)
+	{
+		if (cl.viewangles[PITCH] > 90) cl.viewangles[PITCH] = 90;
+		if (cl.viewangles[PITCH] < -90) cl.viewangles[PITCH] = -90;
+	}
+	else
+	{
+		if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
+		if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
+	}
+}

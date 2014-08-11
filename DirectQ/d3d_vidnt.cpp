@@ -614,8 +614,8 @@ D3DFORMAT D3DVid_FindBPP (int bpp)
 
 int RRCompFunc (const void *a, const void *b)
 {
-	int ia = ((int *) a) [0];
-	int ib = ((int *) b) [0];
+	int ia = ((int *) a)[0];
+	int ib = ((int *) b)[0];
 
 	return ia - ib;
 }

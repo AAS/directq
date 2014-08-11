@@ -1171,7 +1171,7 @@ void PF_vtos (void)
 {
 	char *pr_string_temp = PR_GetTempString ();
 
-	_snprintf (pr_string_temp, 128, "'%5.1f %5.1f %5.1f'", G_VECTOR (OFS_PARM0) [0], G_VECTOR (OFS_PARM0) [1], G_VECTOR (OFS_PARM0) [2]);
+	_snprintf (pr_string_temp, 128, "'%5.1f %5.1f %5.1f'", G_VECTOR (OFS_PARM0)[0], G_VECTOR (OFS_PARM0)[1], G_VECTOR (OFS_PARM0)[2]);
 	G_INT (OFS_RETURN) = pr_string_temp - SVProgs->Strings;
 }
 
@@ -1924,7 +1924,7 @@ void PF_setspawnparms (void)
 	client = svs.clients + (i - 1);
 
 	for (i = 0; i < NUM_SPAWN_PARMS; i++)
-		(&SVProgs->GlobalStruct->parm1) [i] = client->spawn_parms[i];
+		(&SVProgs->GlobalStruct->parm1)[i] = client->spawn_parms[i];
 }
 
 /*

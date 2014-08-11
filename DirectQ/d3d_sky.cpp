@@ -209,7 +209,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 		{
 			// solid sky can go up as 8 bit
 			int p = src[i * mt->width + j + transwidth];
-			((byte *) trans) [(i * transwidth) + j] = p;
+			((byte *) trans)[(i * transwidth) + j] = p;
 
 			r += d3d_QuakePalette.standard[p].peRed;
 			g += d3d_QuakePalette.standard[p].peGreen;
@@ -218,10 +218,10 @@ void D3DSky_InitTextures (miptex_t *mt)
 	}
 
 	// bgr
-	((byte *) &transpix) [2] = BYTE_CLAMP (r / (transwidth * transheight));
-	((byte *) &transpix) [1] = BYTE_CLAMP (g / (transwidth * transheight));
-	((byte *) &transpix) [0] = BYTE_CLAMP (b / (transwidth * transheight));
-	((byte *) &transpix) [3] = 0;
+	((byte *) &transpix)[2] = BYTE_CLAMP (r / (transwidth * transheight));
+	((byte *) &transpix)[1] = BYTE_CLAMP (g / (transwidth * transheight));
+	((byte *) &transpix)[0] = BYTE_CLAMP (b / (transwidth * transheight));
+	((byte *) &transpix)[3] = 0;
 
 	// upload it - solid sky can go up as 8 bit
 	if (!D3D_LoadExternalTexture (&solidskytexture, va ("%s_solid", mt->name), 0))

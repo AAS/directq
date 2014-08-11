@@ -492,7 +492,7 @@ void SV_ReadClientMove (usercmd_t *move)
 	if ((host_client->netconnection->mod == MOD_PROQUAKE) && sv.Protocol == PROTOCOL_VERSION_NQ)
 	{
 		for (i = 0; i < 3; i++)
-			angle[i] = MSG_ReadAngle16 (sv.Protocol, sv.PrototcolFlags);
+			angle[i] = MSG_ReadProQuakeAngle ();
 	}
 	else if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ)
 	{

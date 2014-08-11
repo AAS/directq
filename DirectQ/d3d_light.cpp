@@ -929,12 +929,14 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 	// clamp minimum to same level as software Quake uses (5)
 	// R_MinimumLight (c, 15);
 
+	/*
 	// rescale for values of r_overbright
 	// this is done before clamping so that we get the correct flattening of light in non-overbright modes
-	if (r_overbright.value > 0)
-		VectorScale (c, 0.5f, c);
-	else if (r_overbright.value > 1)
+	if (r_overbright.value > 1)
 		VectorScale (c, 0.25f, c);
+	else if (r_overbright.value > 0)
+		VectorScale (c, 0.5f, c);
+	*/
 }
 
 

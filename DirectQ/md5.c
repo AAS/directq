@@ -343,7 +343,7 @@ unsigned int len;
 	unsigned int i;
 
 	for (i = 0; i < len; i++)
-		( (char *) output) [i] = (char) value;
+		( (char *) output)[i] = (char) value;
 }
 
 

@@ -77,6 +77,11 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, entity_t *ent, int al
 		return;
 	}
 
+	// catch surfaces without textures
+	// (done after sky as sky surfaces don't have textures...)
+	if (!tex->teximage)
+		return;
+
 	// everything else is batched up for drawing in the main pass
 	// ensure that there is space
 	if (d3d_NumModelSurfs >= MAX_MODELSURFS) return;
@@ -171,16 +176,17 @@ void D3D_AddSurfacesToRender (void)
 	// this should only ever happen if the scene is filled with water or sky
 	if (!d3d_NumModelSurfs) return;
 
-#if 0
-	// just do it nice and fast instead of building up loads of complex chains in multiple passes
-	qsort
-	(
-		d3d_ModelSurfs,
-		d3d_NumModelSurfs,
-		sizeof (d3d_modelsurf_t *),
-		(int (*) (const void *, const void *)) D3DSurf_ModelSurfsSortFunc
-	);
-#endif
+	if (SysInfo.dwNumberOfProcessors < 2)
+	{
+		// just do it nice and fast instead of building up loads of complex chains in multiple passes
+		qsort
+		(
+			d3d_ModelSurfs,
+			d3d_NumModelSurfs,
+			sizeof (d3d_modelsurf_t *),
+			(int (*) (const void *, const void *)) D3DSurf_ModelSurfsSortFunc
+		);
+	}
 
 	bool stateset = false;
 
@@ -631,14 +637,17 @@ void D3D_BuildWorld (void)
 	}
 
 	// create our thread objects if we need to
-	if (!hSurfSortMutex) hSurfSortMutex = CreateMutex (NULL, TRUE, NULL);
-	if (!hSurfSortThread) hSurfSortThread = CreateThread (NULL, 0x10000, D3DSurf_SortProc, NULL, 0, NULL);
+	if (SysInfo.dwNumberOfProcessors > 1)
+	{
+		if (!hSurfSortMutex) hSurfSortMutex = CreateMutex (NULL, TRUE, NULL);
+		if (!hSurfSortThread) hSurfSortThread = CreateThread (NULL, 0x10000, D3DSurf_SortProc, NULL, 0, NULL);
 
-	if (!hSurfSortMutex) Sys_Error ("Failed to create Mutex object");
-	if (!hSurfSortThread) Sys_Error ("Failed to create Thread object");
+		if (!hSurfSortMutex) Sys_Error ("Failed to create Mutex object");
+		if (!hSurfSortThread) Sys_Error ("Failed to create Thread object");
 
-	// now we're ready to sort so let the sorting thread take over while we do some other work here
-	ReleaseMutex (hSurfSortMutex);
+		// now we're ready to sort so let the sorting thread take over while we do some other work here
+		ReleaseMutex (hSurfSortMutex);
+	}
 
 	// upload any lightmaps that were modified
 	// done as early as possible for best parallelism
@@ -651,7 +660,7 @@ void D3D_BuildWorld (void)
 	D3D_AddParticesToAlphaList ();
 
 	// ensure that the sort has completed and grab the sorting mutex again
-	WaitForSingleObject (hSurfSortMutex, INFINITE);
+	if (SysInfo.dwNumberOfProcessors > 1) WaitForSingleObject (hSurfSortMutex, INFINITE);
 
 	// finish solid surfaces by adding any such to the solid buffer
 	D3D_AddSurfacesToRender ();

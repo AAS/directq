@@ -318,6 +318,20 @@ float MSG_ReadAngle (int protocol, unsigned int flags) // gb, PROTOCOL_RMQ
 }
 
 
+void MSG_WriteProQuakeAngle (sizebuf_t *sb, float f)
+{
+	int val = (int) f * 65536 / 360;
+	MSG_WriteShort (sb, (val & 65535));
+}
+
+
+float MSG_ReadProQuakeAngle (void)
+{
+	int val = MSG_ReadShort ();
+	return val * (360.0 / 65536);
+}
+
+
 //===========================================================================
 
 void SZ_Alloc (sizebuf_t *buf, int startsize)

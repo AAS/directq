@@ -1768,7 +1768,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	byte *mod_base = (byte *) header;
 
 	for (i = 0; i < sizeof (dheader_t) / 4; i++)
-		((int *) header) [i] = LittleLong (((int *) header) [i]);
+		((int *) header)[i] = LittleLong (((int *) header)[i]);
 
 	// alloc space for a brush header
 	mod->brushhdr = (brushhdr_t *) MainHunk->Alloc (sizeof (brushhdr_t));

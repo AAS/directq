@@ -370,7 +370,6 @@ void CL_AdjustAngles (void)
 	CL_BoundViewPitch ();
 
 	if (cl.viewangles[ROLL] > 50) cl.viewangles[ROLL] = 50;
-
 	if (cl.viewangles[ROLL] < -50) cl.viewangles[ROLL] = -50;
 }
 
@@ -473,14 +472,12 @@ void CL_SendMove (usercmd_t *cmd)
 
 		// send the movement message
 		MSG_WriteByte (&buf, clc_move);
-
-		// fixme - also switch clc_move to Write/Read long in RMQ
 		MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
 
 		if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION_NQ)
 		{
 			for (i = 0; i < 3; i++)
-				MSG_WriteAngle16 (&buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
+				MSG_WriteProQuakeAngle (&buf, cl.viewangles[i]);
 		}
 		else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
 		{
@@ -555,13 +552,12 @@ void CL_SendMove (usercmd_t *cmd)
 
 		// send the movement message
 		MSG_WriteByte (buf, clc_move);
-
 		MSG_WriteFloat (buf, cl.mtime[0]);	// so server can get ping times
 
 		if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION_NQ)
 		{
 			for (i = 0; i < 3; i++)
-				MSG_WriteAngle16 (buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
+				MSG_WriteProQuakeAngle (buf, cl.viewangles[i]);
 		}
 		else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
 		{

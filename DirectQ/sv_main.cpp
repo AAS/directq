@@ -932,7 +932,8 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	{
 		MSG_WriteByte (msg, svc_setangle);
 
-		for (i = 0; i < 3; i++) MSG_WriteAngle (msg, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags);
+		for (i = 0; i < 3; i++)
+			MSG_WriteAngle (msg, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags);
 
 		ent->v.fixangle = 0;
 	}
@@ -1423,7 +1424,7 @@ void SV_SaveSpawnparms (void)
 		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->SetChangeParms);
 
 		for (j = 0; j < NUM_SPAWN_PARMS; j++)
-			host_client->spawn_parms[j] = (&SVProgs->GlobalStruct->parm1) [j];
+			host_client->spawn_parms[j] = (&SVProgs->GlobalStruct->parm1)[j];
 	}
 }
 

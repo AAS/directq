@@ -28,6 +28,8 @@ int	current_skill;
 
 void Mod_Print (void);
 
+char host_lastsave[256];
+
 /*
 ==================
 Host_Quit_f
@@ -356,19 +358,32 @@ Restarts the current server for a dead player
 */
 void Host_Restart_f (void)
 {
-	char	mapname[MAX_QPATH];
+	char mapname[MAX_QPATH];
 
-	if (cls.demoplayback || !sv.active)
-		return;
-
-	if (cmd_source != src_command)
-		return;
+	if (cls.demoplayback || !sv.active) return;
+	if (cmd_source != src_command) return;
 
 	Q_strncpy (mapname, sv.name, 63);	// must copy out, because it gets cleared
 	// in sv_spawnserver
 
 	SV_SpawnServer (mapname);
 }
+
+void Host_Restart2_f (void)
+{
+	if (cls.demoplayback || !sv.active) return;
+	if (cmd_source != src_command) return;
+
+	if (!host_lastsave[0])
+	{
+		Host_Restart_f ();
+		return;
+	}
+
+	Cbuf_InsertText (va ("load %s\n", host_lastsave));
+	Cbuf_Execute ();
+}
+
 
 /*
 ==================
@@ -500,14 +515,14 @@ void Host_DoSavegame (char *savename)
 
 		// check for invalid chars
 		if (savename[i] == '/' ||
-				savename[i] == '\\' ||
-				savename[i] == ':' ||
-				savename[i] == '*' ||
-				savename[i] == '?' ||
-				savename[i] == '"' ||
-				savename[i] == '<' ||
-				savename[i] == '>' ||
-				savename[i] == '|')
+			savename[i] == '\\' ||
+			savename[i] == ':' ||
+			savename[i] == '*' ||
+			savename[i] == '?' ||
+			savename[i] == '"' ||
+			savename[i] == '<' ||
+			savename[i] == '>' ||
+			savename[i] == '|')
 		{
 			Con_Printf ("Invalid character: \"%c\" detected in save name\n", savename[i]);
 			return;
@@ -524,6 +539,9 @@ void Host_DoSavegame (char *savename)
 		Con_Printf ("ERROR: couldn't open %s.\n", name);
 		return;
 	}
+
+	// store out the last save game
+	strcpy (host_lastsave, savename);
 
 	// saving can cause sound to stall while disk IO is busy so clear the buffer first
 	S_ClearBuffer ();
@@ -1263,7 +1281,7 @@ void Host_Spawn_f (void)
 		// copy spawn parms out of the client_t
 
 		for (i = 0; i < NUM_SPAWN_PARMS; i++)
-			(&SVProgs->GlobalStruct->parm1) [i] = host_client->spawn_parms[i];
+			(&SVProgs->GlobalStruct->parm1)[i] = host_client->spawn_parms[i];
 
 		// call the spawn function
 
@@ -2046,6 +2064,7 @@ cmd_t Host_Notarget_f_Cmd ("notarget", Host_Notarget_f);
 cmd_t Host_Fly_f_Cmd ("fly", Host_Fly_f);
 cmd_t Host_Map_f_Cmd ("map", Host_Map_f);
 cmd_t Host_Restart_f_Cmd ("restart", Host_Restart_f);
+cmd_t Host_Restart2_f_Cmd ("restart2", Host_Restart2_f);
 cmd_t Host_Changelevel_f_Cmd ("changelevel", Host_Changelevel_f);
 //cmd_t Host_Changelevel2_f_Cmd ("changelevel2", Host_Changelevel2_f);
 cmd_t Host_Connect_f_Cmd ("connect", Host_Connect_f);

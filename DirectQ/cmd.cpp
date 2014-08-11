@@ -897,7 +897,7 @@ Cmd_Add
 void Cmd_Add (cmd_t *newcmd)
 {
 	// fail if the command is a variable name
-	if (Cvar_VariableString (newcmd->name) [0]) return;
+	if (Cvar_VariableString (newcmd->name)[0]) return;
 
 	// fail if the command already exists
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next)

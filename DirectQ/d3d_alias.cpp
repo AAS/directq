@@ -536,12 +536,13 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, bool shadowed)
 		{
 			if (!strcmp (ent->model->name, "progs/flame2.mdl") || !strcmp (ent->model->name, "progs/flame.mdl"))
 			{
-				ambientlight[0] = shadelight[0] = 256;
-				ambientlight[1] = shadelight[1] = 256;
-				ambientlight[2] = shadelight[2] = 256;
+				ambientlight[0] = shadelight[0] = 255;
+				ambientlight[1] = shadelight[1] = 255;
+				ambientlight[2] = shadelight[2] = 255;
 			}
 		}
 
+#if 0
 		// and now scale them by the correct factor; the default scale assumes no overbrighting
 		// we use different scaling on the view ent as it comes out really dark with this light model
 		if (ent == &cl.viewent)
@@ -558,6 +559,15 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, bool shadowed)
 			VectorScale (shadelight, -(r_aliaslightscale.value / 200.0f), shadelight);
 			VectorScale (ambientlight, (r_aliaslightscale.value / 200.0f), ambientlight);
 		}
+#else
+		// reflect software Quake's lighting more accurately
+		ambientlight[0] = 255.0f - ambientlight[0];
+		ambientlight[1] = 255.0f - ambientlight[1];
+		ambientlight[2] = 255.0f - ambientlight[2];
+
+		VectorScale (shadelight, (r_aliaslightscale.value / 255.0f), shadelight);
+		VectorScale (ambientlight, (r_aliaslightscale.value / 255.0f), ambientlight);
+#endif
 
 		D3DHLSL_SetFloatArray ("ShadeVector", shadevector, 3);
 		D3DHLSL_SetFloatArray ("AmbientLight", ambientlight, 3);
