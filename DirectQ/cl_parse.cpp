@@ -262,11 +262,11 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	SZ_Clear (&cls.message);
 }
 
-void Host_Frame (DWORD time);
+void Host_Frame (float time);
 
 static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 {
-	static DWORD time, oldtime, newtime;
+	static float time, oldtime, newtime;
 	static int lastpercent = 666;
 	int thispercent = (PercentDown / 10);
 
@@ -282,7 +282,7 @@ static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 
 	cls.download.percent = PercentDown;
 
-	newtime = timeGetTime ();
+	newtime = Sys_FloatTime ();
 	time = newtime - oldtime;
 
 	if (lastpercent != thispercent)
@@ -1080,6 +1080,9 @@ void CL_ParseProQuakeString (char *string);
 CL_ParseServerMessage
 =====================
 */
+void Fog_ParseServerMessage (void);
+void Fog_Update (float density, float r, float g, float b);
+
 void CL_ParseServerMessage (void)
 {
 	int			cmd;
@@ -1417,28 +1420,13 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_fogfitz:
-			// protocol compatibility; does nothing for now
-			MSG_ReadByte ();
-			MSG_ReadByte ();
-			MSG_ReadByte ();
-			MSG_ReadByte ();
-			MSG_ReadShort ();
+			Fog_ParseServerMessage ();
 			break;
 
 		case svc_fog:
 			if (MSG_ReadByte ())
-			{
-				Cvar_Set ("gl_fogdensity", MSG_ReadFloat ());
-				Cvar_Set ("gl_fogred", MSG_ReadByte () / 255.0);
-				Cvar_Set ("gl_foggreen", MSG_ReadByte () / 255.0);
-				Cvar_Set ("gl_fogblue", MSG_ReadByte () / 255.0);
-				Cvar_Set ("gl_fogenable", 1);
-			}
-			else
-			{
-				Cvar_Set ("gl_fogenable", 0.0f);
-				Cvar_Set ("gl_fogdensity", 0.0f);
-			}
+				Fog_Update (MSG_ReadFloat (), (MSG_ReadByte () / 255.0), (MSG_ReadByte () / 255.0), (MSG_ReadByte () / 255.0));
+			else Fog_Update (0, 0, 0, 0);
 
 			break;
 

@@ -1490,7 +1490,6 @@ void SV_SpawnServer (char *server)
 	sv.state = ss_loading;
 	sv.paused = false;
 	sv.time = 1.0f;
-	sv.dwTime = 1000;
 	sv.models[1] = sv.worldmodel;
 
 	// clear world interaction links

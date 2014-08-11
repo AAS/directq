@@ -192,7 +192,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.5;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 125, 492, 146);
+			R_ColourDLight (dl, 308, 351, 109);
 		}
 
 		R_WallHitParticles (pos, vec3_origin, 20, 30);
@@ -322,7 +322,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 2, 225, 541);
+			R_ColourDLight (dl, 65, 232, 470);
 
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
@@ -330,7 +330,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 2, 225, 541);
+			R_ColourDLight (dl, 65, 232, 470);
 		}
 
 		CL_ParseBeam (cl_bolt1_mod, ent, start, end);
@@ -355,7 +355,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 2, 225, 541);
+			R_ColourDLight (dl, 65, 232, 470);
 
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
@@ -363,7 +363,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 2, 225, 541);
+			R_ColourDLight (dl, 65, 232, 470);
 		}
 
 		CL_ParseBeam (cl_bolt2_mod, ent, start, end);
@@ -388,7 +388,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 2, 225, 541);
+			R_ColourDLight (dl, 65, 232, 470);
 
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
@@ -396,7 +396,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 2, 225, 541);
+			R_ColourDLight (dl, 65, 232, 470);
 		}
 
 		CL_ParseBeam (cl_bolt3_mod, ent, start, end);

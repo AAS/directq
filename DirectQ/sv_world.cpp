@@ -352,8 +352,8 @@ loc0:;
 		old_self = SVProgs->GlobalStruct->self;
 		old_other = SVProgs->GlobalStruct->other;
 
-		SVProgs->GlobalStruct->self = EDICT_TO_PROG(touch);
-		SVProgs->GlobalStruct->other = EDICT_TO_PROG(ent);
+		SVProgs->GlobalStruct->self = EDICT_TO_PROG (touch);
+		SVProgs->GlobalStruct->other = EDICT_TO_PROG (ent);
 		SVProgs->GlobalStruct->time = sv.time;
 		SVProgs->ExecuteProgram (touch->v.touch);
 
@@ -568,6 +568,7 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 	int			i;
 	vec3_t		mid;
 
+loc0:;
 	// check for empty
 	if (num < 0)
 	{
@@ -602,8 +603,18 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 		t2 = DotProduct (plane->normal, p2) - plane->dist;
 	}
 
-	if (t1 >= 0 && t2 >= 0) return SV_RecursiveHullCheck (hull, node->children[0], p1f, p2f, p1, p2, trace);
-	if (t1 < 0 && t2 < 0) return SV_RecursiveHullCheck (hull, node->children[1], p1f, p2f, p1, p2, trace);
+	// LordHavoc: recursion optimization
+	if (t1 >= 0 && t2 >= 0)
+	{
+		num = node->children[0];
+		goto loc0;
+	}
+
+	if (t1 < 0 && t2 < 0)
+	{
+		num = node->children[1];
+		goto loc0;
+	}
 
 	// put the crosspoint DIST_EPSILON pixels on the near side
 	if (t1 < 0)

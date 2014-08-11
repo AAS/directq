@@ -232,6 +232,7 @@ typedef struct msurface_s
 
 	// rectangle specifying the surface lightmap
 	RECT		LightRect;
+	int			lightmapoffset;
 
 	mtexinfo_t	*texinfo;
 

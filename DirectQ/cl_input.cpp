@@ -120,7 +120,8 @@ void IN_KLookUp (void) {KeyUp(&in_klook);}
 void IN_MLookDown (void) {KeyDown(&in_mlook);}
 void IN_MLookUp (void) {
 KeyUp(&in_mlook);
-if ( !(in_mlook.state&1) &&  lookspring.value)
+extern cvar_t m_look;
+if (!((in_mlook.state & 1) || m_look.integer) &&  lookspring.value)
 	V_StartPitchDrift();
 }
 void IN_UpDown(void) {KeyDown(&in_up);}
@@ -439,83 +440,162 @@ CL_SendMove
 */
 void CL_SendMove (usercmd_t *cmd)
 {
-	int		i;
-	int		bits;
-	sizebuf_t	*buf;
-
-	if (pq_lag.value < 0) Cvar_Set (&pq_lag, 0.0f);
-	if (pq_lag.value > 400) Cvar_Set (&pq_lag, 400.0f);
-
-	buf = &lag_buff[lag_head & 31];
-	buf->maxsize = 128;
-	buf->cursize = 0;
-	buf->data = lag_data[lag_head & 31]; // JPG - added head index
-	lag_sendtime[(lag_head++) & 31] = realtime + (pq_lag.value / 1000.0);
-
-	Q_MemCpy (&cl.cmd, cmd, sizeof (usercmd_t));
-
-	// send the movement message
-    MSG_WriteByte (buf, clc_move);
-	MSG_WriteFloat (buf, cl.mtime[0]);	// so server can get ping times
-
-	if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION)
-	{
-		for (i = 0; i < 3; i++)
-			MSG_WriteAngle16 (buf, cl.viewangles[i]);
-	}
-	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
-	{
-		for (i = 0; i < 3; i++)
-			MSG_WriteAngle16 (buf, cl.viewangles[i]);
-	}
-	else
-	{
-		for (i = 0; i < 3; i++)
-			MSG_WriteAngle (buf, cl.viewangles[i], cl.Protocol);
-	}
-
-    MSG_WriteShort (buf, cmd->forwardmove);
-    MSG_WriteShort (buf, cmd->sidemove);
-    MSG_WriteShort (buf, cmd->upmove);
-
-	// send button bits
-	bits = 0;
-
-	if (in_attack.state & 3) bits |= 1;
-	in_attack.state &= ~2;
-
-	if (in_jump.state & 3) bits |= 2;
-	in_jump.state &= ~2;
-
-    MSG_WriteByte (buf, bits);
-    MSG_WriteByte (buf, in_impulse);
-
-	if (IsWeaponImpulse (in_impulse))
-	{
-		in_lastimpulse[1] = in_lastimpulse[0];
-		in_lastimpulse[0] = in_impulse;
-	}
-
-	// clear the impulse (if any)
-	in_impulse = 0;
-
-	// deliver the message (unless we're playing a demo in which case there is no server to deliver to)
-	if (cls.demoplayback) return;
-
-	// allways dump the first two message, because it may contain leftover inputs
-	// from the last level
 	if (sv.active)
 	{
-		// if we're playing on a local server we just send the standard move
-		if (++cl.movemessages <= 2) return;
+		int		i;
+		int		bits;
+		sizebuf_t	buf;
+		byte	data[128];
 
-		if (NET_SendUnreliableMessage (cls.netcon, buf) == -1)
+		buf.maxsize = 128;
+		buf.cursize = 0;
+		buf.data = data;
+
+		cl.cmd = *cmd;
+
+		// send the movement message
+		MSG_WriteByte (&buf, clc_move);
+		MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
+
+		if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION)
+		{
+			for (i = 0; i < 3; i++)
+				MSG_WriteAngle16 (&buf, cl.viewangles[i]);
+		}
+		else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+		{
+			for (i = 0; i < 3; i++)
+				MSG_WriteAngle16 (&buf, cl.viewangles[i]);
+		}
+		else
+		{
+			for (i = 0; i < 3; i++)
+				MSG_WriteAngle (&buf, cl.viewangles[i], cl.Protocol);
+		}
+
+		MSG_WriteShort (&buf, cmd->forwardmove);
+		MSG_WriteShort (&buf, cmd->sidemove);
+		MSG_WriteShort (&buf, cmd->upmove);
+
+		// send button bits
+		bits = 0;
+
+		if (in_attack.state & 3)
+			bits |= 1;
+
+		in_attack.state &= ~2;
+
+		if (in_jump.state & 3)
+			bits |= 2;
+
+		in_jump.state &= ~2;
+
+		MSG_WriteByte (&buf, bits);
+		MSG_WriteByte (&buf, in_impulse);
+
+		if (IsWeaponImpulse (in_impulse))
+		{
+			in_lastimpulse[1] = in_lastimpulse[0];
+			in_lastimpulse[0] = in_impulse;
+		}
+
+		in_impulse = 0;
+
+		// deliver the message
+		if (cls.demoplayback)
+			return;
+
+		// allways dump the first two message, because it may contain leftover inputs
+		// from the last level
+		if (++cl.movemessages <= 2)
+			return;
+
+		if (NET_SendUnreliableMessage (cls.netcon, &buf) == -1)
 		{
 			Con_Printf ("CL_SendMove: lost server connection\n");
 			CL_Disconnect ();
 		}
 	}
-	else CL_SendLagMove ();
+	else
+	{
+		int		i;
+		int		bits;
+		sizebuf_t	*buf;
+
+		if (pq_lag.value < 0) Cvar_Set (&pq_lag, 0.0f);
+		if (pq_lag.value > 400) Cvar_Set (&pq_lag, 400.0f);
+
+		buf = &lag_buff[lag_head & 31];
+		buf->maxsize = 128;
+		buf->cursize = 0;
+		buf->data = lag_data[lag_head & 31]; // JPG - added head index
+		lag_sendtime[(lag_head++) & 31] = realtime + (pq_lag.value / 1000.0);
+
+		Q_MemCpy (&cl.cmd, cmd, sizeof (usercmd_t));
+
+		// send the movement message
+		MSG_WriteByte (buf, clc_move);
+		MSG_WriteFloat (buf, cl.mtime[0]);	// so server can get ping times
+
+		if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION)
+		{
+			for (i = 0; i < 3; i++)
+				MSG_WriteAngle16 (buf, cl.viewangles[i]);
+		}
+		else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+		{
+			for (i = 0; i < 3; i++)
+				MSG_WriteAngle16 (buf, cl.viewangles[i]);
+		}
+		else
+		{
+			for (i = 0; i < 3; i++)
+				MSG_WriteAngle (buf, cl.viewangles[i], cl.Protocol);
+		}
+
+		MSG_WriteShort (buf, cmd->forwardmove);
+		MSG_WriteShort (buf, cmd->sidemove);
+		MSG_WriteShort (buf, cmd->upmove);
+
+		// send button bits
+		bits = 0;
+
+		if (in_attack.state & 3) bits |= 1;
+		in_attack.state &= ~2;
+
+		if (in_jump.state & 3) bits |= 2;
+		in_jump.state &= ~2;
+
+		MSG_WriteByte (buf, bits);
+		MSG_WriteByte (buf, in_impulse);
+
+		if (IsWeaponImpulse (in_impulse))
+		{
+			in_lastimpulse[1] = in_lastimpulse[0];
+			in_lastimpulse[0] = in_impulse;
+		}
+
+		// clear the impulse (if any)
+		in_impulse = 0;
+
+		// deliver the message (unless we're playing a demo in which case there is no server to deliver to)
+		if (cls.demoplayback) return;
+
+		// allways dump the first two message, because it may contain leftover inputs
+		// from the last level
+		if (sv.active)
+		{
+			// if we're playing on a local server we just send the standard move
+			if (++cl.movemessages <= 2) return;
+
+			if (NET_SendUnreliableMessage (cls.netcon, buf) == -1)
+			{
+				Con_Printf ("CL_SendMove: lost server connection\n");
+				CL_Disconnect ();
+			}
+		}
+		else CL_SendLagMove ();
+	}
 }
 
 

@@ -1,0 +1,19 @@
+DirectQ 1.8.666b
+----------------
+
+- reverted to standard input code for singleplayer games.
+- fixed a long-standing bug where looking up could be screwy if lookstrafe was on.
+- changed wizard and lightning dynamic light colours slightly (GB is right).
+- added HLSL fog support (FitzQuake standard).
+- increased max allowed skybox size to 1024
+- fixed bug where an animation frame in a texture may have the same data as a different texture, causing wackiness.
+- removed switchable refresh rates - it's back to your monitor's rate now; this was buggy
+- cleaned up some timer code.
+- fixed large temporary hang when loading a game.
+
+Performance in this one is down a bit I'm afraid; maintaining certain legacy code paths is starting to have an
+impact on my ability to tune the renderer more effectively.  I've since written code without those paths that
+goes about 1.5 times faster, and handles heavy scenes more efficiently (up to 4 or 5 times faster).
+
+The next one will see the removal of those legacy code paths.  That means that the hardware requirements will go
+up a little; you're going to need an Intel 915, Geforce FX, or Radeon 9500 or better.

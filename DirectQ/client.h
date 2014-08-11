@@ -159,7 +159,7 @@ extern client_static_t	cls;
 // the client_state_t structure is wiped completely at every
 // server signon
 //
-typedef struct
+typedef struct client_state_s
 {
 	int			movemessages;	// since connecting to this server
 								// throw out the first couple, so the player
@@ -212,8 +212,6 @@ typedef struct
 	float		time;			// clients view of time, should be between
 								// servertime and oldservertime to generate
 								// a lerp point for other data
-
-	DWORD		dwTime;
 
 	float		oldtime;		// previous cl.time, time-oldtime is used
 								// to decay light values and smooth step ups

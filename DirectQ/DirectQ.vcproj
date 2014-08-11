@@ -303,6 +303,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\d3d_fog.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\d3d_model.cpp"
 				>
 			</File>

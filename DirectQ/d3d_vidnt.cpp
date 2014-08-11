@@ -226,10 +226,6 @@ cvar_alias_t r_anisotropicfilter_alias ("r_anisotropicfilter", &r_anisotropicfil
 
 cvar_t gl_triplebuffer ("gl_triplebuffer", 1, CVAR_ARCHIVE);
 
-cvar_t vid_refreshrate ("vid_refreshrate", "-1", CVAR_ARCHIVE);
-int d3d_AllowedRefreshRates[64] = {0};
-int d3d_NumRefreshRates = 0;
-
 d3d_ModeDesc_t *d3d_ModeList = NULL;
 
 D3DDISPLAYMODE d3d_DesktopMode;
@@ -416,36 +412,11 @@ void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 		pp->BackBufferFormat = D3DFMT_UNKNOWN;
 		pp->FullScreen_RefreshRateInHz = 0;
 	}
-	else if (!WinDWM || d3d_NumRefreshRates < 2)
-	{
-		// only allow refresh rate changes on vista or higher as they seem unstable on XPDM drivers
-		pp->Windowed = FALSE;
-		pp->BackBufferFormat = mode->Format;
-		pp->FullScreen_RefreshRateInHz = d3d_DesktopMode.RefreshRate;
-	}
 	else
 	{
 		pp->Windowed = FALSE;
 		pp->BackBufferFormat = mode->Format;
-
-		// pick a safe refresh rate
-		int findrr = mode->RefreshRate;
-
-		for (int i = 0; i < d3d_NumRefreshRates; i++)
-		{
-			if (d3d_AllowedRefreshRates[i] == vid_refreshrate.integer)
-			{
-				findrr = d3d_AllowedRefreshRates[i];
-				break;
-			}
-		}
-
-		// set back to the cvar
-		Cvar_Set (&vid_refreshrate, findrr);
-
-		// store to pp and mode
-		pp->FullScreen_RefreshRateInHz = findrr;
-		mode->RefreshRate = findrr;
+		pp->FullScreen_RefreshRateInHz = d3d_DesktopMode.RefreshRate;
 	}
 
 	// create it without a depth buffer to begin with
@@ -753,8 +724,6 @@ void D3D_EnumerateVideoModes (void)
 	int MaxWindowWidth = WorkArea.right - WorkArea.left;
 	int MaxWindowHeight = WorkArea.bottom - WorkArea.top;
 
-	d3d_NumRefreshRates = 0;
-
 	// enumerate the modes in the adapter
 	for (int m = 0;; m++)
 	{
@@ -813,26 +782,6 @@ void D3D_EnumerateVideoModes (void)
 
 			// attempt to change to it
 			if (ChangeDisplaySettings (&dm, CDS_TEST | CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL) continue;
-
-			// store out the list of allowed refresh rates
-			bool allowrr = true;
-
-			// see if this rate is already available
-			for (int rr = 0; rr < d3d_NumRefreshRates; rr++)
-			{
-				if (d3d_AllowedRefreshRates[rr] == mode.RefreshRate)
-				{
-					allowrr = false;
-					break;
-				}
-			}
-
-			// we assume that monitors won't support more than this number of refresh rates...
-			if (allowrr && d3d_NumRefreshRates < 64)
-			{
-				d3d_AllowedRefreshRates[d3d_NumRefreshRates] = mode.RefreshRate;
-				d3d_NumRefreshRates++;
-			}
 
 			// we're only interested in modes that match the desktop refresh rate
 			if (mode.RefreshRate != d3d_DesktopMode.RefreshRate) continue;
@@ -911,9 +860,6 @@ void D3D_EnumerateVideoModes (void)
 		Sys_Error ("D3D_EnumerateVideoModes: No RGB fullscreen modes available");
 		return;
 	}
-
-	// sort the refresh rates list
-	qsort (d3d_AllowedRefreshRates, d3d_NumRefreshRates, sizeof (int), RRCompFunc);
 
 	// did we find any windowed modes?
 	if (NumWindowedModes)
@@ -1962,9 +1908,9 @@ void D3D_SetActiveGamma (void)
 	for (int i = 0; i < 256; i++)
 	{
 		// adjust v_gamma to the same scale as glquake uses
-		d3d_CurrentGamma.r[i] = D3D_AdjustGamma ((v_gamma.value * 0.7f), d3d_DefaultGamma.r[i]);
-		d3d_CurrentGamma.g[i] = D3D_AdjustGamma ((v_gamma.value * 0.7f), d3d_DefaultGamma.g[i]);
-		d3d_CurrentGamma.b[i] = D3D_AdjustGamma ((v_gamma.value * 0.7f), d3d_DefaultGamma.b[i]);
+		d3d_CurrentGamma.r[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.b[i]);
 	}
 
 	// now apply r/g/b to the derived values
@@ -2089,45 +2035,6 @@ void D3D_CheckAnisotropic (void)
 }
 
 
-void D3D_CheckRefreshRate (void)
-{
-	static int oldrr = ~vid_refreshrate.integer;
-
-	// only allow on vista or higher
-	if (oldrr != vid_refreshrate.integer && WinDWM && d3d_NumRefreshRates > 1)
-	{
-		// pick a valid rate
-		int findrr = d3d_DesktopMode.RefreshRate;
-
-		// ensure that it's valid
-		for (int i = 0; i < d3d_NumRefreshRates; i++)
-		{
-			if (d3d_AllowedRefreshRates[i] == vid_refreshrate.integer)
-			{
-				findrr = d3d_AllowedRefreshRates[i];
-				break;
-			}
-		}
-
-		// set back
-		Cvar_Set (&vid_refreshrate, findrr);
-
-		// only restart if it changed
-		if (findrr != oldrr)
-		{
-			D3D_VidRestart_f ();
-
-			static bool firsttime = true;
-
-			if (!firsttime) Con_Printf ("Set refresh rate to %i Hz\n", findrr);
-			firsttime = false;
-		}
-
-		oldrr = vid_refreshrate.integer;
-	}
-}
-
-
 void D3D_SubdivideWater (void);
 void D3D_VBOCheck (void);
 
@@ -2144,7 +2051,6 @@ void D3D_BeginRendering (void)
 	D3D_CheckGamma ();
 	D3D_CheckVidMode (); if (vid_restarted) return;
 	D3D_CheckVSync (); if (vid_restarted) return;
-	D3D_CheckRefreshRate (); if (vid_restarted) return;
 	D3D_CheckD3DXVersion (); if (vid_restarted) return;
 	D3D_CheckAnisotropic ();
 

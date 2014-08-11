@@ -184,6 +184,7 @@ LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex2 = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyz = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuseTex1 = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuse = NULL;
+LPDIRECT3DVERTEXDECLARATION9 d3d_VDMDLBuffered = NULL;
 
 
 bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff, int vsver, int psver)
@@ -253,6 +254,17 @@ void D3D_CreateVertDeclFromFVFCode (DWORD fvf, LPDIRECT3DVERTEXDECLARATION9 *vd)
 }
 
 
+D3DVERTEXELEMENT9 d3d_mdlbuffered_layout[] =
+{
+	{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+	{0, 0, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+	{1, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
+	{1, 0, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 1},
+	{2, 0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+	D3DDECL_END ()
+};
+
+
 void D3D_InitHLSL (void)
 {
 	// done first so that even if hlsl is unavailable these will be
@@ -261,6 +273,8 @@ void D3D_InitHLSL (void)
 	D3D_CreateVertDeclFromFVFCode (D3DFVF_XYZ | D3DFVF_TEX2, &d3d_VDXyzTex2);
 	D3D_CreateVertDeclFromFVFCode (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1, &d3d_VDXyzDiffuseTex1);
 	D3D_CreateVertDeclFromFVFCode (D3DFVF_XYZ | D3DFVF_DIFFUSE, &d3d_VDXyzDiffuse);
+
+	d3d_Device->CreateVertexDeclaration (d3d_mdlbuffered_layout, &d3d_VDMDLBuffered);
 
 	// unsupported to begin with
 	d3d_GlobalCaps.supportPixelShaders = false;
@@ -330,6 +344,7 @@ void D3D_ShutdownHLSL (void)
 	SAFE_RELEASE (d3d_VDXyz);
 	SAFE_RELEASE (d3d_VDXyzDiffuseTex1);
 	SAFE_RELEASE (d3d_VDXyzDiffuse);
+	SAFE_RELEASE (d3d_VDMDLBuffered);
 }
 
 
@@ -452,6 +467,7 @@ typedef struct d3d_alphalist_s
 #define D3D_ALPHATYPE_ENTITY		1
 #define D3D_ALPHATYPE_PARTICLE		2
 #define D3D_ALPHATYPE_WATERWARP		3
+#define D3D_ALPHATYPE_SURFACE		4
 
 d3d_alphalist_t **d3d_AlphaList = NULL;
 int d3d_NumAlphaList = 0;
@@ -498,7 +514,9 @@ void D3D_AddToAlphaList (entity_t *ent)
 void D3D_AddToAlphaList (d3d_modelsurf_t *modelsurf)
 {
 	// we only support turb surfaces for now
-	if (modelsurf->surf->flags & SURF_DRAWTURB) D3D_AddToAlphaList (D3D_ALPHATYPE_WATERWARP, modelsurf, D3D_GetDist (modelsurf->surf->midpoint));
+	if (modelsurf->surf->flags & SURF_DRAWTURB)
+		D3D_AddToAlphaList (D3D_ALPHATYPE_WATERWARP, modelsurf, D3D_GetDist (modelsurf->surf->midpoint));
+	else D3D_AddToAlphaList (D3D_ALPHATYPE_SURFACE, modelsurf, D3D_GetDist (modelsurf->surf->midpoint));
 }
 
 
@@ -1011,6 +1029,7 @@ void D3D_InitSubdivision (void);
 void D3D_ModelSurfsBeginMap (void);
 void R_FixupBModelBBoxes (void);
 void R_FindHipnoticWindows (void);
+void Fog_ParseWorldspawn (void);
 
 void R_NewMap (void)
 {
@@ -1058,6 +1077,7 @@ void R_NewMap (void)
 	D3D_AlphaListNewMap ();
 	R_FixupBModelBBoxes ();
 	R_FindHipnoticWindows ();
+	Fog_ParseWorldspawn ();
 
 	// release cached skins to save memory
 	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);

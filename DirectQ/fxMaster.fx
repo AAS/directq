@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 float4x4 WorldMatrix;
+float4x4 ModelViewMatrix;
 
 texture tmu0Texture;
 texture tmu1Texture;
@@ -29,6 +30,7 @@ float warpscale;
 float warpfactor;
 float Overbright;
 float AlphaVal;
+float SkyFog;
 
 int texfilter0, texfilter1, texfilter2;
 int mipfilter0, mipfilter1, mipfilter2;
@@ -36,6 +38,9 @@ int address0, address1, address2;
 
 float3 Scale;
 float3 r_origin;
+
+float4 FogColor;
+float FogDensity;
 
 samplerCUBE cubeSampler = sampler_state
 {
@@ -97,6 +102,14 @@ struct WorldVert
 	float2 Tex1 : TEXCOORD1;
 };
 
+struct WorldVertPS
+{
+	float4 Position : POSITION0;
+	float2 Tex0 : TEXCOORD0;
+	float2 Tex1 : TEXCOORD1;
+	float4 FogPosition : TEXCOORD2;
+};
+
 struct VertLiquidInput
 {
 	float4 Position : POSITION0;
@@ -114,6 +127,7 @@ struct VertLiquidOutput
 	float4 Position : POSITION0;
 	float2 Texcoord0 : TEXCOORD0;
 	float2 Texcoord1 : TEXCOORD1;
+	float4 FogPosition : TEXCOORD2;
 };
 
 struct VertTexturedColoured
@@ -121,6 +135,14 @@ struct VertTexturedColoured
 	float4 Position : POSITION0;
 	float4 Color : COLOR0;
 	float2 Tex0 : TEXCOORD0;
+};
+
+struct VertAlias
+{
+	float4 Position : POSITION0;
+	float4 Color : COLOR0;
+	float2 Tex0 : TEXCOORD0;
+	float4 FogPosition : TEXCOORD1;
 };
 
 struct VertPositionOnly
@@ -135,9 +157,18 @@ struct VertColoured
 };
 
 
-float4 PSTexturedColouredNoLuma (VertTexturedColoured Input) : COLOR0
+float4 FogCalc (float4 color, float4 fogpos)
+{
+	float fogdist = length (fogpos);
+	float fogfactor = clamp (exp2 (-FogDensity * FogDensity * fogdist * fogdist * 1.442695), 0.0, 1.0);
+	return lerp (FogColor, color, fogfactor);
+}
+
+
+float4 PSAliasNoLuma (VertAlias Input) : COLOR0
 {
 	float4 color = (tex2D (tmu0Sampler, Input.Tex0) * Input.Color) * Overbright;
+	color = FogCalc (color, Input.FogPosition);
 	color.a = Input.Color.a;
 
 	return color;
@@ -150,18 +181,20 @@ float4 PSTexturedColouredAlpha (VertTexturedColoured Input) : COLOR0
 }
 
 
-float4 PSTexturedColouredLuma (VertTexturedColoured Input) : COLOR0
+float4 PSParticles (VertAlias Input) : COLOR0
 {
-	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) * Input.Color) * Overbright) + tex2D (tmu1Sampler, Input.Tex0);
-	color.a = Input.Color.a;
-
+	float4 texcolor = tex2D (tmu0Sampler, Input.Tex0);
+	float4 color = FogCalc (texcolor * Input.Color, Input.FogPosition);
+	color.a = texcolor.a;
 	return color;
 }
 
 
-float4 PSTexturedColouredLumaNoLuma (VertTexturedColoured Input) : COLOR0
+float4 PSAliasLuma (VertAlias Input) : COLOR0
 {
-	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * Input.Color) * Overbright;
+	float4 fullbright = tex2D (tmu1Sampler, Input.Tex0) * 0.5;
+	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) * Input.Color) * Overbright);
+	color = FogCalc (color + fullbright, Input.FogPosition) + fullbright;
 	color.a = Input.Color.a;
 
 	return color;
@@ -189,11 +222,41 @@ VertTexturedColoured VSTexturedColouredCommon (VertTexturedColoured Input)
 }
 
 
+VertAlias VSAliasCommon (VertTexturedColoured Input)
+{
+	VertAlias Output;
+
+	// this is friendlier for preshaders
+	Output.Position = mul (Input.Position, WorldMatrix);
+	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
+
+	Output.Color = Input.Color;
+	Output.Tex0 = Input.Tex0;
+
+	return Output;
+}
+
+
+VertTexturedColoured VSParticles (VertTexturedColoured Input)
+{
+	VertTexturedColoured Output;
+
+	// this is friendlier for preshaders
+	Output.Position = mul (Input.Position, WorldMatrix);
+
+	Output.Color = Input.Color;
+	Output.Tex0 = Input.Tex0;
+
+	return Output;
+}
+
+
 float4 LiquidPS (VertLiquidOutput Input) : COLOR0
 {
 	// same warp calculation as is used for the fixed pipeline path
 	// a lot of the heavier lifting here has been offloaded to the vs
 	float4 color = tex2D (tmu0Sampler, mul (mul (sin (Input.Texcoord1), warpscale) + Input.Texcoord0, 0.015625f));
+	color = FogCalc (color, Input.FogPosition);
 	color.a = AlphaVal;
 
 	return color;
@@ -206,6 +269,7 @@ VertLiquidOutput LiquidVS (VertLiquidInput Input)
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
+	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
 	Output.Texcoord0 = Input.Texcoord;
 
 	// we need to switch x and y at some stage; logic says lets do it per vertex to get the ps instructions down
@@ -251,39 +315,42 @@ float4 ShadowPS (VertColoured Input) : COLOR0
 }
 
 
-float4 PSWorldNoLuma (WorldVert Input) : COLOR0
+float4 PSWorldNoLuma (WorldVertPS Input) : COLOR0
 {
 	float4 color = tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright;
+	color = FogCalc (color, Input.FogPosition);
 	color.a = AlphaVal;
 	
 	return color;
 }
 
 
-float4 PSWorldLuma (WorldVert Input) : COLOR0
+float4 PSWorldLuma (WorldVertPS Input) : COLOR0
 {
-	float4 color = (tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright) + tex2D (tmu2Sampler, Input.Tex0);
+	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0) * 0.5;
+	float4 color = (tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright);
+	color = FogCalc (color + fullbright, Input.FogPosition) + fullbright;
 	color.a = AlphaVal;
 	
 	return color;
 }
 
 
-float4 PSWorldLumaNoLuma (WorldVert Input) : COLOR0
+float4 PSWorldLumaNoLuma (WorldVertPS Input) : COLOR0
 {
 	float4 color = (tex2D (tmu1Sampler, Input.Tex0) + tex2D (tmu2Sampler, Input.Tex0)) * tex2D (tmu0Sampler, Input.Tex1) * Overbright;
 	color.a = AlphaVal;
-	
 	return color;
 }
 
 
-WorldVert VSWorldCommon (WorldVert Input)
+WorldVertPS VSWorldCommon (WorldVert Input)
 {
-	WorldVert Output;
+	WorldVertPS Output;
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
+	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
 
 	Output.Tex0 = Input.Tex0;
 	Output.Tex1 = Input.Tex1;
@@ -304,7 +371,7 @@ float4 SkyWarpPS (VertSkyInput Input) : COLOR0
 	float4 color = (alphacolor * alphacolor.a) + (solidcolor * (1.0 - alphacolor.a));
 	color.a = 1.0;
 	
-	return color;
+	return lerp (FogColor, color, SkyFog);
 }
 
 
@@ -337,7 +404,9 @@ VertSkyInput SkyBoxVS (VertPositionOnly Input)
 
 float4 SkyBoxPS (VertSkyInput Input) : COLOR0
 {
-	return texCUBE (cubeSampler, Input.Texcoord);
+	float4 color = texCUBE (cubeSampler, Input.Texcoord);
+	color.a = 1.0;
+	return lerp (FogColor, color, SkyFog);
 }
 
 
@@ -346,15 +415,15 @@ technique MasterRefresh
 	pass PAliasNoLuma
 	{
 		// textured, coloured, no luma, usable for alias models only owing to overbrights
-		VertexShader = compile vs_2_0 VSTexturedColouredCommon ();
-		PixelShader = compile ps_2_0 PSTexturedColouredNoLuma ();
+		VertexShader = compile vs_2_0 VSAliasCommon ();
+		PixelShader = compile ps_2_0 PSAliasNoLuma ();
 	}
 
 	pass PAliasLuma
 	{
 		// textured, coloured, with luma, alias models only
-		VertexShader = compile vs_2_0 VSTexturedColouredCommon ();
-		PixelShader = compile ps_2_0 PSTexturedColouredLuma ();
+		VertexShader = compile vs_2_0 VSAliasCommon ();
+		PixelShader = compile ps_2_0 PSAliasLuma ();
 	}
 
 	pass PGeneric
@@ -431,7 +500,16 @@ technique MasterRefresh
 	pass PAliasLumaNoLuma
 	{
 		// textured, coloured, with luma, alias models only
-		VertexShader = compile vs_2_0 VSTexturedColouredCommon ();
-		PixelShader = compile ps_2_0 PSTexturedColouredLumaNoLuma ();
+		VertexShader = compile vs_2_0 VSAliasCommon ();
+		PixelShader = compile ps_2_0 PSAliasLuma ();
+	}
+
+	pass PParticles
+	{
+		// particles!
+		//VertexShader = compile vs_2_0 VSParticles ();
+		VertexShader = compile vs_2_0 VSAliasCommon ();
+		PixelShader = compile ps_2_0 PSParticles ();
+		//PixelShader = compile ps_2_0 PSAliasNoLuma ();
 	}
 }

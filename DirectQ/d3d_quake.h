@@ -150,6 +150,7 @@ void D3D_EndShaderPass (void);
 #define FX_PASS_SKYBOX			11
 #define FX_PASS_WORLD_LUMA_NO_LUMA	12
 #define FX_PASS_ALIAS_LUMA_NO_LUMA	13
+#define FX_PASS_PARTICLES		14
 
 extern int d3d_FXPass;
 

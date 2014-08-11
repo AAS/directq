@@ -39,7 +39,6 @@ typedef struct
 	bool	loadgame;			// handle connections specially
 
 	float		time;
-	DWORD		dwTime;
 	float		lastchecktime;
 
 	int			lastcheck;			// used by PF_checkclient

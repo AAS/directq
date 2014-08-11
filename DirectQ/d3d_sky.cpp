@@ -634,7 +634,7 @@ void R_MakeSkyboxCubeMap (void)
 	if (maxsize > d3d_DeviceCaps.MaxTextureHeight) maxsize = d3d_DeviceCaps.MaxTextureWidth;
 
 	// prevent those wacky modders from choking our video ram and performance
-	if (maxsize > 512) maxsize = 512;
+	if (maxsize > 1024) maxsize = 1024;
 
 	// now we can attempt to create the cubemap
 	for (;;)

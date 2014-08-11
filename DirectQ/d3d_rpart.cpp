@@ -1076,7 +1076,6 @@ void D3D_AddParticesToAlphaList (void)
 
 
 // update particles after drawing
-// update particles after drawing
 void R_UpdateParticles (void)
 {
 	float grav = d3d_RenderDef.frametime * sv_gravity.value * 0.05;
@@ -1140,9 +1139,9 @@ void D3DRPart_SetTexture (void *data)
 		if (d3d_FXPass == FX_PASS_NOTBEGUN)
 		{
 			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_GENERIC);
+			D3D_BeginShaderPass (FX_PASS_PARTICLES);
 		}
-		else if (d3d_FXPass == FX_PASS_GENERIC)
+		else if (d3d_FXPass == FX_PASS_PARTICLES)
 		{
 			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
 			d3d_FXCommitPending = true;
@@ -1151,7 +1150,7 @@ void D3DRPart_SetTexture (void *data)
 		{
 			D3D_EndShaderPass ();
 			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_GENERIC);
+			D3D_BeginShaderPass (FX_PASS_PARTICLES);
 		}
 	}
 	else D3D_SetTexture (tc->stage, tc->tex);
@@ -1162,6 +1161,7 @@ void D3DRPart_SetTexture (void *data)
 LPDIRECT3DTEXTURE9 cachedparticletexture = NULL;
 
 // particles were HUGELY inefficient in the VBO so I've put them back to UserPrimitives
+// fixme - most of this to go to the vertex shader
 void R_AddParticleTypeToRender (particle_type_t *pt)
 {
 	if (!pt->particles) return;

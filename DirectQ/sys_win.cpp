@@ -806,7 +806,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 
 
-void Host_Frame (DWORD time);
+void Host_Frame (float time);
 void D3D_CreateShadeDots (void);
 void VID_DefaultMonitorGamma_f (void);
 
@@ -1012,7 +1012,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	Sys_Init ();
 	Host_Init (&parms);
 
-	DWORD oldtime = timeGetTime ();
+	float oldtime = Sys_FloatTime ();
 
 	// load our easter egg ;)
 	d400klen = Sys_LoadResourceData (IDR_D400K, (void **) &d400kdata);
@@ -1042,13 +1042,15 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 			else Sleep (NOT_FOCUS_SLEEP);
 		}
 
-		DWORD newtime = timeGetTime ();
+		float newtime = Sys_FloatTime ();
 
 		// don't update if no time has passed
-		if (newtime == oldtime) continue;
-
-		Host_Frame (newtime - oldtime);
-		oldtime = newtime;
+		//if (newtime > oldtime)
+		{
+			Host_Frame (newtime - oldtime);
+			oldtime = newtime;
+		}
+		//else Sleep (0);
 	}
 
 	// success of application

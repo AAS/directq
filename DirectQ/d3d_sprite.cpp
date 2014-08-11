@@ -99,9 +99,9 @@ void D3DSprite_SetState (void *data)
 		{
 			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
 			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_GENERIC);
+			D3D_BeginShaderPass (FX_PASS_PARTICLES);
 		}
-		else if (d3d_FXPass == FX_PASS_GENERIC)
+		else if (d3d_FXPass == FX_PASS_PARTICLES)
 		{
 			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
 			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
@@ -112,7 +112,7 @@ void D3DSprite_SetState (void *data)
 			D3D_EndShaderPass ();
 			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
 			d3d_MasterFX->SetTexture ("tmu0Texture", tc->tex);
-			D3D_BeginShaderPass (FX_PASS_GENERIC);
+			D3D_BeginShaderPass (FX_PASS_PARTICLES);
 		}
 	}
 	else

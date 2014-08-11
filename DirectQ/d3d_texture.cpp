@@ -379,6 +379,10 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			continue;
 		}
 
+		// fixes a bug in red slammer where a frame 0 in an animated texture generated the same checksum as a standard lava texture,
+		// causing animation cycles to get messed up.  ideally the texture system would be immune to this but for now it's not...
+		if (strcmp (identifier, d3dtex->texture->identifier)) continue;
+
 		// compare the hash and reuse if it matches
 		if (COM_CheckHash (texhash, d3dtex->texture->hash))
 		{

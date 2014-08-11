@@ -522,10 +522,35 @@ void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode, DWORD tmu2mode)
 {
 	if (d3d_GlobalCaps.usingPixelShaders)
 	{
+#if 0
+		static DWORD oldtmumodes[3] = {-1, -1, -1};
+
+		if (tmu0mode != oldtmumodes[0])
+		{
+			d3d_MasterFX->SetInt ("address0", tmu0mode);
+			d3d_FXCommitPending = true;
+			oldtmumodes[0] = tmu0mode;
+		}
+
+		if (tmu1mode != oldtmumodes[1])
+		{
+			d3d_MasterFX->SetInt ("address1", tmu1mode);
+			d3d_FXCommitPending = true;
+			oldtmumodes[1] = tmu1mode;
+		}
+
+		if (tmu2mode != oldtmumodes[2])
+		{
+			d3d_MasterFX->SetInt ("address2", tmu2mode);
+			d3d_FXCommitPending = true;
+			oldtmumodes[2] = tmu2mode;
+		}
+#else
 		d3d_MasterFX->SetInt ("address0", tmu0mode);
 		d3d_MasterFX->SetInt ("address1", tmu1mode);
 		d3d_MasterFX->SetInt ("address2", tmu2mode);
 		d3d_FXCommitPending = true;
+#endif
 	}
 	else
 	{
@@ -618,6 +643,22 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 
 	if (d3d_GlobalCaps.usingPixelShaders)
 	{
+#if 0
+		static DWORD oldfilters[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+
+		if (oldfilters[stage] != actual)
+		{
+			// hack - we don't know which stage numbers correspond to which samplers so
+			// we need this farce to set them correctly.
+			if (type == D3DSAMP_MAGFILTER || type == D3DSAMP_MINFILTER)
+				d3d_MasterFX->SetInt (va ("texfilter%i", stage), actual);
+			else d3d_MasterFX->SetInt (va ("mipfilter%i", stage), actual);
+
+			// bleagh.
+			d3d_FXCommitPending = true;
+			oldfilters[stage] = actual;
+		}
+#else
 		// hack - we don't know which stage numbers correspond to which samplers so
 		// we need this farce to set them correctly.
 		if (type == D3DSAMP_MAGFILTER || type == D3DSAMP_MINFILTER)
@@ -626,6 +667,7 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 
 		// bleagh.
 		d3d_FXCommitPending = true;
+#endif
 	}
 	else D3D_SetSamplerState (stage, type, actual);
 }

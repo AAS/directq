@@ -84,10 +84,6 @@ extern int d3d_NumRefreshRates;
 #define MENU_TAG_FULL			(1 << 31)
 #endif
 
-char **refrlist = NULL;
-int refrnum = 0;
-extern cvar_t vid_refreshrate;
-
 void VID_ApplyModeChange (void)
 {
 	// run a screen update after each to make sure they only occur one at a time
@@ -95,9 +91,6 @@ void VID_ApplyModeChange (void)
 	SCR_UpdateScreen ();
 
 	Cvar_Set (&vid_vsync, dummy_vsync);
-	SCR_UpdateScreen ();
-
-	Cvar_Set (&vid_refreshrate, d3d_AllowedRefreshRates[refrnum]);
 	SCR_UpdateScreen ();
 
 	// position the selection back up one as the "apply" option is no longer valid
@@ -111,7 +104,6 @@ bool Menu_VideoCheckNeedApply (void)
 	// we signal to show the apply option
 	if (menu_videomodenum != d3d_mode.integer) return true;
 	if (vid_vsync.integer != dummy_vsync) return true;
-	if (d3d_AllowedRefreshRates[refrnum] != vid_refreshrate.integer) return true;
 
 	// no apply needed
 	return false;
@@ -251,17 +243,6 @@ void Menu_VideoDecodeVideoMode (void)
 			menu_fullnum = findresnum;
 		}
 
-		refrnum = 0;
-
-		for (int i = 0; i < d3d_NumRefreshRates; i++)
-		{
-			if (d3d_AllowedRefreshRates[i] == vid_refreshrate.integer)
-			{
-				refrnum = i;
-				break;
-			}
-		}
-
 		return;
 	}
 
@@ -324,16 +305,6 @@ void Menu_VideoDecodeVideoMode (void)
 		menu_fullscrnres[i] = (char *) MainZone->Alloc (strlen (fullresolutions) + 1);
 		strcpy (menu_fullscrnres[i], fullresolutions);
 		fullresolutions += 32;
-	}
-
-	refrlist = (char **) MainZone->Alloc ((d3d_NumRefreshRates + 1) * sizeof (char *));
-
-	// fill in refreshrates
-	for (int i = 0; i < d3d_NumRefreshRates; i++)
-	{
-		refrlist[i] = (char *) MainZone->Alloc (16);
-		sprintf (refrlist[i], "%i Hz", d3d_AllowedRefreshRates[i]);
-		refrlist[i + 1] = NULL;
 	}
 
 	// call recursively to set the selected options
@@ -499,10 +470,6 @@ void Menu_VideoBuild (void)
 	menu_Video.AddOption (TAG_WINDOWED_HIDE, new CQMenuSpinControl ("Resolution", &menu_windnum, &menu_windowedres));
 	menu_Video.AddOption (TAG_FULLSCREEN_HIDE, new CQMenuSpinControl ("Resolution", &menu_fullnum, &menu_fullscrnres));
 	menu_Video.AddOption (TAG_FULLSCREEN_ENABLE, new CQMenuSpinControl ("Color Depth", &bppnum, bpplist));
-
-	// only allow on vista or higher
-	if (WinDWM && d3d_NumRefreshRates > 1)
-		menu_Video.AddOption (TAG_FULLSCREEN_ENABLE, new CQMenuSpinControl ("Refresh Rate", &refrnum, &refrlist));
 
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (new CQMenuIntegerToggle ("Vertical Sync", &dummy_vsync, 0, 1));

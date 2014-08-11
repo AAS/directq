@@ -690,15 +690,16 @@ void Host_Loadgame_f (void)
 	current_skill = (int) (tfloat + 0.1);
 	Cvar_Set ("skill", (float) current_skill);
 
-	// ensure these aren't silly
-	Cvar_Set ("deathmatch", 0.0f);
-	Cvar_Set ("coop", 0.0f);
-	Cvar_Set ("teamplay", 0.0f);
-
 	fscanf (f, "%s\n", mapname);
 	fscanf (f, "%f\n", &time);
 
 	CL_Disconnect_f ();
+
+	// ensure these aren't silly
+	// moved to after the disconnect because they hang slightly on load
+	Cvar_Set ("deathmatch", 0.0f);
+	Cvar_Set ("coop", 0.0f);
+	Cvar_Set ("teamplay", 0.0f);
 
 	SV_SpawnServer (mapname);
 
@@ -768,7 +769,6 @@ void Host_Loadgame_f (void)
 	
 	SVProgs->NumEdicts = entnum;
 	sv.time = time;
-	sv.dwTime = (DWORD) (time * 1000.0f);
 
 	fclose (f);
 

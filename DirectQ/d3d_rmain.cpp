@@ -1079,6 +1079,7 @@ void D3DRMain_EndCallback (void *blah)
 
 
 bool d3d_HLSLBegun = false;
+cvar_t r_skyfog ("r_skyfog", 0.5f, CVAR_ARCHIVE);
 
 void D3DRMain_HLSLBeginCallback (void *blah)
 {
@@ -1088,11 +1089,25 @@ void D3DRMain_HLSLBeginCallback (void *blah)
 		{
 			UINT numpasses;
 
+			extern float d3d_FogColor[];
+			extern float d3d_FogDensity;
+
 			d3d_MasterFX->SetTechnique ("MasterRefresh");
 			d3d_MasterFX->Begin (&numpasses, D3DXFX_DONOTSAVESTATE);
+
 			d3d_MasterFX->SetMatrix ("WorldMatrix", D3D_MakeD3DXMatrix (&d3d_ModelViewProjMatrix));
+			d3d_MasterFX->SetMatrix ("ModelViewMatrix", D3D_MakeD3DXMatrix (&d3d_ViewMatrix));
+
 			d3d_MasterFX->SetFloat ("Overbright", r_overbright.integer ? 2.0f : 1.0f);
 			d3d_MasterFX->SetFloatArray ("r_origin", r_origin, 3);
+
+			d3d_MasterFX->SetFloatArray ("FogColor", d3d_FogColor, 4);
+			hr = d3d_MasterFX->SetFloat ("FogDensity", (d3d_FogDensity / 64.0f));
+
+			if (d3d_FogDensity > 0 && r_skyfog.value > 0)
+				d3d_MasterFX->SetFloat ("SkyFog", 1.0f - r_skyfog.value);
+			else d3d_MasterFX->SetFloat ("SkyFog", 1.0f);
+
 			d3d_FXPass = FX_PASS_NOTBEGUN;
 			d3d_FXCommitPending = false;
 

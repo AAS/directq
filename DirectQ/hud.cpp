@@ -1416,27 +1416,26 @@ void HUD_MiniDeathmatchOverlay (void)
 
 void HUD_DrawFPS (void)
 {
-	static int fpsframe = 0;
-	static DWORD acctime = 0;
-	static float fps_fps = 0;
-	static bool firstrun = true;
+	static float	oldtime = 0, fps = 0;
+	static int		oldframecount = 0;
+	float			time;
+	int				x, y, frames;
 
-	acctime += dwHostFrameTime;
-	fpsframe++;
+	time = realtime - oldtime;
+	frames = d3d_RenderDef.framecount - oldframecount;
 
-	if (acctime >= 250)
+	if (time < 0 || frames < 0)
 	{
-		// we added to both counters above so we guarantee no division by zero
-		fps_fps = 1000.0f / ((float) acctime / (float) fpsframe);
-		acctime = 0;
-		fpsframe = 0;
-		firstrun = false;
+		oldtime = realtime;
+		oldframecount = d3d_RenderDef.framecount;
+		return;
 	}
 
-	if (firstrun)
+	if (time > 0.25) //update value every 1/4 second
 	{
-		// while we're starting up we just update roughly
-		fps_fps = 1000.0f / ((float) acctime / (float) fpsframe);
+		fps = frames / time;
+		oldtime = realtime;
+		oldframecount = d3d_RenderDef.framecount;
 	}
 
 	if (scr_showfps.value)
@@ -1448,7 +1447,7 @@ void HUD_DrawFPS (void)
 		int y1 = 40 + sb_lines;
 		int y2 = 11 + sb_lines;
 
-		_snprintf (str, 16, "%4i fps", (int) (fps_fps + 0.5f));
+		_snprintf (str, 16, "%4i fps", (int) (fps + 0.5f));
 
 		if (cl_sbar.integer > 2)
 			Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y1, str);

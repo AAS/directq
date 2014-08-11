@@ -37,14 +37,9 @@ quakeparms_t host_parms;
 
 bool	host_initialized;		// true if into command execution
 
-// note - this is TREACHEROUS!!!!  susceptible to rounding errors which may accumulate as it's added to other timers
 float		host_frametime;
-
-DWORD		dwHostFrameTime;
-
 float		realtime;				// without any filtering or bounding
-DWORD		dwRealTime;
-DWORD		dwOldRealTime;
+float		oldrealtime;
 int			host_framecount;
 
 client_t	*host_client;			// current client
@@ -520,46 +515,33 @@ Returns false if the time is too short to run a frame
 ===================
 */
 cvar_t host_maxfps ("host_maxfps", 72, CVAR_ARCHIVE | CVAR_SERVER);
+
 cvar_alias_t cl_maxfps ("cl_maxfps", &host_maxfps);
+cvar_alias_t sv_maxfps ("sv_maxfps", &host_maxfps);
 cvar_alias_t pq_maxfps ("pq_maxfps", &host_maxfps);
 
-DWORD fpsspread = 14;
 
-void Host_FPSSpread (void)
+bool Host_FilterTime (float time)
 {
-	// better to run at 71 than at 77...
-	fpsspread = (int) ((1000.0f / host_maxfps.value) + 0.5f);
-}
-
-
-bool Host_FilterTime (DWORD time)
-{
-	dwRealTime += time;
-	realtime = ((float) dwRealTime / 1000.0f);
+	realtime += time;
 
 	// bound sensibly
-	// with a millisecond timer at > 500 fps we're going to round down to 1 millisecond per frame
 	if (host_maxfps.value < 10) Cvar_Set (&host_maxfps, 10);
-	if (host_maxfps.value > 500) Cvar_Set (&host_maxfps, 500);
+	if (host_maxfps.value > 1000) Cvar_Set (&host_maxfps, 1000);
 
-	// determine the spread of framerates for this value of host_maxfps
-	Host_FPSSpread ();
-
-	if (!cls.timedemo && ((dwRealTime - dwOldRealTime) < fpsspread))
+	if (!cls.timedemo && ((realtime - oldrealtime) < (1.0f / host_maxfps.value)))
 		return false;
 
-	dwHostFrameTime = dwRealTime - dwOldRealTime;
-	dwOldRealTime = dwRealTime;
+	host_frametime = realtime - oldrealtime;
+	oldrealtime = realtime;
 
 	if (host_framerate.value > 0)
 		host_frametime = host_framerate.value;
 	else
 	{
 		// fixme - this is nonsensical...
-		if (dwHostFrameTime > 100) dwHostFrameTime = 100;
-		if (dwHostFrameTime < 1) dwHostFrameTime = 1;
-
-		host_frametime = ((float) dwHostFrameTime / 1000.0f);
+		if (host_frametime > 0.1f) host_frametime = 0.1f;
+		if (host_frametime < 0.001f) host_frametime = 0.001f;
 	}
 
 	return true;
@@ -608,7 +590,7 @@ void CL_SendLagMove (void);
 
 cvar_t host_speeds ("host_speeds", "0");
 
-void Host_Frame (DWORD time)
+void Host_Frame (float time)
 {
 	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver)) return;

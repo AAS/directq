@@ -445,7 +445,6 @@ float CL_LerpPoint (void)
 	if (!f || cl_nolerp.value || cls.timedemo || sv.active)
 	{
 		cl.time = cl.mtime[0];
-		cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
 		return 1;
 	}
 
@@ -461,20 +460,14 @@ float CL_LerpPoint (void)
 	if (frac < 0)
 	{
 		if (frac < -0.01)
-		{
 			cl.time = cl.mtime[1];
-			cl.dwTime = (DWORD) (cl.mtime[1] * 1000.0f);
-		}
 
 		frac = 0;
 	}
 	else if (frac > 1)
 	{
 		if (frac > 1.01)
-		{
 			cl.time = cl.mtime[0];
-			cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
-		}
 
 		frac = 1;
 	}
@@ -711,11 +704,11 @@ void CL_RelinkEntities (void)
 
 			// some entities have different attacks resulting in a different flash colour
 			if (!strncmp (&ent->model->name[6], "wizard", 6))
-				R_ColourDLight (dl, 125, 492, 146);
+				R_ColourDLight (dl, 308, 351, 109);
 			else if (!strncmp (&ent->model->name[6], "shalrath", 8))
 				R_ColourDLight (dl, 399, 141, 228);
 			else if (!strncmp (&ent->model->name[6], "shambler", 8))
-				R_ColourDLight (dl, 2, 225, 541);
+				R_ColourDLight (dl, 65, 232, 470);
 			else R_ColourDLight (dl, 408, 242, 117);
 
 			if (i == cl.viewentity)
@@ -731,7 +724,7 @@ void CL_RelinkEntities (void)
 					dl->die = cl.time + 0.1;
 
 					// switch the dlight colour
-					R_ColourDLight (dl, 2, 225, 541);
+					R_ColourDLight (dl, 65, 232, 470);
 				}
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)
 				{
@@ -739,7 +732,7 @@ void CL_RelinkEntities (void)
 					dl->die = cl.time + 0.1;
 
 					// switch the dlight colour
-					R_ColourDLight (dl, 2, 225, 541);
+					R_ColourDLight (dl, 65, 232, 470);
 				}
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_NAILGUN)
 				{
@@ -818,7 +811,7 @@ void CL_RelinkEntities (void)
 				dl->radius = 200;
 				dl->die = cl.time + 0.01;
 
-				R_ColourDLight (dl, 125, 492, 146);
+				R_ColourDLight (dl, 308, 351, 109);
 			}
 
 			ent->effects |= EF_NEVEROCCLUDE;
@@ -902,8 +895,7 @@ int CL_ReadFromServer (void)
 	cl.oldtime = cl.time;
 
 	// keep client timings millisecond steady
-	cl.dwTime += dwHostFrameTime;
-	cl.time = ((float) cl.dwTime / 1000.0f);
+	cl.time += host_frametime;
 
 	do
 	{

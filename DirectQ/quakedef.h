@@ -303,8 +303,6 @@ extern	cvar_t		developer;
 extern	bool	host_initialized;		// true if into command execution
 
 extern	float		host_frametime;
-extern	DWORD		dwHostFrameTime;
-
 extern	int			host_framecount;	// incremented every frame, never reset
 
 extern	float		realtime;			// not bounded in any way, changed at

@@ -48,8 +48,6 @@ cvar_t	sv_nostep ("sv_nostep","0", CVAR_SERVER);
 
 static	vec3_t	vec_origin = {0.0, 0.0, 0.0};
 
-static float physics_frametime = 0;
-
 #define	MOVE_EPSILON	0.01
 
 void SV_Physics_Toss (edict_t *ent);
@@ -138,7 +136,7 @@ bool SV_RunThink (edict_t *ent)
 {
 	float thinktime = ent->v.nextthink;
 
-	if (thinktime <= 0 || thinktime > (sv.time + physics_frametime)) return true;
+	if (thinktime <= 0 || thinktime > (sv.time + host_frametime)) return true;
 
 	// don't let things stay in the past.  it is possible to start that way by a trigger with a local time.
 	if (thinktime < sv.time) thinktime = sv.time;
@@ -402,7 +400,7 @@ void SV_AddGravity (edict_t *ent)
 		ent_gravity = val->_float;
 	else ent_gravity = 1.0;
 
-	ent->v.velocity[2] -= (ent_gravity * sv_gravity.value * physics_frametime);
+	ent->v.velocity[2] -= (ent_gravity * sv_gravity.value * host_frametime);
 }
 
 
@@ -744,13 +742,13 @@ void SV_Physics_Pusher (edict_t *ent)
 	
 	thinktime = ent->v.nextthink;
 
-	if (thinktime < ent->v.ltime + physics_frametime)
+	if (thinktime < ent->v.ltime + host_frametime)
 	{
 		movetime = thinktime - ent->v.ltime;
 		if (movetime < 0)
 			movetime = 0;
 	}
-	else movetime = physics_frametime;
+	else movetime = host_frametime;
 
 	// advances ent->v.ltime if not blocked
 #if 1
@@ -759,7 +757,7 @@ void SV_Physics_Pusher (edict_t *ent)
 	{
 		// hmmm - what solid does the end spiky ball use...?
 		if (ent->v.solid == SOLID_BSP && (ent->v.avelocity[0] || ent->v.avelocity[1] || ent->v.avelocity[2]) && ent != SVProgs->EdictPointers[0])
-	        SV_PushRotate (ent, physics_frametime);
+	        SV_PushRotate (ent, host_frametime);
 		else SV_PushMove (ent, movetime);
 	}
 #else
@@ -987,7 +985,7 @@ void SV_WalkMove (edict_t *ent)
 	VectorCopy (ent->v.origin, oldorg);
 	VectorCopy (ent->v.velocity, oldvel);
 	
-	clip = SV_FlyMove (ent, physics_frametime, &steptrace);
+	clip = SV_FlyMove (ent, host_frametime, &steptrace);
 
 	if ( !(clip & 2) )
 		return;		// move didn't block on a step
@@ -1015,7 +1013,7 @@ void SV_WalkMove (edict_t *ent)
 	VectorCopy (vec3_origin, upmove);
 	VectorCopy (vec3_origin, downmove);
 	upmove[2] = STEPSIZE;
-	downmove[2] = -STEPSIZE + oldvel[2]*physics_frametime;
+	downmove[2] = -STEPSIZE + oldvel[2]*host_frametime;
 
 // move up
 	SV_PushEntity (ent, upmove);	// FIXME: don't link?
@@ -1024,7 +1022,7 @@ void SV_WalkMove (edict_t *ent)
 	ent->v.velocity[0] = oldvel[0];
 	ent->v. velocity[1] = oldvel[1];
 	ent->v. velocity[2] = 0;
-	clip = SV_FlyMove (ent, physics_frametime, &steptrace);
+	clip = SV_FlyMove (ent, host_frametime, &steptrace);
 
 // check for stuckness, possibly due to the limited precision of floats
 // in the clipping hulls
@@ -1115,13 +1113,13 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	case MOVETYPE_FLY:
 		if (!SV_RunThink (ent))
 			return;
-		SV_FlyMove (ent, physics_frametime, NULL);
+		SV_FlyMove (ent, host_frametime, NULL);
 		break;
 		
 	case MOVETYPE_NOCLIP:
 		if (!SV_RunThink (ent))
 			return;
-		VectorMA (ent->v.origin, physics_frametime, ent->v.velocity, ent->v.origin);
+		VectorMA (ent->v.origin, host_frametime, ent->v.velocity, ent->v.origin);
 		break;
 
 	default:
@@ -1219,8 +1217,8 @@ void SV_Physics_Noclip (edict_t *ent)
 	if (!SV_RunThink (ent))
 		return;
 
-	VectorMA (ent->v.angles, physics_frametime, ent->v.avelocity, ent->v.angles);
-	VectorMA (ent->v.origin, physics_frametime, ent->v.velocity, ent->v.origin);
+	VectorMA (ent->v.angles, host_frametime, ent->v.avelocity, ent->v.angles);
+	VectorMA (ent->v.origin, host_frametime, ent->v.velocity, ent->v.origin);
 
 	SV_LinkEdict (ent, false);
 }
@@ -1300,10 +1298,10 @@ void SV_Physics_Toss (edict_t *ent)
 		SV_AddGravity (ent);
 
 // move angles
-	VectorMA (ent->v.angles, physics_frametime, ent->v.avelocity, ent->v.angles);
+	VectorMA (ent->v.angles, host_frametime, ent->v.avelocity, ent->v.angles);
 
 // move origin
-	VectorScale (ent->v.velocity, physics_frametime, move);
+	VectorScale (ent->v.velocity, host_frametime, move);
 	trace = SV_PushEntity (ent, move);
 
 	if (trace.fraction == 1)
@@ -1368,7 +1366,7 @@ void SV_Physics_Step (edict_t *ent)
 
 		SV_AddGravity (ent);
 		SV_CheckVelocity (ent);
-		SV_FlyMove (ent, physics_frametime, NULL);
+		SV_FlyMove (ent, host_frametime, NULL);
 		SV_LinkEdict (ent, true);
 
 		if ((int) ent->v.flags & FL_ONGROUND)	// just hit ground
@@ -1397,8 +1395,6 @@ void SV_Physics (void)
 {
 	int		i;
 	edict_t	*ent;
-
-	physics_frametime = ((float) dwHostFrameTime / 1000.0f);
 
 	// let the progs know that a new frame has started
 	SVProgs->GlobalStruct->self = EDICT_TO_PROG(SVProgs->EdictPointers[0]);
@@ -1440,8 +1436,7 @@ void SV_Physics (void)
 	if (SVProgs->GlobalStruct->force_retouch)
 		SVProgs->GlobalStruct->force_retouch--;
 
-	sv.dwTime += dwHostFrameTime;
-	sv.time = ((float) sv.dwTime / 1000.0f);
+	sv.time += host_frametime;
 }
 
 
@@ -1454,8 +1449,8 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	float	save_frametime;
 
 	// needs to simulate different FPS because it comes from progs
-	save_frametime = physics_frametime;
-	physics_frametime = 0.05;
+	save_frametime = host_frametime;
+	host_frametime = 0.05;
 
 	Q_MemCpy(&tempent, ent, sizeof(edict_t));
 	tent = &tempent;
@@ -1464,8 +1459,8 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	{
 		SV_CheckVelocity (tent);
 		SV_AddGravity (tent);
-		VectorMA (tent->v.angles, physics_frametime, tent->v.avelocity, tent->v.angles);
-		VectorScale (tent->v.velocity, physics_frametime, move);
+		VectorMA (tent->v.angles, host_frametime, tent->v.avelocity, tent->v.angles);
+		VectorScale (tent->v.velocity, host_frametime, move);
 		VectorAdd (tent->v.origin, move, end);
 		trace = SV_Move (tent->v.origin, tent->v.mins, tent->v.maxs, end, MOVE_NORMAL, tent);	
 		VectorCopy (trace.endpos, tent->v.origin);
@@ -1475,6 +1470,6 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 				break;
 	}
 
-	physics_frametime = save_frametime;
+	host_frametime = save_frametime;
 	return trace;
 }
