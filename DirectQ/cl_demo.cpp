@@ -401,7 +401,7 @@ void CL_Record_f (void)
 		{
 			MSG_WriteByte (&net_message, svc_lightstyle);
 			MSG_WriteByte (&net_message, i);
-			MSG_WriteString (&net_message, cl_lightstyle[i].map);
+			MSG_WriteString (&net_message, (char *) cl_lightstyle[i].map);
 		}
 
 		// view entity

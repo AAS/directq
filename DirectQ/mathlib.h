@@ -93,6 +93,7 @@ float	anglemod (float a);
 		BoxOnPlaneSide((emins), (emaxs), (p)))
 
 #define CLAMP(min, x, max) ((x) < (min) ? (min) : (x) > (max) ? (max) : (x))
+
 #define Q_rint(x) ((x) > 0 ? (int)((x) + 0.5) : (int)((x) - 0.5))
 
 #define Q_Random(MIN,MAX) ((rand() & 32767) * (((MAX) - (MIN)) * (1.0f / 32767.0f)) + (MIN))

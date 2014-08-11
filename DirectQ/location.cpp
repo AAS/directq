@@ -38,10 +38,14 @@ void LOC_LoadLocations (void)
 	char locname[MAX_PATH];
 	COM_StripExtension (cl.worldmodel->name, locname);
 
+	// this assumes that cl.worldmodel begins with "maps/"
+	memcpy (locname, "locs", 4);
+	/*
 	locname[0] = 'l';
 	locname[1] = 'o';
 	locname[2] = 'c';
 	locname[3] = 's';
+	*/
 	COM_DefaultExtension (locname, ".loc");
 
 	char *locdataload = (char *) COM_LoadFile (locname);
@@ -123,7 +127,7 @@ void LOC_LoadLocations (void)
 	}
 
 	Zone_Free (locdataload);
-	Con_DPrintf ("Read %i locations\n", numlocations);
+	Con_Printf ("Read %i locations\n", numlocations);
 }
 
 

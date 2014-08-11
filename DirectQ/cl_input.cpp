@@ -603,6 +603,8 @@ void CL_SendLagMove (void)
 			Con_Printf ("CL_SendLagMove: lost server connection\n");
 			CL_Disconnect ();
 		}
+
+		// Con_Printf ("sent %i\n", lag_buff[(lag_tail - 1) & 31].cursize);
 	}
 }
 
@@ -614,7 +616,6 @@ CL_SendMove
 */
 void CL_SendMove (usercmd_t *cmd)
 {
-	int		i;
 	int		bits;
 	sizebuf_t	*buf;
 
@@ -633,18 +634,22 @@ void CL_SendMove (usercmd_t *cmd)
 
 	if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION_NQ)
 	{
-		for (i = 0; i < 3; i++)
-			MSG_WriteProQuakeAngle (buf, cl.viewangles[i]);
+		MSG_WriteProQuakeAngle (buf, cl.viewangles[0]);
+		MSG_WriteProQuakeAngle (buf, cl.viewangles[1]);
+		MSG_WriteProQuakeAngle (buf, cl.viewangles[2]);
 	}
 	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
 	{
-		for (i = 0; i < 3; i++)
-			MSG_WriteAngle16 (buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
+		MSG_WriteAngle16 (buf, cl.viewangles[0], cl.Protocol, cl.PrototcolFlags);
+		MSG_WriteAngle16 (buf, cl.viewangles[1], cl.Protocol, cl.PrototcolFlags);
+		MSG_WriteAngle16 (buf, cl.viewangles[2], cl.Protocol, cl.PrototcolFlags);
 	}
 	else
 	{
-		for (i = 0; i < 3; i++)
-			MSG_WriteAngle (buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
+		// don't rough-round angle[1] here (fixme - the param name is no longer descriptive)
+		MSG_WriteAngle (buf, cl.viewangles[0], cl.Protocol, cl.PrototcolFlags, 0);
+		MSG_WriteAngle (buf, cl.viewangles[1], cl.Protocol, cl.PrototcolFlags, 0);
+		MSG_WriteAngle (buf, cl.viewangles[2], cl.Protocol, cl.PrototcolFlags, 2);
 	}
 
 	MSG_WriteShort (buf, cmd->forwardmove);

@@ -515,6 +515,9 @@ void Menu_DirtySaveLoadMenu (void);
 // where all the necessary validation and setup has already been performed!!!
 void Host_DoSavegame (char *savename)
 {
+	// this ensures that savedir is validated and created irrespective of where it is called from
+	if (!COM_ValidateContentFolderCvar (&host_savedir)) return;
+
 	char	name[256];
 	FILE	*f;
 	int		i;
@@ -1360,9 +1363,9 @@ void Host_Spawn_f (void)
 	MSG_WriteByte (&host_client->message, svc_setangle);
 
 	for (i = 0; i < 2; i++)
-		MSG_WriteAngle (&host_client->message, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags);
+		MSG_WriteAngle (&host_client->message, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
 
-	MSG_WriteAngle (&host_client->message, 0, sv.Protocol, sv.PrototcolFlags);
+	MSG_WriteAngle (&host_client->message, 0, sv.Protocol, sv.PrototcolFlags, 2);
 
 	SV_WriteClientdataToMessage (sv_player, &host_client->message);
 

@@ -86,6 +86,7 @@ typedef struct r_coronavertex_s
 } r_coronavertex_t;
 
 
+// fixme - move these to a vertex buffer
 r_coronavertex_t *r_coronavertexes = NULL;
 unsigned short *r_coronaindexes = NULL;
 
@@ -412,6 +413,33 @@ void D3D_AddDynamicLights (msurface_t *surf)
 R_AnimateLight
 ==================
 */
+int light_valuetable[256];
+
+void R_SetDefaultLightStyles (void)
+{
+	// correct lightscaling so that 'm' is 256, not 264
+	for (int i = 0; i < 256; i++)
+	{
+		// make it explicit that yeah, it's a *signed* char we want to use here
+		// so that values > 127 will behave as expected
+		float fv = (float) ((signed char) i - 'a') * 22;
+
+		fv *= 256.0f;
+		fv /= 264.0f;
+
+		// in general a mod should never provide values for these that are outside of the 'a'..'z' range,
+		// but the argument could be made that ID Quake/QC does/did nothing to prevent it, so it's legal
+		if (fv < 0)
+			light_valuetable[i] = (int) (fv - 0.5f);
+		else light_valuetable[i] = (int) (fv + 0.5f);
+	}
+
+	// normal light value - making this consistent with a value of 'm' in R_AnimateLight
+	// will prevent the upload of lightmaps when a surface is first seen
+	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = light_valuetable['m'];
+}
+
+
 void R_AnimateLight (void)
 {
 	// made this cvar-controllable!
@@ -436,26 +464,19 @@ void R_AnimateLight (void)
 		{
 			if (!cl_lightstyle[j].length)
 			{
-				d_lightstylevalue[j] = 264;	// consistency with ('m' - 'a') * 22
+				d_lightstylevalue[j] = light_valuetable['m'];
 				continue;
 			}
 			else if (cl_lightstyle[j].length == 1)
 			{
 				// single length style so don't bother interpolating
-				d_lightstylevalue[j] = 22 * (cl_lightstyle[j].map[0] - 'a');
+				d_lightstylevalue[j] = light_valuetable[cl_lightstyle[j].map[0]];
 				continue;
 			}
 
 			// interpolate animating light
-			// frame just gone
-			k = flight % cl_lightstyle[j].length;
-			k = cl_lightstyle[j].map[k] - 'a';
-			l = (float) (k * 22) * backlerp;
-
-			// upcoming frame
-			k = clight % cl_lightstyle[j].length;
-			k = cl_lightstyle[j].map[k] - 'a';
-			l += (float) (k * 22) * lerpfrac;
+			l = (float) light_valuetable[cl_lightstyle[j].map[flight % cl_lightstyle[j].length]] * backlerp;
+			l += (float) light_valuetable[cl_lightstyle[j].map[clight % cl_lightstyle[j].length]] * lerpfrac;
 
 			d_lightstylevalue[j] = (int) l;
 		}
@@ -469,20 +490,17 @@ void R_AnimateLight (void)
 		{
 			if (!cl_lightstyle[j].length)
 			{
-				d_lightstylevalue[j] = 264;	// consistency with ('m' - 'a') * 22
+				d_lightstylevalue[j] = light_valuetable['m'];
 				continue;
 			}
 			else if (cl_lightstyle[j].length == 1)
 			{
-				// single length style so don't bother calculating
-				d_lightstylevalue[j] = 22 * (cl_lightstyle[j].map[0] - 'a');
+				// single length style so don't bother interpolating
+				d_lightstylevalue[j] = light_valuetable[cl_lightstyle[j].map[0]];
 				continue;
 			}
 
-			int k = i % cl_lightstyle[j].length;
-			k = cl_lightstyle[j].map[k] - 'a';
-			k = k * 22;
-			d_lightstylevalue[j] = k;
+			d_lightstylevalue[j] = light_valuetable[cl_lightstyle[j].map[i % cl_lightstyle[j].length]];
 		}
 	}
 }

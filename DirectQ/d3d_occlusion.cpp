@@ -435,6 +435,7 @@ void D3DOC_ShowBBoxes (void)
 	if (stateset)
 	{
 		D3D_BackfaceCull (D3DCULL_CCW);
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 
 		if (r_showbboxes.integer > 1)
 			D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);

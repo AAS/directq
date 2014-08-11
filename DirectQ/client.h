@@ -33,7 +33,10 @@ typedef struct
 typedef struct
 {
 	int		length;
-	char	map[MAX_STYLESTRING];
+
+	// this was a char but could give negative array indexes if a mod author uses a lightstyle map > 127, so we make it a byte
+	// instead and convert it back to the signed char equivalent in our lookup table
+	byte	map[MAX_STYLESTRING];
 } lightstyle_t;
 
 typedef struct

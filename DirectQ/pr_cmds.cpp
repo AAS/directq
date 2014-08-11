@@ -1821,7 +1821,7 @@ void PF_WriteLong (void)
 
 void PF_WriteAngle (void)
 {
-	MSG_WriteAngle (WriteDest(), G_FLOAT (OFS_PARM1), sv.Protocol, sv.PrototcolFlags);
+	MSG_WriteAngle (WriteDest(), G_FLOAT (OFS_PARM1), sv.Protocol, sv.PrototcolFlags, 0);
 }
 
 void PF_WriteCoord (void)
@@ -1887,7 +1887,7 @@ void MakeMeAStaticEntity (sizebuf_t *buf, edict_t *ent)
 	for (i = 0; i < 3; i++)
 	{
 		MSG_WriteCoord (buf, ent->v.origin[i], sv.Protocol, sv.PrototcolFlags);
-		MSG_WriteAngle (buf, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags);
+		MSG_WriteAngle (buf, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
 	}
 
 	if (bits & B_ALPHA) MSG_WriteByte (buf, ent->alpha);

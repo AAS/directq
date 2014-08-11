@@ -172,11 +172,7 @@ char **menu_fullscrnres = NULL;
 
 int menu_windnum = 0;
 int menu_fullnum = 0;
-
-char *bpplist[] = {"16 bpp", "32 bpp", NULL};
 char *modelist[] = {"Windowed", "Fullscreen", NULL};
-
-int bppnum = 0;
 int modetypenum = 0;
 
 extern D3DDISPLAYMODE d3d_DesktopMode;
@@ -257,16 +253,6 @@ void Menu_VideoDecodeVideoMode (void)
 			modetypenum = 1;
 			findformat = d3d_CurrentMode.Format;
 			findres = menu_fullscrnres;
-		}
-
-		switch (findformat)
-		{
-		case D3DFMT_R5G6B5:		bppnum = 0; break;
-		case D3DFMT_X1R5G5B5:	bppnum = 0; break;
-		case D3DFMT_A1R5G5B5:	bppnum = 0; break;
-		case D3DFMT_X8R8G8B8:	bppnum = 1; break;
-		case D3DFMT_UNKNOWN:	bppnum = 1; break;
-		default:				bppnum = 1; break;
 		}
 
 		char resbuf[32];
@@ -393,10 +379,6 @@ void Menu_VideoEncodeVideoMode (void)
 		if (!mode->AllowWindowed && modetypenum == 0) continue;
 		if (mode->AllowWindowed && modetypenum == 1) continue;
 
-		// match bit depth if fullscreen
-		if (modetypenum == 1 && bppnum == 0 && mode->BPP != 16) continue;
-		if (modetypenum == 1 && bppnum == 1 && mode->BPP != 32) continue;
-
 		// this is the mode
 		menu_videomodenum = mode->ModeNum;
 		break;
@@ -498,7 +480,6 @@ void Menu_VideoBuild (void)
 	menu_Video.AddOption (new CQMenuSpinControl ("Video Mode Type", &modetypenum, modelist));
 	menu_Video.AddOption (TAG_WINDOWED_HIDE, new CQMenuSpinControl ("Resolution", &menu_windnum, &menu_windowedres));
 	menu_Video.AddOption (TAG_FULLSCREEN_HIDE, new CQMenuSpinControl ("Resolution", &menu_fullnum, &menu_fullscrnres));
-	menu_Video.AddOption (TAG_FULLSCREEN_ENABLE, new CQMenuSpinControl ("Color Depth", &bppnum, bpplist));
 	menu_Video.AddOption (new CQMenuIntegerToggle ("Vertical Sync", &dummy_vsync, 0, 1));
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuCommand ("Apply Video Mode Change", VID_ApplyModeChange));

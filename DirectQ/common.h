@@ -99,7 +99,7 @@ void MSG_WriteString (sizebuf_t *sb, char *s);
 
 
 void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol, unsigned flags);
-void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol, unsigned flags);
+void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol, unsigned flags, int angleindex);
 float MSG_ReadCoord (int protocol, unsigned flags);
 float MSG_ReadAngle (int protocol, unsigned flags);
 void MSG_WriteAngle16 (sizebuf_t *sb, float f, int protocol, unsigned flags);

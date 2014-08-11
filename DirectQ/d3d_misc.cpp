@@ -245,6 +245,7 @@ void D3DAlias_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
 void Mod_InitForMap (model_t *mod);
 void D3DTexture_DefineChains (void);
+void R_SetDefaultLightStyles (void);
 
 void R_ParseForNehahra (void)
 {
@@ -260,9 +261,7 @@ void R_NewMap (void)
 	d3d_RenderDef.framecount = 1;
 	d3d_RenderDef.visframecount = 0;
 
-	// normal light value - making this consistent with a value of 'm' in R_AnimateLight
-	// will prevent the upload of lightmaps when a surface is first seen!
-	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 264; // consistency with ('m' - 'a') * 22
+	R_SetDefaultLightStyles ();
 
 	// clear out efrags (one short???)
 	for (int i = 0; i < cl.worldmodel->brushhdr->numleafs; i++)

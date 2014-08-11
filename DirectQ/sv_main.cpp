@@ -860,11 +860,11 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (bits & U_SKIN) MSG_WriteByte (msg, ent->v.skin);
 		if (bits & U_EFFECTS) MSG_WriteByte (msg, ent->v.effects);
 		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, ent->v.origin[0], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0], sv.Protocol, sv.PrototcolFlags);
+		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0], sv.Protocol, sv.PrototcolFlags, 0);
 		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, ent->v.origin[1], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1], sv.Protocol, sv.PrototcolFlags);
+		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1], sv.Protocol, sv.PrototcolFlags, 1);
 		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, ent->v.origin[2], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2], sv.Protocol, sv.PrototcolFlags);
+		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2], sv.Protocol, sv.PrototcolFlags, 2);
 		if (bits & U_ALPHA) MSG_WriteByte (msg, alpha);
 		if (bits & U_FRAME2) MSG_WriteByte (msg, (int) ent->v.frame >> 8);
 		if (bits & U_MODEL2) MSG_WriteByte (msg, (int) ent->v.modelindex >> 8);
@@ -953,7 +953,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 		MSG_WriteByte (msg, svc_setangle);
 
 		for (i = 0; i < 3; i++)
-			MSG_WriteAngle (msg, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags);
+			MSG_WriteAngle (msg, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
 
 		ent->v.fixangle = 0;
 	}
@@ -1380,7 +1380,7 @@ void SV_CreateBaseline (void)
 		for (i = 0; i < 3; i++)
 		{
 			MSG_WriteCoord (&sv.signon, svent->baseline.origin[i], sv.Protocol, sv.PrototcolFlags);
-			MSG_WriteAngle (&sv.signon, svent->baseline.angles[i], sv.Protocol, sv.PrototcolFlags);
+			MSG_WriteAngle (&sv.signon, svent->baseline.angles[i], sv.Protocol, sv.PrototcolFlags, i);
 		}
 
 		if (bits & B_ALPHA) MSG_WriteByte (&sv.signon, svent->baseline.alpha);

@@ -306,6 +306,48 @@ SV_TouchLinks
 */
 void SV_TouchLinks (edict_t *ent, areanode_t *node)
 {
+#if 0
+	link_t		*l, *next;
+	edict_t		*touch;
+	int			old_self, old_other;
+
+// touch linked edicts
+	for (l = node->trigger_edicts.next ; l != &node->trigger_edicts ; l = next)
+	{
+		next = l->next;
+		touch = EDICT_FROM_AREA(l);
+		if (touch == ent)
+			continue;
+		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER)
+			continue;
+		if (ent->v.absmin[0] > touch->v.absmax[0]
+		|| ent->v.absmin[1] > touch->v.absmax[1]
+		|| ent->v.absmin[2] > touch->v.absmax[2]
+		|| ent->v.absmax[0] < touch->v.absmin[0]
+		|| ent->v.absmax[1] < touch->v.absmin[1]
+		|| ent->v.absmax[2] < touch->v.absmin[2] )
+			continue;
+		old_self = SVProgs->GlobalStruct->self;
+		old_other = SVProgs->GlobalStruct->other;
+
+		SVProgs->GlobalStruct->self = EDICT_TO_PROG(touch);
+		SVProgs->GlobalStruct->other = EDICT_TO_PROG(ent);
+		SVProgs->GlobalStruct->time = sv.time;
+		SVProgs->ExecuteProgram (touch->v.touch);
+
+		SVProgs->GlobalStruct->self = old_self;
+		SVProgs->GlobalStruct->other = old_other;
+	}
+	
+// recurse down both sides
+	if (node->axis == -1)
+		return;
+	
+	if ( ent->v.absmax[node->axis] > node->dist )
+		SV_TouchLinks ( ent, node->children[0] );
+	if ( ent->v.absmin[node->axis] < node->dist )
+		SV_TouchLinks ( ent, node->children[1] );
+#else
 	link_t	       *l, *next;
 	edict_t	       *touch;
 	int	       old_self, old_other, touched = 0, i;
@@ -323,9 +365,7 @@ loc0:;
 		touch = EDICT_FROM_AREA (l);
 
 		if (touch == ent) continue;
-
 		if (touch->free) continue;
-
 		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER) continue;
 
 		if (ent->v.absmin[0] > touch->v.absmax[0] || ent->v.absmin[1] > touch->v.absmax[1] || ent->v.absmin[2] > touch->v.absmax[2] ||
@@ -383,6 +423,58 @@ loc0:;
 			goto loc0;
 		}
 	}
+#endif
+}
+
+
+void SV_RotateBBoxToAbsMinMax (edict_t *ent)
+{
+	int i, j;
+	float mins[3];
+	float maxs[3];
+	vec3_t bbox[8];
+	vec3_t fv, rv, uv;
+	float angles[3];
+
+	// compute a full bounding box
+	for (i = 0; i < 8; i++)
+	{
+		bbox[i][0] = (i & 1) ? ent->v.mins[0] : ent->v.maxs[0];
+		bbox[i][1] = (i & 2) ? ent->v.mins[1] : ent->v.maxs[1];
+		bbox[i][2] = (i & 4) ? ent->v.mins[2] : ent->v.maxs[2];
+	}
+
+	// derive forward/right/up vectors from the angles
+	AngleVectors (ent->v.angles, fv, rv, uv);
+
+	// compute the rotated bbox corners
+	mins[0] = mins[1] = mins[2] = 9999999;
+	maxs[0] = maxs[1] = maxs[2] = -9999999;
+
+	// and rotate the bounding box
+	for (i = 0; i < 8; i++)
+	{
+		vec3_t tmp;
+
+		VectorCopy (bbox[i], tmp);
+
+		bbox[i][0] = DotProduct (fv, tmp);
+		bbox[i][1] = -DotProduct (rv, tmp);
+		bbox[i][2] = DotProduct (uv, tmp);
+
+		// and convert them to mins and maxs
+		for (j = 0; j < 3; j++)
+		{
+			if (bbox[i][j] < mins[j]) mins[j] = bbox[i][j];
+			if (bbox[i][j] > maxs[j]) maxs[j] = bbox[i][j];
+		}
+	}
+
+	// translate the bbox to it's final position at the entity origin
+	VectorAdd (ent->v.origin, mins, ent->v.absmin);
+	VectorAdd (ent->v.origin, maxs, ent->v.absmax);
+
+	// Con_Printf ("%f %f %f\n", ent->v.angles[0], ent->v.angles[1], ent->v.angles[2]);
 }
 
 
@@ -395,27 +487,11 @@ SV_LinkEdict
 void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 {
 	if (ent->area.prev) SV_UnlinkEdict (ent);	// unlink from old position
-
 	if (ent == SVProgs->EdictPointers[0]) return;		// don't add the world
-
 	if (ent->free) return;
 
 	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
-	{
-		// expand for rotation
-		float max = DotProduct (ent->v.mins, ent->v.mins);
-		float v = DotProduct (ent->v.maxs, ent->v.maxs);
-
-		if (max < v)
-			max = sqrt (v);
-		else max = sqrt (max);
-
-		for (int i = 0; i < 3; i++)
-		{
-			ent->v.absmin[i] = ent->v.origin[i] - max;
-			ent->v.absmax[i] = ent->v.origin[i] + max;
-		}
-	}
+		SV_RotateBBoxToAbsMinMax (ent);
 	else
 	{
 		// set the abs box
@@ -798,11 +874,8 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 		touch = EDICT_FROM_AREA (l);
 
 		if (touch->v.solid == SOLID_NOT) continue;
-
 		if (touch == clip->passedict) continue;
-
 		if (touch->v.solid == SOLID_TRIGGER) Sys_Error ("Trigger in clipping list");
-
 		if (clip->type == MOVE_NOMONSTERS && touch->v.solid != SOLID_BSP) continue;
 
 		if (clip->boxmins[0] > touch->v.absmax[0] || clip->boxmins[1] > touch->v.absmax[1] || clip->boxmins[2] > touch->v.absmax[2] ||
@@ -810,13 +883,11 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 			continue;
 
 		if (clip->passedict && clip->passedict->v.size[0] && !touch->v.size[0]) continue;	// points never interact
-
 		if (clip->trace.allsolid) return; // might intersect, so do an exact clip
 
 		if (clip->passedict)
 		{
 			if (PROG_TO_EDICT (touch->v.owner) == clip->passedict) continue;	// don't clip against own missiles
-
 			if (PROG_TO_EDICT (clip->passedict->v.owner) == touch) continue;	// don't clip against owner
 		}
 

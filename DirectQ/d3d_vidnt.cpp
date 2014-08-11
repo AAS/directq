@@ -35,7 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma comment (lib, "d3dx9.lib")
 #endif
 
-#define VIDDRIVER_VERSION "1.8.7"
+#define VIDDRIVER_VERSION "1.8.7-no-16-bpp"
 cvar_t viddriver_version ("viddriver_version", "unknown", CVAR_ARCHIVE);
 
 void D3D_SetAllStates (void);
@@ -134,18 +134,6 @@ D3DDISPLAYMODE d3d_DesktopMode;
 D3DDISPLAYMODE d3d_CurrentMode;
 
 d3d_ModeDesc_t d3d_BadMode = {{666, 666, 666, D3DFMT_UNKNOWN}, false, 0, -1, "Bad Mode"};
-
-
-// list of mode formats we wish to test
-D3DFORMAT d3d_AdapterModeDescs[] =
-{
-	// enumerate in this order
-	D3DFMT_R5G6B5,
-	D3DFMT_X1R5G5B5,
-	D3DFMT_A1R5G5B5,
-	D3DFMT_X8R8G8B8,
-	D3DFMT_UNKNOWN
-};
 
 
 // rather than having lots and lots and lots of globals all holding multiple instances of the same data, let's do
@@ -528,20 +516,7 @@ void D3DVid_Restart_f (void)
 
 		memset (&dm, 0, sizeof (DEVMODE));
 		dm.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-
-		switch (d3d_CurrentMode.Format)
-		{
-		case D3DFMT_R5G6B5:
-		case D3DFMT_X1R5G5B5:
-		case D3DFMT_A1R5G5B5:
-			dm.dmBitsPerPel = 16;
-			break;
-
-		default:
-			dm.dmBitsPerPel = 32;
-			break;
-		}
-
+		dm.dmBitsPerPel = 32;
 		dm.dmDisplayFrequency = d3d_CurrentMode.RefreshRate;
 		dm.dmPelsWidth = d3d_CurrentMode.Width;
 		dm.dmPelsHeight = d3d_CurrentMode.Height;
@@ -686,129 +661,113 @@ void D3DVid_EnumerateVideoModes (void)
 	// get a valid pointer for the first mode in the list
 	d3d_ModeList = (d3d_ModeDesc_t *) MainHunk->Alloc (0);
 
-	// enumerate the modes in the adapter
-	for (int m = 0;; m++)
+	// enumerate 32bpp modes in the adapter
+	// see can we support a fullscreen format with this mode format
+	hr = d3d_Object->CheckDeviceType (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DFMT_X8R8G8B8, FALSE);
+
+	if (FAILED (hr))
 	{
-		// end of the list
-		if (d3d_AdapterModeDescs[m] == D3DFMT_UNKNOWN) break;
+		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
+		return;
+	}
 
-		// see can we support a fullscreen format with this mode format
-		hr = d3d_Object->CheckDeviceType (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], d3d_AdapterModeDescs[m], FALSE);
+	// see can we create a standard texture on it
+	hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
 
-		if (FAILED (hr)) continue;
+	if (FAILED (hr))
+	{
+		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
+		return;
+	}
 
-		// see can we create a standard texture on it
-		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
+	// see can we create an alpha texture on it
+	hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
 
-		if (FAILED (hr)) continue;
+	if (FAILED (hr))
+	{
+		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
+		return;
+	}
 
-		// see can we create an alpha texture on it
-		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
+	// get the count of modes for this format
+	int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8);
 
-		if (FAILED (hr)) continue;
+	// no modes available for this format
+	if (!ModeCount)
+	{
+		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
+		return;
+	}
 
-		// get the count of modes for this format
-		int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, d3d_AdapterModeDescs[m]);
+	// enumerate them all
+	for (int i = 0; i < ModeCount; i++)
+	{
+		D3DDISPLAYMODE mode;
 
-		// no modes available for this format
-		if (!ModeCount) continue;
+		// get the mode description
+		d3d_Object->EnumAdapterModes (D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8, i, &mode);
 
-		// enumerate them all
-		for (int i = 0; i < ModeCount; i++)
-		{
-			D3DDISPLAYMODE mode;
+		DEVMODE dm;
 
-			// get the mode description
-			d3d_Object->EnumAdapterModes (D3DADAPTER_DEFAULT, d3d_AdapterModeDescs[m], i, &mode);
+		memset (&dm, 0, sizeof (DEVMODE));
+		dm.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+		dm.dmBitsPerPel = 32;
+		dm.dmDisplayFrequency = mode.RefreshRate;
+		dm.dmPelsWidth = mode.Width;
+		dm.dmPelsHeight = mode.Height;
 
-			DEVMODE dm;
+		dm.dmSize = sizeof (DEVMODE);
 
-			memset (&dm, 0, sizeof (DEVMODE));
-			dm.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+		// attempt to change to it
+		// (fixme - this still breaks on vmwares svga driver which allows huge virtual resolutions)
+		if (ChangeDisplaySettings (&dm, CDS_TEST | CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL) continue;
 
-			switch (mode.Format)
-			{
-			case D3DFMT_R5G6B5:
-			case D3DFMT_X1R5G5B5:
-			case D3DFMT_A1R5G5B5:
-				dm.dmBitsPerPel = 16;
-				break;
+		// we're only interested in modes that match the desktop refresh rate
+		if (mode.RefreshRate != d3d_DesktopMode.RefreshRate) continue;
 
-			default:
-				dm.dmBitsPerPel = 32;
-				break;
-			}
+		// don't allow modes < 640 x 480
+		if (mode.Width < 640) continue;
+		if (mode.Height < 480) continue;
 
-			dm.dmDisplayFrequency = mode.RefreshRate;
-			dm.dmPelsWidth = mode.Width;
-			dm.dmPelsHeight = mode.Height;
+		// if the mode width is < height we assume that we have a monitor capable of rotating it's desktop
+		// and therefore we skip the mode
+		if (mode.Width < mode.Height) continue;
 
-			dm.dmSize = sizeof (DEVMODE);
+		// if the mode is already present don't record it
+		if (ExistingMode (&mode)) continue;
 
-			// attempt to change to it
-			// (fixme - this still breaks on vmwares svga driver which allows huge virtual resolutions)
-			if (ChangeDisplaySettings (&dm, CDS_TEST | CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL) continue;
+		// ensure that we have space to store it
+		MainHunk->Alloc (sizeof (d3d_ModeDesc_t));
 
-			// we're only interested in modes that match the desktop refresh rate
-			if (mode.RefreshRate != d3d_DesktopMode.RefreshRate) continue;
+		// and store it in our master mode list
+		d3d_ModeDesc_t *newmode = &d3d_ModeList[d3d_NumModes];
+		newmode->ModeNum = d3d_NumModes;
+		d3d_NumModes++;
 
-			// don't allow modes < 640 x 480
-			if (mode.Width < 640) continue;
-			if (mode.Height < 480) continue;
+		// copy out
+		newmode->d3d_Mode.Format = mode.Format;
+		newmode->d3d_Mode.Height = mode.Height;
+		newmode->d3d_Mode.RefreshRate = mode.RefreshRate;
+		newmode->d3d_Mode.Width = mode.Width;
+		newmode->BPP = 32;
 
-			// if the mode width is < height we assume that we have a monitor capable of rotating it's desktop
-			// and therefore we skip the mode
-			if (mode.Width < mode.Height) continue;
+		// store the description
+		strcpy (newmode->ModeDesc, D3DTypeToString (D3DFMT_X8R8G8B8));
 
-			// if the mode is already present don't record it
-			if (ExistingMode (&mode)) continue;
+		// see is it valid for windowed
+		newmode->AllowWindowed = true;
 
-			// ensure that we have space to store it
-			MainHunk->Alloc (sizeof (d3d_ModeDesc_t));
-
-			// and store it in our master mode list
-			d3d_ModeDesc_t *newmode = &d3d_ModeList[d3d_NumModes];
-			newmode->ModeNum = d3d_NumModes;
-			d3d_NumModes++;
-
-			// copy out
-			newmode->d3d_Mode.Format = mode.Format;
-			newmode->d3d_Mode.Height = mode.Height;
-			newmode->d3d_Mode.RefreshRate = mode.RefreshRate;
-			newmode->d3d_Mode.Width = mode.Width;
-
-			// store bpp
-			switch (mode.Format)
-			{
-			case D3DFMT_R5G6B5:
-			case D3DFMT_X1R5G5B5:
-			case D3DFMT_A1R5G5B5:
-				newmode->BPP = 16;
-				break;
-
-			default:
-				newmode->BPP = 32;
-				break;
-			}
-
-			// store the description
-			strcpy (newmode->ModeDesc, D3DTypeToString (d3d_AdapterModeDescs[m]));
-
-			// see is it valid for windowed
-			newmode->AllowWindowed = true;
-
-			// valid windowed modes must be the same format as the desktop and less than it's resolution
-			if (newmode->d3d_Mode.Width >= MaxWindowWidth) newmode->AllowWindowed = false;
-			if (newmode->d3d_Mode.Height >= MaxWindowHeight) newmode->AllowWindowed = false;
-			if (newmode->d3d_Mode.Format != d3d_DesktopMode.Format) newmode->AllowWindowed = false;
-			if (newmode->AllowWindowed) d3d_NumWindowedModes++; else continue;
-			d3d_NumWindowedModes = d3d_NumWindowedModes;
-		}
+		// valid windowed modes must be the same format as the desktop and less than it's resolution
+		if (newmode->d3d_Mode.Width >= MaxWindowWidth) newmode->AllowWindowed = false;
+		if (newmode->d3d_Mode.Height >= MaxWindowHeight) newmode->AllowWindowed = false;
+		if (newmode->d3d_Mode.Format != d3d_DesktopMode.Format) newmode->AllowWindowed = false;
+		if (newmode->AllowWindowed) d3d_NumWindowedModes++; else continue;
+		d3d_NumWindowedModes = d3d_NumWindowedModes;
 	}
 
 	if (!d3d_NumModes)
 	{
-		Sys_Error ("D3DVid_EnumerateVideoModes: No RGB display modes available");
+		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
 		return;
 	}
 
@@ -1175,24 +1134,16 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_NEVER)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
 	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_NOTEQUAL)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
 
-	// check for hardware T&L support
-	if ((d3d_DeviceCaps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) && (d3d_DeviceCaps.DevCaps & D3DDEVCAPS_PUREDEVICE))
-	{
-		d3d_GlobalCaps.supportHardwareTandL = true;
-		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
-	}
-	else
-	{
-		d3d_GlobalCaps.supportHardwareTandL = false;
-		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
-	}
-
 	// now reset the present params as they will have become messed up above
 	D3DVid_SetPresentParams (&d3d_PresentParams, mode);
 
-	// attempt to create the device - we can ditch all of the extra flags now :)
+	// attempt to create a hardware T&L device - we can ditch all of the extra flags now :)
 	// (Quark ETP needs D3DCREATE_FPU_PRESERVE - using _controlfp during texcoord gen doesn't work)
 	// here as the generated coords will also lose precision when being applied
+	SAFE_RELEASE (d3d_Device);
+	d3d_GlobalCaps.supportHardwareTandL = true;
+	d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
+
 	hr = d3d_Object->CreateDevice
 	(
 		D3DADAPTER_DEFAULT,
@@ -1205,8 +1156,26 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 
 	if (FAILED (hr))
 	{
-		Sys_Error ("D3DVid_InitDirect3D: IDirect3D9::CreateDevice failed");
-		return;
+		// we may still be able to create a software T&L device
+		SAFE_RELEASE (d3d_Device);
+		d3d_GlobalCaps.supportHardwareTandL = false;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
+
+		hr = d3d_Object->CreateDevice
+		(
+			D3DADAPTER_DEFAULT,
+			D3DDEVTYPE_HAL,
+			d3d_Window,
+			d3d_GlobalCaps.deviceCreateFlags | D3DCREATE_FPU_PRESERVE,
+			&d3d_PresentParams,
+			&d3d_Device
+		);
+
+		if (FAILED (hr))
+		{
+			Sys_Error ("D3DVid_InitDirect3D: IDirect3D9::CreateDevice failed");
+			return;
+		}
 	}
 
 	if (d3d_GlobalCaps.supportHardwareTandL)

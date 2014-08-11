@@ -634,8 +634,6 @@ If an entities model or origin changes from frame to frame, it must be
 relinked.  Other attributes can change without relinking.
 ==================
 */
-int	bitcounts[16];
-
 void CL_ClearInterpolation (entity_t *ent)
 {
 	ent->framestarttime = 0;
@@ -688,10 +686,6 @@ void CL_ParseUpdate (int bits)
 	// eeewww.
 	ent = CL_EntityNum (num);
 
-	for (i = 0; i < 16; i++)
-		if (bits & (1 << i))
-			bitcounts[i]++;
-
 	if (ent->msgtime != cl.mtime[1])
 	{
 		// entity was not present on the previous frame
@@ -699,6 +693,12 @@ void CL_ParseUpdate (int bits)
 		forcelink = true;
 	}
 	else forcelink = false;
+
+	if (ent->msgtime + 0.2 < cl.mtime[0])
+	{
+		// more than 0.2 seconds since the last message (most entities think every 0.1 sec)
+		CL_ClearInterpolation (ent);
+	}
 
 	ent->msgtime = cl.mtime[0];
 
@@ -1288,8 +1288,8 @@ void CL_ParseServerMessage (void)
 			}
 
 			// note - 64, not 63, is intentional here
-			Q_strncpy (cl_lightstyle[i].map,  MSG_ReadString(), 64);
-			cl_lightstyle[i].length = strlen (cl_lightstyle[i].map);
+			Q_strncpy ((char *) cl_lightstyle[i].map,  MSG_ReadString (), 64);
+			cl_lightstyle[i].length = strlen ((char *) cl_lightstyle[i].map);
 			break;
 
 		case svc_sound:

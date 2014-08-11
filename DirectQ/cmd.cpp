@@ -1046,7 +1046,7 @@ cvar_t	pq_noweapons ("pq_noweapons", "no weapons", CVAR_ARCHIVE);
 
 void Cmd_ForwardToServer (void)
 {
-#if 1
+#if 0
 	if (cls.state != ca_connected)
 	{
 		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));
