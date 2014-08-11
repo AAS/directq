@@ -1441,6 +1441,7 @@ This is called at the start of each level
 */
 extern float ScrCenterTimeOff;
 void R_WipeParticles (void);
+void Mod_InitForMap (model_t *mod);
 
 void SV_SpawnServer (char *server)
 {
@@ -1495,8 +1496,8 @@ void SV_SpawnServer (char *server)
 		return;
 	}
 
-	// clear the fat pvs
-	fatpvs = NULL;
+	// the server needs these up ASAP as it's going to run some physics frames shortly
+	Mod_InitForMap (sv.worldmodel);
 
 	// no edicts yet
 	SVProgs->NumEdicts = 0;
@@ -1543,6 +1544,7 @@ void SV_SpawnServer (char *server)
 
 	sv.state = ss_loading;
 	sv.paused = false;
+	sv.dwTime = 1000;
 	sv.time = 1.0f;
 	sv.models[1] = sv.worldmodel;
 
@@ -1592,8 +1594,8 @@ void SV_SpawnServer (char *server)
 	sv.state = ss_active;
 
 	// run two frames to allow everything to settle
-	SV_Physics (0.1f);
-	SV_Physics (0.1f);
+	SV_Physics (100);
+	SV_Physics (100);
 
 	// create a baseline for more efficient communications
 	SV_CreateBaseline ();

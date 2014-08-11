@@ -56,8 +56,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //=============================================================================
 
 
-#define Q1_BSPVERSION	29
-#define HL_BSPVERSION	30
+#define PR_BSPVERSION	28	// pre-release maps
+#define Q1_BSPVERSION	29	// final release maps
+#define HL_BSPVERSION	30	// haflife crap
+
 #define	TOOLVERSION	2
 
 typedef struct

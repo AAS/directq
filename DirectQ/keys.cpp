@@ -25,8 +25,13 @@ key up events are sent even if in console mode
 */
 
 
+#define      HISTORY_FILE_NAME   "id1/quake_history.txt"
+
+// lets allow a nice big history
 #define		MAXCMDLINE	256
-char	key_lines[32][MAXCMDLINE];
+#define		CMDLINES	256
+
+char	key_lines[CMDLINES][MAXCMDLINE];
 int		key_linepos;
 int		shift_down = false;
 int		key_lastpress;
@@ -152,6 +157,70 @@ keyname_t keynames[] =
 
 ==============================================================================
 */
+
+void Key_HistoryLoad (void)
+{
+	int i, c;
+	FILE *hf;
+
+	for (i = 0; i < CMDLINES; i++)
+	{
+		key_lines[i][0] = ']';
+		key_lines[i][1] = 0;
+	}
+
+	key_linepos = 1;
+
+	if ((hf = fopen (HISTORY_FILE_NAME, "r")))
+	{
+		do
+		{
+			i = 1;
+
+			do
+			{
+				c = fgetc (hf);
+				key_lines[edit_line][i++] = c;
+			} while (c != '\n' && c != EOF && i < MAXCMDLINE);
+
+			key_lines[edit_line][i - 1] = 0;
+			edit_line = (edit_line + 1) & (CMDLINES - 1);
+		} while (c != EOF && edit_line < CMDLINES);
+
+		fclose (hf);
+
+		history_line = edit_line = (edit_line - 1) & (CMDLINES - 1);
+		key_lines[edit_line][0] = ']';
+		key_lines[edit_line][1] = 0;
+	}
+}
+
+
+void Key_HistoryFlush (void)
+{
+	int i;
+	FILE *hf;
+
+	if ((hf = fopen (HISTORY_FILE_NAME, "w")))
+	{
+		i = edit_line;
+
+		do
+		{
+			i = (i + 1) & (CMDLINES - 1);
+		} while (i != edit_line && !key_lines[i][1]);
+
+		do
+		{
+			fprintf (hf, "%s\n", key_lines[i] + 1);
+			i = (i + 1) & (CMDLINES - 1);
+		} while (i != edit_line && key_lines[i][1]);
+
+		fclose (hf);
+	}
+}
+
+
 // protocol autocomplete list
 char *protolist[] =
 {
@@ -173,10 +242,25 @@ char *d3d_filtermodelist[] =
 };
 
 
+// content autocompletion lists
+extern char **spinbox_bsps;
+extern char **skybox_menulist;
+extern char **demolist;
+extern char **saveloadlist;
+extern char *gamedirs[];
+
+
+typedef struct key_autotablist_s
+{
+	char *str;
+	char **list;
+} key_autotablist_t;
+
 int Cmd_Match (char *partial, int matchcycle, bool conout);
 int match_count = 0;
 int match_cycle = 0;
 char match_buf[256] = {0};
+static int contentcycle = 0;
 
 void Key_PrintMatch (char *cmd)
 {
@@ -191,7 +275,8 @@ void Key_PrintMatch (char *cmd)
 void Key_PrintContentMatch (char *matchedcontent)
 {
 	// find the text position after the command
-	for (int i = 254; i >= 0; i--)
+	// this needs to work back from the first \0 as subsequent text from a previous command may still be in the buffer and contain a space
+	for (int i = strlen (key_lines[edit_line]); i >= 0; i--)
 	{
 		if (key_lines[edit_line][i] == ' ')
 		{
@@ -207,15 +292,16 @@ void Key_PrintContentMatch (char *matchedcontent)
 }
 
 
-void Key_ContentMatch (char **contentlist, int *cycle)
+void Key_ContentMatch (char **contentlist)
 {
 	static char matched[256] = {0};
 
-	if (!cycle[0])
+	if (!contentcycle)
 	{
 		// grab the text after the command
 		// we need to store this for subsequent commands
-		for (int i = 254; i > 0; i--)
+		// this needs to work back from the first \0 as subsequent text from a previous command may still be in the buffer and contain a space
+		for (int i = strlen (key_lines[edit_line]); i > 0; i--)
 		{
 			//  find the first valid char
 			if (key_lines[edit_line][i] == ' ')
@@ -230,7 +316,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 		{
 			// return the first item on the list
 			Key_PrintContentMatch (contentlist[0]);
-			cycle[0] = 1;
+			contentcycle = 1;
 			return;
 		}
 
@@ -240,7 +326,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 			if (!contentlist[i])
 			{
 				// no match (should this gracefully fail or inform the user of no match?)
-				cycle[0] = 0;
+				contentcycle = 0;
 				// Key_PrintContentMatch ("** (No Match)");
 				return;
 			}
@@ -249,7 +335,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 			{
 				// do the completion
 				Key_PrintContentMatch (contentlist[i]);
-				cycle[0] = i + 1;
+				contentcycle = i + 1;
 				return;
 			}
 		}
@@ -258,7 +344,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 		return;
 	}
 
-	for (int i = cycle[0], passes = 0;; i++)
+	for (int i = contentcycle, passes = 0;; i++)
 	{
 		// if we run out of maps we restart the cycle at 0
 		if (!contentlist[i])
@@ -277,10 +363,25 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 		{
 			// do the completion
 			Key_PrintContentMatch (contentlist[i]);
-			cycle[0] = i + 1;
+			contentcycle = i + 1;
 			return;
 		}
 	}
+}
+
+
+bool Key_CheckAutoTab (char *str, char **list)
+{
+	if (list && list[0])
+	{
+		if (!strnicmp (&key_lines[edit_line][1], str, strlen (str)))
+		{
+			Key_ContentMatch (list);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 
@@ -291,8 +392,6 @@ Key_Console
 Interactive line editing and console scrollback
 ====================
 */
-char *capturecmds[] = {"start ", "stop ", NULL};
-
 void Key_Console (int key)
 {
 	char	*cmd;
@@ -300,14 +399,6 @@ void Key_Console (int key)
 	int		i;
 	HANDLE	th;
 	char	*clipText, *textCopied;
-	static int contentcycle = 0;
-
-	// content autocompletion lists
-	extern char **spinbox_bsps;
-	extern char **skybox_menulist;
-	extern char **demolist;
-	extern char **saveloadlist;
-	extern char *gamedirs[];
 
 	if (key == K_ENTER)
 	{
@@ -315,7 +406,7 @@ void Key_Console (int key)
 		Cbuf_AddText ("\n");
 		Con_Printf ("%s\n", key_lines[edit_line]);
 
-		edit_line = (edit_line + 1) & 31;
+		edit_line = (edit_line + 1) & (CMDLINES - 1);
 		history_line = edit_line;
 		key_lines[edit_line][0] = ']';
 		key_lines[edit_line][1] = 0;
@@ -330,72 +421,35 @@ void Key_Console (int key)
 
 	if (key == K_TAB)
 	{
-		// see are we matching content to a command or matching a command
-		if (!strnicmp (&key_lines[edit_line][1], "map ", 4) && spinbox_bsps[0])
+		// we can't declare these globally as they may change so we have to do it this way
+		// oh well, at least it's still kinda cleaner (gotta watch the stack though...)
+		key_autotablist_t key_autotablist[] =
 		{
-			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
+			{"map ", spinbox_bsps},
+			{"changelevel ", spinbox_bsps},
+			{"loadsky ", skybox_menulist},
+			{"skybox ", skybox_menulist},
+			{"sky ", skybox_menulist},
+			{"playdemo ", demolist},
+			{"timedemo ", demolist},
+			{"save ", saveloadlist},
+			{"load ", saveloadlist},
+			{"game ", gamedirs},
+			{"gamedir ", gamedirs},
+			{"sv_protocol ", protolist},
+			{"gl_texturemode ", d3d_filtermodelist},
+			{NULL, NULL}
+		};
 
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "changelevel ", 12) && spinbox_bsps[0])
+		for (i = 0; ; i++)
 		{
-			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
+			if (!key_autotablist[i].str) break;
+			if (!key_autotablist[i].list) break;
+			if (Key_CheckAutoTab (key_autotablist[i].str, key_autotablist[i].list)) return;
+		}
 
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "capture ", 8) && capturecmds[0])
-		{
-			if (capturecmds) Key_ContentMatch (capturecmds, &contentcycle);
-
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "loadsky ", 8) && skybox_menulist[0])
-		{
-			if (skybox_menulist) Key_ContentMatch (skybox_menulist, &contentcycle);
-
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "playdemo ", 9) && demolist[0])
-		{
-			if (demolist) Key_ContentMatch (demolist, &contentcycle);
-
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "timedemo ", 9) && demolist[0])
-		{
-			if (demolist) Key_ContentMatch (demolist, &contentcycle);
-
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "save ", 5) && saveloadlist[0])
-		{
-			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
-
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "load ", 5) && saveloadlist[0])
-		{
-			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
-
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "game ", 5) && gamedirs[0])
-		{
-			if (gamedirs[0]) Key_ContentMatch (gamedirs, &contentcycle);
-
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "sv_protocol ", 12) && protolist[0])
-		{
-			Key_ContentMatch (protolist, &contentcycle);
-			return;
-		}
-		else if (!strnicmp (&key_lines[edit_line][1], "gl_texturemode ", 15) && d3d_filtermodelist[0])
-		{
-			Key_ContentMatch (d3d_filtermodelist, &contentcycle);
-			return;
-		}
-		else contentcycle = 0;
+		// no match so begin a new cycle
+		contentcycle = 0;
 
 		if (!match_count)
 		{
@@ -459,9 +513,9 @@ void Key_Console (int key)
 		if (strlen (key_lines[edit_line]) == key_linepos)
 		{
 			// no character to get
-			if (strlen (key_lines[(edit_line + 31) & 31]) <= key_linepos) return;
+			if (strlen (key_lines[(edit_line + (CMDLINES - 1)) & (CMDLINES - 1)]) <= key_linepos) return;
 
-			key_lines[edit_line][key_linepos] = key_lines[(edit_line + 31) & 31][key_linepos];
+			key_lines[edit_line][key_linepos] = key_lines[(edit_line + (CMDLINES - 1)) & (CMDLINES - 1)][key_linepos];
 			key_linepos++;
 			key_lines[edit_line][key_linepos] = 0;
 		}
@@ -481,13 +535,13 @@ void Key_Console (int key)
 	{
 		do
 		{
-			history_line = (history_line - 1) & 31;
+			history_line = (history_line - 1) & (CMDLINES - 1);
 		}
 		while (history_line != edit_line
 				&& !key_lines[history_line][1]);
 
 		if (history_line == edit_line)
-			history_line = (edit_line + 1) & 31;
+			history_line = (edit_line + 1) & (CMDLINES - 1);
 
 		strcpy (key_lines[edit_line], key_lines[history_line]);
 		key_linepos = strlen (key_lines[edit_line]);
@@ -500,7 +554,7 @@ void Key_Console (int key)
 
 		do
 		{
-			history_line = (history_line + 1) & 31;
+			history_line = (history_line + 1) & (CMDLINES - 1);
 		}
 		while (history_line != edit_line
 				&& !key_lines[history_line][1]);
@@ -572,7 +626,7 @@ void Key_Console (int key)
 		}
 	}
 
-	if ((key == 'C' || key == 'c') && GetKeyState (VK_CONTROL) < 0)
+	if ((key == 'C' || key == 'c') && keydown[K_CTRL])
 	{
 		if (OpenClipboard (NULL))
 		{
@@ -597,7 +651,7 @@ void Key_Console (int key)
 		}
 	}
 
-	if ((key == 'V' || key == 'v') && GetKeyState (VK_CONTROL) < 0)
+	if ((key == 'V' || key == 'v') && keydown[K_CTRL])
 	{
 		if (OpenClipboard (NULL))
 		{
@@ -950,13 +1004,8 @@ void Key_Init (void)
 {
 	int		i;
 
-	for (i = 0; i < 32; i++)
-	{
-		key_lines[i][0] = ']';
-		key_lines[i][1] = 0;
-	}
-
-	key_linepos = 1;
+	// load up the history
+	Key_HistoryLoad ();
 
 	// init ascii characters in console mode
 	for (i = 32; i < 128; i++)
@@ -1170,9 +1219,7 @@ void Key_Event (int key, bool down)
 		return;		// other systems only care about key down events
 
 	if (shift_down)
-	{
 		key = keyshift[key];
-	}
 
 	switch (key_dest)
 	{

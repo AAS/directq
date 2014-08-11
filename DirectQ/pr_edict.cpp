@@ -879,7 +879,7 @@ bool ED_ParseEpair (void *base, ddef_t *key, char *s)
 		break;
 
 	case ev_entity:
-		* (int *) d = EDICT_TO_PROG (GetEdictForNumber (atoi (s)));
+		*(int *) d = EDICT_TO_PROG (GetEdictForNumber (atoi (s)));
 		break;
 
 	case ev_field:
@@ -961,8 +961,7 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 		else anglehack = false;
 
 		// FIXME: change light to _light to get rid of this hack
-		if (!strcmp (com_token, "light"))
-			strcpy (com_token, "light_lev");	// hack for single light def
+		if (!strcmp (com_token, "light")) strcpy (com_token, "light_lev");	// hack for single light def
 
 		strcpy (keyname, com_token);
 
@@ -1276,14 +1275,23 @@ void ED_LoadFromFile (char *data)
 
 		if (!func)
 		{
-			// made the console spamming developer only...
-			Con_Printf ("No spawn function for: %s\n", classname);
-			ed_warning++;
+			if (!stricmp (classname, "func_detail"))
+			{
+				// if we couldn't find a spawn function for a func_detail entity we must convert it back to a func_wall
+				func = ED_FindFunction ("func_wall");
+			}
 
-			if (developer.value) ED_Print (ent);
+			if (!func)
+			{
+				// made the console spamming developer only...
+				Con_Printf ("No spawn function for: %s\n", classname);
+				ed_warning++;
 
-			ED_Free (ent);
-			continue;
+				if (developer.value) ED_Print (ent);
+
+				ED_Free (ent);
+				continue;
+			}
 		}
 
 		SVProgs->GlobalStruct->self = EDICT_TO_PROG (ent);
@@ -1298,6 +1306,7 @@ void ED_LoadFromFile (char *data)
 		Con_Printf ("Could not find classname and/or spawn functions for %i entities\n");
 		Con_Printf ("Progs.dat may be invalid for current game\n");
 		Con_Printf ("Use developer 1 and reload map for full list\n");
+		ed_warning = 0;
 	}
 
 	Con_DPrintf ("%i entities with %i inhibited\n", ed_number, inhibit);
@@ -1383,26 +1392,4 @@ int GetNumberForEdict (edict_t *e)
 {
 	return e->ednum;
 }
-
-
-void Neh_GameStart (void)
-{
-	// eeeewwww!
-	if (!nehahra) return;
-
-	func_t RestoreGame;
-	dfunction_t *f;
-
-	if ((f = ED_FindFunction ("RestoreGame")))
-	{
-		if ((RestoreGame = (func_t) (f - SVProgs->Functions)))
-		{
-			SVProgs->GlobalStruct->time = sv.time;
-			SVProgs->GlobalStruct->self = EDICT_TO_PROG (sv_player);
-			SVProgs->ExecuteProgram (RestoreGame);
-		}
-	}
-}
-
-
 

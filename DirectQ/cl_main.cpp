@@ -462,6 +462,7 @@ float CL_LerpPoint (void)
 	if (!f || cl_nolerp.value || cls.timedemo || sv.active)
 	{
 		cl.time = cl.mtime[0];
+		cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
 		return 1;
 	}
 
@@ -477,14 +478,20 @@ float CL_LerpPoint (void)
 	if (frac < 0)
 	{
 		if (frac < -0.01)
+		{
+			cl.dwTime = (DWORD) (cl.mtime[1] * 1000.0f);
 			cl.time = cl.mtime[1];
+		}
 
 		frac = 0;
 	}
 	else if (frac > 1)
 	{
 		if (frac > 1.01)
+		{
+			cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
 			cl.time = cl.mtime[0];
+		}
 
 		frac = 1;
 	}
@@ -599,6 +606,7 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 
 
 void CL_ClearInterpolation (entity_t *ent);
+cvar_t cl_itemrotatespeed ("cl_itemrotatespeed", 100.0f);
 
 void CL_RelinkEntities (void)
 {
@@ -633,7 +641,7 @@ void CL_RelinkEntities (void)
 		}
 	}
 
-	bobjrotate = anglemod (100 * cl.time);
+	bobjrotate = anglemod (cl_itemrotatespeed.value * cl.time);
 
 	// start on the entity after the world
 	for (i = 1; i < cl.num_entities; i++)
@@ -898,13 +906,14 @@ CL_ReadFromServer
 Read all incoming data from the server
 ===============
 */
-int CL_ReadFromServer (float frametime)
+int CL_ReadFromServer (DWORD dwFrameTime)
 {
 	int		ret;
 
+	cl.dwTime += dwFrameTime;
+	cl.time = (float) cl.dwTime / 1000.0f;
+	cl.frametime = cl.time - cl.oldtime;	// get a correct client frame duration
 	cl.oldtime = cl.time;
-	cl.time += frametime;
-	cl.frametime = frametime;
 
 	do
 	{

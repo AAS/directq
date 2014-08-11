@@ -75,7 +75,6 @@ void MSG_WriteFloat (sizebuf_t *sb, float f)
 	} dat;
 
 	dat.f = f;
-	dat.l = LittleLong (dat.l);
 
 	SZ_Write (sb, &dat.l, 4);
 }
@@ -183,8 +182,6 @@ float MSG_ReadFloat (void)
 	dat.b[2] =      net_message.data[msg_readcount+2];
 	dat.b[3] =      net_message.data[msg_readcount+3];
 	msg_readcount += 4;
-
-	dat.l = LittleLong (dat.l);
 
 	return dat.f;
 }

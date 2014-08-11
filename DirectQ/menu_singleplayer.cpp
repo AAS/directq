@@ -306,7 +306,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	_snprintf (name2, 256, "%s/save/%s", com_gamedir, filename);
 
 	// open it again (isn't the Windows API beautiful?)
-	HANDLE hFile = CreateFile (name2, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFile = CreateFile (name2, FILE_READ_DATA | FILE_READ_ATTRIBUTES, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
 	if (!hFile) return;
 

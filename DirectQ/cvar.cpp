@@ -27,6 +27,8 @@ char *cvar_null_string = "";
 
 cvar_t *Cmd_FindCvar (char *name);
 
+bool cvar_initialized = false;
+
 /*
 ============
 Cvar_FindVar
@@ -61,6 +63,17 @@ cvar_t *Cvar_FindVar (char *var_name)
 	}
 
 	return NULL;
+}
+
+
+void Cvar_ResetAll (void)
+{
+	for (cvar_t *var = cvar_vars; var; var = var->next)
+	{
+		if (!var->defaultvalue) continue;
+
+		Cvar_Set (var, var->defaultvalue);
+	}
 }
 
 
@@ -119,10 +132,21 @@ bool Cvar_SetPrevalidate (cvar_t *var)
 }
 
 
-void Cvar_SetBroadcast (cvar_t *var)
+void Cvar_SetCommon (cvar_t *var)
 {
-	if (!(var->usage & CVAR_SERVER)) return;
+	// be friendly and notify the player if this change can't take effect immediately
+	if ((var->usage & CVAR_RESTART) && cvar_initialized)
+		Con_Printf ("You will need to restart DirectQ for this change to take effect\n");
 
+	if ((var->usage & CVAR_RENDERER) && cvar_initialized)
+		Con_Printf ("You will need to restart the renderer (use \"vid_restart\") for this change to take effect\n");
+
+	if ((var->usage & CVAR_MAP) && (cls.state == ca_connected))
+		Con_Printf ("You will need to reload the current map for this change to take effect\n");
+
+	if (var->callback) var->callback ();
+
+	if (!(var->usage & CVAR_SERVER)) return;
 	if (!sv.active) return;
 
 	// add the name of the person who changed it to the message
@@ -130,29 +154,25 @@ void Cvar_SetBroadcast (cvar_t *var)
 }
 
 
-/*
-============
-Cvar_Set
-============
-*/
-void Cvar_Set (cvar_t *var, char *value)
+bool Cvar_Preset (cvar_t *var)
 {
 	// some QC attempts to set old WinQuake cvars that don't exist any more
-	if (!var) return;
+	if (!var) return false;
+	if (!Cvar_SetPrevalidate (var)) return false;
 
-	if (!Cvar_SetPrevalidate (var)) return;
-
-	if (strcmp (var->string, value))
+	if ((var->usage & CVAR_SYSTEM) && cvar_initialized)
 	{
-		Zone_Free (var->string);
-		var->string = (char *) Zone_Alloc (strlen (value) + 1);
-		strcpy (var->string, value);
-		var->value = atof (var->string);
-		var->integer = (int) var->value;
-
-		Cvar_SetBroadcast (var);
+		Con_Printf ("This cvar is for system use only and is not intended to be set by the player\n");
+		return false;
 	}
 
+	// it's OK to set the cvar now
+	return true;
+}
+
+
+void Cvar_RConSet (cvar_t *var)
+{
 	// joe, from ProQuake: rcon (64 doesn't mean anything special,
 	// but we need some extra space because NET_MAXMESSAGE == RCON_BUFF_SIZE)
 	if (rcon_active && (rcon_message.cursize < rcon_message.maxsize - strlen (var->name) - strlen (var->string) - 64))
@@ -163,12 +183,33 @@ void Cvar_Set (cvar_t *var, char *value)
 }
 
 
+/*
+============
+Cvar_Set
+============
+*/
+void Cvar_Set (cvar_t *var, char *value)
+{
+	if (!Cvar_Preset (var)) return;
+
+	if (strcmp (var->string, value))
+	{
+		Zone_Free (var->string);
+		var->string = (char *) Zone_Alloc (strlen (value) + 1);
+		strcpy (var->string, value);
+		var->value = atof (var->string);
+		var->integer = (int) var->value;
+
+		Cvar_SetCommon (var);
+	}
+
+	Cvar_RConSet (var);
+}
+
+
 void Cvar_Set (cvar_t *var, float value)
 {
-	// some QC attempts to set old WinQuake cvars that don't exist any more
-	if (!var) return;
-
-	if (!Cvar_SetPrevalidate (var)) return;
+	if (!Cvar_Preset (var)) return;
 
 	if (var->value != value)
 	{
@@ -185,16 +226,10 @@ void Cvar_Set (cvar_t *var, float value)
 
 		strcpy (var->string, valbuf);
 
-		Cvar_SetBroadcast (var);
+		Cvar_SetCommon (var);
 	}
 
-	// joe, from ProQuake: rcon (64 doesn't mean anything special,
-	// but we need some extra space because NET_MAXMESSAGE == RCON_BUFF_SIZE)
-	if (rcon_active && (rcon_message.cursize < rcon_message.maxsize - strlen (var->name) - strlen (var->string) - 64))
-	{
-		rcon_message.cursize--;
-		MSG_WriteString (&rcon_message, va ("\"%s\" set to \"%s\"\n", var->name, var->string));
-	}
+	Cvar_RConSet (var);
 }
 
 
@@ -244,6 +279,10 @@ static void Cvar_Register (cvar_t *variable)
 	variable->value = atof (variable->string);
 	variable->integer = (int) variable->value;
 
+	// store out the default value at registration time
+	variable->defaultvalue = (char *) Zone_Alloc (strlen (variable->string) + 1);
+	strcpy (variable->defaultvalue, variable->string);
+
 	// link the variable in
 	variable->next = cvar_vars;
 	cvar_vars = variable;
@@ -268,7 +307,7 @@ void Cvar_WriteVariables (FILE *f)
 }
 
 
-cvar_t::cvar_t (char *cvarname, char *initialval, int useflags)
+cvar_t::cvar_t (char *cvarname, char *initialval, int useflags, cvarcallback_t cb)
 {
 	// alloc space
 	this->name = (char *) Zone_Alloc (strlen (cvarname) + 1);
@@ -278,13 +317,15 @@ cvar_t::cvar_t (char *cvarname, char *initialval, int useflags)
 	strcpy (this->name, cvarname);
 	strcpy (this->string, initialval);
 	this->usage = useflags;
+	this->defaultvalue = NULL;
+	this->callback = cb;
 
 	// self-register the cvar at construction time
 	Cvar_Register (this);
 }
 
 
-cvar_t::cvar_t (char *cvarname, float initialval, int useflags)
+cvar_t::cvar_t (char *cvarname, float initialval, int useflags, cvarcallback_t cb)
 {
 	// alloc space
 	this->name = (char *) Zone_Alloc (strlen (cvarname) + 1);
@@ -300,6 +341,8 @@ cvar_t::cvar_t (char *cvarname, float initialval, int useflags)
 	strcpy (this->name, cvarname);
 	strcpy (this->string, valbuf);
 	this->usage = useflags;
+	this->defaultvalue = NULL;
+	this->callback = cb;
 
 	// self-register the cvar at construction time
 	Cvar_Register (this);
@@ -314,10 +357,12 @@ cvar_t::cvar_t (void)
 
 	this->name[0] = 0;
 	this->string[0] = 0;
+	this->defaultvalue = NULL;
 	this->value = 0;
 	this->usage = CVAR_DUMMY;
 	this->integer = 0;
 	this->next = NULL;
+	this->callback = NULL;
 }
 
 

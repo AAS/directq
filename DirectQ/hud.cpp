@@ -719,11 +719,6 @@ void HUD_DeathmatchOverlay (void)
 
 void HUD_SoloScoreboard (qpic_t *pic, float solotime)
 {
-	// shade behind the overlay so that we can see the text on-screen
-	D3D_Set2DShade (0.666f);
-	Draw_TextBox ((vid.width >> 1) - 148, 20, 280, 144);
-	D3D_Set2DShade (1.0f);
-
 	char str[128];
 	int l;
 	int i;
@@ -1733,10 +1728,14 @@ void HUD_IntermissionOverlay (void)
 }
 
 
-void HUD_FinaleOverlay (void)
+void HUD_FinaleOverlay (int y)
 {
 	if (cl.gametype == GAME_DEATHMATCH)
 		HUD_DeathmatchOverlay ();
-	else Draw_Pic ((vid.width - gfx_finale_lmp->width) / 2, 16, gfx_finale_lmp);
+	else
+	{
+		Draw_Pic ((vid.width - gfx_finale_lmp->width) / 2, y - gfx_finale_lmp->height - 16, gfx_finale_lmp);
+		HUD_DividerLine (y - 12, 16);
+	}
 }
 

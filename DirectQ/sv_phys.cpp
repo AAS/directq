@@ -1106,14 +1106,12 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	switch ((int) ent->v.movetype)
 	{
 	case MOVETYPE_NONE:
-
 		if (!SV_RunThink (ent))
 			return;
 
 		break;
 
 	case MOVETYPE_WALK:
-
 		if (!SV_RunThink (ent))
 			return;
 
@@ -1131,7 +1129,6 @@ void SV_Physics_Client (edict_t	*ent, int num)
 		break;
 
 	case MOVETYPE_FLY:
-
 		if (!SV_RunThink (ent))
 			return;
 
@@ -1139,7 +1136,6 @@ void SV_Physics_Client (edict_t	*ent, int num)
 		break;
 
 	case MOVETYPE_NOCLIP:
-
 		if (!SV_RunThink (ent))
 			return;
 
@@ -1418,12 +1414,12 @@ SV_Physics
 
 ================
 */
-void SV_Physics (float frametime)
+void SV_Physics (DWORD dwFrameTime)
 {
 	int		i;
 	edict_t	*ent;
 
-	sv.frametime = frametime;
+	sv.frametime = (float) dwFrameTime / 1000.0f;
 
 	// let the progs know that a new frame has started
 	SVProgs->GlobalStruct->self = EDICT_TO_PROG (SVProgs->EdictPointers[0]);
@@ -1465,7 +1461,9 @@ void SV_Physics (float frametime)
 	if (SVProgs->GlobalStruct->force_retouch)
 		SVProgs->GlobalStruct->force_retouch--;
 
-	sv.time += frametime;
+	// because this is an accumulated time we must accumulate it without precision loss
+	sv.dwTime += dwFrameTime;
+	sv.time = (float) sv.dwTime / 1000.0f;
 }
 
 

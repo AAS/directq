@@ -38,13 +38,10 @@ void D3DBrush_SetShader (int ShaderNum)
 		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP);
 		break;
 
-	case FX_PASS_WORLD_LUMA:
-	case FX_PASS_WORLD_LUMA_ALPHA:
+	default:
+		// some kind of luma style
 		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
 		D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
-		break;
-
-	default:
 		break;
 	}
 

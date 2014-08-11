@@ -255,7 +255,6 @@ LPDIRECT3DSURFACE9 d3d_RTTSurface = NULL;
 LPDIRECT3DSURFACE9 d3d_RTTBackBuffer = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_UnderwaterDecl = NULL;
 
-
 typedef struct rttverts_s
 {
 	float xyz[3];
@@ -348,6 +347,10 @@ void D3DRTT_BeginScene (void)
 	{
 		if (r_waterwarp.value > 1) return;
 
+		// ha!  this causes a host_error when trying to connect online before a map is downloaded!  just bypass it for now
+		if (!cl.worldmodel) return;
+		if (!cl.worldmodel->brushhdr->nodes) return;
+
 		// r_refdef.vieworg is set in V_RenderView so it can be reliably tested here
 		// fixme - only eval this once
 		mleaf_t *viewleaf = Mod_PointInLeaf (r_refdef.vieworg, cl.worldmodel);
@@ -398,7 +401,7 @@ void D3DRTT_EndScene (void)
 	// begin rendering on the original render target
 	d3d_Device->BeginScene ();
 
-	// to do - actually draw it here!!!
+	// actually draw it here!!!
 	D3DMATRIX m;
 	D3DMatrix_Identity (&m);
 	D3DMatrix_OrthoOffCenterRH (&m, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
@@ -407,16 +410,12 @@ void D3DRTT_EndScene (void)
 	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
 	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
-	// no backface culling
+	// no backface culling or alpha blending
 	D3D_BackfaceCull (D3DCULL_NONE);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 
+	// the 3rd texture needs to wrap as it's drawn shrunken and controls the sine warp
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP);
-
-	// enable alpha blending (always)
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
 	// set up shader for drawing
 	D3DHLSL_SetWorldMatrix (&m);
@@ -426,6 +425,7 @@ void D3DRTT_EndScene (void)
 	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// edge biasing
 	D3DHLSL_SetTexture (2, d3d_WaterWarpTexture);	// warping
 
+	// even the baseline RTT texture needs linear filtering as the texcoords will be offset by a sine warp
 	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_NONE);
 	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
 	D3D_SetTextureMipmap (2, D3DTEXF_LINEAR, D3DTEXF_NONE);

@@ -386,15 +386,15 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 	// create the file - see http://blogs.msdn.com/larryosterman/archive/2004/04/19/116084.aspx for
 	// further info on the flags chosen here.
 	HANDLE hf = CreateFile
-				(
-					fpath1,
-					GENERIC_WRITE | GENERIC_READ,
-					FILE_SHARE_READ,
-					NULL,
-					CREATE_ALWAYS,
-					FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-					NULL
-				);
+	(
+		fpath1,
+		FILE_WRITE_DATA | FILE_READ_DATA,
+		FILE_SHARE_READ,
+		NULL,
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+		NULL
+	);
 
 	// either good or INVALID_HANDLE_VALUE
 	return hf;
@@ -507,7 +507,7 @@ HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 						if (!stricmp (filename_inzip, filename))
 						{
 							// got it, so unzip it to the temp folder
-							byte unztemp[1024];
+							byte *unztemp = (byte *) scratchbuf;
 							DWORD byteswritten;
 
 							HANDLE pk3handle = COM_MakeTempFile (filename);
@@ -517,7 +517,8 @@ HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 
 							for (;;)
 							{
-								int bytesread = unzReadCurrentFile (uf, unztemp, 1024);
+								// read in SCRATCHBUF_SIZE blocks
+								int bytesread = unzReadCurrentFile (uf, unztemp, SCRATCHBUF_SIZE);
 
 								if (bytesread < 0)
 								{
@@ -633,15 +634,15 @@ int COM_FOpenFile (char *filename, void *hf)
 					// note - we need to share read access because e.g. a demo could result in 2 simultaneous
 					// reads, one for the .dem file and one for a .bsp file
 					*hFile = CreateFile
-							 (
-								 pak->filename,
-								 GENERIC_READ,
-								 FILE_SHARE_READ,
-								 NULL,
-								 OPEN_EXISTING,
-								 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
-								 NULL
-							 );
+					(
+						pak->filename,
+						FILE_READ_DATA,
+						FILE_SHARE_READ,
+						NULL,
+						OPEN_EXISTING,
+						FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+						NULL
+					);
 
 					// this can happen if a PAK file was enumerated on startup but deleted while running
 					if (*hFile == INVALID_HANDLE_VALUE)
@@ -681,15 +682,15 @@ int COM_FOpenFile (char *filename, void *hf)
 			// note - we need to share read access because e.g. a demo could result in 2 simultaneous
 			// reads, one for the .dem file and one for a .bsp file
 			*hFile = CreateFile
-					 (
-						 netpath,
-						 GENERIC_READ,
-						 FILE_SHARE_READ,
-						 NULL,
-						 OPEN_EXISTING,
-						 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
-						 NULL
-					 );
+			(
+				netpath,
+				FILE_READ_DATA,
+				FILE_SHARE_READ,
+				NULL,
+				OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+				NULL
+			);
 
 			if (*hFile == INVALID_HANDLE_VALUE) continue;
 
@@ -805,8 +806,8 @@ pack_t *COM_LoadPackFile (char *packfile)
 		return NULL;
 	}
 
-	header.dirofs = LittleLong (header.dirofs);
-	header.dirlen = LittleLong (header.dirlen);
+	header.dirofs = header.dirofs;
+	header.dirlen = header.dirlen;
 
 	numpackfiles = header.dirlen / sizeof (packfile_t);
 
@@ -819,8 +820,8 @@ pack_t *COM_LoadPackFile (char *packfile)
 	// parse the directory
 	for (i = 0; i < numpackfiles; i++)
 	{
-		info[i].filepos = LittleLong (info[i].filepos);
-		info[i].filelen = LittleLong (info[i].filelen);
+		info[i].filepos = info[i].filepos;
+		info[i].filelen = info[i].filelen;
 	}
 
 	pack = (pack_t *) GameZone->Alloc (sizeof (pack_t));

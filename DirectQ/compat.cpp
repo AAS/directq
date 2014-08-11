@@ -81,7 +81,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *gl_nocolors_compat = new cvar_t ("gl_nocolors", "0", CVAR_COMPAT);
 	cvar_t *gl_keeptjunctions_compat = new cvar_t ("gl_keeptjunctions", "0", CVAR_COMPAT);
 	cvar_t *gl_reporttjunctions_compat = new cvar_t ("gl_reporttjunctions", "0", CVAR_COMPAT);
-	cvar_t *gl_doubleeyes_compat = new cvar_t ("gl_doubleeys", "0", CVAR_COMPAT);
 	cvar_t *scr_viewsize_compat = new cvar_t ("viewsize", "0", CVAR_COMPAT);
 	cvar_t *scr_fov_compat = new cvar_t ("fov", "0", CVAR_COMPAT);
 	cvar_t *scr_conspeed_compat = new cvar_t ("scr_conspeed", "0", CVAR_COMPAT);
@@ -284,7 +283,6 @@ void Cmd_MakeCompatLayer (void)
 	cmd_t *compatcmd_51 = new cmd_t ("messagemode", NULL);
 	cmd_t *compatcmd_52 = new cmd_t ("messagemode2", NULL);
 	cmd_t *compatcmd_53 = new cmd_t ("clear", NULL);
-	cmd_t *compatcmd_54 = new cmd_t ("gl_texturemode", NULL);
 	cmd_t *compatcmd_55 = new cmd_t ("timerefresh", NULL);
 	cmd_t *compatcmd_56 = new cmd_t ("envmap", NULL);
 	cmd_t *compatcmd_57 = new cmd_t ("pointfile", NULL);

@@ -102,10 +102,15 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, entity_t *ent, int al
 
 	// the luma image also decides the shader pass to use
 	// (this assumes that the surf is solid, it will be correctly set for liquid elsewhere)
-	if (tex->lumaimage)
+	if (tex->lumaimage && gl_fullbrights.integer)
 	{
 		ms->textures[TEXTURE_LUMA] = tex->lumaimage->d3d_Texture;
 		ms->shaderpass = alpha < 255 ? FX_PASS_WORLD_LUMA_ALPHA : FX_PASS_WORLD_LUMA;
+	}
+	else if (tex->lumaimage)
+	{
+		ms->textures[TEXTURE_LUMA] = tex->lumaimage->d3d_Texture;
+		ms->shaderpass = alpha < 255 ? FX_PASS_WORLD_LUMA_NO_LUMA_ALPHA : FX_PASS_WORLD_LUMA_NO_LUMA;
 	}
 	else
 	{
@@ -125,6 +130,7 @@ int D3DSurf_ModelSurfsSortFunc (d3d_modelsurf_t **ms1, d3d_modelsurf_t **ms2)
 	// get all the lumas gathered together
 	if (ms1[0]->textures[TEXTURE_LUMA] == ms2[0]->textures[TEXTURE_LUMA])
 	{
+		// a luma can be NULL so we also need to check diffuse
 		if (ms1[0]->textures[TEXTURE_DIFFUSE] == ms2[0]->textures[TEXTURE_DIFFUSE])
 		{
 			// because qsort is an unstable sort we need to maintain the correct f2b addition order from the BSP tree
@@ -139,57 +145,19 @@ int D3DSurf_ModelSurfsSortFunc (d3d_modelsurf_t **ms1, d3d_modelsurf_t **ms2)
 }
 
 
-// because sorting can be relatively expensive, and because there is some other
-// work we can be doing while we sort, let's run it on another thread
-HANDLE hSurfSortMutex = NULL;
-HANDLE hSurfSortThread = NULL;
-bool SortReady = false;
-
-
-DWORD WINAPI D3DSurf_SortProc (LPVOID blah)
-{
-	while (1)
-	{
-		// wait until we've been told that we're ready
-		WaitForSingleObject (hSurfSortMutex, INFINITE);
-
-		// ensure that we only sort once
-		if (d3d_NumModelSurfs && SortReady)
-		{
-			qsort
-			(
-				d3d_ModelSurfs,
-				d3d_NumModelSurfs,
-				sizeof (d3d_modelsurf_t *),
-				(int (*) (const void *, const void *)) D3DSurf_ModelSurfsSortFunc
-			);
-		}
-
-		// now the sort has completed so let the main thread come back
-		SortReady = false;	// completed
-		ReleaseMutex (hSurfSortMutex);
-	}
-
-	return 0;
-}
-
-
 void D3D_AddSurfacesToRender (void)
 {
 	// this should only ever happen if the scene is filled with water or sky
 	if (!d3d_NumModelSurfs) return;
 
-	if (SysInfo.dwNumberOfProcessors < 2)
-	{
-		// just do it nice and fast instead of building up loads of complex chains in multiple passes
-		qsort
-		(
-			d3d_ModelSurfs,
-			d3d_NumModelSurfs,
-			sizeof (d3d_modelsurf_t *),
-			(int (*) (const void *, const void *)) D3DSurf_ModelSurfsSortFunc
-		);
-	}
+	// just do it nice and fast instead of building up loads of complex chains in multiple passes
+	qsort
+	(
+		d3d_ModelSurfs,
+		d3d_NumModelSurfs,
+		sizeof (d3d_modelsurf_t *),
+		(int (*) (const void *, const void *)) D3DSurf_ModelSurfsSortFunc
+	);
 
 	bool stateset = false;
 
@@ -390,7 +358,7 @@ void R_AutomapSurfaces (void)
 		if (!leaf->seen) continue;
 
 		// need to cull here too otherwise we'll get static ents we shouldn't
-		if (R_CullBox (leaf->minmaxs, leaf->minmaxs + 3)) continue;
+		if (R_CullBox (leaf->mins, leaf->maxs)) continue;
 
 		// mark the surfs
 		R_MarkLeafSurfs (leaf);
@@ -414,7 +382,7 @@ void R_AutomapSurfaces (void)
 		// node culling
 		if (node->contents == CONTENTS_SOLID) continue;
 		if (!node->seen) continue;
-		if (R_CullBox (node->minmaxs, node->minmaxs + 3)) continue;
+		if (R_CullBox (node->mins, node->maxs)) continue;
 
 		// find which side of the node we are on
 		switch (node->plane->type)
@@ -541,6 +509,9 @@ void D3D_SetupBrushModel (entity_t *ent)
 
 	// get origin vector relative to viewer
 	// this is now stored in the entity so we can read it back any time we want
+	// fixme - this is wrong because some bmodels will always have an origin of 0,0,0 whereas others will
+	// have their origin correctly positioned in the world; it should also take account of the correct modelview
+	// matrix for the entity rather than use the software quake transforms.
 	VectorSubtract (r_refdef.vieworg, ent->origin, ent->modelorg);
 
 	// adjust for rotation
@@ -639,20 +610,6 @@ void D3D_BuildWorld (void)
 		}
 	}
 
-	// create our thread objects if we need to
-	if (SysInfo.dwNumberOfProcessors > 1)
-	{
-		if (!hSurfSortMutex) hSurfSortMutex = CreateMutex (NULL, TRUE, NULL);
-		if (!hSurfSortThread) hSurfSortThread = CreateThread (NULL, 0x10000, D3DSurf_SortProc, NULL, 0, NULL);
-
-		if (!hSurfSortMutex) Sys_Error ("Failed to create Mutex object");
-		if (!hSurfSortThread) Sys_Error ("Failed to create Thread object");
-
-		// now we're ready to sort so let the sorting thread take over while we do some other work here
-		SortReady = true;
-		ReleaseMutex (hSurfSortMutex);
-	}
-
 	// upload any lightmaps that were modified
 	// done as early as possible for best parallelism
 	D3D_UploadLightmaps ();
@@ -662,9 +619,6 @@ void D3D_BuildWorld (void)
 
 	// add particles here because it's useful work to be doing while waiting on the sort
 	D3D_AddParticesToAlphaList ();
-
-	// ensure that the sort has completed and grab the sorting mutex again
-	if (SysInfo.dwNumberOfProcessors > 1) WaitForSingleObject (hSurfSortMutex, INFINITE);
 
 	// finish solid surfaces by adding any such to the solid buffer
 	D3D_AddSurfacesToRender ();
@@ -754,14 +708,19 @@ void R_MarkLeaves (void)
 	mnode_t	*node;
 	int		i;
 	extern	byte *mod_novis;
-	static int old_novis = -666;
+	static int old_novis = r_novis.integer;
+	static int old_lockpvs = r_lockpvs.integer;
 
-	// viewleaf hasn't changed, r_novis hasn't changed or we're drawing with a locked PVS
-	if (((d3d_RenderDef.oldviewleaf == d3d_RenderDef.viewleaf) && (r_novis.integer == old_novis)) || r_lockpvs.value) return;
+	if (r_lockpvs.integer == old_lockpvs)
+	{
+		// viewleaf hasn't changed, r_novis hasn't changed or we're drawing with a locked PVS
+		if (((d3d_RenderDef.oldviewleaf == d3d_RenderDef.viewleaf) && (r_novis.integer == old_novis)) || r_lockpvs.value) return;
+	}
 
 	// go to a new visframe
 	d3d_RenderDef.visframecount++;
 	old_novis = r_novis.integer;
+	old_lockpvs = r_lockpvs.integer;
 
 	// add in visible leafs - we always add the fat PVS to ensure that client visibility
 	// is the same as that which was used by the server; R_CullBox will take care of unwanted leafs

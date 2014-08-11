@@ -349,17 +349,6 @@ static void CD_f (void)
 		return;
 	}
 
-	if (!cdValid)
-	{
-		CDAudio_GetAudioDiskInfo();
-
-		if (!cdValid)
-		{
-			Con_Printf ("No CD in player.\n");
-			return;
-		}
-	}
-
 	if (stricmp (command, "play") == 0)
 	{
 		CDAudio_Play ((byte) atoi (Cmd_Argv (2)), false);
@@ -390,16 +379,6 @@ static void CD_f (void)
 		return;
 	}
 
-	if (stricmp (command, "eject") == 0)
-	{
-		if (playing)
-			CDAudio_Stop();
-
-		CDAudio_Eject();
-		cdValid = false;
-		return;
-	}
-
 	if (stricmp (command, "info") == 0)
 	{
 		Con_Printf ("%u tracks\n", maxTrack);
@@ -410,6 +389,28 @@ static void CD_f (void)
 			Con_Printf ("Paused %s track %u\n", playLooping ? "looping" : "playing", playTrack);
 
 		Con_Printf ("Volume is %f\n", cdvolume);
+		return;
+	}
+
+	// the intention is that the "cd" command works with MP3 tracks too, so here we only check if there is a CD in the drive
+	if (!cdValid)
+	{
+		CDAudio_GetAudioDiskInfo();
+
+		if (!cdValid)
+		{
+			Con_Printf ("No CD in player.\n");
+			return;
+		}
+	}
+
+	if (stricmp (command, "eject") == 0)
+	{
+		if (playing)
+			CDAudio_Stop();
+
+		CDAudio_Eject();
+		cdValid = false;
 		return;
 	}
 }
@@ -531,6 +532,7 @@ int CDAudio_Init (void)
 }
 
 cmd_t CD_f_Cmd ("cd", CD_f);
+cmd_t MP3_f_Cmd ("mp3", CD_f);
 
 void CDAudio_Shutdown (void)
 {

@@ -318,11 +318,18 @@ void R_ReadPointFile_f (void)
 
 		c++;
 
-		if (!(p = R_NewParticle (pt))) return;
+		if (!(p = R_NewParticle (pt)))
+		{
+			// woah!  this was a return!  NOT clever!
+			Con_Printf ("Pointfile overflow - ");
+			break;
+		}
 
 		p->die = cl.time + 999999;
 		p->color = (-c) & 15;
 		p->flags |= PT_NOCLIP;
+		p->color = 251;	// let's make pointfiles more visible
+		p->scale = 5;
 		VectorCopy2 (p->vel, vec3_origin);
 		VectorCopy2 (p->org, org);
 	}

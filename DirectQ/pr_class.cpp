@@ -98,7 +98,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 
 	// byte swap the header
 	for (int i = 0; i < sizeof (dprograms_t) / 4; i++)
-		((int *) this->QC)[i] = LittleLong (((int *) this->QC)[i]);
+		((int *) this->QC)[i] = ((int *) this->QC)[i];
 
 	if (this->QC->version != PROG_VERSION) Host_Error ("progs.dat has wrong version number (%i should be %i)", this->QC->version, PROG_VERSION);
 	if (this->QC->crc != PROGHEADER_CRC) Host_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
@@ -114,15 +114,6 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	// this just points at this->Globals (per comment above on it's declaration)
 	this->GlobalStruct = (globalvars_t *) this->Globals;
 	this->EdictSize = this->QC->entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
-
-	// byte swap the lumps
-	for (int i = 0; i < this->QC->numstatements; i++)
-	{
-		this->Statements[i].op = LittleShort (this->Statements[i].op);
-		this->Statements[i].a = LittleShort (this->Statements[i].a);
-		this->Statements[i].b = LittleShort (this->Statements[i].b);
-		this->Statements[i].c = LittleShort (this->Statements[i].c);
-	}
 
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 	// initialize function numbers for PROGS.DAT
@@ -146,18 +137,10 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 			if (pr_ebfs_builtins[j].funcno > pr_numbuiltins) pr_numbuiltins = pr_ebfs_builtins[j].funcno;
 		}
 	}
-
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	for (int i = 0; i < this->QC->numfunctions; i++)
 	{
-		this->Functions[i].first_statement = LittleLong (this->Functions[i].first_statement);
-		this->Functions[i].parm_start = LittleLong (this->Functions[i].parm_start);
-		this->Functions[i].s_name = LittleLong (this->Functions[i].s_name);
-		this->Functions[i].s_file = LittleLong (this->Functions[i].s_file);
-		this->Functions[i].numparms = LittleLong (this->Functions[i].numparms);
-		this->Functions[i].locals = LittleLong (this->Functions[i].locals);
-
 		// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 		if (pr_builtin_remap.value)
 		{
@@ -235,37 +218,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 
 		// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  end
 	}
-
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
-
-	for (int i = 0; i < this->QC->numglobaldefs; i++)
-	{
-		this->GlobalDefs[i].type = LittleShort (this->GlobalDefs[i].type);
-		this->GlobalDefs[i].ofs = LittleShort (this->GlobalDefs[i].ofs);
-		this->GlobalDefs[i].s_name = LittleLong (this->GlobalDefs[i].s_name);
-	}
-
-	for (int i = 0; i < this->QC->numfielddefs; i++)
-	{
-		this->FieldDefs[i].type = LittleShort (this->FieldDefs[i].type);
-
-		if (this->FieldDefs[i].type & DEF_SAVEGLOBAL)
-			Host_Error ("CProgsDat::CProgsDat: this->FieldDefs[i].type & DEF_SAVEGLOBAL");
-
-		this->FieldDefs[i].ofs = LittleShort (this->FieldDefs[i].ofs);
-		this->FieldDefs[i].s_name = LittleLong (this->FieldDefs[i].s_name);
-	}
-
-	for (int i = 0; i < this->QC->numglobals; i++)
-	{
-		if (this->Globals[i] != this->Globals[i])
-		{
-			// Con_Printf ("Got a NaN in Globals at %i\n", i);
-			this->Globals[i] = 0;
-		}
-
-		((int *) this->Globals)[i] = LittleLong (((int *) this->Globals)[i]);
-	}
 
 	FindEdictFieldOffsets ();
 }

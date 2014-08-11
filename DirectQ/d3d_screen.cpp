@@ -99,7 +99,7 @@ cvar_t		scr_centerlog ("scr_centerlog", 1, CVAR_ARCHIVE);
 cvar_t		scr_showram ("showram", 1);
 cvar_t		scr_showturtle ("showturtle", "0");
 cvar_t		scr_showpause ("showpause", 1);
-cvar_t		scr_printspeed ("scr_printspeed", 20);
+cvar_t		scr_printspeed ("scr_printspeed", 10);
 
 cvar_t		scr_screenshotformat ("scr_screenshotformat", "tga", CVAR_ARCHIVE);
 cvar_t		scr_shotnamebase ("scr_shotnamebase", "Quake", CVAR_ARCHIVE);
@@ -207,6 +207,8 @@ void SCR_CenterPrint (char *str)
 }
 
 
+int finaley = 0;
+
 void SCR_DrawCenterString (void)
 {
 	char	*start;
@@ -223,7 +225,7 @@ void SCR_DrawCenterString (void)
 	scr_erase_center = 0;
 	start = scr_centerstring;
 
-	y = (vid.height - (scr_center_lines * 10)) / 3;
+	finaley = y = (vid.height - (scr_center_lines * 10)) / 3;
 
 	do
 	{
@@ -397,6 +399,7 @@ static void SCR_CalcRefdef (void)
 	r_refdef.vrect.height = vid.height = (d3d_CurrentMode.Height - conheight) * conscale->value + conheight;
 
 	if (r_refdef.vrect.height > vid.height - sb_lines) r_refdef.vrect.height = vid.height - sb_lines;
+
 	if (r_refdef.vrect.height > vid.height) r_refdef.vrect.height = vid.height;
 
 	// always
@@ -407,12 +410,29 @@ static void SCR_CalcRefdef (void)
 
 	if (scr_fov.integer == 90 || !scr_fovcompat.integer)
 	{
-		// calculate y fov as if the screen was 640 x 432; this ensures that the top and bottom
-		// doesn't get clipped off if we have a widescreen display (also keeps the same amount of the viewmodel visible)
-		r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, 640, 432);
+		float aspect = (float) r_refdef.vrect.width / (float) r_refdef.vrect.height;
 
-		// now recalculate fov_x so that it's correctly proportioned for fov_y
-		r_refdef.fov_x = SCR_CalcFovX (r_refdef.fov_y, r_refdef.vrect.width, r_refdef.vrect.height);
+		if (aspect > (4.0f / 3.0f))
+		{
+			// calculate y fov as if the screen was 640 x 432; this ensures that the top and bottom
+			// doesn't get clipped off if we have a widescreen display (also keeps the same amount of the viewmodel visible)
+			r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, 640, 432);
+
+			// now recalculate fov_x so that it's correctly proportioned for fov_y
+			r_refdef.fov_x = SCR_CalcFovX (r_refdef.fov_y, r_refdef.vrect.width, r_refdef.vrect.height);
+
+			// Con_Printf ("widescreen\n");
+		}
+		else
+		{
+			// readjust height so that it's correctly proportioned
+			float fovheight = (640.0f * aspect) / (4.0f / 3.0f);
+
+			// calculate y fov for the new height; x fov stays as is
+			r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, fovheight, 432);
+
+			// Con_Printf ("tallscreen\n");
+		}
 	}
 	else
 	{
@@ -1414,14 +1434,14 @@ needs almost the entire 256k of stack space!
 */
 void M_Draw (void);
 void HUD_IntermissionOverlay (void);
-void HUD_FinaleOverlay (void);
+void HUD_FinaleOverlay (int y);
 void SHOWLMP_drawall (void);
 
 extern bool vid_restarted;
 
 void D3DDraw_End2D (void);
 
-void SCR_UpdateScreen (float timepassed)
+void SCR_UpdateScreen (DWORD dwTimePassed)
 {
 	// ensure that everything needed is up
 	if (!d3d_Device) return;
@@ -1493,7 +1513,7 @@ void SCR_UpdateScreen (float timepassed)
 
 	D3DHLSL_BeginFrame ();
 
-	R_RenderView (timepassed);
+	R_RenderView (dwTimePassed);
 
 	D3DDraw_Begin2D ();
 
@@ -1507,8 +1527,9 @@ void SCR_UpdateScreen (float timepassed)
 	}
 	else if (cl.intermission == 2 && key_dest == key_game)
 	{
-		HUD_FinaleOverlay ();
+		finaley = 16;
 		SCR_CheckDrawCenterString ();
+		HUD_FinaleOverlay (finaley);
 	}
 	else if (!scr_drawmapshot)
 	{
@@ -1570,7 +1591,7 @@ void SCR_UpdateScreen (float timepassed)
 		SCR_Mapshot_f (va ("%s/%s", com_gamedir, cl.worldmodel->name), false, false);
 	}
 
-	V_UpdatePalette (timepassed);
+	V_UpdatePalette ((float) dwTimePassed / 1000.0f);
 }
 
 
@@ -1602,7 +1623,7 @@ void SCR_QuakeIsLoading (int stage, int maxstage)
 
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 	SCR_CalcRefdef ();
-	hr = d3d_Device->BeginScene ();
+	D3DVid_BeginRendering ();
 
 	if (FAILED (hr)) return;
 
@@ -1626,7 +1647,6 @@ void SCR_QuakeIsLoading (int stage, int maxstage)
 	D3DDraw_End2D ();
 	D3DHLSL_EndFrame ();
 
-	d3d_Device->EndScene ();
-	d3d_Device->Present (NULL, NULL, NULL, NULL);
+	D3DVid_EndRendering ();
 }
 

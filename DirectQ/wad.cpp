@@ -26,7 +26,6 @@ int			wad_numlumps;
 lumpinfo_t	*wad_lumps;
 byte		*wad_base = NULL;
 
-void SwapPic (qpic_t *pic);
 
 /*
 ==================
@@ -85,20 +84,19 @@ bool W_LoadWadFile (char *filename)
 			header->identification[2] != 'D' || header->identification[3] != '2')
 		Sys_Error ("Wad file %s doesn't have WAD2 id\n", filename);
 
-	wad_numlumps = LittleLong (header->numlumps);
-	infotableofs = LittleLong (header->infotableofs);
+	wad_numlumps = header->numlumps;
+	infotableofs = header->infotableofs;
 	wad_lumps = (lumpinfo_t *) (wad_base + infotableofs);
 
 	for (i = 0, lump_p = wad_lumps; i < wad_numlumps; i++, lump_p++)
 	{
-		lump_p->filepos = LittleLong (lump_p->filepos);
-		lump_p->size = LittleLong (lump_p->size);
+		lump_p->filepos = lump_p->filepos;
+		lump_p->size = lump_p->size;
 		W_CleanupName (lump_p->name, lump_p->name);
 
 		if (lump_p->type == TYP_QPIC)
 		{
 			qpic_t *pic = (qpic_t *) (wad_base + lump_p->filepos);
-			SwapPic (pic);
 		}
 	}
 
@@ -168,20 +166,6 @@ void *W_GetLumpNum (int num)
 	return (void *) (wad_base + lump->filepos);
 }
 
-/*
-=============================================================================
-
-automatic byte swapping
-
-=============================================================================
-*/
-
-void SwapPic (qpic_t *pic)
-{
-	pic->width = LittleLong (pic->width);
-	pic->height = LittleLong (pic->height);
-}
-
 
 miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 {
@@ -192,11 +176,7 @@ miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 	int wadstart = SetFilePointer (fh, 0, NULL, FILE_CURRENT);
 
 	if (COM_FReadFile (fh, &header, sizeof (wadinfo_t)) != sizeof (wadinfo_t)) return NULL;
-
 	if (memcmp (header.identification, "WAD3", 4)) return NULL;
-
-	header.numlumps = LittleLong (header.numlumps);
-	header.infotableofs = LittleLong (header.infotableofs);
 
 	// seek to the info table (this is offset from the beginning of the file, NOT the current position)
 	// (do it this way so that it's PAK file friendly)
@@ -219,8 +199,6 @@ miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 
 		// clean the name/etc
 		W_CleanupName (lump.name, lump.name);
-		lump.filepos = LittleLong (lump.filepos);
-		lump.size = LittleLong (lump.size);
 
 		// check the name
 		if (!stricmp (lump.name, texname))

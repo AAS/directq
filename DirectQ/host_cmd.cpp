@@ -82,8 +82,7 @@ void Host_Status_f (void)
 
 		print = Con_Printf;
 	}
-	else
-		print = SV_ClientPrintf;
+	else print = SV_ClientPrintf;
 
 	print ("host:    %s\n", Cvar_VariableString ("hostname"));
 	print ("version: %4.2f\n", VERSION);
@@ -109,8 +108,7 @@ void Host_Status_f (void)
 			if (hours)
 				minutes -= (hours * 60);
 		}
-		else
-			hours = 0;
+		else hours = 0;
 
 		print ("#%-2u %-16.16s  %3i  %2i:%02i:%02i\n", j + 1, client->name, (int) client->edict->v.frags, hours, minutes, seconds);
 		print ("   %s\n", client->netconnection->address);
@@ -833,6 +831,7 @@ void Host_Loadgame_f (void)
 	}
 
 	SVProgs->NumEdicts = entnum;
+	sv.dwTime = (DWORD) (time * 1000.0f);
 	sv.time = time;
 
 	fclose (f);
@@ -1248,7 +1247,7 @@ void Host_PreSpawn_f (void)
 Host_Spawn_f
 ==================
 */
-void Neh_GameStart (void);
+void Neh_QCWeeniesBurnInHell (void);
 
 void Host_Spawn_f (void)
 {
@@ -1275,7 +1274,7 @@ void Host_Spawn_f (void)
 		// if this is the last client to be connected, unpause
 		sv.paused = false;
 
-		if (nehahra) Neh_GameStart ();
+		if (nehahra) Neh_QCWeeniesBurnInHell ();
 	}
 	else
 	{

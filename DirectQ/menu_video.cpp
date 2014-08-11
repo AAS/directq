@@ -105,7 +105,6 @@ bool Menu_VideoCheckNeedApply (void)
 	// if any of the options that need a device reset have changed from their defaults
 	// we signal to show the apply option
 	if (menu_videomodenum != d3d_mode.integer) return true;
-
 	if (vid_vsync.integer != dummy_vsync) return true;
 
 	// no apply needed

@@ -208,6 +208,8 @@ typedef struct client_state_s
 
 	float frametime;
 
+	DWORD		dwTime;			// used to keep timings steady
+
 	float		oldtime;
 	float		lastrecievedmessage;	// (realtime) for net trouble icon
 
@@ -332,7 +334,7 @@ void CL_UpdateTEnts (void);
 void CL_ClearState (void);
 
 
-int  CL_ReadFromServer (float frametime);
+int  CL_ReadFromServer (DWORD dwFrameTime);
 void CL_WriteToServer (usercmd_t *cmd);
 void CL_BaseMove (usercmd_t *cmd);
 

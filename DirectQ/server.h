@@ -41,6 +41,8 @@ typedef struct
 	float		lastchecktime;
 	float		time;
 
+	DWORD		dwTime;				// 
+
 	int			lastcheck;			// used by PF_checkclient
 
 	char		name[64];			// map name
@@ -245,7 +247,7 @@ void SV_AddClientToServer (struct qsocket_s	*ret);
 void SV_ClientPrintf (char *fmt, ...);
 void SV_BroadcastPrintf (char *fmt, ...);
 
-void SV_Physics (float frametime);
+void SV_Physics (DWORD dwFrameTime);
 
 bool SV_CheckBottom (edict_t *ent);
 bool SV_movestep (edict_t *ent, vec3_t move, bool relink);

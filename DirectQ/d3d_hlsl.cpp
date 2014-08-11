@@ -40,7 +40,6 @@ LPD3DXEFFECT d3d_MasterFX = NULL;
 // let's see, where is it documented that this must be a NULL-terminated array again?
 D3DXMACRO d3d_EnableFogInShaders[] = {{"hlsl_fog", "1"}, {NULL, NULL}};
 
-
 bool SilentLoad = false;
 
 // keep these global as we'll want to use them in a few places
@@ -377,11 +376,15 @@ void D3DHLSL_InvalidateState (void)
 	d3d_HLSLState.CurrLerp = -1;
 	d3d_HLSLState.LastLerp = -1;
 
-	// this is sufficient to force a recache
 	d3d_HLSLState.oldtextures[0] = NULL;
 	d3d_HLSLState.oldtextures[1] = NULL;
 	d3d_HLSLState.oldtextures[2] = NULL;
 	d3d_HLSLState.oldcubemap = NULL;
+
+	d3d_HLSLState.newtextures[0] = NULL;
+	d3d_HLSLState.newtextures[1] = NULL;
+	d3d_HLSLState.newtextures[2] = NULL;
+	d3d_HLSLState.newcubemap = NULL;
 
 	d3d_HLSLState.addressmodes[0] = 0xffffffff;
 	d3d_HLSLState.addressmodes[1] = 0xffffffff;
@@ -532,23 +535,18 @@ void D3DHLSL_Init (void)
 }
 
 
+#define HLSL_RELEASE(s) if (s) \
+{ \
+	(s)->OnLostDevice (); \
+	SAFE_RELEASE (s); \
+}
+
 void D3DHLSL_Shutdown (void)
 {
 	d3d_MasterFX = NULL;
 
-	if (d3d_MasterFXNoFog)
-	{
-		// release any other resources the fx may have created
-		d3d_MasterFXNoFog->OnLostDevice ();
-		SAFE_RELEASE (d3d_MasterFXNoFog);
-	}
-
-	if (d3d_MasterFXWithFog)
-	{
-		// release any other resources the fx may have created
-		d3d_MasterFXWithFog->OnLostDevice ();
-		SAFE_RELEASE (d3d_MasterFXWithFog);
-	}
+	HLSL_RELEASE (d3d_MasterFXNoFog);
+	HLSL_RELEASE (d3d_MasterFXWithFog);
 
 	// invalidate any cached states
 	D3DHLSL_InvalidateState ();

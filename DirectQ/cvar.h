@@ -51,6 +51,8 @@ Cvars are restricted from having the same names as commands to keep this
 interface from being ambiguous.
 */
 
+typedef void (*cvarcallback_t) (void);
+
 // changes are broadcast to all clients
 #define CVAR_SERVER			1
 
@@ -77,6 +79,18 @@ interface from being ambiguous.
 // compatibility cvars are registered for the purposes of soaking abuse from QC, but don't appear in the autocomplete lists
 #define CVAR_COMPAT			128
 
+// if this cvar has it's value changed then directq needs to be restarted
+#define CVAR_RESTART		256
+
+// this cvar is only intended to be changed by the system, not the player
+#define CVAR_SYSTEM			512
+
+// if this cvar is changed then the renderer must be restarted
+#define CVAR_RENDERER		1024
+
+// if this cvar is changed then the map must be reloaded
+#define CVAR_MAP			2048
+
 class cvar_t
 {
 public:
@@ -87,22 +101,30 @@ public:
 
 	// this one allows specifying of cvars directly by usage flags
 	// this is the preferred way and ultimately all cvars will be changed over to this
-	cvar_t (char *cvarname, char *initialval, int useflags = 0);
+	cvar_t (char *cvarname, char *initialval, int useflags = 0, cvarcallback_t cb = NULL);
 
 	// same as above but it allows for an explicit value cvar
-	cvar_t (char *cvarname, float initialval, int useflags = 0);
+	cvar_t (char *cvarname, float initialval, int useflags = 0, cvarcallback_t cb = NULL);
 
 	char	*name;
 	char	*string;
+	char	*defaultvalue;
 	float	value;
 	int		integer;
 
 	// usage flags
 	int usage;
 
+	// callback if modified
+	cvarcallback_t callback;
+
 	// next in the chain
 	cvar_t *next;
 };
+
+
+// if this is true startup and restart cvars get restrictions
+extern bool cvar_initialized;
 
 
 // allow cvars to be referenced by multiple names

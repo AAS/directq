@@ -30,6 +30,7 @@ void D3DRTT_EndScene (void);
 typedef struct palettedef_s
 {
 	PALETTEENTRY luma[256];
+	PALETTEENTRY noluma[256];
 	PALETTEENTRY standard[256];
 
 	D3DCOLOR standard32[256];
@@ -95,26 +96,31 @@ void D3DHLSL_SetInt (D3DXHANDLE handle, int n);
 void D3DHLSL_SetCurrLerp (float val);
 void D3DHLSL_SetLastLerp (float val);
 
-#define FX_PASS_NOTBEGUN				-1
-#define FX_PASS_ALIAS_NOLUMA			0
-#define FX_PASS_ALIAS_LUMA				1
-#define FX_PASS_LIQUID					2
-#define FX_PASS_SHADOW					3
-#define FX_PASS_WORLD_NOLUMA			4
-#define FX_PASS_WORLD_LUMA				5
-#define FX_PASS_SKYWARP					6
-#define FX_PASS_DRAWTEXTURED			7
-#define FX_PASS_DRAWCOLORED				8
-#define FX_PASS_SKYBOX					9
-#define FX_PASS_PARTICLES				10
-#define FX_PASS_WORLD_NOLUMA_ALPHA		11
-#define FX_PASS_WORLD_LUMA_ALPHA		12
-#define FX_PASS_PARTICLES_INSTANCED		13
-#define FX_PASS_UNDERWATER				14
+#define FX_PASS_NOTBEGUN					-1
+#define FX_PASS_ALIAS_NOLUMA				0
+#define FX_PASS_ALIAS_LUMA					1
+#define FX_PASS_LIQUID						2
+#define FX_PASS_SHADOW						3
+#define FX_PASS_WORLD_NOLUMA				4
+#define FX_PASS_WORLD_LUMA					5
+#define FX_PASS_SKYWARP						6
+#define FX_PASS_DRAWTEXTURED				7
+#define FX_PASS_DRAWCOLORED					8
+#define FX_PASS_SKYBOX						9
+#define FX_PASS_PARTICLES					10
+#define FX_PASS_WORLD_NOLUMA_ALPHA			11
+#define FX_PASS_WORLD_LUMA_ALPHA			12
+#define FX_PASS_PARTICLES_INSTANCED			13
+#define FX_PASS_UNDERWATER					14
+#define FX_PASS_ALIAS_LUMA_NO_LUMA			15
+#define FX_PASS_WORLD_LUMA_NO_LUMA			16
+#define FX_PASS_WORLD_LUMA_NO_LUMA_ALPHA	17
 
 void D3DHLSL_Init (void);
 void D3DHLSL_Shutdown (void);
 
+
+extern cvar_t gl_fullbrights;
 
 // this one wraps DIP so that I can check for commit and anything else i need to do before drawing
 void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumIndexes);
@@ -316,6 +322,7 @@ typedef struct d3d_renderdef_s
 	float time;
 	float oldtime;
 	float frametime;
+	DWORD dwTime;
 
 	// actual fov used for rendering
 	float fov_x;

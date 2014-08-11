@@ -161,6 +161,9 @@ void Sys_Init (void)
 			exit (666);
 		}
 	}
+
+	// run the timer once to get a valid baseline for subsequents
+	Sys_Milliseconds ();
 }
 
 
@@ -402,7 +405,7 @@ bool RecursiveCheckFolderForQuake (char *path)
 	return false;
 }
 
-char MyDesktopFolder[MAX_PATH];
+char MyDesktopFolder[MAX_PATH] = {0};
 
 char *WellKnownDirectories[] =
 {
@@ -443,8 +446,11 @@ void SetQuakeDirectory (void)
 	char currdir[MAX_PATH];
 
 	// some people install quake to their desktops
-	SHGetFolderPath (NULL, CSIDL_DESKTOP, NULL, SHGFP_TYPE_CURRENT, MyDesktopFolder);
-	strcat (MyDesktopFolder, "\\quake");
+	hr = SHGetFolderPath (NULL, CSIDL_DESKTOP, NULL, SHGFP_TYPE_CURRENT, MyDesktopFolder);
+
+	if (FAILED (hr))
+		MyDesktopFolder[0] = 0;
+	else strcat (MyDesktopFolder, "\\quake");
 
 	// if the current directory is the Quake directory, we search no more
 	GetCurrentDirectory (MAX_PATH, currdir);
@@ -646,11 +652,26 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 	switch (Msg)
 	{
-		// events we want to discard
+	case WM_GETMINMAXINFO:
+		{
+			RECT windowrect;
+			RECT clientrect;
+			MINMAXINFO *mmi = (MINMAXINFO *) lParam;
+
+			GetWindowRect (hWnd, &windowrect);
+			GetClientRect (hWnd, &clientrect);
+
+			mmi->ptMinTrackSize.x = 320 + ((windowrect.right - windowrect.left) - (clientrect.right - clientrect.left));
+			mmi->ptMinTrackSize.y = 240 + ((windowrect.bottom - windowrect.top) - (clientrect.bottom - clientrect.top));
+		}
+
+		return 0;
+
 	case WM_SIZE:
 		D3DVid_ResizeWindow (hWnd);
 		return 0;
 
+		// events we want to discard
 	case WM_CREATE: return 0;
 	case WM_ERASEBKGND: return 1; // treachery!!! see your MSDN!
 	case WM_SYSCHAR: return 0;
@@ -720,6 +741,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 void Host_Frame (DWORD time);
 void VID_DefaultMonitorGamma_f (void);
+void D3DVid_DetectVSync (HWND hWnd);
 
 void GetCrashReason (LPEXCEPTION_POINTERS ep);
 
@@ -779,7 +801,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		0,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
-		GetDesktopWindow (),
+		NULL,
 		NULL,
 		hInstance,
 		NULL
@@ -918,6 +940,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	AllowAccessibilityShortcutKeys (false);
 
 	Sys_Init ();
+	D3DVid_DetectVSync (d3d_Window);
 	Host_Init (&parms);
 
 	DWORD oldtime = Sys_Milliseconds ();
@@ -950,6 +973,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	// run through correct shutdown
 	Sys_Quit (msg.wParam);
-	return 0;	// shut up compiler
+	return 0;
 }
 

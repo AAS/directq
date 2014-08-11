@@ -883,7 +883,7 @@ void PF_checkpos (void)
 
 //============================================================================
 
-byte	checkpvs[(MAX_MAP_LEAFS + 7) / 8];
+byte *checkpvs = NULL;
 
 int PF_newcheckclient (int check)
 {
@@ -955,6 +955,7 @@ name checkclient ()
 */
 #define	MAX_CHECK	16
 int c_invis, c_notvis;
+
 void PF_checkclient (void)
 {
 	edict_t	*ent, *self;

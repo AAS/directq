@@ -313,29 +313,14 @@ cmd_t COM_Path_f_Cmd ("path", COM_Path_f);
 
 void COM_Init (char *basedir)
 {
-	byte    swaptest[2] = {1, 0};
-
-	// set the byte swapping variables in a portable manner
-	if (* (short *) swaptest == 1)
-	{
-		bigendien = false;
-		BigShort = ShortSwap;
-		LittleShort = ShortNoSwap;
-		BigLong = LongSwap;
-		LittleLong = LongNoSwap;
-		BigFloat = FloatSwap;
-		LittleFloat = FloatNoSwap;
-	}
-	else
-	{
-		bigendien = true;
-		BigShort = ShortNoSwap;
-		LittleShort = ShortSwap;
-		BigLong = LongNoSwap;
-		LittleLong = LongSwap;
-		BigFloat = FloatNoSwap;
-		LittleFloat = FloatSwap;
-	}
+	// because we're D3D, and therefore Windows only, we don't need to concern ourselves with this crap
+	bigendien = false;
+	BigShort = ShortSwap;
+	LittleShort = ShortNoSwap;
+	BigLong = LongSwap;
+	LittleLong = LongNoSwap;
+	BigFloat = FloatSwap;
+	LittleFloat = FloatNoSwap;
 
 	COM_InitFilesystem ();
 	COM_CheckRegistered ();

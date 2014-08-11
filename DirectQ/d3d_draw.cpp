@@ -1579,8 +1579,6 @@ void D3DDraw_Begin2D (void)
 	D3DRTT_EndScene ();
 
 	D3DMATRIX m;
-
-	// go back to fixed func processing for ID3DXSprite
 	D3DMatrix_Identity (&m);
 	D3DMatrix_OrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
 

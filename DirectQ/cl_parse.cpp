@@ -1201,9 +1201,14 @@ void CL_ParseServerMessage (void)
 
 				// proquake messaging only exists with protocol 15
 				if (cl.Protocol == PROTOCOL_VERSION_NQ)
+				{
+					// the Con_Printf needs to come first as CL_ParseProQuakeString is going to fuck
+					// with the contents of str.  to be honest i think this whole thing is one great big
+					// dirty hack and should be taken outside and shot.
+					Con_Printf ("%s", str);
 					CL_ParseProQuakeString (str);
-
-				Con_Printf ("%s", str);
+				}
+				else Con_Printf ("%s", str);
 			}
 
 			break;

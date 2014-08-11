@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
+cvar_t gl_fullbrights ("gl_fullbrights", "1", CVAR_ARCHIVE);
+
 void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf)
 {
 	DWORD swprocflag = d3d_GlobalCaps.supportHardwareTandL ? 0 : D3DUSAGE_SOFTWAREPROCESSING;
@@ -439,18 +441,15 @@ bool R_CullBox (vec3_t emins, vec3_t emaxs)
 bool R_CullBox (mnode_t *node)
 {
 	// different culling for the automap
-	if (d3d_RenderDef.automap) return R_AutomapCull (node->minmaxs, node->minmaxs + 3);
+	if (d3d_RenderDef.automap) return R_AutomapCull (node->mins, node->maxs);
 
-#if 0
-
-	// this is just a sanity check and never happens (yes, i tested it)
+	// if the node's parent was fully outside the frustum then the node is also fully outside the frustum
+	// (note that this should be a trivial reject case as the children of nodes fully outside should never be traversed)
 	if (node->parent && node->parent->bops == FULLY_OUTSIDE_FRUSTUM)
 	{
 		node->bops = FULLY_OUTSIDE_FRUSTUM;
 		return true;
 	}
-
-#endif
 
 	// if the node's parent was fully inside the frustum then the node is also fully inside the frustum
 	if (node->parent && node->parent->bops == FULLY_INSIDE_FRUSTUM)
@@ -459,6 +458,7 @@ bool R_CullBox (mnode_t *node)
 		return false;
 	}
 
+	// the node's parent intersected the frustum (or the node has no parent) so run a full check
 	// BoxOnPlaneSide result flags are unknown
 	node->bops = 0;
 
@@ -469,7 +469,7 @@ bool R_CullBox (mnode_t *node)
 		if (node->parent && node->parent->sides[i] == INSIDE_FRUSTUM) continue;
 
 		// need to check
-		node->sides[i] |= BoxOnPlaneSide (node->minmaxs, node->minmaxs + 3, frustum + i);
+		node->sides[i] |= BoxOnPlaneSide (node->mins, node->maxs, frustum + i);
 
 		// if the node is outside the frustum on any side then the entire node is rejected
 		if (node->sides[i] == OUTSIDE_FRUSTUM)
@@ -879,6 +879,8 @@ void D3D_PrepareFog (void)
 ========================================================================================
 */
 
+cvar_t cl_deathfade ("cl_deathfade", 0.1f, CVAR_ARCHIVE);
+
 void D3D_DeathBlend (void)
 {
 	// no death blend initially
@@ -898,38 +900,41 @@ void D3D_DeathBlend (void)
 	// look around after they die, and god knows there's all sorts of folks in the world
 	if (cl.maxclients > 1) return;
 
-	static float deathred = 0;
-	static float deathalpha = 0;
-	static bool wasalive = true;
-
-	// see if we're still alive
-	if (cl.stats[STAT_HEALTH] > 0)
+	if (cl_deathfade.value > 0.0f)
 	{
-		// we're still alive
-		wasalive = true;
-		return;
+		static float deathred = 0;
+		static float deathalpha = 0;
+		static bool wasalive = true;
+
+		// see if we're still alive
+		if (cl.stats[STAT_HEALTH] > 0)
+		{
+			// we're still alive
+			wasalive = true;
+			return;
+		}
+
+		// ok, we're dead - see did we just die or have we been dead for a while?
+		if (wasalive)
+		{
+			// init the color and blend
+			deathalpha = 0;
+			deathred = 0.666;
+
+			// signal that we've been dead before
+			wasalive = false;
+		}
+
+		// set up the death shift
+		cl.cshifts[CSHIFT_DEATH].destcolor[0] = (deathred * 255.0f);
+		cl.cshifts[CSHIFT_DEATH].destcolor[1] = 0;
+		cl.cshifts[CSHIFT_DEATH].destcolor[2] = 0;
+		cl.cshifts[CSHIFT_DEATH].percent = (deathalpha * 255.0f);
+
+		// update blend (attempt to get close to DP's scale)
+		deathalpha += (d3d_RenderDef.frametime * 10.0f * cl_deathfade.value) / 3.0f;
+		deathred -= (d3d_RenderDef.frametime * 10.0f * cl_deathfade.value) / 5.0f;
 	}
-
-	// ok, we're dead - see did we just die or have we been dead for a while?
-	if (wasalive)
-	{
-		// init the color and blend
-		deathalpha = 0;
-		deathred = 0.666;
-
-		// signal that we've been dead before
-		wasalive = false;
-	}
-
-	// set up the death shift
-	cl.cshifts[CSHIFT_DEATH].destcolor[0] = (deathred * 255.0f);
-	cl.cshifts[CSHIFT_DEATH].destcolor[1] = 0;
-	cl.cshifts[CSHIFT_DEATH].destcolor[2] = 0;
-	cl.cshifts[CSHIFT_DEATH].percent = (deathalpha * 255.0f);
-
-	// update blend
-	deathalpha += d3d_RenderDef.frametime / 3.0f;
-	deathred -= d3d_RenderDef.frametime / 5.0f;
 }
 
 
@@ -1109,6 +1114,7 @@ void D3DRMain_HLSLSetup (void)
 
 	D3DHLSL_SetFloat ("Overbright", d3d_OverbrightModulate);
 	D3DHLSL_SetFloatArray ("r_origin", r_origin, 3);
+	D3DHLSL_SetFloatArray ("viewangles", r_refdef.viewangles, 3);
 
 	D3DHLSL_SetFloatArray ("FogColor", d3d_FogColor, 4);
 
@@ -1139,15 +1145,17 @@ void D3DRMain_HLSLSetup (void)
 }
 
 
-void R_RenderView (float timepassed)
+void R_RenderView (DWORD dwTimePassed)
 {
 	// if (sv.active && sv.paused) Con_Printf ("server paused\n");
 
 	// always pause in single player if in the console or the menus
 	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
 	{
+		// keep timings steady
 		d3d_RenderDef.oldtime = d3d_RenderDef.time;
-		d3d_RenderDef.time += timepassed;
+		d3d_RenderDef.dwTime += dwTimePassed;
+		d3d_RenderDef.time = (float) d3d_RenderDef.dwTime / 1000.0f;
 	}
 
 	// this needs to be updated here instead of in a callback otherwise it will go out of sync

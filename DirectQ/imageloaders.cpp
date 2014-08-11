@@ -121,6 +121,10 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		tex
 	);
 
+	// now bring it into video RAM
+	if (SUCCEEDED (hr))
+		tex[0]->PreLoad ();
+
 	return hr;
 }
 
@@ -617,15 +621,15 @@ ext_tex_load:;
 	{
 		// attempt to open it direct
 		fh = CreateFile
-			 (
-				 extpath,
-				 GENERIC_READ,
-				 FILE_SHARE_READ,
-				 NULL,
-				 OPEN_EXISTING,
-				 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
-				 NULL
-			 );
+		(
+			extpath,
+			FILE_READ_DATA,
+			FILE_SHARE_READ,
+			NULL,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+			NULL
+		);
 
 		filelen = GetFileSize (fh, NULL);
 	}

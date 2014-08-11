@@ -42,6 +42,7 @@ int aniso0, aniso1, aniso2;
 
 float3 Scale;
 float3 r_origin;
+float3 viewangles;
 
 float4 FogColor;
 float FogDensity;
@@ -113,6 +114,24 @@ float4 FogCalc (float4 color, float4 fogpos)
 	return color;
 }
 #endif
+
+
+#ifdef hlsl_fog
+float4 GetLumaColor (float4 texcolor, float4 lightmap, float4 lumacolor, float4 FogPosition)
+#else
+float4 GetLumaColor (float4 texcolor, float4 lightmap, float4 lumacolor)
+#endif
+{
+#ifdef hlsl_fog
+	float4 lumaon = FogCalc (texcolor * lightmap * Overbright, FogPosition) + lumacolor;
+	float4 lumaoff = FogCalc ((texcolor + lumacolor) * lightmap * Overbright, FogPosition);
+#else
+	float4 lumaon = (texcolor * lightmap * Overbright) + lumacolor;
+	float4 lumaoff = (texcolor + lumacolor) * lightmap * Overbright;
+#endif
+
+	return max (lumaon, lumaoff);
+}
 
 
 /*
@@ -195,6 +214,8 @@ PSUnderwaterVert VSDrawUnderwater (VSUnderwaterVert Input)
 	Output.Color0 = 1.0f - Input.Color;
 	Output.Color1 = float4 (Input.Color.rgb, 1.0f) * Input.Color.a;
 
+	// we can't correct the sine warp for view angles as the gun model is drawn in a constant position irrespective of angles
+	// so running the correction turns it into wobbly jelly.  lesser of two evils.
 	Output.Tex0 = Input.Tex0;
 	Output.Tex1 = Input.Tex1;
 	Output.Tex2 = (Input.Tex1 + (warptime * 0.0625f)) * Scale.xy;
@@ -235,15 +256,29 @@ struct VertAliasPS
 };
 
 
+float4 PSAliasLumaNoLuma (VertAliasPS Input) : COLOR0
+{
+	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = FogCalc ((tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright), Input.FogPosition);
+#else
+	float4 color = (tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright);
+#endif
+
+	color.a = AlphaVal;
+	return color;
+}
+
+
 float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 {
 	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
-	float4 fullbright = tex2D (tmu1Sampler, Input.Tex0);
 
 #ifdef hlsl_fog
-	float4 color = FogCalc ((tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Shade * Overbright), Input.FogPosition) + fullbright;
+	float4 color = GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), Shade, tex2D (tmu1Sampler, Input.Tex0), Input.FogPosition);
 #else
-	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Shade * Overbright)) + fullbright;
+	float4 color = GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), Shade, tex2D (tmu1Sampler, Input.Tex0));
 #endif
 
 	color.a = AlphaVal;
@@ -542,16 +577,22 @@ float4 PSWorldNoLumaAlpha (PSWorldVert Input) : COLOR0
 }
 
 
+float4 PSWorldLumaNoLuma (PSWorldVert Input) : COLOR0
+{
+#ifdef hlsl_fog
+	return FogCalc ((tex2D (tmu1Sampler, Input.Tex0) + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright), Input.FogPosition);
+#else
+	return (tex2D (tmu1Sampler, Input.Tex0) + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright);
+#endif
+}
+
+
 float4 PSWorldLuma (PSWorldVert Input) : COLOR0
 {
-	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
-	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0);
-	float4 lightmap = tex2D (tmu0Sampler, Input.Tex1);
-
 #ifdef hlsl_fog
-	return FogCalc ((texcolor - fullbright) * (lightmap * Overbright), Input.FogPosition) + fullbright;
+	return GetLumaColor (tex2D (tmu1Sampler, Input.Tex0), tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0), Input.FogPosition);
 #else
-	return ((texcolor - fullbright) * (lightmap * Overbright)) + fullbright;
+	return GetLumaColor (tex2D (tmu1Sampler, Input.Tex0), tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0));
 #endif
 }
 
@@ -559,13 +600,26 @@ float4 PSWorldLuma (PSWorldVert Input) : COLOR0
 float4 PSWorldLumaAlpha (PSWorldVert Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
-	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0);
-	float4 lightmap = tex2D (tmu0Sampler, Input.Tex1);
 
 #ifdef hlsl_fog
-	float4 color = FogCalc ((texcolor - fullbright) * (lightmap * Overbright), Input.FogPosition) + fullbright;
+	float4 color = GetLumaColor (texcolor, tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0), Input.FogPosition);
 #else
-	float4 color = ((texcolor - fullbright) * (lightmap * Overbright)) + fullbright;
+	float4 color = GetLumaColor (texcolor, tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0));
+#endif
+
+	color.a = AlphaVal * texcolor.a;
+	return color;
+}
+
+
+float4 PSWorldLumaNoLumaAlpha (PSWorldVert Input) : COLOR0
+{
+	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
+
+#ifdef hlsl_fog
+	float4 color = FogCalc ((texcolor + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright), Input.FogPosition);
+#else
+	float4 color = (texcolor + tex2D (tmu2Sampler, Input.Tex0)) * (tex2D (tmu0Sampler, Input.Tex1) * Overbright);
 #endif
 
 	color.a = AlphaVal * texcolor.a;
@@ -619,7 +673,10 @@ float4 SkyWarpPS (PSSkyVert Input) : COLOR0
 
 	float4 color = (alphacolor * alphacolor.a) + (solidcolor * (1.0 - alphacolor.a));
 	color.a = 1.0;
+
 #ifdef hlsl_fog
+	// to do - use the same fog density but fade it off a little?
+	// something else???
 	return lerp (FogColor, color, SkyFog);
 #else
 	return color;
@@ -762,6 +819,24 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 VSDrawUnderwater ();
 		PixelShader = compile ps_2_0 PSDrawUnderwater ();
+	}
+
+	pass FX_PASS_ALIAS_LUMA_NO_LUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVS ();
+		PixelShader = compile ps_2_0 PSAliasLumaNoLuma ();
+	}
+
+	pass FX_PASS_WORLD_LUMA_NO_LUMA
+	{
+		VertexShader = compile vs_2_0 VSWorldCommon ();
+		PixelShader = compile ps_2_0 PSWorldLumaNoLuma ();
+	}
+
+	pass FX_PASS_WORLD_LUMA_NO_LUMA_ALPHA
+	{
+		VertexShader = compile vs_2_0 VSWorldCommon ();
+		PixelShader = compile ps_2_0 PSWorldLumaNoLumaAlpha ();
 	}
 }
 

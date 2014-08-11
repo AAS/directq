@@ -274,6 +274,7 @@ Writes key bindings and archived cvars
 */
 void Cmd_WriteAlias (FILE *f);
 void D3DVid_SaveTextureMode (FILE *f);
+void Key_HistoryFlush (void);
 
 void Host_WriteConfiguration (void)
 {
@@ -320,6 +321,8 @@ void Host_WriteConfiguration (void)
 		D3DVid_SaveTextureMode (f);	// per request
 
 		fclose (f);
+
+		Key_HistoryFlush ();
 
 #if 1
 		Con_SafePrintf ("Wrote directq.cfg\n");
@@ -614,7 +617,7 @@ Host_ServerFrame
 
 ==================
 */
-void Host_ServerFrame (float frametime)
+void Host_ServerFrame (DWORD dwFrameTime, float frametime)
 {
 	// run the world state
 	SVProgs->GlobalStruct->frametime = frametime;
@@ -631,7 +634,7 @@ void Host_ServerFrame (float frametime)
 	// move things around and think
 	// always pause in single player if in console or menus
 	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
-		SV_Physics (frametime);
+		SV_Physics (dwFrameTime);
 
 	// send all messages to the clients
 	SV_SendClientMessages ();
@@ -685,7 +688,8 @@ void Host_Frame (DWORD time)
 	else
 	{
 		// move these back to DWORDs to keep timings steady; there is a tendency for them to drift at present
-		float host_frametime = (float) (dwRealTime - dwOldRealTime) * 0.001f;
+		DWORD dwFrameTime = dwRealTime - dwOldRealTime;
+		float host_frametime = (float) dwFrameTime * 0.001f;
 
 		realtime = (float) dwRealTime * 0.001f;
 		dwOldRealTime = dwRealTime;
@@ -693,8 +697,15 @@ void Host_Frame (DWORD time)
 		// more integer compensation here
 		// weird things happen if we're running at > 1000 fps and we clamp frametimes to 1 ms so don't do that!
 		if (host_framerate.value > 0)
+		{
+			dwFrameTime = (DWORD) (host_framerate.value * 1000.0f);
 			host_frametime = host_framerate.value;
-		else if (host_frametime > 0.1f) host_frametime = 0.1f;
+		}
+		else if (host_frametime > 0.1f)
+		{
+			dwFrameTime = 100;
+			host_frametime = 0.1f;
+		}
 
 		IN_Commands ();
 		Cbuf_Execute ();
@@ -704,10 +715,10 @@ void Host_Frame (DWORD time)
 		// process any queued input events
 		IN_ProcessQueue ();
 
-		if (sv.active) Host_ServerFrame (host_frametime);
+		if (sv.active) Host_ServerFrame (dwFrameTime, host_frametime);
 
 		// fetch results from server
-		if (cls.state == ca_connected) CL_ReadFromServer (host_frametime);
+		if (cls.state == ca_connected) CL_ReadFromServer (dwFrameTime);
 
 		// set up the console (FPS dependent)
 		SCR_SetUpToDrawConsole (host_frametime);
@@ -717,7 +728,7 @@ void Host_Frame (DWORD time)
 		V_RenderView (cl.time, host_frametime);
 
 		// update refresh
-		SCR_UpdateScreen (host_frametime);
+		SCR_UpdateScreen (dwFrameTime);
 
 		// run anything that needs to be done after the screen update
 		// update particles
@@ -835,6 +846,9 @@ void Host_Init (quakeparms_t *parms)
 
 	// anything allocated after this point will be cleared between maps
 	host_initialized = true;
+
+	// cvars are now initialized
+	cvar_initialized = true;
 
 	UpdateTitlebarText ();
 }

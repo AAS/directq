@@ -54,6 +54,8 @@ void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
 void D3DLight_LightPoint (entity_t *e, float *c);
 
 cvar_t r_aliaslightscale ("r_aliaslightscale", "1", CVAR_ARCHIVE);
+cvar_t r_optimizealiasmodels ("r_optimizealiasmodels", "1", CVAR_ARCHIVE | CVAR_RESTART);
+cvar_t r_cachealiasmodels ("r_cachealiasmodels", "0", CVAR_ARCHIVE | CVAR_RESTART);
 
 /*
 =================================================================
@@ -63,14 +65,96 @@ ALIAS MODEL DISPLAY LIST GENERATION
 =================================================================
 */
 
+#define AM_NOSHADOW			1
+#define AM_FULLBRIGHT		2
+#define AM_EYES				4
+
+
+void D3D_CacheAliasMesh (char *name, byte *hash, aliashdr_t *hdr)
+{
+	char meshname[MAX_PATH] = {0};
+
+	Sys_mkdir ("mesh");
+	COM_StripExtension (name, meshname);
+	FILE *f = fopen (va ("%s/mesh/%s.ms3", com_gamedir, &meshname[6]), "wb");
+
+	if (f)
+	{
+		// write out a checksum for the model to ensure that the saved .ms3 is valid
+		fwrite (hash, 16, 1, f);
+
+		// write out the sizes
+		fwrite (&hdr->numindexes, sizeof (int), 1, f);
+		fwrite (&hdr->nummesh, sizeof (int), 1, f);
+		fwrite (&r_optimizealiasmodels.integer, sizeof (int), 1, f);
+
+		// write out the data
+		fwrite (hdr->indexes, sizeof (unsigned short), hdr->numindexes, f);
+		fwrite (hdr->meshverts, sizeof (aliasmesh_t), hdr->nummesh, f);
+
+		fclose (f);
+	}
+}
+
+
 /*
 ================
 D3DAlias_MakeAliasMesh
 
 ================
 */
-void D3DAlias_MakeAliasMesh (char *name, aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles)
+void D3DAlias_MakeAliasMesh (char *name, byte *hash, aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles)
 {
+	if (r_cachealiasmodels.integer)
+	{
+		// look for a cached version
+		HANDLE h = INVALID_HANDLE_VALUE;
+		char meshname[MAX_PATH] = {0};
+		byte ms3hash[16];
+		int optimized = 0;
+
+		COM_StripExtension (name, meshname);
+		COM_FOpenFile (va ("mesh/%s.ms3", &meshname[6]), &h);
+
+		if (h == INVALID_HANDLE_VALUE) goto bad_mesh_1;
+
+		// read and validate all of the data
+		if (COM_FReadFile (h, ms3hash, 16) != 16) goto bad_mesh_2;
+		if (!COM_CheckHash (ms3hash, hash)) goto bad_mesh_2;
+		if (COM_FReadFile (h, &hdr->numindexes, sizeof (int)) != sizeof (int)) goto bad_mesh_2;
+		if (COM_FReadFile (h, &hdr->nummesh, sizeof (int)) != sizeof (int)) goto bad_mesh_2;
+		if (COM_FReadFile (h, &optimized, sizeof (int)) != sizeof (int)) goto bad_mesh_2;
+
+		// if the cached version is different from the current optimization level then recache it too
+		// (exception: if the cached version is optimized we prefer to use it)
+		if (optimized != r_optimizealiasmodels.integer && !optimized) goto bad_mesh_2;
+
+		// the scratchbuf is big enough for 65536 verts so set up temp storage for reading to
+		unsigned short *cacheindexes = (unsigned short *) scratchbuf;
+		aliasmesh_t *cachemesh = (aliasmesh_t *) (cacheindexes + hdr->numindexes);
+
+		// these will be cached even if invalid so they need to stay in temp storage until caching is complete
+		// (although by this stage it's unlikely, but still...)
+		if (COM_FReadFile (h, cacheindexes, sizeof (unsigned short) * hdr->numindexes) != sizeof (unsigned short) * hdr->numindexes) goto bad_mesh_2;
+		if (COM_FReadFile (h, cachemesh, sizeof (aliasmesh_t) * hdr->nummesh) != sizeof (aliasmesh_t) * hdr->nummesh) goto bad_mesh_2;
+
+		// cached OK
+		COM_FCloseFile (&h);
+
+		// and cache the mesh for real
+		hdr->indexes = (unsigned short *) MainCache->Alloc (cacheindexes, hdr->numindexes * sizeof (unsigned short));
+		hdr->meshverts = (aliasmesh_t *) MainCache->Alloc (cachemesh, hdr->nummesh * sizeof (aliasmesh_t));
+
+		return;
+
+bad_mesh_2:;
+		// we get here if the mesh file was successfully opened but was not valid for this MDL or had a read error
+		COM_FCloseFile (&h);
+bad_mesh_1:;
+		// we get here if the mesh file could not be opened
+		Con_Printf ("meshing %s...\n", name);
+	}
+
 	// also reserve space for the index remap tables
 	int max_mesh = (SCRATCHBUF_SIZE / sizeof (aliasmesh_t));
 
@@ -136,12 +220,122 @@ void D3DAlias_MakeAliasMesh (char *name, aliashdr_t *hdr, stvert_t *stverts, dtr
 	if (hdr->nummesh > d3d_DeviceCaps.MaxVertexIndex) Sys_Error ("D3DAlias_MakeAliasMesh: MDL %s too big", name);
 	if (hdr->nummesh > d3d_DeviceCaps.MaxPrimitiveCount) Sys_Error ("D3DAlias_MakeAliasMesh: MDL %s too big", name);
 
-	// alloc a final for-real buffer for the mesh verts
-	hdr->meshverts = (aliasmesh_t *) MainCache->Alloc (hdr->meshverts, hdr->nummesh * sizeof (aliasmesh_t));
+	if (r_optimizealiasmodels.integer)
+	{
+		// optimize the mesh - we can pull temp storage off the hunk here because we're gonna free it anyway
+		// most of the following code was inspired by the example at http://psp.jim.sh/svn/comp.php?repname=ps3ware&compare[]=/@136&compare[]=/@137
+		// i reworked it to support my data types and naming and removed all of the STL gross-out crap.
+		// this is the *only* practical example of these functions usage i could find, everything else just says
+		// "use them" but doesn't actually say *how* (indicating that a lot of folks don't really know what they're talking about...)
+		int numtris = hdr->numindexes / 3;
+		unsigned short *newindexes = (unsigned short *) MainHunk->Alloc (hdr->numindexes * sizeof (unsigned short), FALSE);
+		DWORD *optresult = (DWORD *) MainHunk->Alloc ((hdr->nummesh > numtris ? hdr->nummesh : numtris) * sizeof (DWORD), FALSE);
+		aliasmesh_t *newvertexes = (aliasmesh_t *) MainHunk->Alloc (hdr->nummesh * sizeof (aliasmesh_t), FALSE);
+		DWORD *remap = (DWORD *) MainHunk->Alloc (hdr->nummesh * sizeof (DWORD), FALSE);
+
+		D3DXOptimizeFaces (hdr->indexes, numtris, hdr->nummesh, FALSE, optresult);
+
+		for (int i = 0; i < numtris; i++)
+		{
+			int src = optresult[i] * 3;
+			int dst = i * 3;
+
+			newindexes[dst + 0] = hdr->indexes[src + 0];
+			newindexes[dst + 1] = hdr->indexes[src + 1];
+			newindexes[dst + 2] = hdr->indexes[src + 2];
+		}
+
+		D3DXOptimizeVertices (newindexes, numtris, hdr->nummesh, FALSE, optresult);
+
+		// FILE *f = fopen ("vopt.txt", "w");
+
+		for (int i = 0; i < hdr->nummesh; i++)
+		{
+			// fprintf (f, "%3i : %3i\n", i, optresult[i]);
+
+			memcpy (&newvertexes[i], &hdr->meshverts[optresult[i]], sizeof (aliasmesh_t));
+			remap[optresult[i]] = i;
+		}
+
+		// fclose (f);
+		// f = fopen ("iopt.txt", "w");
+
+		for (int i = 0; i < hdr->numindexes; i++)
+		{
+			// fprintf (f, "%3i : %3i\n", hdr->indexes[i], remap[newindexes[i]]);
+			hdr->indexes[i] = remap[newindexes[i]];
+		}
+
+		// fclose (f);
+
+		// cache alloc from the optimized vertexes
+		hdr->meshverts = (aliasmesh_t *) MainCache->Alloc (newvertexes, hdr->nummesh * sizeof (aliasmesh_t));
+	}
+	else
+	{
+		// alloc a final for-real buffer for the mesh verts
+		hdr->meshverts = (aliasmesh_t *) MainCache->Alloc (hdr->meshverts, hdr->nummesh * sizeof (aliasmesh_t));
+	}
+
+	// free our hunk memory
 	MainHunk->FreeToLowMark (hunkmark);
+
+	// (optionally) save the data out to disk
+	if (r_cachealiasmodels.integer)
+		D3D_CacheAliasMesh (name, hash, hdr);
 
 	// not delerped yet (view models only)
 	hdr->mfdelerp = false;
+
+	// calculate drawflags
+	hdr->drawflags = 0;
+	char *Name = strrchr (name, '/');
+
+	if (Name)
+	{
+		Name++;
+
+		// this list was more or less lifted straight from Bengt Jardrup's engine.  Personally I think that hard-coding
+		// behaviours like this into the engine is evil, but there are mods that depend on it so oh well.
+		// At least I guess it's *standardized* evil...
+		if (!strcmp (name, "progs/flame.mdl") || !strcmp (name, "progs/flame2.mdl"))
+			hdr->drawflags |= (AM_NOSHADOW | AM_FULLBRIGHT);
+		else if (!strcmp (name, "progs/eyes.mdl"))
+			hdr->drawflags |= (AM_NOSHADOW | AM_EYES);
+		else if (!strcmp (name, "progs/bolt.mdl"))
+			hdr->drawflags |= AM_NOSHADOW;
+		else if (!strncmp (Name, "flame", 5) || !strncmp (Name, "torch", 5) || !strcmp (name, "progs/missile.mdl") ||
+			!strcmp (Name, "newfire.mdl") || !strcmp (Name, "longtrch.mdl") || !strcmp (Name, "bm_reap.mdl"))
+			hdr->drawflags |= (AM_NOSHADOW | AM_FULLBRIGHT);
+		else if (!strncmp (Name, "lantern", 7) ||
+			 !strcmp (Name, "brazshrt.mdl") ||  // For Chapters ...
+			 !strcmp (Name, "braztall.mdl"))
+			hdr->drawflags |= (AM_NOSHADOW | AM_FULLBRIGHT);
+		else if (!strncmp (Name, "bolt", 4) ||	    // Bolts ...
+			 !strcmp (Name, "s_light.mdl"))
+			hdr->drawflags |= (AM_NOSHADOW | AM_FULLBRIGHT);
+		else if (!strncmp (Name, "candle", 6))
+			hdr->drawflags |= (AM_NOSHADOW | AM_FULLBRIGHT);
+		else if ((!strcmp (Name, "necro.mdl") ||
+			 !strcmp (Name, "wizard.mdl") ||
+			 !strcmp (Name, "wraith.mdl")) && nehahra)	    // Nehahra
+			hdr->drawflags |= AM_NOSHADOW;
+		else if (!strcmp (Name, "beam.mdl") ||	    // Rogue
+			 !strcmp (Name, "dragon.mdl") ||    // Rogue
+			 !strcmp (Name, "eel2.mdl") ||	    // Rogue
+			 !strcmp (Name, "fish.mdl") ||
+			 !strcmp (Name, "flak.mdl") ||	    // Marcher
+			 (Name[0] != 'v' && !strcmp (&Name[1], "_spike.mdl")) ||
+			 !strcmp (Name, "imp.mdl") ||
+			 !strcmp (Name, "laser.mdl") ||
+			 !strcmp (Name, "lasrspik.mdl") ||  // Hipnotic
+			 !strcmp (Name, "lspike.mdl") ||    // Rogue
+			 !strncmp (Name, "plasma", 6) ||    // Rogue
+			 !strcmp (Name, "spike.mdl") ||
+			 !strncmp (Name, "tree", 4) ||
+			 !strcmp (Name, "wr_spike.mdl"))    // Nehahra
+			hdr->drawflags |= AM_NOSHADOW;
+	}
 }
 
 
@@ -319,7 +513,10 @@ void D3DAlias_TextureChange (aliasstate_t *aliasstate)
 	{
 		if (aliasstate->lumaimage)
 		{
-			D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
+			if (gl_fullbrights.integer)
+				D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
+			else D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA_NO_LUMA);
+
 			D3DHLSL_SetTexture (0, aliasstate->teximage->d3d_Texture);
 			D3DHLSL_SetTexture (1, aliasstate->lumaimage->d3d_Texture);
 		}
@@ -380,6 +577,9 @@ void D3DAlias_InterpolateStreams (entity_t *ent, aliashdr_t *hdr, aliasstate_t *
 }
 
 
+cvar_t cl_itembobheight ("cl_itembobheight", 0.0f);
+cvar_t cl_itembobspeed ("cl_itembobspeed", 0.5f);
+
 void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, bool shadowed)
 {
 	// this is used for shadows as well as regular drawing otherwise shadows might not cache colours
@@ -411,7 +611,20 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, bool shadowed)
 	else
 	{
 		// build the transformation for this entity.  the full model gets a full rotation
-		D3D_RotateForEntity (ent, &ent->matrix);
+		// allow bouncing items for those who like them
+		if (cl_itembobheight.value > 0.0f && (ent->model->flags & EF_ROTATE))
+		{
+			// store out the original origin so that we can put it back the way it was for shadows
+			float org2 = ent->origin[2];
+
+			// come back to my place, bouncy bouncy!
+			ent->origin[2] += (cos ((d3d_RenderDef.time + ent->entnum) * cl_itembobspeed.value * (2.0f * D3DX_PI)) + 1.0f) * 0.5f * cl_itembobheight.value;
+			D3D_RotateForEntity (ent, &ent->matrix);
+
+			// restore the origin for any later use
+			ent->origin[2] = org2;
+		}
+		else D3D_RotateForEntity (ent, &ent->matrix);
 
 		// the full model needs the texcoord stream too
 		D3D_SetStreamSource (1, d3d_AliasBuffers[hdr->buffernum].Stream1, 0, sizeof (aliasstream1_t));
@@ -437,14 +650,11 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, bool shadowed)
 		vec3_t shadelight = {ent->shadelight[0], ent->shadelight[1], ent->shadelight[2]};
 
 		// nehahra assumes that fullbrights are not available in the engine
-		if (nehahra)
+		if ((nehahra || !gl_fullbrights.integer) && (hdr->drawflags & AM_FULLBRIGHT))
 		{
-			if (!strcmp (ent->model->name, "progs/flame2.mdl") || !strcmp (ent->model->name, "progs/flame.mdl"))
-			{
-				shadelight[0] = (255 >> r_overbright.integer);
-				shadelight[1] = (255 >> r_overbright.integer);
-				shadelight[2] = (255 >> r_overbright.integer);
-			}
+			shadelight[0] = (256 >> r_overbright.integer);
+			shadelight[1] = (256 >> r_overbright.integer);
+			shadelight[2] = (256 >> r_overbright.integer);
 		}
 
 		VectorScale (shadelight, (r_aliaslightscale.value / 255.0f), shadelight);
@@ -453,9 +663,18 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, bool shadowed)
 		D3DHLSL_SetFloatArray ("ShadeLight", shadelight, 3);
 	}
 
-	// the scaling needs to be included at this time
-	D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2]);
-	D3DMatrix_Scale (&ent->matrix, hdr->scale[0], hdr->scale[1], hdr->scale[2]);
+	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.integer)
+	{
+		// the scaling needs to be included at this time
+		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0] - (22 + 8), hdr->scale_origin[1] - (22 + 8), hdr->scale_origin[2] - (22 + 8));
+		D3DMatrix_Scale (&ent->matrix, hdr->scale[0] * 2.0f, hdr->scale[1] * 2.0f, hdr->scale[2] * 2.0f);
+	}
+	else
+	{
+		// the scaling needs to be included at this time
+		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2]);
+		D3DMatrix_Scale (&ent->matrix, hdr->scale[0], hdr->scale[1], hdr->scale[2]);
+	}
 
 	D3DHLSL_SetEntMatrix (&ent->matrix);
 
@@ -574,6 +793,9 @@ void D3DAlias_DrawAliasShadows (entity_t **ents, int numents)
 
 		// don't crash
 		if (!aliasstate->lightplane) continue;
+
+		// these entities don't have shadows
+		if (hdr->drawflags & AM_NOSHADOW) continue;
 
 		if (!stateset)
 		{
@@ -1047,8 +1269,9 @@ void D3DAlias_DrawViewModel (void)
 
 	extern cvar_t scr_fov;
 	extern cvar_t scr_fovcompat;
+	float aspect = (float) r_refdef.vrect.width / (float) r_refdef.vrect.height;
 
-	if (scr_fov.value > 90 && !scr_fovcompat.integer)
+	if ((scr_fov.value > 90 && !scr_fovcompat.integer) || aspect < (4.0f / 3.0f))
 	{
 		// recalculate the correct fov for displaying the gun model as if fov was 90
 		float fov_y = SCR_CalcFovY (90, 640, 432);
@@ -1084,7 +1307,7 @@ void D3DAlias_DrawViewModel (void)
 	// restoring the original projection is unnecessary as the gun is the last thing drawn in the 3D view
 	if ((cl.items & IT_INVISIBILITY) || r_drawviewmodel.value < 0.99f)
 	{
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+		// D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 	}
 }

@@ -68,6 +68,7 @@ extern cvar_t scr_centersbar;
 extern cvar_t r_aliaslightscale;
 extern cvar_t r_particlesize;
 extern cvar_t r_particlestyle;
+extern cvar_t gl_fullbrights;
 
 CQMenu menu_Main (m_main);
 CQMenu menu_Singleplayer (m_other);
@@ -224,9 +225,13 @@ void Menu_InitMainMenu (void)
 
 // commands
 void Host_WriteConfiguration (void);
+void Cvar_ResetAll (void);
 
 void Menu_OptionsResetToDefaults (void)
 {
+	// this option should also put cvars back to their defaults
+	Cvar_ResetAll ();
+
 	Cbuf_AddText ("exec default.cfg\n");
 }
 
@@ -1146,6 +1151,7 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Light Style", &r_lerplightstyle, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Lighting"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Overbright Light", &overbright_num, overbright_options));
+	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Fullbrights", &gl_fullbrights, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("MDL Light Scale", &r_aliaslightscale, 0, 5, 0.1));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Particles"));
@@ -1526,7 +1532,7 @@ bool ValidateMap (char *mapname, int itemnum)
 		return false;
 	}
 
-	if (bsphead.version != Q1_BSPVERSION && bsphead.version != HL_BSPVERSION)
+	if (bsphead.version != PR_BSPVERSION && bsphead.version != Q1_BSPVERSION && bsphead.version != HL_BSPVERSION)
 	{
 		// don't add maps with a bad version number to the list
 		COM_FCloseFile (&fh);
@@ -1861,7 +1867,6 @@ bool M_Menu_Demo_Info (char *demofile)
 					break;
 
 				case svc_print:
-
 					while (1)
 					{
 						int c = msgdata[msgpos++];
@@ -1873,6 +1878,7 @@ bool M_Menu_Demo_Info (char *demofile)
 
 				case svc_setangle:
 					// just get 3 bytes
+					// (this is going to be different for different protocols)
 					msgpos += 3;
 					break;
 

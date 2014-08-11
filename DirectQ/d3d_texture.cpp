@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
-
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
 
 LPDIRECT3DTEXTURE9 d3d_CurrentTexture[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
@@ -51,6 +50,7 @@ void D3D_MakeQuakePalettes (byte *palette)
 {
 	int dark = 21024;
 	int darkindex = 0;
+	PALETTEENTRY *p1, *p2;
 
 	for (int i = 0; i < 256; i++)
 	{
@@ -79,20 +79,27 @@ void D3D_MakeQuakePalettes (byte *palette)
 		d3d_QuakePalette.standard[i].peBlue = rgb[2];
 		d3d_QuakePalette.standard[i].peFlags = alpha;
 
+		// pre-bake the fullbright stuff into the palettes so that we can avoid some expensive shader ops
 		if (vid.fullbright[i])
 		{
-			d3d_QuakePalette.luma[i].peRed = rgb[0];
-			d3d_QuakePalette.luma[i].peGreen = rgb[1];
-			d3d_QuakePalette.luma[i].peBlue = rgb[2];
-			d3d_QuakePalette.luma[i].peFlags = alpha;
+			p1 = &d3d_QuakePalette.luma[i];
+			p2 = &d3d_QuakePalette.noluma[i];
 		}
 		else
 		{
-			d3d_QuakePalette.luma[i].peRed = 0;
-			d3d_QuakePalette.luma[i].peGreen = 0;
-			d3d_QuakePalette.luma[i].peBlue = 0;
-			d3d_QuakePalette.luma[i].peFlags = alpha;
+			p1 = &d3d_QuakePalette.noluma[i];
+			p2 = &d3d_QuakePalette.luma[i];
 		}
+
+		p1->peRed = rgb[0];
+		p1->peGreen = rgb[1];
+		p1->peBlue = rgb[2];
+		p1->peFlags = alpha;
+
+		p2->peRed = 0;
+		p2->peGreen = 0;
+		p2->peBlue = 0;
+		p2->peFlags = alpha;
 
 		d3d_QuakePalette.standard32[i] = D3DCOLOR_XRGB (rgb[0], rgb[1], rgb[2]);
 	}
@@ -475,13 +482,11 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 	// nehahra assumes that fullbrights are not available in the engine
 	if (((flags & IMAGE_BSP) || (flags & IMAGE_ALIAS)) && !nehahra)
 	{
-		if (flags & IMAGE_FENCE)
-			activepal = d3d_QuakePalette.standard;
-		else if (flags & IMAGE_LIQUID)
+		if (flags & IMAGE_LIQUID)
 			activepal = d3d_QuakePalette.standard;
 		else if (flags & IMAGE_LUMA)
 			activepal = d3d_QuakePalette.luma;
-		else activepal = d3d_QuakePalette.standard;
+		else activepal = d3d_QuakePalette.noluma;
 	}
 	else activepal = d3d_QuakePalette.standard;
 

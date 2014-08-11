@@ -228,7 +228,7 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 				else Con_Printf ("  (bad) ");
 
 				if (cl->var)
-					Con_Printf ("%s (value \"%s\")\n", cl->name, cl->var->string);
+					Con_Printf ("%s (value \"%s\") (default \"%s\")\n", cl->name, cl->var->string, cl->var->defaultvalue);
 				else if (cl->alias)
 					Con_Printf ("%s (value \"%s\")\n", cl->name, cl->alias->value);
 				else Con_Printf ("%s\n", cl->name);
@@ -284,7 +284,6 @@ void CmdCvarList (bool dumpcmd, bool dumpvar)
 		for (int i = 0; i < numcomplist; i++)
 		{
 			if (complist[i].cmd && dumpcmd) Con_Printf ("%s\n", complist[i].name);
-
 			if (complist[i].var && dumpvar) Con_Printf ("%s\n", complist[i].name);
 		}
 
@@ -326,7 +325,6 @@ void CmdCvarList (bool dumpcmd, bool dumpvar)
 	for (int i = 0; i < numcomplist; i++)
 	{
 		if (complist[i].cmd && dumpcmd) fprintf (f, "%s\n", complist[i].name);
-
 		if (complist[i].var && dumpvar) fprintf (f, "%s\n", complist[i].name);
 	}
 
@@ -1018,7 +1016,7 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 
 			// perform a variable print or set
 			if (Cmd_Argc () == 1)
-				Con_Printf ("\"%s\" is \"%s\"\n", cl->var->name, cl->var->string);
+				Con_Printf ("\"%s\" is \"%s\" (default \"%s\")\n", cl->var->name, cl->var->string, cl->var->defaultvalue);
 			else Cvar_Set (cl->var, Cmd_Argv (1));
 		}
 	}
@@ -1048,6 +1046,28 @@ cvar_t	pq_noweapons ("pq_noweapons", "no weapons", CVAR_ARCHIVE);
 
 void Cmd_ForwardToServer (void)
 {
+#if 1
+	if (cls.state != ca_connected)
+	{
+		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));
+		return;
+	}
+	
+	if (cls.demoplayback)
+		return;		// not really connected
+
+	MSG_WriteByte (&cls.message, clc_stringcmd);
+
+	if (stricmp(Cmd_Argv(0), "cmd") != 0)
+	{
+		SZ_Print (&cls.message, Cmd_Argv(0));
+		SZ_Print (&cls.message, " ");
+	}
+	if (Cmd_Argc() > 1)
+		SZ_Print (&cls.message, Cmd_Args());
+	else
+		SZ_Print (&cls.message, "\n");
+#else
 	char *src, *dst, buff[128];			// JPG - used for say/say_team formatting
 	int minutes, seconds, match_time;	// JPG - used for %t
 
@@ -1229,6 +1249,7 @@ void Cmd_ForwardToServer (void)
 	if (Cmd_Argc () > 1)
 		SZ_Print (&cls.message, Cmd_Args ());
 	else SZ_Print (&cls.message, "\n");
+#endif
 }
 
 

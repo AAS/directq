@@ -216,7 +216,6 @@ typedef struct msurface_s
 	bool		rotated;
 
 	int			firstedge;
-	int			bspverts;	// turb surfs need these so that they can recalculate the warp correctly
 	int			numverts;
 	int			numindexes;
 
@@ -282,8 +281,8 @@ typedef struct mnode_s
 	int			contents;		// 0, to differentiate from leafs
 	int			visframe;		// node needs to be traversed if current
 	bool		seen;
-	float		minmaxs[6];		// for bounding box culling
-	float		radius;
+	float		mins[3];		// for bounding box culling
+	float		maxs[3];		// for bounding box culling
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -311,8 +310,8 @@ typedef struct mleaf_s
 	int			contents;		// wil be a negative contents number
 	int			visframe;		// node needs to be traversed if current
 	bool		seen;
-	float		minmaxs[6];		// for bounding box culling
-	float		radius;
+	float		mins[3];		// for bounding box culling
+	float		maxs[3];		// for bounding box culling
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -446,7 +445,7 @@ typedef struct aliashdr_s
 
 	float		boundingradius;
 	synctype_t	synctype;
-	int			flags;
+	unsigned int drawflags;
 	float		size;
 
 	bool		mfdelerp;
@@ -517,12 +516,6 @@ typedef struct brushheader_s
 	int			numleafs;		// number of visible leafs, not counting 0
 	mleaf_t		*leafs;
 
-	int			numvertexes;
-	mvertex_t	*vertexes;
-
-	int			numedges;
-	medge_t		*edges;
-
 	int			numnodes;
 	mnode_t		*nodes;
 
@@ -531,9 +524,6 @@ typedef struct brushheader_s
 
 	int			numsurfaces;
 	msurface_t	*surfaces;
-
-	int			numsurfedges;
-	int			*surfedges;
 
 	int			numclipnodes;
 	mclipnode_t	*clipnodes;

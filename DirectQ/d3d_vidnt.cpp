@@ -59,12 +59,6 @@ bool vid_canalttab = false;
 bool vid_initialized = false;
 bool scr_skipupdate;
 
-// RotateAxisLocal requires instantiating a class and filling it's members just to pass
-// 3 floats to it!  These little babies avoid that silly nonsense.  SORT IT OUT MICROSOFT!!!
-D3DXVECTOR3 XVECTOR (1, 0, 0);
-D3DXVECTOR3 YVECTOR (0, 1, 0);
-D3DXVECTOR3 ZVECTOR (0, 0, 1);
-
 // forward declarations of video menu functions
 void VID_MenuDraw (void);
 void VID_MenuKey (int key);
@@ -166,8 +160,11 @@ void D3DVid_ResizeWindow (HWND hWnd)
 
 	// reset the device to resize the backbuffer
 	RECT clientrect;
-
 	GetClientRect (hWnd, &clientrect);
+
+	// check the client rect dimensions to make sure it's valid
+	if (clientrect.right - clientrect.left < 1) return;
+	if (clientrect.bottom - clientrect.top < 1) return;
 
 	d3d_CurrentMode.Width = clientrect.right - clientrect.left;
 	d3d_CurrentMode.Height = clientrect.bottom - clientrect.top;
@@ -175,6 +172,7 @@ void D3DVid_ResizeWindow (HWND hWnd)
 	d3d_PresentParams.BackBufferWidth = d3d_CurrentMode.Width;
 	d3d_PresentParams.BackBufferHeight = d3d_CurrentMode.Height;
 
+	vid.recalc_refdef = 1;
 	IN_UpdateClipCursor ();
 	D3DVid_Restart_f ();
 }
@@ -252,21 +250,10 @@ void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
 
 DWORD D3DVid_GetPresentInterval (void)
 {
+	// per the documentation for D3DPRESENT these are always available
 	if (vid_vsync.integer)
-	{
-		if (d3d_DeviceCaps.PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
-			return D3DPRESENT_INTERVAL_ONE;
-		else D3DPRESENT_INTERVAL_IMMEDIATE;
-	}
-	else
-	{
-		if (d3d_DeviceCaps.PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
-			return D3DPRESENT_INTERVAL_IMMEDIATE;
-		else D3DPRESENT_INTERVAL_ONE;
-	}
-
-	// shut up compiler
-	return D3DPRESENT_INTERVAL_IMMEDIATE;
+		return D3DPRESENT_INTERVAL_ONE;
+	else return D3DPRESENT_INTERVAL_IMMEDIATE;
 }
 
 
@@ -1198,12 +1185,12 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	if ((d3d_DeviceCaps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) && (d3d_DeviceCaps.DevCaps & D3DDEVCAPS_PUREDEVICE))
 	{
 		d3d_GlobalCaps.supportHardwareTandL = true;
-		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
 	}
 	else
 	{
 		d3d_GlobalCaps.supportHardwareTandL = false;
-		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
 	}
 
 	// now reset the present params as they will have become messed up above
@@ -2018,5 +2005,91 @@ void D3DVid_Finish (void)
 {
 	// bollocks!
 }
+
+
+/*
+=========================================================================================================================================
+
+		VERTICAL SYNC DETECTION
+
+	Here we attempt to detect any vsync settings in a driver control panel.  D3D doesn't seem to have a way of detecting this so
+	instead we'll break into some OpenGL, run some frames in a double-buffered context, see how long they take and make a guess
+	based on that.  This should be done as early as possible in the program (but after the timer is initialized) so that a D3D
+	device isn't active while it's running.  We could potentially rework this as a splash screen at some point in time???
+
+=========================================================================================================================================
+*/
+
+#include <gl/gl.h>
+#pragma comment (lib, "opengl32.lib")
+
+void D3DVid_DetectVSync (HWND hWnd)
+{
+	int pf = 0;
+	HGLRC hRC = NULL;
+	HDC hDC = GetDC (hWnd);
+
+	PIXELFORMATDESCRIPTOR pfd =
+	{
+		sizeof (PIXELFORMATDESCRIPTOR),
+		1,
+		PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+		PFD_TYPE_RGBA,
+		32,
+		0, 0, 0, 0, 0, 0,
+		0,
+		0,
+		0,
+		0, 0, 0, 0,
+		24,
+		0,
+		0,
+		PFD_MAIN_PLANE,
+		0,
+		0, 0, 0
+	};
+
+	if (!(pf = ChoosePixelFormat (hDC, &pfd))) return;
+	if (!SetPixelFormat (hDC, pf, &pfd)) return;
+	if (!(hRC = wglCreateContext (hDC))) return;
+
+	if (!wglMakeCurrent (hDC, hRC))
+	{
+		wglDeleteContext (hRC);
+		return;
+	}
+
+	// run some dummy frames to warm it up as otherwise the first frame or so might be unusually long
+	for (int i = 0; i < 4; i++)
+	{
+		glClear (GL_DEPTH_BUFFER_BIT);
+		glFinish ();
+		SwapBuffers (hDC);
+	}
+
+	DWORD start = Sys_Milliseconds ();
+
+	// now do it for real
+	for (int i = 0; i < 4; i++)
+	{
+		glClear (GL_DEPTH_BUFFER_BIT);
+		glFinish ();
+		SwapBuffers (hDC);
+	}
+
+	DWORD end = Sys_Milliseconds ();
+
+	wglMakeCurrent (NULL, NULL);
+	wglDeleteContext (hRC);
+	ReleaseDC (hWnd, hDC);
+
+	// we're running 4 frames so if vsync is enabled in the driver control panel
+	// a difference of > 20ms is good for detecting refresh rates up to 200 hz.
+	if (end - start > 20)
+		Cvar_Set (&vid_vsync, 1.0f);
+	else Cvar_Set (&vid_vsync, 0.0f);
+}
+
+
 
 

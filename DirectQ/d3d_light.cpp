@@ -22,7 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-#define LIGHTMAP_WIDTH		512
+#define LIGHTMAP_WIDTH		256
 #define LIGHTMAP_HEIGHT		512
 
 int LightmapWidth = LIGHTMAP_WIDTH;
@@ -105,7 +105,7 @@ void D3D_UploadLightmaps (void)
 		{
 			lm->d3d_Texture->UnlockRect (0);
 			lm->d3d_Texture->AddDirtyRect (&lm->DirtyRect);
-			// lm->d3d_Texture->PreLoad ();
+			lm->d3d_Texture->PreLoad ();
 
 			// flag as unmodified and clear the dirty region
 			lm->modified = false;
@@ -247,6 +247,9 @@ void D3D_BuildLightmaps (void)
 {
 	Con_DPrintf ("Loading lightmaps... ");
 
+	LightmapWidth = LIGHTMAP_WIDTH;
+	LightmapHeight = LIGHTMAP_HEIGHT;
+
 	// bound lightmap textures to max supported by the device
 	if (LightmapWidth > d3d_DeviceCaps.MaxTextureWidth) LightmapWidth = d3d_DeviceCaps.MaxTextureWidth;
 	if (LightmapHeight > d3d_DeviceCaps.MaxTextureHeight) LightmapHeight = d3d_DeviceCaps.MaxTextureHeight;
@@ -258,8 +261,17 @@ void D3D_BuildLightmaps (void)
 	int smax = (MaxExtents[0] >> 4) + 1;
 	int tmax = (MaxExtents[1] >> 4) + 1;
 
-	if (smax > LightmapWidth) Host_Error ("Surface extents (%i) exceeds %i\n", smax, LightmapWidth);
-	if (tmax > LightmapHeight) Host_Error ("Surface extents (%i) exceeds %i\n", tmax, LightmapHeight);
+	// increase lightmap size if needed
+	if (smax > LightmapWidth) LightmapWidth = smax;
+	if (tmax > LightmapHeight) LightmapHeight = tmax;
+
+	// make it a power of 2
+	LightmapWidth = D3D_PowerOf2Size (LightmapWidth);
+	LightmapHeight = D3D_PowerOf2Size (LightmapHeight);
+
+	// ensure that the hardware can handle it
+	if (LightmapWidth > d3d_DeviceCaps.MaxTextureWidth) Sys_Error ("LightmapWidth > d3d_DeviceCaps.MaxTextureWidth");
+	if (LightmapHeight > d3d_DeviceCaps.MaxTextureHeight) Sys_Error ("LightmapHeight > d3d_DeviceCaps.MaxTextureHeight");
 
 	// now alloc the blocklights as big as we need them
 	d3d_BlockLights = (unsigned int *) MainHunk->Alloc (smax * tmax * sizeof (unsigned int) * 3);
@@ -308,6 +320,16 @@ void D3D_BuildLightmaps (void)
 
 	// upload all lightmaps
 	D3D_UploadLightmaps ();
+
+	// preload them so that we don't need to load them first time they're seen
+	for (int i = 0; i < MAX_LIGHTMAPS; i++)
+	{
+		d3d_lightmap_t *lm = &d3d_InternalLightmaps[i];
+
+		if (!lm->d3d_Texture) continue;
+
+		lm->d3d_Texture->PreLoad ();
+	}
 
 	Con_DPrintf ("Done\n");
 }
@@ -854,20 +876,10 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 	}
 
 	// set start point
-	if (e->model->type == mod_brush)
-	{
-		// pick top-center point as these can have their origins at one bottom corner
-		start[0] = ((e->origin[0] + e->model->mins[0]) + (e->origin[0] + e->model->maxs[0])) / 2;
-		start[1] = ((e->origin[1] + e->model->mins[1]) + (e->origin[1] + e->model->maxs[1])) / 2;
-		start[2] = e->origin[2] + e->model->maxs[2];
-	}
-	else
-	{
-		// same as entity origin
-		start[0] = e->origin[0];
-		start[1] = e->origin[1];
-		start[2] = e->origin[2];
-	}
+	// pick center point as models can have their origins at one bottom corner
+	start[0] = ((e->origin[0] + e->model->mins[0]) + (e->origin[0] + e->model->maxs[0])) / 2;
+	start[1] = ((e->origin[1] + e->model->mins[1]) + (e->origin[1] + e->model->maxs[1])) / 2;
+	start[2] = ((e->origin[2] + e->model->mins[2]) + (e->origin[2] + e->model->maxs[2])) / 2;
 
 	// set end point
 	end[0] = start[0];
@@ -922,18 +934,6 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, 24);
 	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, 72);
 	if (e->model->type == mod_brush) R_MinimumLight (c, 18);
-
-	// clamp minimum to same level as software Quake uses (5)
-	// R_MinimumLight (c, 15);
-
-	/*
-	// rescale for values of r_overbright
-	// this is done before clamping so that we get the correct flattening of light in non-overbright modes
-	if (r_overbright.value > 1)
-		VectorScale (c, 0.25f, c);
-	else if (r_overbright.value > 0)
-		VectorScale (c, 0.5f, c);
-	*/
 }
 
 

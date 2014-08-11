@@ -96,12 +96,12 @@ bool CL_WriteDemoMessage (void)
 	float	    f;
 	bool    Success;
 
-	len = LittleLong (net_message.cursize);
+	len = net_message.cursize;
 	Success = (COM_FWriteFile (demohandle, &len, 4) == 1);
 
 	for (i = 0; i < 3 && Success; i++)
 	{
-		f = LittleFloat (cl.viewangles[i]);
+		f = cl.viewangles[i];
 		Success = (COM_FWriteFile (demohandle, &f, 4) == 1);
 	}
 
@@ -167,12 +167,12 @@ int CL_GetMessage (void)
 		for (i = 0; i < 3 && Success; i++)
 		{
 			Success = (COM_FReadFile (demohandle, &f, 4) != -1);
-			cl.mviewangles[0][i] = LittleFloat (f);
+			cl.mviewangles[0][i] = f;
 		}
 
 		if (Success)
 		{
-			net_message.cursize = LittleLong (net_message.cursize);
+			net_message.cursize = net_message.cursize;
 
 			if (net_message.cursize > MAX_MSGLEN)
 				Host_Error ("Demo message %d > MAX_MSGLEN (%d)", net_message.cursize, MAX_MSGLEN);
@@ -349,7 +349,7 @@ void CL_Record_f (void)
 	COM_DefaultExtension (name, ".dem");
 
 	Con_Printf ("recording to %s.\n", name);
-	demohandle = CreateFile (name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+	demohandle = CreateFile (name, FILE_WRITE_DATA, 0, NULL, CREATE_ALWAYS, 0, NULL);
 
 	if (demohandle == INVALID_HANDLE_VALUE)
 	{

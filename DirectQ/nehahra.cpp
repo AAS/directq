@@ -24,9 +24,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <math.h>
 #include "quakedef.h"
 #include "d3d_model.h"
+#include "pr_class.h"
 
 
-// nehahra stuffcmds this
+// nehahra stuffcmds this (...and it can go fuck right off in my opinion...)
 cvar_t r_waterripple ("r_waterripple", "0");
 
 // nehahra cutscene - fixme - need to find a way to skip a cutscene while playing
@@ -52,9 +53,9 @@ cvar_t r_oldsky ("r_oldsky", "1", CVAR_NEHAHRA);
 
 
 // these are just to soak up nehahra abuse
-void NehahraAbuseMeBaby (void) {}
-cmd_t Cmd_PlayMod ("playmod", NehahraAbuseMeBaby);
-cmd_t Cmd_StopMod ("stopmod", NehahraAbuseMeBaby);
+void FuckOffAndDieYouCollectionOfPoxyHacks (void) {}
+cmd_t Cmd_PlayMod ("playmod", FuckOffAndDieYouCollectionOfPoxyHacks);
+cmd_t Cmd_StopMod ("stopmod", FuckOffAndDieYouCollectionOfPoxyHacks);
 
 
 /*
@@ -168,7 +169,6 @@ void SHOWLMP_drawall (void)
 void SHOWLMP_clear (void)
 {
 	if (!nehahra) return;
-
 	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
 
 	for (int i = 0; i < SHOWLMP_MAXLABELS; i++) showlmp[i].isactive = false;
@@ -179,4 +179,39 @@ void SHOWLMP_newgame (void)
 {
 	showlmp = NULL;
 }
+
+
+/*
+============================================================================================================
+
+		RESTORING FOG, SKYBOX, ETC
+
+	Any normal sane implementation would have put these in WorldSpawn, but Nehahra HAS to bow down to the
+	great gods of QC.  For Jesus Fucking Christ Almighty and all his wee goblins SAKE.
+
+============================================================================================================
+*/
+
+dfunction_t *ED_FindFunction (char *name);
+
+void Neh_QCWeeniesBurnInHell (void)
+{
+	// eeeewwww!
+	if (!nehahra) return;
+
+	func_t RestoreGame;
+	dfunction_t *f;
+
+	if ((f = ED_FindFunction ("RestoreGame")))
+	{
+		if ((RestoreGame = (func_t) (f - SVProgs->Functions)))
+		{
+			SVProgs->GlobalStruct->time = sv.time;
+			SVProgs->GlobalStruct->self = EDICT_TO_PROG (sv_player);
+			SVProgs->ExecuteProgram (RestoreGame);
+		}
+	}
+}
+
+
 

@@ -96,7 +96,29 @@ void R_InitResourceTextures (void)
 	D3D_LoadResourceTexture ("particledot", &particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
 	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, 0);
 	D3D_LoadResourceTexture ("YAH", &yahtexture, IDR_YOUAREHERE, 0);
-	D3D_LoadResourceTexture ("UWBLUR", &d3d_WaterWarpTexture, IDR_UWBLUR, 0);
+	D3D_LoadResourceTexture ("IDR_UWWARP", &d3d_WaterWarpTexture, IDR_UWWARP, 0);
+
+	/*
+	{
+		D3DLOCKED_RECT lockrect;
+		byte *rgba;
+
+		d3d_WaterWarpTexture->LockRect (0, &lockrect, NULL, 0);
+		rgba = (byte *) lockrect.pBits;
+
+		for (int i = 0; i < 64 * 64; i++, rgba += 4)
+		{
+			rgba[0] = rgba[2];
+			rgba[1] = rgba[2];
+			rgba[2] = rgba[2];
+			rgba[3] = rgba[2];
+		}
+
+		d3d_WaterWarpTexture->UnlockRect (0);
+
+		SCR_WriteTextureToTGA ("uwwarp.tga", d3d_WaterWarpTexture, D3DFMT_A8R8G8B8);
+	}
+	*/
 
 	// because this is just a square we can upload it as a 1x1 texture and save a lot of performance
 	unsigned int squaredata = 0xffffffff;
@@ -244,6 +266,7 @@ void Fog_ParseWorldspawn (void);
 void IN_ClearStates (void);
 void D3DAlias_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
+void Mod_InitForMap (model_t *mod);
 
 void R_ParseForNehahra (void)
 {
@@ -252,6 +275,9 @@ void R_ParseForNehahra (void)
 
 void R_NewMap (void)
 {
+	// set up the pvs arrays (these will already have been done by the server if it's active
+	if (!sv.active) Mod_InitForMap (cl.worldmodel);
+
 	// init frame counters
 	d3d_RenderDef.skyframe = -1;
 	d3d_RenderDef.framecount = 1;
@@ -304,10 +330,6 @@ void R_NewMap (void)
 	CL_InitTEnts ();
 	S_InitAmbients ();
 	LOC_LoadLocations ();
-
-	// also need it here as demos don't spawn a server!!!
-	// this was nasty as it meant that a random memory location was being overwritten by PVS data in demos!
-	fatpvs = NULL;
 
 	// see do we need to switch off the menus or console
 	if (key_dest != key_game && (cls.demoplayback || cls.demorecording || cls.timedemo))

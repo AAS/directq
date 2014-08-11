@@ -116,7 +116,6 @@ typedef struct drawvertx_s
 		DWORD	normal1dw;
 	};
 
-	byte	lightnormalindex;
 	bool	lerpvert;
 } drawvertx_t;
 

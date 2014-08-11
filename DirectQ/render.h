@@ -183,7 +183,7 @@ extern	struct texture_s	*r_notexture_mip;
 
 void R_Init (void);
 void R_InitTextures (void);
-void R_RenderView (float timepassed);		// must set r_refdef first
+void R_RenderView (DWORD dwTimePassed);		// must set r_refdef first
 void R_ViewChanged (vrect_t *pvrect, int lineadj, float aspect);
 // called whenever r_refdef or vid change
 

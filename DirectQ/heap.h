@@ -18,8 +18,9 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+// 1 MB buffer for general short-lived allocations
 extern byte *scratchbuf;
-#define SCRATCHBUF_SIZE 262144
+#define SCRATCHBUF_SIZE 0x100000
 
 // interface
 void Pool_Init (void);
@@ -37,7 +38,7 @@ class CQuakeHunk
 public:
 	CQuakeHunk (int maxsizemb);
 	~CQuakeHunk (void);
-	void *Alloc (int size);
+	void *Alloc (int size, BOOL memset0 = TRUE);
 	void Free (void);
 
 	int GetLowMark (void);
