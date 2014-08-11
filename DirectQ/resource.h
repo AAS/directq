@@ -34,5 +34,5 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // lookup tables
 #define IDR_ANORMDOTS				1010
 #define IDR_ANORMS					1020
-
+#define IDR_D400K					1030
 

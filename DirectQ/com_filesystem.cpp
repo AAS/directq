@@ -393,6 +393,73 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 }
 
 
+void COM_DecompressFile (char *filename, byte **decompressbuf, int *decompresslen)
+{
+	byte *buf = NULL;
+	decompresslen[0] = 0;
+
+	unzFile			uf = NULL;
+	int				err;
+	unz_global_info gi;
+	unz_file_info	file_info;
+
+	uf = unzOpen (filename);
+	err = unzGetGlobalInfo (uf, &gi);
+
+	if (err == UNZ_OK)
+	{
+		char filename_inzip[64];
+
+		unzGoToFirstFile (uf);
+
+		for (int i = 0; i < gi.number_entry; i++)
+		{
+			err = unzOpenCurrentFile (uf);
+
+			if (err != UNZ_OK)
+			{
+				// something bad happened
+				buf = NULL;
+				goto done;
+			}
+
+			// the first file is the only one we want... ;)
+			err = unzGetCurrentFileInfo (uf, &file_info, filename_inzip, sizeof (filename_inzip), NULL, 0, NULL, 0);
+
+			if (err == UNZ_OK)
+			{
+				buf = (byte *) MainZone->Alloc (file_info.uncompressed_size);
+
+				int bytesread = unzReadCurrentFile (uf, buf, file_info.uncompressed_size);
+
+				if (bytesread != file_info.uncompressed_size)
+				{
+					unzCloseCurrentFile (uf);
+					buf = NULL;
+					goto done;
+				}
+
+				// done!
+				decompresslen[0] = file_info.uncompressed_size;
+				unzCloseCurrentFile (uf);
+				goto done;
+			}
+			else
+			{
+				// something bad happened
+				buf = NULL;
+				unzCloseCurrentFile (uf);
+				goto done;
+			}
+		}
+	}
+
+done:;
+	unzClose (uf);
+	decompressbuf[0] = buf;
+}
+
+
 HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 {
 	// initial scan ensures the file is present before opening the zip (perf)

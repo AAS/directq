@@ -1516,8 +1516,6 @@ void Draw_FadeScreen (int alpha)
 	};
 
 	VBO_Add2DQuad (&q);
-
-	Sbar_Changed ();
 }
 
 

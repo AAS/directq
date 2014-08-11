@@ -284,7 +284,6 @@ miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipda
 // this should really move to vidnt.cpp
 void D3D_MakeQuakePalettes (byte *palette);
 void PaletteFromColormap (byte *pal, byte *map);
-void Check_Gamma (unsigned char *pal);
 
 bool W_LoadPalette (void)
 {
@@ -302,7 +301,6 @@ bool W_LoadPalette (void)
 	{
 		vid.colormap = colormap;
 		PaletteFromColormap (palette, vid.colormap);
-		Check_Gamma (palette);
 		D3D_MakeQuakePalettes (palette);
 
 		return true;

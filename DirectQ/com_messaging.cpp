@@ -240,7 +240,7 @@ void MSG_WriteAngle16 (sizebuf_t *sb, float f)
 
 float MSG_ReadCoord24 (void)
 {
-	return MSG_ReadShort () + MSG_ReadByte () * (1.0 / 255);
+	return MSG_ReadShort () + ((float) MSG_ReadByte ()) * (1.0 / 255);
 }
 
 
@@ -262,7 +262,11 @@ void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol)
 	if (protocol >= PROTOCOL_VERSION_MH)
 		MSG_WriteFloat (sb, f);
 	else if (protocol == PROTOCOL_VERSION_RMQ_MINUS2)
-		MSG_WriteCoord24 (sb, f);
+	{
+		// coord24 is incredibbly jerky on elevator rides
+		//MSG_WriteCoord24 (sb, f);
+		MSG_WriteFloat (sb, f);
+	}
 	else MSG_WriteShort (sb, (int) (f * 8));
 }
 
@@ -291,7 +295,11 @@ float MSG_ReadCoord (int protocol)
 	if (protocol >= PROTOCOL_VERSION_MH)
 		return MSG_ReadFloat ();
 	else if (protocol == PROTOCOL_VERSION_RMQ_MINUS2)
-		return MSG_ReadCoord24 ();
+	{
+		// coord24 is incredibbly jerky on elevator rides
+		//return MSG_ReadCoord24 ();
+		return MSG_ReadFloat ();
+	}
 	else return MSG_ReadShort () * (1.0f / 8.0f);
 }
 

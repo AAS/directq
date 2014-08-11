@@ -1015,9 +1015,6 @@ void R_FindHipnoticWindows (void);
 
 void R_NewMap (void)
 {
-	// force an initial sbar update
-	Sbar_Changed ();
-
 	// init frame counters
 	d3d_RenderDef.skyframe = -1;
 	d3d_RenderDef.framecount = 1;

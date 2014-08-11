@@ -23,10 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // bitmaps and other image types
 IDR_SPLASH			RCDATA		"splash.png"
 
-IDR_PARTICLEDOT			RCDATA		"particledot.png"
+IDR_PARTICLEDOT		RCDATA		"particledot.png"
 
-IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
-IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
+IDR_CROSSHAIR		RCDATA		"CrosshairFont.png"
+IDR_YOUAREHERE		RCDATA		"YouAreHere.png"
 
 // shaders
 IDR_MASTERFX		RCDATA		"fxMaster.fx"
@@ -35,6 +35,7 @@ IDR_MASTERFX		RCDATA		"fxMaster.fx"
 IDI_APPICON			ICON		"dq.ico"
 
 // lookup tables
-IDR_ANORMDOTS			RCDATA		"anorm_dots.bin"
+IDR_ANORMDOTS		RCDATA		"anorm_dots.bin"
 IDR_ANORMS			RCDATA		"anorms.bin"
+IDR_D400K			RCDATA		"d400k.bin"
 

@@ -1275,7 +1275,6 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 
 	// clear to black immediately
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-	Sbar_Changed ();
 	d3d_Device->Present (NULL, NULL, NULL, NULL);
 
 	// get capabilities on the actual device
@@ -1505,130 +1504,15 @@ void PaletteFromColormap (byte *pal, byte *map)
 	// set fullbright colour indexes
 	for (int x = 0; x < 256; x++)
 	{
-		vid.fullbright[x] = true;
-
-		for (int y = 1; y < VID_GRADES; y++)
-		{
-			int y1 = y - 1;
-
-			if (map[y * 256 + x] != map[y1 * 256 + x])
-			{
-				vid.fullbright[x] = false;
-				break;
-			}
-		}
-	}
-
-	// colour 255 (alpha) is never fullbright
-	vid.fullbright[255] = false;
-
-	float lmgrades[256];
-	float maxgrade = 0;
-
-	// average the colormap intensities to obtain a lightmap table
-	// also do a reversed order (see below)
-	for (int y = 0, rev = VID_GRADES - 1; y < VID_GRADES; y++, rev--)
-	{
-		int numcolors = 0;
-		int avgr = 0;
-		int avgg = 0;
-		int avgb = 0;
-
-		for (int x = 0; x < 256; x++)
-		{
-			// exclude columns with the same intensity all the way down
-			if (vid.fullbright[x]) continue;
-
-			// accumulate a new colour
-			numcolors++;
-
-			int thispal = map[y * 256 + x] * 3;
-			int avgpal = map[31 * 256 + x] * 3;
-
-#if 1
-			// the colormap is premultiplied colour * intensity, so recover the original intensity used
-			if (pal[avgpal + 0] > 0) avgr += (pal[thispal + 0] * 255) / pal[avgpal + 0];
-			if (pal[avgpal + 1] > 0) avgg += (pal[thispal + 1] * 255) / pal[avgpal + 1];
-			if (pal[avgpal + 2] > 0) avgb += (pal[thispal + 2] * 255) / pal[avgpal + 2];
-#else
-			avgr += pal[thispal + 0];
-			avgg += pal[thispal + 1];
-			avgb += pal[thispal + 2];
-#endif
-		}
-
-		if (!numcolors) continue;
-
-		// store this grade; right now we're just storing temp data so we don't need to worry
-		// about doing it right just yet.
-		// the colormap goes from light to dark so reverse the order
-		lmgrades[rev * 4] = (float) (avgr * 30 + avgg * 59 + avgb * 11) / (float) (10 * numcolors);
-	}
-
-	// interpolate into vid.lightmap
-	for (int i = 2; i < 255; i += 4) lmgrades[i] = (lmgrades[i - 2] + lmgrades[i + 2]) / 2.0f;
-	for (int i = 1; i < 255; i += 2) lmgrades[i] = (lmgrades[i - 1] + lmgrades[i + 1]) / 2.0f;
-	for (int i = 253; i < 256; i++) lmgrades[i] = (lmgrades[i - 1] * lmgrades[i - 2]) / lmgrades[i - 3];
-
-	for (int i = 0; i < 256; i++)
-	{
-		int grade = (lmgrades[i] / lmgrades[255]) * 255.0f;
-		vid.lightmap[i] = BYTE_CLAMP (grade);
-	}
-
-	// now reset the palette
-	byte basepal[768];
-	Q_MemCpy (basepal, pal, 768);
-
-	// take the midline of the colormap for the palette; we *could* average the
-	// entire column for each colour, but we lose some palette colours that way
-	for (int i = 0; i < 256; i++)
-	{
-		int cmap1 = map[31 * 256 + i];
-		int cmap2 = map[32 * 256 + i];
-		int paltotal = 0;
-
-		for (int c = 0; c < 3; c++)
-		{
-			float f = ((float) basepal[cmap1 * 3 + c] + (float) basepal[cmap2 * 3 + c]) / 2.0f;
-			pal[i * 3 + c] = BYTE_CLAMP ((int) f);
-			paltotal += pal[i * 3 + c];
-		}
-
-		// don't set dark colours to fullbright
-		if (paltotal < 21) vid.fullbright[i] = false;
+		if (x < 224)
+			vid.fullbright[x] = false;
+		else if (x < 255)
+			vid.fullbright[x] = true;
+		else vid.fullbright[x] = false;
 	}
 
 	// for avoidance of the pink fringe effect
 	pal[765] = pal[766] = pal[767] = 0;
-
-	// entry 255 is not a luma
-	vid.fullbright[255] = false;
-}
-
-
-void Check_Gamma (unsigned char *pal)
-{
-#ifdef GLQUAKE_GAMMA_SCALE
-	int i;
-
-	// set -gamma properly (the config will be up by now so this will override whatever was in it)
-	if ((i = COM_CheckParm ("-gamma"))) Cvar_Set (&v_gamma, atof (com_argv[i + 1]));
-
-	// apply default Quake gamma to texture palette
-	for (i = 0; i < 768; i++)
-	{
-		// this calculation is IMPORTANT for retaining the full colour range of a LOT of
-		// Quake 1 textures which gets LOST otherwise.
-		float f = pow ((float) ((pal[i] + 1) / 256.0), 0.7f);
-
-		// note: + 0.5f is IMPORTANT here for retaining a LOT of the visual look of Quake
-		int inf = (f * 255.0f + 0.5f);
-
-		// store back
-		pal[i] = BYTE_CLAMP (inf);
-	}
-#endif
 }
 
 
@@ -1776,7 +1660,6 @@ void D3D_ShutdownDirect3D (void)
 	if (d3d_Device)
 	{
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-		Sbar_Changed ();
 		d3d_Device->Present (NULL, NULL, NULL, NULL);
 	}
 
@@ -2041,9 +1924,10 @@ void D3D_SetActiveGamma (void)
 	// apply v_gamma to all components
 	for (int i = 0; i < 256; i++)
 	{
-		d3d_CurrentGamma.r[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.r[i]);
-		d3d_CurrentGamma.g[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.g[i]);
-		d3d_CurrentGamma.b[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.b[i]);
+		// adjust v_gamma to the same scale as glquake uses
+		d3d_CurrentGamma.r[i] = D3D_AdjustGamma ((v_gamma.value * 0.7f), d3d_DefaultGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3D_AdjustGamma ((v_gamma.value * 0.7f), d3d_DefaultGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3D_AdjustGamma ((v_gamma.value * 0.7f), d3d_DefaultGamma.b[i]);
 	}
 
 	// now apply r/g/b to the derived values
@@ -2060,10 +1944,11 @@ void D3D_SetActiveGamma (void)
 
 void D3D_CheckGamma (void)
 {
-	static int oldvgamma = 100;
-	static int oldrgamma = 100;
-	static int oldggamma = 100;
-	static int oldbgamma = 100;
+	// these values are to force a change on first run
+	static int oldvgamma = -1;
+	static int oldrgamma = -1;
+	static int oldggamma = -1;
+	static int oldbgamma = -1;
 
 	// didn't change - call me paranoid about floats!!!
 	if ((int) (v_gamma.value * 100) == oldvgamma &&

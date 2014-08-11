@@ -1,0 +1,17 @@
+DirectQ 1.8.666
+===============
+
+This is the full release of DirectQ 1.8.666 - enjoy it!
+
+It will also be the last release for a while as I'm currently working on the Remake Quake project - check it out, this will
+rock.  My part involves working on a new, portable, cross platform Quake engine, with enhanced modding and mapping 
+capabilities, and there will be some good positive stuff coming from this into future releases of DirectQ.
+
+I can't say when I'll be back to DirectQ, as there is a LOT of work ahead on RMQ, but one thing is certain and that is that I
+WILL be back.
+
+-----------------------
+
+There are a few changes in this one from the RC3 release.  Gamma handling is now slightly different, performance may be down
+a percent or two (but stability and quality up to compensate), and there's a rather cool Easter Egg hidden somewhere in the
+engine.  I won't be handing out prizes to anyone who finds it, but you'll know it when you do.

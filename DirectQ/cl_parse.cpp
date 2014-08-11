@@ -923,8 +923,6 @@ void CL_ParseClientdata (void)
 			if ( (i & (1<<j)) && !(cl.items & (1<<j)))
 				cl.item_gettime[j] = cl.time;
 		cl.items = i;
-
-		Sbar_Changed ();
 	}
 
 	cl.onground = (bits & SU_ONGROUND) != 0;
@@ -941,10 +939,7 @@ void CL_ParseClientdata (void)
 		i = 0;
 
 	if (cl.stats[STAT_ARMOR] != i)
-	{
 		cl.stats[STAT_ARMOR] = i;
-		Sbar_Changed ();
-	}
 
 	if (bits & SU_WEAPON)
 	{
@@ -954,54 +949,25 @@ void CL_ParseClientdata (void)
 	}
 	else i = 0;
 
-	if (cl.stats[STAT_WEAPON] != i)
-	{
-		cl.stats[STAT_WEAPON] = i;
-		Sbar_Changed ();
-	}
+	cl.stats[STAT_WEAPON] = i;
 
 	i = MSG_ReadShort ();
-	if (cl.stats[STAT_HEALTH] != i)
-	{
-		cl.stats[STAT_HEALTH] = i;
-		Sbar_Changed ();
-	}
+	cl.stats[STAT_HEALTH] = i;
 
 	i = MSG_ReadByte ();
-	if (cl.stats[STAT_AMMO] != i)
-	{
-		cl.stats[STAT_AMMO] = i;
-		Sbar_Changed ();
-	}
+	cl.stats[STAT_AMMO] = i;
 
-	for (i=0; i<4; i++)
+	for (i = 0; i < 4; i++)
 	{
 		j = MSG_ReadByte ();
-		if (cl.stats[STAT_SHELLS+i] != j)
-		{
-			cl.stats[STAT_SHELLS+i] = j;
-			Sbar_Changed ();
-		}
+		cl.stats[STAT_SHELLS+i] = j;
 	}
 
 	i = MSG_ReadByte ();
 
 	if (standard_quake)
-	{
-		if (cl.stats[STAT_ACTIVEWEAPON] != i)
-		{
-			cl.stats[STAT_ACTIVEWEAPON] = i;
-			Sbar_Changed ();
-		}
-	}
-	else
-	{
-		if (cl.stats[STAT_ACTIVEWEAPON] != (1<<i))
-		{
-			cl.stats[STAT_ACTIVEWEAPON] = (1<<i);
-			Sbar_Changed ();
-		}
-	}
+		cl.stats[STAT_ACTIVEWEAPON] = i;
+	else cl.stats[STAT_ACTIVEWEAPON] = (1<<i);
 
 	if (bits & SU_WEAPON2) cl.stats[STAT_WEAPON] |= (MSG_ReadByte () << 8);
 	if (bits & SU_ARMOR2) cl.stats[STAT_ARMOR] |= (MSG_ReadByte () << 8);
@@ -1028,8 +994,6 @@ void CL_ParseClientdata (void)
 			if (flashon > 10)
 				flashon = 0;
 			else flashon = (flashon % 5) + 2;
-
-			if (flashon) Sbar_Changed ();
 		}
 	}
 }
@@ -1288,7 +1252,6 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatename:
-			Sbar_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1302,7 +1265,6 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatefrags:
-			Sbar_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1313,11 +1275,9 @@ void CL_ParseServerMessage (void)
 			}
 
 			cl.scores[i].frags = MSG_ReadShort ();
-			Sbar_Changed ();
 			break;			
 
 		case svc_updatecolors:
-			Sbar_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1331,7 +1291,6 @@ void CL_ParseServerMessage (void)
 
 			// make the new translation
 			cl.scores[i].colors = MSG_ReadByte ();
-			Sbar_Changed ();
 			break;
 
 		case svc_particle:

@@ -26,7 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define PROTOCOL_VERSION_FITZ	666
 
 // RemakeQuake (current draft protocol, subject to change)
-#define PROTOCOL_VERSION_RMQ_MINUS2	777
+#define PROTOCOL_VERSION_RMQ_MINUS2	778
 
 // BJP protocols - just ripped them from his engine!  let's see how far we get with them... :)
 #define	PROTOCOL_VERSION_BJP	10000	// Extended protocol (models > 256 etc), hopefully no conflict

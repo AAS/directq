@@ -356,8 +356,6 @@ extern cvar_t scr_sbaralpha;
 
 static void SCR_CalcRefdef (void)
 {
-	Sbar_Changed ();
-
 	Cvar_Get (conscale, "gl_conscale");
 
 	vid.recalc_refdef = 0;
@@ -612,9 +610,6 @@ void SCR_DrawConsole (void)
 	{
 		Con_DrawConsole (scr_con_current, true);
 		clearconsole = 0;
-
-		// hack - if we have drawn the console we must force an sbar update
-		Sbar_Changed ();
 	}
 	else
 	{
@@ -1123,7 +1118,6 @@ void SCR_BeginLoadingPlaque (void)
 	scr_centertime_off = 0;
 	scr_con_current = 0;
 
-	Sbar_Changed ();
 	scr_drawloading = true;
 	SCR_UpdateScreen ();
 	scr_drawloading = false;
@@ -1608,7 +1602,6 @@ void SCR_QuakeIsLoading (int stage, int maxstage)
 	d3d_GlobalCaps.usingPixelShaders = false;
 
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-	Sbar_Changed ();
 	SCR_CalcRefdef ();
 	D3D_BeginRendering ();
 

@@ -73,16 +73,6 @@ qpic_t      *hsb_items[2];
 bool	hud_showscores = false;
 bool	hud_showdemoscores = false;
 
-// so that we force an update the first time we run
-bool	sbar_changed = true;
-bool	sbar_frame = true;
-
-void Sbar_Changed (void)
-{
-	sbar_changed = true;
-	sbar_frame = true;
-}
-
 
 void HUD_Init (void)
 {
@@ -1498,8 +1488,6 @@ void HUD_DrawOSDItems (void)
 }
 
 
-cvar_t fullsbardraw ("fullsbardraw", "0", CVAR_ARCHIVE);
-
 void HUD_DrawHUD (void)
 {
 	// no HUD conditions
@@ -1530,9 +1518,6 @@ void HUD_DrawHUD (void)
 		}
 	}
 
-	// only cl_sbar 0 can skip updates
-	if (!sbar_changed && !sbar_frame && !cl_sbar.integer && !fullsbardraw.integer) return;
-
 	// draw any areas not covered by the HUD
 	if (sb_lines)
 	{
@@ -1540,39 +1525,30 @@ void HUD_DrawHUD (void)
 		Draw_TileClear ((vid.width - 320) / 2 + 320, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
 	}
 
-	if (cl.stats[STAT_HEALTH] > 0)
+	// draw elements
+	// note - team colors must be drawn after the face as they overlap in the default layout
+	HUD_DrawSBar ();
+	HUD_DrawFace (cl.items, cl.stats[STAT_HEALTH]);
+	HUD_DrawTeamColors ();
+	HUD_DrawArmor (cl.items, cl.stats[STAT_ARMOR]);
+	HUD_DrawAmmo (cl.items, cl.stats[STAT_AMMO]);
+
+	// no inventory
+	if (!(scr_viewsize.value > 101))
 	{
-		// draw elements
-		// note - team colors must be drawn after the face as they overlap in the default layout
-		HUD_DrawSBar ();
-		HUD_DrawFace (cl.items, cl.stats[STAT_HEALTH]);
-		HUD_DrawTeamColors ();
-		HUD_DrawArmor (cl.items, cl.stats[STAT_ARMOR]);
-		HUD_DrawAmmo (cl.items, cl.stats[STAT_AMMO]);
+		// inventory
+		HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
+		HUD_DrawSigils (cl.items);
+		HUD_DrawKeys (cl.items);
+		HUD_DrawItems (cl.items);
+		HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
 
-		// no inventory
-		if (!(scr_viewsize.value > 101))
-		{
-			// inventory
-			HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
-			HUD_DrawSigils (cl.items);
-			HUD_DrawKeys (cl.items);
-			HUD_DrawItems (cl.items);
-			HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
+		// ammocounts are left till last because they don't batch with everything else
+		HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
 
-			// ammocounts are left till last because they don't batch with everything else
-			HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
-
-			// deathmatch overlay
-			HUD_MiniDeathmatchOverlay ();
-		}
+		// deathmatch overlay
+		HUD_MiniDeathmatchOverlay ();
 	}
-
-	// need to properly handle a double-buffered rendering context
-	if (!sbar_changed) sbar_frame = false;
-
-	// not changed
-	sbar_changed = false;
 }
 
 

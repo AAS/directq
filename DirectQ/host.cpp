@@ -606,6 +606,8 @@ Runs all active servers
 void S_FrameCheck (void);
 void CL_SendLagMove (void);
 
+cvar_t host_speeds ("host_speeds", "0");
+
 void Host_Frame (DWORD time)
 {
 	// something bad happened, or the server disconnected
@@ -624,6 +626,8 @@ void Host_Frame (DWORD time)
 		return;
 	}
 
+	float begin_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
+
 	// get new key events
 	Sys_SendKeyEvents ();
 
@@ -638,34 +642,51 @@ void Host_Frame (DWORD time)
 
 	NET_Poll ();
 
+	CL_SendCmd ();
+
+	float command_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
+
 	// if running the server locally, make intentions now
 	if (sv.active)
 	{
-		CL_SendCmd ();
-
 		// run a server frame (this can probably go in a separate thread)
 		Host_ServerFrame ();
 	}
-	else
-	{
-		// if running the server remotely, send intentions now after
-		// the incoming messages have been read
-		CL_SendCmd ();
-	}
+
+	float server_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
 
 	// fetch results from server
 	if (cls.state == ca_connected) CL_ReadFromServer ();
+
+	float client_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
 
 	// update sound
 	if (cls.signon == SIGNONS)
 		S_Update (r_origin, vpn, vright, vup);
 	else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 
+	float sound_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
+
 	// update display
 	SCR_UpdateScreen ();
 
+	float render_time = (host_speeds.integer) ? Sys_FloatTime () : 0;
+
 	// update dlights (should this move to the end of SCR_UpdateScreen?)
 	if (cls.signon == SIGNONS) CL_DecayLights ();
+
+	if (host_speeds.integer && cls.state == ca_connected)
+	{
+		Con_Printf
+		(
+			"Commands %i  Server %i  Client %i  Sound %i  Renderer %i ms\n",
+			(int) ((command_time - begin_time) * 1000.0f),
+			(int) ((server_time - command_time) * 1000.0f),
+			(int) ((client_time - server_time) * 1000.0f),
+			(int) ((sound_time - client_time) * 1000.0f),
+			(int) ((render_time - sound_time) * 1000.0f)
+		);
+	}
 
 	// finish sound
 	S_EndThread ();

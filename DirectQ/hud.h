@@ -23,4 +23,3 @@ extern	int			sb_lines;			// scan lines to draw
 
 void HUD_Init (void);
 
-void Sbar_Changed (void);

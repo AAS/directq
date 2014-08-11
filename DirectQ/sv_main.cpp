@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 cvar_t	sv_progs ("sv_progs", "progs.dat");
 
+bool spawnserver = false;
+
 int		sv_max_datagram = MAX_DATAGRAM; // Must be set so client will work without server
 
 server_t		sv;
@@ -168,7 +170,7 @@ static void SV_SetProtocol_f (void)
 			else if (i == 1)
 				sv_protocol = 666;
 			else if (i == 2)
-				sv_protocol = 777;
+				sv_protocol = 778;
 			else sv_protocol = 9998 + i - 1;
 
 			return;
@@ -1434,8 +1436,10 @@ void SV_SpawnServer (char *server)
 	SVProgs->LoadProgs ("progs.dat", &sv_progs);
 
 	// bring up the worldmodel early so that we can get a count on the number of edicts needed
+	spawnserver = true;
 	_snprintf (sv.modelname, 64, "maps/%s.bsp", server);
 	sv.worldmodel = Mod_ForName (sv.modelname, false);
+	spawnserver = false;
 
 	if (!sv.worldmodel)
 	{

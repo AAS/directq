@@ -433,9 +433,6 @@ void D3D_InitSkySphere (void)
 	float a, b, x, ax, ay, v[3], length;
 	float dx, dy, dz;
 
-	int xxx = SKYSPHERE_NUMVERTS;
-	int yyy = (SKYGRID_SIZE * SKYGRID_SIZE * 6) * sizeof (unsigned short);
-
 	dx = 16;
 	dy = 16;
 	dz = 16 / 3;
@@ -446,9 +443,6 @@ void D3D_InitSkySphere (void)
 	warpverts_t *ssv2 = ssv;
 
 	i = SKYSPHERE_NUMVERTS;
-
-	float maxv = 0;
-	float minv = 1048576;
 
 	for (j = 0; j <= SKYGRID_SIZE; j++)
 	{
@@ -465,14 +459,6 @@ void D3D_InitSkySphere (void)
 			v[1] = ay * x * dy;
 			v[2] = -sin ((b + 0.5) * D3DX_PI) * dz;
 
-			if (v[0] > maxv) maxv = v[0];
-			if (v[1] > maxv) maxv = v[1];
-			if (v[2] > maxv) maxv = v[2];
-
-			if (v[0] < minv) minv = v[0];
-			if (v[1] < minv) minv = v[1];
-			if (v[2] < minv) minv = v[2];
-
 			// same calculation as classic Q1 sky but projected onto an actual physical sphere
 			// (rather than on flat surfs) and calced as if from an origin of [0,0,0] to prevent
 			// the heaving and buckling effect
@@ -487,9 +473,6 @@ void D3D_InitSkySphere (void)
 			ssv2++;
 		}
 	}
-
-	Con_DPrintf ("max is %0.3f\n", maxv);
-	Con_DPrintf ("min is %0.3f\n", minv);
 
 	d3d_DPSkyIndexes = (unsigned short *) MainZone->Alloc ((SKYGRID_SIZE * SKYGRID_SIZE * 6) * sizeof (unsigned short));
 

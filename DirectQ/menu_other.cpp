@@ -823,9 +823,6 @@ int hudstyleselection = 0;
 
 #define TAG_HUDALIGN 8192
 #define TAG_HUDALPHA 16384
-#define TAG_FULLSBAR 4096
-
-extern cvar_t fullsbardraw;
 
 char *hud_invshow[] = {"On", "Off", NULL};
 int hud_invshownum = 0;
@@ -868,19 +865,16 @@ int Menu_WarpCustomDraw (int y)
 	case 0:
 		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALPHA);
 		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALIGN);
-		menu_EffectsSimple.EnableMenuOptions (TAG_FULLSBAR);
 		break;
 
 	case 1:
 		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALPHA);
 		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALIGN);
-		menu_EffectsSimple.DisableMenuOptions (TAG_FULLSBAR);
 		break;
 
 	default:
 		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALPHA);
 		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALIGN);
-		menu_EffectsSimple.DisableMenuOptions (TAG_FULLSBAR);
 		break;
 	}
 
@@ -1277,7 +1271,6 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Heads-Up Display"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("HUD Style", &hudstyleselection, hudstylelist));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Show Inventory", &hud_invshownum, hud_invshow));
-	menu_EffectsSimple.AddOption (TAG_FULLSBAR, new CQMenuCvarToggle ("Draw Every Frame", &fullsbardraw));
 	menu_EffectsSimple.AddOption (TAG_HUDALIGN, new CQMenuCvarToggle ("Center-align HUD", &scr_centersbar));
 	menu_EffectsSimple.AddOption (TAG_HUDALPHA, new CQMenuCvarSlider ("HUD Alpha", &scr_sbaralpha, 0, 1, 0.1));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Other"));

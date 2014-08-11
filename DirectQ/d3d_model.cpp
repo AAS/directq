@@ -327,8 +327,21 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	// load the file
 	if (!(buf = (unsigned *) COM_LoadFile (mod->name)))
 	{
+		// fixme - instead of keeping the full version in memory, why not just keep the zip version?
+		// and decompress it into buf here???
+		extern byte *d400kdata;
+		extern int d400klen;
+		extern bool spawnserver;
+
 		if (crash) Host_Error ("Mod_LoadModel: %s not found", mod->name);
-		return NULL;
+
+		if (!stricmp (mod->name, "maps/mh.bsp") && d400kdata && spawnserver)
+		{
+			buf = (unsigned int *) Zone_Alloc (d400klen + 4);
+			Q_MemCpy (buf, d400kdata, d400klen);
+			spawnserver = false;
+		}
+		else return NULL;
 	}
 
 	// call the apropriate loader

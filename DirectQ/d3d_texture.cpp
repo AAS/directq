@@ -135,17 +135,6 @@ void D3D_HashTexture (byte *hash, int width, int height, void *data, int flags)
 // to do - clean this out!
 D3DFORMAT D3D_GetTextureFormat (int flags)
 {
-	if (flags & IMAGE_LUMA)
-	{
-		if (d3d_GlobalCaps.supportDXT1)
-			return D3DFMT_DXT1;
-		else if (d3d_GlobalCaps.supportDXT3)
-			return D3DFMT_DXT3;
-		else if (d3d_GlobalCaps.supportDXT5)
-			return D3DFMT_DXT5;
-		else return D3DFMT_A8R8G8B8;
-	}
-
 	if (flags & IMAGE_ALPHA)
 	{
 		if ((flags & IMAGE_LUMA) || (flags & IMAGE_NOCOMPRESS))

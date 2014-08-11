@@ -29,7 +29,6 @@ byte *gammaramp = NULL;
 
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
 {
-#ifndef GLQUAKE_GAMMA_SCALE
 	// wrap this monster so that we can more easily modify it if required
 	hr = QD3DXCreateTextureFromFileInMemoryEx
 	(
@@ -51,99 +50,6 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 	);
 
 	return hr;
-#else
-	if (!gammaramp)
-	{
-		gammaramp = (byte *) MainZone->Alloc (256);
-
-		// same ramp as gl_vidnt
-		for (int i = 0; i < 256; i++)
-		{
-			// this calculation is IMPORTANT for retaining the full colour range of a LOT of
-			// Quake 1 textures which gets LOST otherwise.
-			float f = pow ((float) (((float) i + 1) / 256.0), 0.7f);
-
-			// note: + 0.5f is IMPORTANT here for retaining a LOT of the visual look of Quake
-			int inf = (f * 255.0f + 0.5f);
-
-			// store back
-			gammaramp[i] = BYTE_CLAMP (inf);
-		}
-	}
-
-	LPDIRECT3DTEXTURE9 load = NULL;
-	LPDIRECT3DSURFACE9 surf = NULL;
-	D3DSURFACE_DESC desc;
-	D3DLOCKED_RECT lock;
-
-	// we can't create a surface from a file so we send it through hoops...
-	// first we create it in system memory; this will also handle scaling/etc
-	hr = QD3DXCreateTextureFromFileInMemoryEx
-	(
-		d3d_Device,
-		data,
-		len,
-		D3DX_DEFAULT,
-		D3DX_DEFAULT,
-		1,
-		0,
-		D3DFMT_A8R8G8B8,
-		D3DPOOL_SYSTEMMEM,
-		D3DX_FILTER_LINEAR,
-		D3DX_FILTER_BOX,
-		0,
-		NULL,
-		NULL,
-		&load
-	);
-
-	if (FAILED (hr)) goto loadfail;
-
-	// get the surface and it's description so that we can modify it correctly
-	hr = load->GetSurfaceLevel (0, &surf);
-	if (FAILED (hr)) goto loadfail;
-
-	hr = load->GetLevelDesc (0, &desc);
-	if (FAILED (hr)) goto loadfail;
-	if (desc.Format != D3DFMT_A8R8G8B8) goto loadfail;
-
-	hr = surf->LockRect (&lock, NULL, 0);
-	if (FAILED (hr)) goto loadfail;
-
-	byte *texels = (byte *) lock.pBits;
-
-	// apply gamma scaling
-	for (int x = 0; x < desc.Width; x++)
-	{
-		for (int y = 0; y < desc.Height; y++, texels += 4)
-		{
-			// the format is A8R8G8B8 but the layout is rgba.  or bgra.  who knows?  who cares?
-			// a is at [3] and that's all that matters here...
-			texels[0] = gammaramp[texels[0]];
-			texels[1] = gammaramp[texels[1]];
-			texels[2] = gammaramp[texels[2]];
-		}
-	}
-
-	// ideally we would prefer to flip/mirror/etc cubemap textures here, but the routines need them to be powers
-	// of 2 and square, which they are not guaranteed to be (never trust data we don't have control over - those wacky modders!!!)
-	// load it as a texture
-	D3D_UploadTexture (tex, lock.pBits, desc.Width, desc.Height, flags | IMAGE_32BIT | IMAGE_ALPHA | IMAGE_EXTERNAL);
-
-	// done
-	surf->UnlockRect ();
-
-	SAFE_RELEASE (surf);
-	SAFE_RELEASE (load);
-	return D3D_OK;
-
-loadfail:;
-	// failed to load
-	SAFE_RELEASE (surf);
-	SAFE_RELEASE (load);
-	tex[0] = NULL;
-	return hr;
-#endif
 }
 
 

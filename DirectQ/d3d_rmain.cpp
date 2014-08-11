@@ -605,13 +605,11 @@ void R_SetupD3D (void)
 		// match winquake's grey if we're noclipping
 		clearcolor = 0xff1f1f1f;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		Sbar_Changed ();
 	}
 	else if (r_wireframe.integer)
 	{
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
 		clearcolor = 0xff1f1f1f;
-		Sbar_Changed ();
 	}
 
 	// projection matrix depends on drawmode
@@ -620,7 +618,6 @@ void R_SetupD3D (void)
 		// change clear color to black and force a clear
 		clearcolor = 0xff000000;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		Sbar_Changed ();
 
 		// nothing has been culled yet
 		automap_culls = 0;
@@ -1148,9 +1145,6 @@ void R_RenderView (void)
 	old_frametime = cl.time;
 
 	if (r_speeds.value) time1 = Sys_FloatTime ();
-
-	// force sbar updates on the first few frames to get a solid pic in the front buffer and all backbuffers
-	if (d3d_RenderDef.framecount < 5) Sbar_Changed ();
 
 	// initialize stuff
 	R_SetupFrame ();

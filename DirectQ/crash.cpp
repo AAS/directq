@@ -1,6 +1,4 @@
 
-#ifdef _DEBUG
-
 #include <windows.h>
 #include <assert.h>
 #include <Dbghelp.h>
@@ -8,6 +6,7 @@
 
 #pragma comment (lib, "Dbghelp.lib")
 
+#ifdef _DEBUG
 
 bool symbolsinit = false;
 

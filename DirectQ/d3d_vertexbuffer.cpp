@@ -692,9 +692,9 @@ __inline void D3DAlias_LerpVert (aliaspolyvert_t *dest, aliasmesh_t *av, entity_
 	dest->color = D3DCOLOR_ARGB
 	(
 		BYTE_CLAMP (e->alphaval),
-		vid.lightmap[BYTE_CLAMP (l * e->shadelight[0])],
-		vid.lightmap[BYTE_CLAMP (l * e->shadelight[1])],
-		vid.lightmap[BYTE_CLAMP (l * e->shadelight[2])]
+		BYTE_CLAMP (l * e->shadelight[0]),
+		BYTE_CLAMP (l * e->shadelight[1]),
+		BYTE_CLAMP (l * e->shadelight[2])
 	);
 
 	// do texcoords here too

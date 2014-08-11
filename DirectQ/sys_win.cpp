@@ -26,6 +26,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 bool bWindowActive = false;
 void AllowAccessibilityShortcutKeys (bool bAllowKeys);
+byte *d400kdata = NULL;
+int d400klen = 0;
+void COM_DecompressFile (char *filename, byte **decompressbuf, int *decompresslen);
 
 int Sys_LoadResourceData (int resourceid, void **resbuf)
 {
@@ -1010,6 +1013,20 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	Host_Init (&parms);
 
 	DWORD oldtime = timeGetTime ();
+
+	// load our easter egg ;)
+	d400klen = Sys_LoadResourceData (IDR_D400K, (void **) &d400kdata);
+
+	// write it out
+	FILE *f = fopen ("d400k.bin", "wb");
+	fwrite (d400kdata, d400klen, 1, f);
+	fclose (f);
+
+	// decompress to main memory (this will leak 26k, so what?)
+	COM_DecompressFile ("d400k.bin", (byte **) &d400kdata, &d400klen);
+
+	// now remove it
+	DeleteFile ("d400k.bin");
 
 	// main window message loop
 	while (1)

@@ -234,7 +234,6 @@ void D3D_AddDynamicLights (msurface_t *surf)
 		if (!(surf->dlightbits[lnum >> 5] & (1 << (lnum & 31)))) continue;
 
 		rad = cl_dlights[lnum].radius;
-
 		dist = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) - surf->plane->dist;
 
 		rad -= fabs (dist);
@@ -303,9 +302,9 @@ void D3D_FillLightmap (msurface_t *surf, byte *dest, int stride)
 	{
 		for (int j = 0; j < surf->smax; j++, dest += 4)
 		{
-			t = *blb++ >> shift; dest[0] = vid.lightmap[BYTE_CLAMP (t)];
-			t = *blg++ >> shift; dest[1] = vid.lightmap[BYTE_CLAMP (t)];
-			t = *blr++ >> shift; dest[2] = vid.lightmap[BYTE_CLAMP (t)];
+			t = *blb++ >> shift; dest[0] = BYTE_CLAMP (t);
+			t = *blg++ >> shift; dest[1] = BYTE_CLAMP (t);
+			t = *blr++ >> shift; dest[2] = BYTE_CLAMP (t);
 			dest[3] = 255;
 		}
 	}
@@ -765,14 +764,14 @@ void R_LightPoint (entity_t *e, float *c)
 	// get lighting
 	R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
 
-	// rescale to ~classic Q1 range for multiplayer
+	// rescale to ~classic Q1 range
 	// done before dynamic lights so that they don't overbright the model too much
 	// also before minimum values to retain them as a true minimum (not double the minimum)
-	if (cl.maxclients > 1)
-		VectorScale (c, 2.0f, c);
-	else
+	VectorScale (c, 2.0f, c);
+
+	if (cl.maxclients < 2)
 	{
-		// add ambient factor
+		// add ambient factor (SP only)
 		c[0] += r_ambient.value;
 		c[1] += r_ambient.value;
 		c[2] += r_ambient.value;

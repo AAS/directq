@@ -35,7 +35,6 @@ typedef struct
 {
 	pixel_t			*colormap;		// 256 * VID_GRADES size
 	bool			fullbright[256];	// true if a colour at this index is fullbright
-	byte			lightmap[256];		// lightmap lookup table
 	unsigned		rowbytes;	// may be > width if displayed in a window
 	unsigned		width;
 	unsigned		height;
