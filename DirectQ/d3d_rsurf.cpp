@@ -713,14 +713,11 @@ cvar_t r_zfightinghack ("r_zfightinghack", "0.5", CVAR_ARCHIVE);
 
 void D3D_SetupBrushModel (entity_t *ent)
 {
-	bool rotated;
 	vec3_t mins, maxs;
 	model_t *mod = ent->model;
 
-	if (ent->angles[0] || ent->angles[1] || ent->angles[2])
+	if (ent->rotated)
 	{
-		rotated = true;
-
 		for (int i = 0; i < 3; i++)
 		{
 			mins[i] = ent->origin[i] - mod->radius;
@@ -729,8 +726,6 @@ void D3D_SetupBrushModel (entity_t *ent)
 	}
 	else
 	{
-		rotated = false;
-
 		VectorAdd (ent->origin, mod->mins, mins);
 		VectorAdd (ent->origin, mod->maxs, maxs);
 	}
@@ -793,7 +788,7 @@ void D3D_SetupBrushModel (entity_t *ent)
 	VectorSubtract (r_refdef.vieworg, ent->origin, ent->modelorg);
 
 	// adjust for rotation
-	if (rotated)
+	if (ent->rotated)
 	{
 		vec3_t temp;
 		vec3_t forward, right, up;
@@ -829,8 +824,10 @@ void D3D_SetupBrushModel (entity_t *ent)
 			(!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)) ||
 			(ent->alphaval < 255 && !(surf->flags & SURF_DRAWSKY)))
 		{
-			// the surface needs to inherit an alpha from the entity so that we know how to draw it
+			// the surface needs to inherit an alpha and the rotation member from the entity so that we know how to draw it
+			// (should we make this a SURF_ROTATED flag?)
 			surf->alphaval = ent->alphaval;
+			surf->rotated = ent->rotated;
 
 			// sky surfaces need to be added immediately
 			// other surface types either go on the main list or the alpha list

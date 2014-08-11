@@ -622,18 +622,16 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 
 	VectorCopy (pusher->v.angles, pushorig);
 	
-// move the pusher to it's final position
-
+	// move the pusher to it's final position
 	VectorAdd (pusher->v.angles, amove, pusher->v.angles);
 	pusher->v.ltime += movetime;
 	SV_LinkEdict (pusher, false);
 
-
-// see if any solid entities are inside the final position
+	// see if any solid entities are inside the final position
 	num_moved = 0;
-	check = NEXT_EDICT(SVProgs->EdictPointers[0]);
+	check = NEXT_EDICT (SVProgs->EdictPointers[0]);
 
-	for (e=1; e<SVProgs->NumEdicts; e++, check = NEXT_EDICT(check))
+	for (e = 1; e < SVProgs->NumEdicts; e++, check = NEXT_EDICT (check))
 	{
 		if (check->free)
 			continue;

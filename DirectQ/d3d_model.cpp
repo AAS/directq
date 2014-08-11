@@ -1184,6 +1184,7 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 		surf->numverts = (unsigned short) LittleShort (face->numedges);
 		surf->numindexes = (surf->numverts - 2) * 3;
 		surf->flags = 0;
+		surf->rotated = false;
 
 		// turb surfs need these so that they can recalculate the warp correctly
 		surf->bspverts = surf->numverts;

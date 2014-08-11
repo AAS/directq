@@ -291,7 +291,7 @@ void V_ParseDamage (void)
 	blood = MSG_ReadByte ();
 
 	for (i = 0; i < 3; i++)
-		from[i] = MSG_ReadCoord ();
+		from[i] = MSG_ReadCoord (cl.Protocol);
 
 	count = blood * 0.5 + armor * 0.5;
 

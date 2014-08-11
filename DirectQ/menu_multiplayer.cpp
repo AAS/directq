@@ -158,12 +158,14 @@ int Menu_TCPIPProtoDesc (int y)
 	else if (selected_protocol == 1)
 		Menu_PrintCenter (y, "Extended protocol (models > 256 etc)");
 	else if (selected_protocol == 2)
-		Menu_PrintCenter (y, "Extended protocol (models > 256 etc)");
+		Menu_PrintCenter (y, "Extended protocol (models > 256 etc), more accurate");
 	else if (selected_protocol == 3)
-		Menu_PrintCenter (y, "Extended protocol (sounds > 256), problems with Marcher");
+		Menu_PrintCenter (y, "Extended protocol (models > 256 etc)");
 	else if (selected_protocol == 4)
-		Menu_PrintCenter (y, "Extended protocol (sounds > 256), more compatible but less functional");
+		Menu_PrintCenter (y, "Extended protocol (sounds > 256), problems with Marcher");
 	else if (selected_protocol == 5)
+		Menu_PrintCenter (y, "Extended protocol (sounds > 256), more compatible but less functional");
+	else if (selected_protocol == 6)
 		Menu_PrintCenter (y, "Extended protocol, as BJP3 but extends coords and angles");
 	else Menu_PrintCenter (y, "Unknown protocol");
 

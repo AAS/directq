@@ -157,6 +157,7 @@ char *protolist[] =
 {
 	"15",
 	"Fitz",
+	"RMQ (unfinished)",
 	"BJP",
 	"BJP2",
 	"BJP3",

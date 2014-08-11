@@ -278,6 +278,11 @@ void D3D_AddVisEdict (entity_t *ent)
 	{
 		ent->nocullbox = false;
 
+		// check for rotation; this is used for bmodel culling and also for faster transforms for all model types
+		if (ent->angles[0] || ent->angles[1] || ent->angles[2])
+			ent->rotated = true;
+		else ent->rotated = false;
+
 		if (d3d_RenderDef.numvisedicts < MAX_VISEDICTS)
 		{
 			d3d_RenderDef.visedicts[d3d_RenderDef.numvisedicts] = ent;

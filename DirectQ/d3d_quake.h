@@ -335,6 +335,7 @@ typedef struct d3d_global_caps_s
 	bool supportDXT1;
 	bool supportDXT3;
 	bool supportDXT5;
+	bool supportDynTex;
 	bool supportPixelShaders;
 	bool usingPixelShaders;
 	bool supportHardwareTandL;

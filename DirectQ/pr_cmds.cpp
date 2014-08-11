@@ -705,14 +705,14 @@ void PF_ambientsound (void)
 	}
 
 	// add an svc_spawnambient command to the level signon packet
-	if (soundnum > 255 && sv.Protocol == PROTOCOL_VERSION_FITZ)
+	if (soundnum > 255 && (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2))
 		MSG_WriteByte (&sv.signon, svc_spawnstaticsound2);
 	else MSG_WriteByte (&sv.signon, svc_spawnstaticsound);
 
 	for (i = 0; i < 3; i++)
-		MSG_WriteCoord (&sv.signon, pos[i]);
+		MSG_WriteCoord (&sv.signon, pos[i], sv.Protocol);
 
-	if (soundnum > 255 && sv.Protocol == PROTOCOL_VERSION_FITZ)
+	if (soundnum > 255 && (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2))
 		MSG_WriteShort (&sv.signon, soundnum);
 	else if (sv.Protocol != PROTOCOL_VERSION_BJP2)
 		MSG_WriteByte (&sv.signon, soundnum);
@@ -1750,12 +1750,12 @@ void PF_WriteLong (void)
 
 void PF_WriteAngle (void)
 {
-	MSG_WriteAngle (WriteDest(), G_FLOAT(OFS_PARM1), true);
+	MSG_WriteAngle (WriteDest(), G_FLOAT(OFS_PARM1), sv.Protocol);
 }
 
 void PF_WriteCoord (void)
 {
-	MSG_WriteCoord (WriteDest(), G_FLOAT(OFS_PARM1));
+	MSG_WriteCoord (WriteDest(), G_FLOAT(OFS_PARM1), sv.Protocol);
 }
 
 void PF_WriteString (void)
@@ -1781,7 +1781,7 @@ void PF_makestatic (void)
 
 	ent = G_EDICT (OFS_PARM0);
 
-	if (sv.Protocol == PROTOCOL_VERSION_FITZ)
+	if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 	{
 		// never send alpha
 		if (SV_ModelIndex (SVProgs->Strings + ent->v.model) & 0xFF00) bits |= B_LARGEMODEL;
@@ -1817,8 +1817,8 @@ void PF_makestatic (void)
 
 	for (i = 0; i < 3; i++)
 	{
-		MSG_WriteCoord (&sv.signon, ent->v.origin[i]);
-		MSG_WriteAngle (&sv.signon, ent->v.angles[i], true);
+		MSG_WriteCoord (&sv.signon, ent->v.origin[i], sv.Protocol);
+		MSG_WriteAngle (&sv.signon, ent->v.angles[i], sv.Protocol);
 	}
 
 	// never send FQ alpha but the client must be capable of reading it if it receives it
@@ -1936,19 +1936,19 @@ void PF_te_particlerain (void)
 	MSG_WriteByte (&sv.datagram, TE_PARTICLERAIN);
 
 	// min
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[0]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[1]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[2]);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[0], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[1], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[2], sv.Protocol);
 
 	// max
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[0]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[1]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[2]);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[0], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[1], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[2], sv.Protocol);
 
 	// velocity
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[0]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[1]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[2]);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[0], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[1], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[2], sv.Protocol);
 
 	// count - already tested for < 1 above
 	MSG_WriteShort (&sv.datagram, G_FLOAT (OFS_PARM3) > 65535 ? 65535 : G_FLOAT (OFS_PARM3));
@@ -1966,19 +1966,19 @@ void PF_te_particlesnow (void)
 	MSG_WriteByte (&sv.datagram, TE_PARTICLESNOW);
 
 	// min
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[0]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[1]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[2]);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[0], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[1], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM0)[2], sv.Protocol);
 
 	// max
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[0]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[1]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[2]);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[0], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[1], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM1)[2], sv.Protocol);
 
 	// velocity
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[0]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[1]);
-	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[2]);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[0], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[1], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, G_VECTOR (OFS_PARM2)[2], sv.Protocol);
 
 	// count - already tested for < 1 above
 	MSG_WriteShort (&sv.datagram, G_FLOAT (OFS_PARM3) > 65535 ? 65535 : G_FLOAT (OFS_PARM3));

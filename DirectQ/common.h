@@ -95,16 +95,14 @@ void MSG_WriteShort (sizebuf_t *sb, int c);
 void MSG_WriteLong (sizebuf_t *sb, int c);
 void MSG_WriteFloat (sizebuf_t *sb, float f);
 void MSG_WriteString (sizebuf_t *sb, char *s);
-void MSG_WriteCoord (sizebuf_t *sb, float f);
-void MSG_WriteAngle (sizebuf_t *sb, float f, bool fitzhack);
 
-// these are to prevent crossing client/server boundaries when checking the
-// protocol to decide which data format to use.  in theory the two numbers are
-// the same so it should make no odds, but it just feels cleaner this way.
-// in an ideal world each of client and server would have their own logically
-// separate functions for reading and writing.
-void MSG_WriteClientAngle (sizebuf_t *sb, float f, bool fitzhack);
-float MSG_ReadServerAngle (bool fitzhack);
+
+void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol);
+void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol);
+float MSG_ReadCoord (int protocol);
+float MSG_ReadAngle (int protocol);
+void MSG_WriteAngle16 (sizebuf_t *sb, float f);
+float MSG_ReadAngle16 (void);
 
 extern	int			msg_readcount;
 extern	bool	msg_badread;		// set if a read goes beyond end of message
@@ -116,9 +114,6 @@ int MSG_ReadShort (void);
 int MSG_ReadLong (void);
 float MSG_ReadFloat (void);
 char *MSG_ReadString (void);
-
-float MSG_ReadCoord (void);
-float MSG_ReadAngle (bool fitzhack);
 
 //============================================================================
 

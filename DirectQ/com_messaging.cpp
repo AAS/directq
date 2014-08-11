@@ -91,41 +91,8 @@ void MSG_WriteString (sizebuf_t *sb, char *s)
 }
 
 
-void MSG_WriteCoord (sizebuf_t *sb, float f)
-{
-	// always happens on the server
-	if (sv.Protocol >= PROTOCOL_VERSION_MH)
-		MSG_WriteFloat (sb, f);
-	else MSG_WriteShort (sb, (int)(f*8));
-}
-
-
-void MSG_WriteAngleCommon (sizebuf_t *sb, float f, int proto, bool fitzhack)
-{
-	if (proto >= PROTOCOL_VERSION_MH)
-		MSG_WriteShort (sb, ((int) ((f * 65536) / 360)) & 65535);
-	else if (proto == PROTOCOL_VERSION_FITZ && fitzhack)
-		MSG_WriteByte (sb, ((int) ((f * 256.0) / 360)) & 255);
-	else if (proto == PROTOCOL_VERSION_FITZ)
-		MSG_WriteShort (sb, Q_rint (f * 65536.0 / 360.0) & 65535);
-	else MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
-}
-
-
-void MSG_WriteClientAngle (sizebuf_t *sb, float f, bool fitzhack)
-{
-	MSG_WriteAngleCommon (sb, f, cl.Protocol, fitzhack);
-}
-
-void MSG_WriteAngle (sizebuf_t *sb, float f, bool fitzhack)
-{
-	MSG_WriteAngleCommon (sb, f, sv.Protocol, fitzhack);
-}
-
-//
 // reading functions
-//
-int                     msg_readcount;
+int         msg_readcount;
 bool        msg_badread;
 
 void MSG_BeginReading (void)
@@ -245,40 +212,6 @@ char *MSG_ReadString (void)
 	return string;
 }
 
-float MSG_ReadCoord (void)
-{
-	if (cl.Protocol == PROTOCOL_VERSION_FITZ)
-		return MSG_ReadShort () * (1.0 / 8);
-	else if (cl.Protocol >= PROTOCOL_VERSION_MH)
-		return MSG_ReadFloat ();
-	else return MSG_ReadShort () * (1.0 / 8);
-}
-
-
-float MSG_ReadAngleCommon (int proto, bool fitzhack)
-{
-	if (proto >= PROTOCOL_VERSION_MH)
-		return MSG_ReadShort () * (360.0 / 65536);
-	else if (proto == PROTOCOL_VERSION_FITZ && fitzhack)
-		return MSG_ReadChar () * (360.0 / 256);
-	else if (proto == PROTOCOL_VERSION_FITZ)
-		return MSG_ReadShort () * (360.0 / 65536);
-
-	return MSG_ReadChar () * (360.0 / 256);
-}
-
-
-float MSG_ReadServerAngle (bool fitzhack)
-{
-	return MSG_ReadAngleCommon (sv.Protocol, fitzhack);
-}
-
-
-float MSG_ReadAngle (bool fitzhack)
-{
-	return MSG_ReadAngleCommon (cl.Protocol, fitzhack);
-}
-
 
 // JPG - need this to check for ProQuake messages
 int MSG_PeekByte (void)
@@ -291,6 +224,93 @@ int MSG_PeekByte (void)
 
 	return (unsigned char) net_message.data[msg_readcount];
 }
+
+float MSG_ReadAngle16 (void)
+{
+	int val = MSG_ReadShort();
+	return val * (360.0 / 65536);
+}
+
+void MSG_WriteAngle16 (sizebuf_t *sb, float f)
+{
+	int val = (int)f*65536/360;
+	MSG_WriteShort (sb, val & 65535);
+}
+
+
+float MSG_ReadCoord24 (void)
+{
+	return MSG_ReadShort () + MSG_ReadByte () * (1.0 / 255);
+}
+
+
+float MSG_ReadCoord32f (void)
+{
+	return MSG_ReadFloat ();
+}
+
+
+void MSG_WriteCoord24 (sizebuf_t *sb, float f)
+{
+	MSG_WriteShort (sb, f);
+	MSG_WriteByte (sb, (int) (f * 255) % 255);
+}
+
+
+void MSG_WriteCoord (sizebuf_t *sb, float f, int protocol)
+{
+	if (protocol >= PROTOCOL_VERSION_MH)
+		MSG_WriteFloat (sb, f);
+	else if (protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+		MSG_WriteCoord24 (sb, f);
+	else MSG_WriteShort (sb, (int) (f * 8));
+}
+
+
+void MSG_WriteAngle (sizebuf_t *sb, float f, int protocol)
+{
+	switch (protocol)
+	{
+	case PROTOCOL_VERSION_MH:
+		MSG_WriteShort (sb, ((int) ((f * 65536) / 360)) & 65535);
+		break;
+
+	case PROTOCOL_VERSION_RMQ_MINUS2:
+		MSG_WriteFloat (sb, f);
+		break;
+
+	default:
+		MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
+		break;
+	}
+}
+
+
+float MSG_ReadCoord (int protocol)
+{
+	if (protocol >= PROTOCOL_VERSION_MH)
+		return MSG_ReadFloat ();
+	else if (protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+		return MSG_ReadCoord24 ();
+	else return MSG_ReadShort () * (1.0f / 8.0f);
+}
+
+
+float MSG_ReadAngle (int protocol)
+{
+	switch (protocol)
+	{
+	case PROTOCOL_VERSION_MH:
+		return MSG_ReadShort () * (360.0 / 65536);
+
+	case PROTOCOL_VERSION_RMQ_MINUS2:
+		return MSG_ReadFloat ();
+
+	default:
+		return (MSG_ReadChar () * 1.40625f);
+	}
+}
+
 
 //===========================================================================
 

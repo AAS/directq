@@ -936,7 +936,7 @@ void D3DLight_CreateLightmapTexture (LPDIRECT3DTEXTURE9 *tex, int w, int h, D3DP
 		w,
 		h,
 		1,
-		pool == D3DPOOL_DEFAULT ? D3DUSAGE_DYNAMIC : 0,
+		pool == D3DPOOL_DEFAULT ? (d3d_GlobalCaps.supportDynTex ? D3DUSAGE_DYNAMIC : 0) : 0,
 		d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8,
 		pool,
 		tex,
@@ -984,21 +984,21 @@ CD3DLightmap::CD3DLightmap (msurface_t *surf)
 	if (!this->d3d_MainTexture && !this->d3d_BackupTexture)
 	{
 		// would a host error be enough here as this failure is most likely to be out of memory...
-		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create BOTH Lightmap Textures!!!");
+		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create BOTH Lightmap Textures at %ix%i!!!", this->width, this->height);
 		return;
 	}
 
 	if (!this->d3d_MainTexture)
 	{
 		// would a host error be enough here as this failure is most likely to be out of memory...
-		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create primary Lightmap Texture");
+		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create primary Lightmap Texture at %ix%i", this->width, this->height);
 		return;
 	}
 
 	if (!this->d3d_BackupTexture)
 	{
 		// would a host error be enough here as this failure is most likely to be out of memory...
-		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create backup Lightmap Texture");
+		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create backup Lightmap Texture at %ix%i", this->width, this->height);
 		return;
 	}
 

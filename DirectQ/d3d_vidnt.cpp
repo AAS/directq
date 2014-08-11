@@ -1128,6 +1128,67 @@ void D3D_TexMem_f (void)
 
 cmd_t D3D_TexMem_Cmd ("gl_videoram", D3D_TexMem_f);
 
+void D3D_ValidateTextureSizes (void)
+{
+	LPDIRECT3DTEXTURE9 tex = NULL;
+
+	for (int s = d3d_DeviceCaps.MaxTextureWidth; ; s >>= 1)
+	{
+		if (s < 256)
+		{
+			Sys_Error ("Could not create a 256x256 texture");
+			return;
+		}
+
+		hr = d3d_Device->CreateTexture (s, 256, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL);
+
+		if (FAILED (hr))
+		{
+			tex = NULL;
+			continue;
+		}
+
+		d3d_DeviceCaps.MaxTextureWidth = s;
+		SAFE_RELEASE (tex);
+		break;
+	}
+
+	for (int s = d3d_DeviceCaps.MaxTextureHeight; ; s >>= 1)
+	{
+		if (s < 256)
+		{
+			Sys_Error ("Could not create a 256x256 texture");
+			return;
+		}
+
+		hr = d3d_Device->CreateTexture (256, s, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL);
+
+		if (FAILED (hr))
+		{
+			tex = NULL;
+			continue;
+		}
+
+		d3d_DeviceCaps.MaxTextureHeight = s;
+		SAFE_RELEASE (tex);
+		break;
+	}
+
+	d3d_GlobalCaps.supportDynTex = false;
+
+	if (d3d_DeviceCaps.Caps2 & D3DCAPS2_DYNAMICTEXTURES)
+	{
+		hr = d3d_Device->CreateTexture (256, 256, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
+
+		if (SUCCEEDED (hr))
+		{
+			d3d_GlobalCaps.supportDynTex = true;
+			SAFE_RELEASE (tex);
+		}
+	}
+}
+
+
 void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 {
 	// get the kind of capabilities we can expect from a HAL device ("hello Dave")
@@ -1225,6 +1286,9 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 		Sys_Error ("D3D_InitDirect3D: Failed to retrieve device caps");
 		return;
 	}
+
+	// ensure that the reported texture sizes are correct
+	D3D_ValidateTextureSizes ();
 
 	// report on selected ones
 	Con_Printf ("Maximum Texture Blend Stages: %i\n", d3d_DeviceCaps.MaxTextureBlendStages);

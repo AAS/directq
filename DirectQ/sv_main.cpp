@@ -117,7 +117,7 @@ void SV_WriteByteShort (sizebuf_t *sb, int c)
 {
 	int PrevSize = sv.signon.cursize;
 
-	if (sv.Protocol == PROTOCOL_VERSION || sv.Protocol == PROTOCOL_VERSION_FITZ)
+	if (sv.Protocol == PROTOCOL_VERSION || sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 		MSG_WriteByte (sb, c);
 	else
 	{
@@ -136,12 +136,12 @@ SV_SetProtocol_f
 */
 #if 0
 #ifdef _DEBUG
-static int sv_protocol = PROTOCOL_VERSION_FITZ;
+static int sv_protocol = PROTOCOL_VERSION_RMQ_MINUS2;
 #else
-static int sv_protocol = PROTOCOL_VERSION_MH;
+static int sv_protocol = PROTOCOL_VERSION_RMQ_MINUS2;
 #endif
 #else
-static int sv_protocol = PROTOCOL_VERSION_FITZ;
+static int sv_protocol = PROTOCOL_VERSION_RMQ_MINUS2;
 #endif
 
 extern char *protolist[];
@@ -167,7 +167,9 @@ static void SV_SetProtocol_f (void)
 				sv_protocol = 15;
 			else if (i == 1)
 				sv_protocol = 666;
-			else sv_protocol = 9998 + i;
+			else if (i == 2)
+				sv_protocol = 777;
+			else sv_protocol = 9998 + i - 1;
 
 			return;
 		}
@@ -212,10 +214,13 @@ void SV_StartParticle (vec3_t org, vec3_t dir, int color, int count)
 
 	if (sv.datagram.cursize > MAX_DATAGRAM2-16)
 		return;	
+
 	MSG_WriteByte (&sv.datagram, svc_particle);
-	MSG_WriteCoord (&sv.datagram, org[0]);
-	MSG_WriteCoord (&sv.datagram, org[1]);
-	MSG_WriteCoord (&sv.datagram, org[2]);
+
+	MSG_WriteCoord (&sv.datagram, org[0], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, org[1], sv.Protocol);
+	MSG_WriteCoord (&sv.datagram, org[2], sv.Protocol);
+
 	for (i=0; i<3; i++)
 	{
 		v = dir[i]*16;
@@ -312,8 +317,11 @@ void SV_StartSound (edict_t *entity, int channel, char *sample, int volume, floa
 	if (volume != DEFAULT_SOUND_PACKET_VOLUME) field_mask |= SND_VOLUME;
 	if (attenuation != DEFAULT_SOUND_PACKET_ATTENUATION) field_mask |= SND_ATTENUATION;
 
-	if (ent >= 8192 && sv.Protocol == PROTOCOL_VERSION_FITZ) field_mask |= SND_LARGEENTITY;
-	if ((sound_num >= 256 || channel >= 8) && sv.Protocol == PROTOCOL_VERSION_FITZ) field_mask |= SND_LARGESOUND;
+	if (ent >= 8192 && (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2))
+		field_mask |= SND_LARGEENTITY;
+
+	if ((sound_num >= 256 || channel >= 8) && (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2))
+		field_mask |= SND_LARGESOUND;
 
 	// directed messages go only to the entity the are targeted on
 	MSG_WriteByte (&sv.datagram, svc_sound);
@@ -333,7 +341,7 @@ void SV_StartSound (edict_t *entity, int channel, char *sample, int volume, floa
 		MSG_WriteShort (&sv.datagram, sound_num);
 	else SV_WriteByteShort2 (&sv.datagram, sound_num, false);
 
-	for (i = 0; i < 3; i++) MSG_WriteCoord (&sv.datagram, entity->v.origin[i] + 0.5 * (entity->v.mins[i] + entity->v.maxs[i]));
+	for (i = 0; i < 3; i++) MSG_WriteCoord (&sv.datagram, entity->v.origin[i] + 0.5 * (entity->v.mins[i] + entity->v.maxs[i]), sv.Protocol);
 }
 
 
@@ -729,19 +737,17 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		}
 
 		// send an update
-		// all updates are stored back to the baseline so that only actual changes from the previous
-		// transmission (rather than from when spawned) are sent - helps relieve packet overflows!
 		bits = 0;
 
 		// only transmit origin if changed from the baseline
-		if ((int) ent->v.origin[0] != (int) ent->baseline.origin[0]) bits |= U_ORIGIN1;
-		if ((int) ent->v.origin[1] != (int) ent->baseline.origin[1]) bits |= U_ORIGIN2;
-		if ((int) ent->v.origin[2] != (int) ent->baseline.origin[2]) bits |= U_ORIGIN3;
+		if (ent->v.origin[0] != ent->baseline.origin[0]) bits |= U_ORIGIN1;
+		if (ent->v.origin[1] != ent->baseline.origin[1]) bits |= U_ORIGIN2;
+		if (ent->v.origin[2] != ent->baseline.origin[2]) bits |= U_ORIGIN3;
 
 		// only transmit angles if changed from the baseline
-		if ((int) ent->v.angles[0] != (int) ent->baseline.angles[0]) bits |= U_ANGLE1;
-		if ((int) ent->v.angles[1] != (int) ent->baseline.angles[1]) bits |= U_ANGLE2;
-		if ((int) ent->v.angles[2] != (int) ent->baseline.angles[2]) bits |= U_ANGLE3;
+		if (ent->v.angles[0] != ent->baseline.angles[0]) bits |= U_ANGLE1;
+		if (ent->v.angles[1] != ent->baseline.angles[1]) bits |= U_ANGLE2;
+		if (ent->v.angles[2] != ent->baseline.angles[2]) bits |= U_ANGLE3;
 
 		// check everything else
 		if (ent->v.movetype == MOVETYPE_STEP) bits |= U_NOLERP;
@@ -780,7 +786,7 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		// only send if not protocol 15 - note - FUCKING nehahra uses protocol 15 but sends non-standard messages - FUCK FUCK FUCK
 		if ((((alpha < 1) && (alpha > 0)) || fullbright) && (sv.Protocol != PROTOCOL_VERSION || nehahra)) bits |= U_TRANS;
 
-		if (sv.Protocol == PROTOCOL_VERSION_FITZ)
+		if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 		{
 			ent->alpha = ENTALPHA_ENCODE (alpha);
 
@@ -826,19 +832,19 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		if (bits & U_COLORMAP) MSG_WriteByte (msg, ent->v.colormap);
 		if (bits & U_SKIN) MSG_WriteByte (msg, ent->v.skin);
 		if (bits & U_EFFECTS) MSG_WriteByte (msg, ent->v.effects);
-		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, ent->v.origin[0]);	
-		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0], true);
-		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, ent->v.origin[1]);
-		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1], true);
-		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, ent->v.origin[2]);
-		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2], true);
+		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, ent->v.origin[0], sv.Protocol);
+		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0], sv.Protocol);
+		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, ent->v.origin[1], sv.Protocol);
+		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1], sv.Protocol);
+		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, ent->v.origin[2], sv.Protocol);
+		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2], sv.Protocol);
 
 		if (bits & U_ALPHA) MSG_WriteByte (msg, ent->alpha);
 		if (bits & U_FRAME2) MSG_WriteByte (msg, (int) ent->v.frame >> 8);
 		if (bits & U_MODEL2) MSG_WriteByte (msg, (int) ent->v.modelindex >> 8);
 		if (bits & U_LERPFINISH) MSG_WriteByte (msg, (byte) (Q_rint ((ent->v.nextthink - sv.time) * 255)));
 
-		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION) && (sv.Protocol != PROTOCOL_VERSION_FITZ))
+		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION) && (sv.Protocol != PROTOCOL_VERSION_FITZ) && (sv.Protocol != PROTOCOL_VERSION_RMQ_MINUS2))
 		{
 			// Nehahra/.alpha
 			MSG_WriteFloat (msg, 2);
@@ -892,7 +898,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 		MSG_WriteByte (msg, ent->v.dmg_save);
 		MSG_WriteByte (msg, ent->v.dmg_take);
 
-		for (i = 0; i < 3; i++) MSG_WriteCoord (msg, other->v.origin[i] + 0.5 * (other->v.mins[i] + other->v.maxs[i]));
+		for (i = 0; i < 3; i++) MSG_WriteCoord (msg, other->v.origin[i] + 0.5 * (other->v.mins[i] + other->v.maxs[i]), sv.Protocol);
 
 		ent->v.dmg_take = 0;
 		ent->v.dmg_save = 0;
@@ -906,7 +912,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	{
 		MSG_WriteByte (msg, svc_setangle);
 
-		for (i = 0; i < 3; i++) MSG_WriteAngle (msg, ent->v.angles[i], true);
+		for (i = 0; i < 3; i++) MSG_WriteAngle (msg, ent->v.angles[i], sv.Protocol);
 		ent->v.fixangle = 0;
 	}
 
@@ -941,7 +947,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	// always sent
 	bits |= SU_WEAPON;
 
-	if (sv.Protocol == PROTOCOL_VERSION_FITZ)
+	if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 	{
 		if ((bits & SU_WEAPON) && (SV_ModelIndex (SVProgs->Strings + ent->v.weaponmodel) & 0xFF00)) bits |= SU_WEAPON2;
 		if ((int) ent->v.armorvalue & 0xFF00) bits |= SU_ARMOR2;
@@ -1268,7 +1274,7 @@ void SV_CreateBaseline (void)
 
 		bits = 0;
 
-		if (sv.Protocol == PROTOCOL_VERSION_FITZ)
+		if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 		{
 			if (svent->baseline.modelindex & 0xFF00) bits |= B_LARGEMODEL;
 			if (svent->baseline.frame & 0xFF00) bits |= B_LARGEFRAME;
@@ -1305,8 +1311,8 @@ void SV_CreateBaseline (void)
 
 		for (i = 0; i < 3; i++)
 		{
-			MSG_WriteCoord (&sv.signon, svent->baseline.origin[i]);
-			MSG_WriteAngle (&sv.signon, svent->baseline.angles[i], true);
+			MSG_WriteCoord (&sv.signon, svent->baseline.origin[i], sv.Protocol);
+			MSG_WriteAngle (&sv.signon, svent->baseline.angles[i], sv.Protocol);
 		}
 
 		if (bits & B_ALPHA) MSG_WriteByte (&sv.signon, svent->baseline.alpha);

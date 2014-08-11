@@ -114,6 +114,9 @@ typedef struct entity_s
 	// D3DXMATRIX in *incredibly* unhappy living in an entity_t struct...
 	D3DMATRIX		matrix;
 
+	// check rotation for all model types
+	bool			rotated;
+
 	// cached info about an alias model for deferred drawing
 	aliasstate_t		aliasstate;
 } entity_t;

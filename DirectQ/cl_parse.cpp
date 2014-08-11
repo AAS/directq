@@ -195,7 +195,7 @@ void CL_ParseStartSoundPacket(void)
 		Host_Error ("CL_ParseStartSoundPacket: ent = %i", ent);
 	
 	for (i=0; i<3; i++)
-		pos[i] = MSG_ReadCoord ();
+		pos[i] = MSG_ReadCoord (cl.Protocol);
  
     S_StartSound (ent, channel, cl.sound_precache[sound_num], pos, volume/255.0, attenuation);
 }       
@@ -434,14 +434,15 @@ void CL_ParseServerInfo (void)
 	// parse protocol version number
 	i = MSG_ReadLong ();
 
-	if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+	if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ_MINUS2 && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
 	{
 		Host_Error
 		(
-			"Server returned unknown protocol version %i, (not %i, %i or %i-%i)",
+			"Server returned unknown protocol version %i, (not %i, %i, %i or %i-%i)",
 			i,
 			PROTOCOL_VERSION,
 			PROTOCOL_VERSION_FITZ,
+			PROTOCOL_VERSION_RMQ_MINUS2,
 			PROTOCOL_VERSION_BJP,
 			PROTOCOL_VERSION_MH
 		);
@@ -647,7 +648,7 @@ void CL_ParseUpdate (int bits)
 		bits |= (i << 8);
 	}
 
-	if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 	{
 		if (bits & U_EXTEND1) bits |= MSG_ReadByte () << 16;
 		if (bits & U_EXTEND2) bits |= MSG_ReadByte () << 24;
@@ -674,7 +675,7 @@ void CL_ParseUpdate (int bits)
 
 	if (bits & U_MODEL)
 	{
-		if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+		if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 			modnum = MSG_ReadByte ();
 		else modnum = CL_ReadByteShort ();
 
@@ -731,30 +732,30 @@ void CL_ParseUpdate (int bits)
 	VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
 
 	if (bits & U_ORIGIN1)
-		ent->msg_origins[0][0] = MSG_ReadCoord ();
+		ent->msg_origins[0][0] = MSG_ReadCoord (cl.Protocol);
 	else ent->msg_origins[0][0] = ent->baseline.origin[0];
 
 	if (bits & U_ANGLE1)
-		ent->msg_angles[0][0] = MSG_ReadAngle (true);
+		ent->msg_angles[0][0] = MSG_ReadAngle (cl.Protocol);
 	else ent->msg_angles[0][0] = ent->baseline.angles[0];
 
 	if (bits & U_ORIGIN2)
-		ent->msg_origins[0][1] = MSG_ReadCoord ();
+		ent->msg_origins[0][1] = MSG_ReadCoord (cl.Protocol);
 	else ent->msg_origins[0][1] = ent->baseline.origin[1];
 
 	if (bits & U_ANGLE2)
-		ent->msg_angles[0][1] = MSG_ReadAngle (true);
+		ent->msg_angles[0][1] = MSG_ReadAngle (cl.Protocol);
 	else ent->msg_angles[0][1] = ent->baseline.angles[1];
 
 	if (bits & U_ORIGIN3)
-		ent->msg_origins[0][2] = MSG_ReadCoord ();
+		ent->msg_origins[0][2] = MSG_ReadCoord (cl.Protocol);
 	else ent->msg_origins[0][2] = ent->baseline.origin[2];
 
 	if (bits & U_ANGLE3)
-		ent->msg_angles[0][2] = MSG_ReadAngle (true);
+		ent->msg_angles[0][2] = MSG_ReadAngle (cl.Protocol);
 	else ent->msg_angles[0][2] = ent->baseline.angles[2];
 
-	if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 	{
 		if (bits & U_ALPHA)
 			ent->alphaval = MSG_ReadByte ();
@@ -852,7 +853,7 @@ void CL_ParseBaseline (entity_t *ent, int version)
 
 	if (bits & B_LARGEMODEL)
 		ent->baseline.modelindex = MSG_ReadShort ();
-	else if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 		ent->baseline.modelindex = MSG_ReadByte ();
 	else ent->baseline.modelindex = CL_ReadByteShort ();
 
@@ -862,8 +863,8 @@ void CL_ParseBaseline (entity_t *ent, int version)
 
 	for (i = 0; i < 3; i++)
 	{
-		ent->baseline.origin[i] = MSG_ReadCoord ();
-		ent->baseline.angles[i] = MSG_ReadAngle (true);
+		ent->baseline.origin[i] = MSG_ReadCoord (cl.Protocol);
+		ent->baseline.angles[i] = MSG_ReadAngle (cl.Protocol);
 	}
 
 	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte () : ENTALPHA_DEFAULT;
@@ -947,7 +948,7 @@ void CL_ParseClientdata (void)
 
 	if (bits & SU_WEAPON)
 	{
-		if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+		if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
 			i = MSG_ReadByte ();
 		else i = CL_ReadByteShort ();
 	}
@@ -1088,7 +1089,7 @@ void CL_ParseStaticSound (int version)
 	int			i;
 	
 	for (i=0; i<3; i++)
-		org[i] = MSG_ReadCoord ();
+		org[i] = MSG_ReadCoord (cl.Protocol);
 
 	if (version == 2)
 		sound_num = MSG_ReadShort ();
@@ -1182,14 +1183,15 @@ void CL_ParseServerMessage (void)
 		case svc_version:
 			i = MSG_ReadLong ();
 
-			if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+			if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ_MINUS2 && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
 			{
 				Host_Error
 				(
-					"CL_ParseServerMessage: Server is protocol %i instead of %i, %i or %i-%i",
+					"CL_ParseServerMessage: Server is protocol %i instead of %i, %i, %i or %i-%i",
 					i,
 					PROTOCOL_VERSION,
 					PROTOCOL_VERSION_FITZ,
+					PROTOCOL_VERSION_RMQ_MINUS2,
 					PROTOCOL_VERSION_BJP,
 					PROTOCOL_VERSION_MH
 				);
@@ -1254,7 +1256,7 @@ void CL_ParseServerMessage (void)
 
 		case svc_setangle:
 			for (i=0; i<3; i++)
-				cl.viewangles[i] = MSG_ReadAngle (true);
+				cl.viewangles[i] = MSG_ReadAngle (cl.Protocol);
 			break;
 
 		case svc_setview:
@@ -1451,7 +1453,8 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_skyboxsize:
-			MSG_ReadCoord ();
+			// irrelevant in directQ
+			MSG_ReadCoord (cl.Protocol);
 			break;
 
 		case svc_fogfitz:

@@ -969,6 +969,9 @@ void R_DrawViewModel (void)
 	// never check for bbox culling on the viewmodel
 	ent->nocullbox = true;
 
+	// the viewmodel is always rotated
+	ent->rotated = true;
+
 	// delerp muzzleflashes here
 	DelerpMuzzleFlashes (ent->model->aliashdr);
 

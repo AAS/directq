@@ -454,14 +454,6 @@ void SV_ClientThink (void)
 }
 
 
-float MSG_ReadAngle16 (void)
-{
-	int val = MSG_ReadShort();
-	return val * (360.0 / 65536);
-//	return MSG_ReadShort () * (360.0 / 65536);
-}
-
-
 /*
 ===================
 SV_ReadClientMove
@@ -483,9 +475,15 @@ void SV_ReadClientMove (usercmd_t *move)
 		for (i = 0; i < 3; i++)
 			angle[i] = MSG_ReadAngle16 ();
 	}
+	else if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+	{
+		for (i = 0; i < 3; i++)
+			angle[i] = MSG_ReadAngle16 ();
+	}
 	else
 	{
-		for (i = 0; i < 3; i++) angle[i] = MSG_ReadServerAngle (false);
+		for (i = 0; i < 3; i++)
+			angle[i] = MSG_ReadAngle (sv.Protocol);
 	}
 
 	VectorCopy (angle, host_client->edict->v.v_angle);

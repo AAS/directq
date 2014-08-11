@@ -379,18 +379,37 @@ void VBO_AddSolidSurf (msurface_t *surf, entity_t *ent)
 		D3DMATRIX *m = &ent->matrix;
 		brushhdr_t *hdr = ent->model->brushhdr;
 
-		for (int i = 0; i < surf->numverts; i++)
+		if (surf->rotated)
 		{
-			float *vec;
-			int lindex = hdr->surfedges[surf->firstedge + i];
+			for (int i = 0; i < surf->numverts; i++)
+			{
+				float *vec;
+				int lindex = hdr->surfedges[surf->firstedge + i];
 
-			if (lindex > 0)
-				vec = hdr->vertexes[hdr->edges[lindex].v[0]].position;
-			else vec = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+				if (lindex > 0)
+					vec = hdr->vertexes[hdr->edges[lindex].v[0]].position;
+				else vec = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
 
-			surf->verts[i].xyz[0] = vec[0] * m->_11 + vec[1] * m->_21 + vec[2] * m->_31 + m->_41;
-			surf->verts[i].xyz[1] = vec[0] * m->_12 + vec[1] * m->_22 + vec[2] * m->_32 + m->_42;
-			surf->verts[i].xyz[2] = vec[0] * m->_13 + vec[1] * m->_23 + vec[2] * m->_33 + m->_43;
+				surf->verts[i].xyz[0] = vec[0] * m->_11 + vec[1] * m->_21 + vec[2] * m->_31 + m->_41;
+				surf->verts[i].xyz[1] = vec[0] * m->_12 + vec[1] * m->_22 + vec[2] * m->_32 + m->_42;
+				surf->verts[i].xyz[2] = vec[0] * m->_13 + vec[1] * m->_23 + vec[2] * m->_33 + m->_43;
+			}
+		}
+		else
+		{
+			for (int i = 0; i < surf->numverts; i++)
+			{
+				float *vec;
+				int lindex = hdr->surfedges[surf->firstedge + i];
+
+				if (lindex > 0)
+					vec = hdr->vertexes[hdr->edges[lindex].v[0]].position;
+				else vec = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+
+				surf->verts[i].xyz[0] = vec[0] + m->_41;
+				surf->verts[i].xyz[1] = vec[1] + m->_42;
+				surf->verts[i].xyz[2] = vec[2] + m->_43;
+			}
 		}
 	}
 
@@ -537,11 +556,23 @@ void VBO_AddSky (msurface_t *surf, entity_t *ent)
 	{
 		D3DMATRIX *m = &ent->matrix;
 
-		for (int i = 0; i < surf->numverts; i++, src++, dst += 3)
+		if (surf->rotated)
 		{
-			dst[0] = src->xyz[0] * m->_11 + src->xyz[1] * m->_21 + src->xyz[2] * m->_31 + m->_41;
-			dst[1] = src->xyz[0] * m->_12 + src->xyz[1] * m->_22 + src->xyz[2] * m->_32 + m->_42;
-			dst[2] = src->xyz[0] * m->_13 + src->xyz[1] * m->_23 + src->xyz[2] * m->_33 + m->_43;
+			for (int i = 0; i < surf->numverts; i++, src++, dst += 3)
+			{
+				dst[0] = src->xyz[0] * m->_11 + src->xyz[1] * m->_21 + src->xyz[2] * m->_31 + m->_41;
+				dst[1] = src->xyz[0] * m->_12 + src->xyz[1] * m->_22 + src->xyz[2] * m->_32 + m->_42;
+				dst[2] = src->xyz[0] * m->_13 + src->xyz[1] * m->_23 + src->xyz[2] * m->_33 + m->_43;
+			}
+		}
+		else
+		{
+			for (int i = 0; i < surf->numverts; i++, src++, dst += 3)
+			{
+				dst[0] = src->xyz[0] + m->_41;
+				dst[1] = src->xyz[1] + m->_42;
+				dst[2] = src->xyz[2] + m->_43;
+			}
 		}
 	}
 	else
@@ -575,9 +606,18 @@ void VBO_AddWarpSurf (msurface_t *surf, entity_t *ent)
 		{
 			D3DMATRIX *m = &ent->matrix;
 
-			dst->v[0] = src->xyz[0] * m->_11 + src->xyz[1] * m->_21 + src->xyz[2] * m->_31 + m->_41;
-			dst->v[1] = src->xyz[0] * m->_12 + src->xyz[1] * m->_22 + src->xyz[2] * m->_32 + m->_42;
-			dst->v[2] = src->xyz[0] * m->_13 + src->xyz[1] * m->_23 + src->xyz[2] * m->_33 + m->_43;
+			if (surf->rotated)
+			{
+				dst->v[0] = src->xyz[0] * m->_11 + src->xyz[1] * m->_21 + src->xyz[2] * m->_31 + m->_41;
+				dst->v[1] = src->xyz[0] * m->_12 + src->xyz[1] * m->_22 + src->xyz[2] * m->_32 + m->_42;
+				dst->v[2] = src->xyz[0] * m->_13 + src->xyz[1] * m->_23 + src->xyz[2] * m->_33 + m->_43;
+			}
+			else
+			{
+				dst->v[0] = src->xyz[0] + m->_41;
+				dst->v[1] = src->xyz[1] + m->_42;
+				dst->v[2] = src->xyz[2] + m->_43;
+			}
 		}
 		else
 		{
@@ -620,9 +660,19 @@ __inline void D3DAlias_LerpVert (aliaspolyvert_t *dest, aliasmesh_t *av, entity_
 
 	if (m)
 	{
-		dest->xyz[0] = vert[0] * m->_11 + vert[1] * m->_21 + vert[2] * m->_31 + m->_41;
-		dest->xyz[1] = vert[0] * m->_12 + vert[1] * m->_22 + vert[2] * m->_32 + m->_42;
-		dest->xyz[2] = vert[0] * m->_13 + vert[1] * m->_23 + vert[2] * m->_33 + m->_43;
+		if (e->rotated)
+		{
+			dest->xyz[0] = vert[0] * m->_11 + vert[1] * m->_21 + vert[2] * m->_31 + m->_41;
+			dest->xyz[1] = vert[0] * m->_12 + vert[1] * m->_22 + vert[2] * m->_32 + m->_42;
+			dest->xyz[2] = vert[0] * m->_13 + vert[1] * m->_23 + vert[2] * m->_33 + m->_43;
+		}
+		else
+		{
+			// alias models also need to be scaled
+			dest->xyz[0] = vert[0] * m->_11 + m->_41;
+			dest->xyz[1] = vert[1] * m->_22 + m->_42;
+			dest->xyz[2] = vert[2] * m->_33 + m->_43;
+		}
 	}
 	else
 	{

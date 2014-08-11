@@ -1254,9 +1254,11 @@ void Host_Spawn_f (void)
 	// with a permanent head tilt
 	ent = GetEdictForNumber( 1 + (host_client - svs.clients) );
 	MSG_WriteByte (&host_client->message, svc_setangle);
+
 	for (i=0; i < 2; i++)
-		MSG_WriteAngle (&host_client->message, ent->v.angles[i], true);
-	MSG_WriteAngle (&host_client->message, 0, true);
+		MSG_WriteAngle (&host_client->message, ent->v.angles[i], sv.Protocol);
+
+	MSG_WriteAngle (&host_client->message, 0, sv.Protocol);
 
 	SV_WriteClientdataToMessage (sv_player, &host_client->message);
 

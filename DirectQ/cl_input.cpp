@@ -400,15 +400,6 @@ void CL_BaseMove (usercmd_t *cmd)
 }
 
 
-
-void MSG_WriteAngle16 (sizebuf_t *sb, float f)
-{
-	int val = (int)f*65536/360;
-	MSG_WriteShort (sb, val & 65535);
-	// MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
-}
-
-
 // JPG - support for synthetic lag
 sizebuf_t lag_buff[32]; 
 byte lag_data[32][128];  
@@ -459,9 +450,9 @@ void CL_SendMove (usercmd_t *cmd)
 	buf->maxsize = 128;
 	buf->cursize = 0;
 	buf->data = lag_data[lag_head & 31]; // JPG - added head index
-	lag_sendtime[lag_head++ & 31] = realtime + (pq_lag.value / 1000.0);
+	lag_sendtime[(lag_head++) & 31] = realtime + (pq_lag.value / 1000.0);
 
-	cl.cmd = *cmd;
+	Q_MemCpy (&cl.cmd, cmd, sizeof (usercmd_t));
 
 	// send the movement message
     MSG_WriteByte (buf, clc_move);
@@ -472,10 +463,15 @@ void CL_SendMove (usercmd_t *cmd)
 		for (i = 0; i < 3; i++)
 			MSG_WriteAngle16 (buf, cl.viewangles[i]);
 	}
+	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ_MINUS2)
+	{
+		for (i = 0; i < 3; i++)
+			MSG_WriteAngle16 (buf, cl.viewangles[i]);
+	}
 	else
 	{
 		for (i = 0; i < 3; i++)
-			MSG_WriteClientAngle (buf, cl.viewangles[i], false);
+			MSG_WriteAngle (buf, cl.viewangles[i], cl.Protocol);
 	}
 
     MSG_WriteShort (buf, cmd->forwardmove);

@@ -207,6 +207,7 @@ typedef struct msurface_s
 	int			flags;
 
 	int			alphaval;
+	bool		rotated;
 
 	int			firstedge;
 	int			bspverts;	// turb surfs need these so that they can recalculate the warp correctly

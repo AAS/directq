@@ -180,9 +180,9 @@ void CL_ParseTEnt (void)
 	switch (type)
 	{
 	case TE_WIZSPIKE:			// spike hitting wall
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 
 		if (r_extradlight.value)
 		{
@@ -200,9 +200,9 @@ void CL_ParseTEnt (void)
 		break;
 		
 	case TE_KNIGHTSPIKE:			// spike hitting wall
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 
 		if (r_extradlight.value)
 		{
@@ -220,9 +220,9 @@ void CL_ParseTEnt (void)
 		break;
 		
 	case TE_SPIKE:			// spike hitting wall
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 
 		R_WallHitParticles (pos, vec3_origin, 0, 10);
 
@@ -240,9 +240,9 @@ void CL_ParseTEnt (void)
 		break;
 
 	case TE_SUPERSPIKE:			// super spike hitting wall
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		R_WallHitParticles (pos, vec3_origin, 0, 20);
 
 		if ( rand() % 5 )
@@ -260,16 +260,16 @@ void CL_ParseTEnt (void)
 		break;
 		
 	case TE_GUNSHOT:			// bullet hitting wall
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		R_WallHitParticles (pos, vec3_origin, 0, 20);
 		break;
 		
 	case TE_EXPLOSION:			// rocket explosion
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		R_ParticleExplosion (pos);
 
 		dl = CL_AllocDlight (0);
@@ -284,9 +284,9 @@ void CL_ParseTEnt (void)
 		break;
 		
 	case TE_TAREXPLOSION:			// tarbaby explosion
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		R_BlobExplosion (pos);
 
 		if (r_extradlight.value)
@@ -306,13 +306,13 @@ void CL_ParseTEnt (void)
 	case TE_LIGHTNING1:				// lightning bolts
 		ent = MSG_ReadShort ();
 		
-		start[0] = MSG_ReadCoord ();
-		start[1] = MSG_ReadCoord ();
-		start[2] = MSG_ReadCoord ();
+		start[0] = MSG_ReadCoord (cl.Protocol);
+		start[1] = MSG_ReadCoord (cl.Protocol);
+		start[2] = MSG_ReadCoord (cl.Protocol);
 		
-		end[0] = MSG_ReadCoord ();
-		end[1] = MSG_ReadCoord ();
-		end[2] = MSG_ReadCoord ();
+		end[0] = MSG_ReadCoord (cl.Protocol);
+		end[1] = MSG_ReadCoord (cl.Protocol);
+		end[2] = MSG_ReadCoord (cl.Protocol);
 
 		if (r_extradlight.value)
 		{
@@ -339,13 +339,13 @@ void CL_ParseTEnt (void)
 	case TE_LIGHTNING2:				// lightning bolts
 		ent = MSG_ReadShort ();
 		
-		start[0] = MSG_ReadCoord ();
-		start[1] = MSG_ReadCoord ();
-		start[2] = MSG_ReadCoord ();
+		start[0] = MSG_ReadCoord (cl.Protocol);
+		start[1] = MSG_ReadCoord (cl.Protocol);
+		start[2] = MSG_ReadCoord (cl.Protocol);
 		
-		end[0] = MSG_ReadCoord ();
-		end[1] = MSG_ReadCoord ();
-		end[2] = MSG_ReadCoord ();
+		end[0] = MSG_ReadCoord (cl.Protocol);
+		end[1] = MSG_ReadCoord (cl.Protocol);
+		end[2] = MSG_ReadCoord (cl.Protocol);
 
 		if (r_extradlight.value)
 		{
@@ -372,13 +372,13 @@ void CL_ParseTEnt (void)
 	case TE_LIGHTNING3:				// lightning bolts
 		ent = MSG_ReadShort ();
 		
-		start[0] = MSG_ReadCoord ();
-		start[1] = MSG_ReadCoord ();
-		start[2] = MSG_ReadCoord ();
+		start[0] = MSG_ReadCoord (cl.Protocol);
+		start[1] = MSG_ReadCoord (cl.Protocol);
+		start[2] = MSG_ReadCoord (cl.Protocol);
 		
-		end[0] = MSG_ReadCoord ();
-		end[1] = MSG_ReadCoord ();
-		end[2] = MSG_ReadCoord ();
+		end[0] = MSG_ReadCoord (cl.Protocol);
+		end[1] = MSG_ReadCoord (cl.Protocol);
+		end[2] = MSG_ReadCoord (cl.Protocol);
 
 		if (r_extradlight.value)
 		{
@@ -406,36 +406,36 @@ void CL_ParseTEnt (void)
 	case TE_BEAM:				// grappling hook beam
 		ent = MSG_ReadShort ();
 
-		start[0] = MSG_ReadCoord ();
-		start[1] = MSG_ReadCoord ();
-		start[2] = MSG_ReadCoord ();
+		start[0] = MSG_ReadCoord (cl.Protocol);
+		start[1] = MSG_ReadCoord (cl.Protocol);
+		start[2] = MSG_ReadCoord (cl.Protocol);
 		
-		end[0] = MSG_ReadCoord ();
-		end[1] = MSG_ReadCoord ();
-		end[2] = MSG_ReadCoord ();
+		end[0] = MSG_ReadCoord (cl.Protocol);
+		end[1] = MSG_ReadCoord (cl.Protocol);
+		end[2] = MSG_ReadCoord (cl.Protocol);
 
 		CL_ParseBeam (cl_beam_mod, ent, start, end);
 		break;
 // PGM 01/21/97
 
 	case TE_LAVASPLASH:	
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		R_LavaSplash (pos);
 		break;
 	
 	case TE_TELEPORT:
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		R_TeleportSplash (pos);
 		break;
 		
 	case TE_EXPLOSION2:				// color mapped explosion
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
 		R_ParticleExplosion2 (pos, colorStart, colorLength);
@@ -449,23 +449,23 @@ void CL_ParseTEnt (void)
 
 	case TE_SMOKE:
 		// falls through to explosion 3
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		MSG_ReadByte();
 
 	case TE_EXPLOSION3:
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
-		dl->rgb[0] = MSG_ReadCoord() * 255;
-		dl->rgb[1] = MSG_ReadCoord() * 255;
-		dl->rgb[2] = MSG_ReadCoord() * 255;
+		dl->rgb[0] = MSG_ReadCoord (cl.Protocol) * 255;
+		dl->rgb[1] = MSG_ReadCoord (cl.Protocol) * 255;
+		dl->rgb[2] = MSG_ReadCoord (cl.Protocol) * 255;
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
@@ -476,13 +476,13 @@ void CL_ParseTEnt (void)
 
 			ent = MSG_ReadShort ();
 			
-			start[0] = MSG_ReadCoord ();
-			start[1] = MSG_ReadCoord ();
-			start[2] = MSG_ReadCoord ();
+			start[0] = MSG_ReadCoord (cl.Protocol);
+			start[1] = MSG_ReadCoord (cl.Protocol);
+			start[2] = MSG_ReadCoord (cl.Protocol);
 			
-			end[0] = MSG_ReadCoord ();
-			end[1] = MSG_ReadCoord ();
-			end[2] = MSG_ReadCoord ();
+			end[0] = MSG_ReadCoord (cl.Protocol);
+			end[1] = MSG_ReadCoord (cl.Protocol);
+			end[2] = MSG_ReadCoord (cl.Protocol);
 
 			CL_ParseBeam (Mod_ForName (modelname, true), ent, start, end);
 		}
@@ -496,17 +496,17 @@ void CL_ParseTEnt (void)
 		break;
 
 	case TE_PARTICLESNOW:	// general purpose particle effect
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 
-		pos2[0] = MSG_ReadCoord ();
-		pos2[1] = MSG_ReadCoord ();
-		pos2[2] = MSG_ReadCoord ();
+		pos2[0] = MSG_ReadCoord (cl.Protocol);
+		pos2[1] = MSG_ReadCoord (cl.Protocol);
+		pos2[2] = MSG_ReadCoord (cl.Protocol);
 
-		dir[0] = MSG_ReadCoord ();
-		dir[1] = MSG_ReadCoord ();
-		dir[2] = MSG_ReadCoord ();
+		dir[0] = MSG_ReadCoord (cl.Protocol);
+		dir[1] = MSG_ReadCoord (cl.Protocol);
+		dir[2] = MSG_ReadCoord (cl.Protocol);
 
 		count = MSG_ReadShort (); // number of particles
 		colorStart = MSG_ReadByte (); // color
@@ -515,17 +515,17 @@ void CL_ParseTEnt (void)
 		break;
 
 	case TE_PARTICLERAIN:	// general purpose particle effect
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 
-		pos2[0] = MSG_ReadCoord ();
-		pos2[1] = MSG_ReadCoord ();
-		pos2[2] = MSG_ReadCoord ();
+		pos2[0] = MSG_ReadCoord (cl.Protocol);
+		pos2[1] = MSG_ReadCoord (cl.Protocol);
+		pos2[2] = MSG_ReadCoord (cl.Protocol);
 
-		dir[0] = MSG_ReadCoord ();
-		dir[1] = MSG_ReadCoord ();
-		dir[2] = MSG_ReadCoord ();
+		dir[0] = MSG_ReadCoord (cl.Protocol);
+		dir[1] = MSG_ReadCoord (cl.Protocol);
+		dir[2] = MSG_ReadCoord (cl.Protocol);
 
 		count = MSG_ReadShort (); // number of particles
 		colorStart = MSG_ReadByte (); // color
@@ -539,9 +539,9 @@ void CL_ParseTEnt (void)
 		Con_DPrintf ("CL_ParseTEnt: bad type %i\n", type);
 
 		// note - this might crash the server at some stage if more data is expected
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
+		pos[0] = MSG_ReadCoord (cl.Protocol);
+		pos[1] = MSG_ReadCoord (cl.Protocol);
+		pos[2] = MSG_ReadCoord (cl.Protocol);
 		break;
 	}
 }
