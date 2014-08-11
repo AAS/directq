@@ -391,6 +391,36 @@ void COM_AddGameDirectory (char *dir)
 }
 
 
+bool COM_ValidateGamedir (char *basedir, char *gamename)
+{
+	WIN32_FIND_DATA FindFileData;
+	HANDLE hFind = INVALID_HANDLE_VALUE;
+	char find_filter[MAX_PATH];
+	bool isgamedir = false;
+
+	_snprintf (find_filter, 260, "%s/%s/*", basedir, gamename);
+
+	for (int i = 0;; i++)
+	{
+		if (find_filter[i] == 0) break;
+		if (find_filter[i] == '/') find_filter[i] = '\\';
+	}
+
+	// try to find the first file in the path; any file or directory will do
+	hFind = FindFirstFile (find_filter, &FindFileData);
+
+	// now see what we got
+	if (hFind == INVALID_HANDLE_VALUE)
+		isgamedir = false;
+	else isgamedir = true;
+
+	// close the finder
+	FindClose (hFind);
+
+	return isgamedir;
+}
+
+
 void COM_LoadGame (char *gamename)
 {
 	// no games to begin with
@@ -510,6 +540,10 @@ void COM_LoadGame (char *gamename)
 		if (!stricmp (thisgame, "quoth")) loadgame = false;
 		if (!stricmp (thisgame, "nehahra")) loadgame = false;
 		if (!stricmp (thisgame, GAMENAME)) loadgame = false;
+
+		// check is it actually a proper directory
+		// this is because i'm a fucking butterfingers and always type stuff wrong :)
+		if (!COM_ValidateGamedir (basedir, thisgame)) loadgame = false;
 
 		// only load it if it hasn't already been loaded
 		if (loadgame)

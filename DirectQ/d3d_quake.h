@@ -23,7 +23,6 @@ void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib);
 // palette hackery
 typedef struct palettedef_s
 {
-	PALETTEENTRY noluma[256];
 	PALETTEENTRY luma[256];
 	PALETTEENTRY standard[256];
 
@@ -71,6 +70,7 @@ void D3DHLSL_SetPass (int passnum);
 void D3DHLSL_SetAlpha (float alphaval);
 void D3DHLSL_SetDepthBias (float depthbias);
 void D3DHLSL_SetTexture (UINT stage, LPDIRECT3DBASETEXTURE9 tex);
+void D3DHLSL_SetCubemap (LPDIRECT3DBASETEXTURE9 tex);
 void D3DHLSL_SetAddressMode (UINT stage, DWORD mode);
 void D3DHLSL_SetMagFilter (UINT stage, DWORD mode);
 void D3DHLSL_SetMinFilter (UINT stage, DWORD mode);

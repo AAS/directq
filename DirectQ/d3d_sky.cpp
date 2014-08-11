@@ -53,7 +53,7 @@ void D3DSky_Begin (void)
 {
 	if (SkyboxValid)
 	{
-		D3DHLSL_SetTexture (0, skyboxcubemap);
+		D3DHLSL_SetCubemap (skyboxcubemap);
 
 		D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
 		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);

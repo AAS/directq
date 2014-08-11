@@ -1163,6 +1163,8 @@ void CL_ParseServerMessage (void)
 		case svc_version:
 			i = MSG_ReadLong ();
 
+			// svc_version is never used in the engine.  wtf?  maybe it's from an older version of stuff?
+			// don't read flags anyway for compatibility as we have no control over what sent the message
 			if (i != PROTOCOL_VERSION_NQ && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ)
 			{
 				Host_Error
@@ -1185,7 +1187,6 @@ void CL_ParseServerMessage (void)
 			Host_EndGame ("Server disconnected\n");
 
 		case svc_print:
-
 			if (!cls.download.web)
 			{
 				char *str = MSG_ReadString ();
@@ -1389,8 +1390,7 @@ void CL_ParseServerMessage (void)
 
 			if ((cls.demoplayback || cls.demorecording) && (cls.forcetrack != -1))
 				CDAudio_Play ((byte) cls.forcetrack, true);
-			else
-				CDAudio_Play ((byte) cl.cdtrack, true);
+			else CDAudio_Play ((byte) cl.cdtrack, true);
 
 			break;
 
@@ -1550,7 +1550,6 @@ void CL_ParseProQuakeMessage (void)
 		break;
 
 	case pqc_match_reset:
-
 		if (!cl.teamscores) break;
 
 		for (i = 0; i < 14; i++)
@@ -1670,7 +1669,6 @@ void CL_ParseProQuakeString (char *string)
 				}
 
 				if (!cl.console_ping) *string = 0;
-
 				if (checkping == cl.maxclients) checkping = -1;
 			}
 			else checkping = -1;
@@ -1743,7 +1741,6 @@ void CL_ParseProQuakeString (char *string)
 		else if (playercount && string[0] == '#')
 		{
 			if (!sscanf (string, "#%d", &checkip) || --checkip < 0 || checkip >= cl.maxclients) checkip = -1;
-
 			if (!cl.console_status) *string = 0;
 
 			remove_status = 0;
@@ -1776,3 +1773,4 @@ void CL_ParseProQuakeString (char *string)
 
 	Q_Version (string); //R00k: look for "q_version" requests
 }
+

@@ -121,7 +121,10 @@ void Fog_ParseWorldspawn (void)
 		strcpy (value, com_token);
 
 		if (!strcmp ("fog", key))
+		{
 			sscanf (value, "%f %f %f %f", &d3d_FogDensity, &d3d_FogColor[0], &d3d_FogColor[1], &d3d_FogColor[2]);
+			Fog_Update (d3d_FogDensity, d3d_FogColor[0], d3d_FogColor[1], d3d_FogColor[2]);
+		}
 	}
 }
 

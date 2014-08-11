@@ -1216,8 +1216,6 @@ void Key_Event (int key, bool down)
 ClearAllStates
 ================
 */
-void IN_ClearKeyState (int k);
-
 void ClearAllStates (void)
 {
 	int		i;
@@ -1228,7 +1226,7 @@ void ClearAllStates (void)
 		// trigger the up action for all down keys
 		if (keydown[i])
 		{
-			IN_ClearKeyState (i);
+			Key_Event (i, false);
 			keydown[i] = false;
 		}
 

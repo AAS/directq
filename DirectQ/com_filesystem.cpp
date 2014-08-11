@@ -263,13 +263,9 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 			for (int i = 0; i < pak->numfiles; i++)
 			{
 				int filelen = strlen (pak->files[i].name);
-
 				if (filelen < typelen + dirlen) continue;
-
 				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
-
 				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
-
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
 				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
@@ -286,11 +282,8 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 				int filelen = strlen (pak->files[i].name);
 
 				if (filelen < typelen + dirlen) continue;
-
 				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
-
 				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
-
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
 				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
@@ -309,7 +302,6 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 			for (int i = 0;; i++)
 			{
 				if (find_filter[i] == 0) break;
-
 				if (find_filter[i] == '/') find_filter[i] = '\\';
 			}
 
@@ -326,17 +318,11 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 			{
 				// not interested
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
-
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
-
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
-
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
-
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
-
 				if (CheckExists (fl, FindFileData.cFileName)) continue;
 
 				if (flags & PREPEND_PATH)

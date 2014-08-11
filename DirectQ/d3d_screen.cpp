@@ -1277,6 +1277,7 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 		key_count = -1;	// wait for a key down and up
 		key_lastpress = 0;	// clear last pressed key
 		Sys_SendKeyEvents ();
+		IN_ProcessQueue ();
 
 		// this was trying to be too clever...
 		//if (key_lastpress == K_ENTER) {key_accept = true; break;}

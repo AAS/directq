@@ -22,9 +22,10 @@ float4x4 WorldMatrix;
 float4x4 ModelViewMatrix;
 float4x4 EntMatrix;
 
-texture tmu0Texture;
-texture tmu1Texture;
-texture tmu2Texture;
+Texture2D tmu0Texture;
+Texture2D tmu1Texture;
+Texture2D tmu2Texture;
+TextureCube cubeTexture;
 
 float warptime;
 float warpscale;
@@ -45,13 +46,12 @@ float3 r_origin;
 float4 FogColor;
 float FogDensity;
 
-samplerCUBE cubeSampler = sampler_state
+sampler2D tmu0Sampler : register(s0) = sampler_state
 {
 	Texture = <tmu0Texture>;
 
 	AddressU = <address0>;
 	AddressV = <address0>;
-	AddressW = <address0>;
 
 	MagFilter = <magfilter0>;
 	MinFilter = <minfilter0>;
@@ -60,29 +60,12 @@ samplerCUBE cubeSampler = sampler_state
 	MaxAnisotropy = <aniso0>;
 };
 
-
-sampler tmu0Sampler = sampler_state
-{
-	Texture = <tmu0Texture>;
-
-	AddressU = <address0>;
-	AddressV = <address0>;
-	AddressW = <address0>;
-
-	MagFilter = <magfilter0>;
-	MinFilter = <minfilter0>;
-	MipFilter = <mipfilter0>;
-
-	MaxAnisotropy = <aniso0>;
-};
-
-sampler tmu1Sampler = sampler_state
+sampler2D tmu1Sampler : register(s1) = sampler_state
 {
 	Texture = <tmu1Texture>;
 
 	AddressU = <address1>;
 	AddressV = <address1>;
-	AddressW = <address1>;
 
 	MagFilter = <magfilter1>;
 	MinFilter = <minfilter1>;
@@ -91,13 +74,12 @@ sampler tmu1Sampler = sampler_state
 	MaxAnisotropy = <aniso1>;
 };
 
-sampler tmu2Sampler = sampler_state
+sampler2D tmu2Sampler : register(s2) = sampler_state
 {
 	Texture = <tmu2Texture>;
 
 	AddressU = <address2>;
 	AddressV = <address2>;
-	AddressW = <address2>;
 
 	MagFilter = <magfilter2>;
 	MinFilter = <minfilter2>;
@@ -105,6 +87,22 @@ sampler tmu2Sampler = sampler_state
 
 	MaxAnisotropy = <aniso2>;
 };
+
+samplerCUBE cubeSampler : register(s3) = sampler_state
+{
+	Texture = <cubeTexture>;
+
+	AddressU = <address0>;
+	AddressV = <address0>;
+	AddressW = <address0>;
+
+	MagFilter = <magfilter0>;
+	MinFilter = <minfilter0>;
+	MipFilter = <mipfilter0>;
+
+	MaxAnisotropy = <aniso0>;
+};
+
 
 struct WorldVert
 {
@@ -255,12 +253,13 @@ float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 {
 	// return Input.Color;
 
+	float4 fullbright = tex2D (tmu1Sampler, Input.Tex0);
+
 #ifdef hlsl_fog
-	float4 fullbright = tex2D (tmu1Sampler, Input.Tex0) * 0.5;
-	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Input.Color * Overbright);
-	color = FogCalc (color + fullbright, Input.FogPosition) + fullbright;
+	float4 color = (tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Input.Color * Overbright);
+	color = FogCalc (color, Input.FogPosition) + fullbright;
 #else
-	float4 color = (tex2D (tmu0Sampler, Input.Tex0) * (Input.Color * Overbright)) + tex2D (tmu1Sampler, Input.Tex0);
+	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Input.Color * Overbright)) + fullbright;
 #endif
 
 	color.a = AlphaVal;
@@ -484,25 +483,25 @@ WORLD MODEL
 
 float4 PSWorldNoLuma (WorldVertPS Input) : COLOR0
 {
-	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
-	float4 color = texcolor * (tex2D (tmu0Sampler, Input.Tex1) * Overbright);
 #ifdef hlsl_fog
-	color = FogCalc (color, Input.FogPosition);
+	return FogCalc (tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright, Input.FogPosition);
+#else
+	return tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright;
 #endif
-	
-	return color;
 }
 
 
 float4 PSWorldNoLumaAlpha (WorldVertPS Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
-	float4 color = texcolor * (tex2D (tmu0Sampler, Input.Tex1) * Overbright);
+
 #ifdef hlsl_fog
-	color = FogCalc (color, Input.FogPosition);
+	float4 color = FogCalc (texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright, Input.FogPosition);
+#else
+	float4 color = texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright;
 #endif
+
 	color.a = AlphaVal * texcolor.a;
-	
 	return color;
 }
 
@@ -510,30 +509,30 @@ float4 PSWorldNoLumaAlpha (WorldVertPS Input) : COLOR0
 float4 PSWorldLuma (WorldVertPS Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
+	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0);
+	float4 lightmap = tex2D (tmu0Sampler, Input.Tex1);
+
 #ifdef hlsl_fog
-	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0) * 0.5;
-	float4 color = (texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright);
-	color = FogCalc (color + fullbright, Input.FogPosition) + fullbright;
+	return FogCalc ((texcolor - fullbright) * (lightmap * Overbright), Input.FogPosition) + fullbright;
 #else
-	float4 color = (texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright) + tex2D (tmu2Sampler, Input.Tex0);
+	return ((texcolor - fullbright) * (lightmap * Overbright)) + fullbright;
 #endif
-	
-	return color;
 }
 
 
 float4 PSWorldLumaAlpha (WorldVertPS Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
+	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0);
+	float4 lightmap = tex2D (tmu0Sampler, Input.Tex1);
+
 #ifdef hlsl_fog
-	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0) * 0.5;
-	float4 color = (texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright);
-	color = FogCalc (color + fullbright, Input.FogPosition) + fullbright;
+	float4 color = FogCalc ((texcolor - fullbright) * (lightmap * Overbright), Input.FogPosition) + fullbright;
 #else
-	float4 color = (texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright) + tex2D (tmu2Sampler, Input.Tex0);
+	float4 color = ((texcolor - fullbright) * (lightmap * Overbright)) + fullbright;
 #endif
+
 	color.a = AlphaVal * texcolor.a;
-	
 	return color;
 }
 

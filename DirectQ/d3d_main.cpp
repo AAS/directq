@@ -77,6 +77,8 @@ void D3DMain_ReleaseBuffers (void)
 CD3DDeviceLossHandler d3d_MainBuffersHandler (D3DMain_ReleaseBuffers, D3DMain_CreateBuffers);
 
 
+extern LPDIRECT3DTEXTURE9 char_texture;
+
 // this one wraps DIP so that I can check for commit and anything else i need to do before drawing
 void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumPrimitives)
 {

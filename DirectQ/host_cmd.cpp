@@ -42,7 +42,7 @@ void Host_Quit_f (void)
 {
 	CL_Disconnect ();
 	Host_ShutdownServer (false);
-	Sys_Quit ();
+	Sys_Quit (0);
 }
 
 
@@ -304,6 +304,9 @@ void Host_Map_f (void)
 	svs.serverflags = 0;			// haven't completed an episode yet
 	Q_strncpy (name, Cmd_Argv (1), 63);
 
+	// invalidate the last save game
+	host_lastsave[0] = 0;
+
 	SV_SpawnServer (name);
 
 	if (!sv.active)
@@ -342,6 +345,9 @@ void Host_Changelevel_f (void)
 		Con_Printf ("Only the server may changelevel\n");
 		return;
 	}
+
+	// invalidate the last save game
+	host_lastsave[0] = 0;
 
 	SV_SaveSpawnparms ();
 	Q_strncpy (level, Cmd_Argv (1), 63);
@@ -833,6 +839,9 @@ void Host_Loadgame_f (void)
 
 	for (i = 0; i < NUM_SPAWN_PARMS; i++)
 		svs.clients->spawn_parms[i] = spawn_parms[i];
+
+	// store out the last save game
+	strcpy (host_lastsave, loadname);
 
 	CL_EstablishConnection ("local");
 	Host_Reconnect_f ();

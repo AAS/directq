@@ -1691,9 +1691,12 @@ void D3DVid_TextureMode_f (void)
 		return;
 	}
 
+	char *desiredmode = Cmd_Argv (1);
+	int modenum = desiredmode[0] - '0';
+
 	for (int i = 0; i < 6; i++)
 	{
-		if (!stricmp (d3d_filtermodes[i].name, Cmd_Argv (1)) || i == atoi (Cmd_Argv (1)))
+		if (!stricmp (d3d_filtermodes[i].name, desiredmode) || i == modenum)
 		{
 			// reset filter
 			d3d_TexFilter = d3d_filtermodes[i].texfilter;
@@ -1706,6 +1709,19 @@ void D3DVid_TextureMode_f (void)
 	}
 
 	Con_Printf ("bad filter name\n");
+}
+
+
+void D3DVid_SaveTextureMode (FILE *f)
+{
+	for (int i = 0; i < 6; i++)
+	{
+		if (d3d_TexFilter == d3d_filtermodes[i].texfilter && d3d_MipFilter == d3d_filtermodes[i].mipfilter)
+		{
+			fprintf (f, "gl_texturemode %s\n", d3d_filtermodes[i].name);
+			return;
+		}
+	}
 }
 
 
@@ -1903,7 +1919,7 @@ void D3DVid_RecoverLostDevice (void)
 		case D3DERR_DRIVERINTERNALERROR:
 		default:
 			// something bad happened
-			Sys_Quit ();
+			Sys_Quit (13);
 			break;
 		}
 

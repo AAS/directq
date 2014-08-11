@@ -54,7 +54,10 @@ typedef struct d3d_hlslstate_s
 	float CurrLerp;
 	float LastLerp;
 
-	LPDIRECT3DBASETEXTURE9 textures[3];
+	LPDIRECT3DBASETEXTURE9 newtextures[3];
+	LPDIRECT3DBASETEXTURE9 oldtextures[3];
+	LPDIRECT3DBASETEXTURE9 oldcubemap;
+	LPDIRECT3DBASETEXTURE9 newcubemap;
 	DWORD addressmodes[3];
 	DWORD magfilters[3];
 	DWORD minfilters[3];
@@ -71,6 +74,26 @@ void D3DHLSL_CheckCommit (void)
 {
 	if (d3d_HLSLState.commitpending)
 		d3d_MasterFX->CommitChanges ();
+
+	// now check for texture changes; this is always done even if we don't commit as we need a reset if we switch shaders
+	// texture changes are done this way rather than through ID3DXBaseEffect::SetTexture to avoid a computationally expensive
+	// AddRef and Release (just profile an app using ID3DXBaseEffect::SetTexture in PIX and you'll see what I mean!)
+	for (int i = 0; i < 3; i++)
+	{
+		// note - we specified explicit registers for our samplers so that we can safely do this
+		if (d3d_HLSLState.oldtextures[i] != d3d_HLSLState.newtextures[i])
+		{
+			if (d3d_HLSLState.newtextures[i]) d3d_Device->SetTexture (i, d3d_HLSLState.newtextures[i]);
+			d3d_HLSLState.oldtextures[i] = d3d_HLSLState.newtextures[i];
+		}
+	}
+
+	// note - we specified explicit registers for our samplers so that we can safely do this
+	if (d3d_HLSLState.oldcubemap != d3d_HLSLState.newcubemap)
+	{
+		if (d3d_HLSLState.newcubemap) d3d_Device->SetTexture (3, d3d_HLSLState.newcubemap);
+		d3d_HLSLState.oldcubemap = d3d_HLSLState.newcubemap;
+	}
 
 	// always clear the commit flag so that it doesn't incorrectly fire later on
 	d3d_HLSLState.commitpending = false;
@@ -94,6 +117,13 @@ void D3DHLSL_SetPass (int passnum)
 		// clear the commit flag here because we don't need a commit before a BeginPass
 		d3d_HLSLState.commitpending = false;
 
+		// force all textures to recache
+		d3d_HLSLState.oldtextures[0] = NULL;
+		d3d_HLSLState.oldtextures[1] = NULL;
+		d3d_HLSLState.oldtextures[2] = NULL;
+		d3d_HLSLState.oldcubemap = NULL;
+
+		// interesting - BeginPass clears the currently set textures... how evil...
 		d3d_HLSLState.currentpass = passnum;
 		d3d_MasterFX->BeginPass (passnum);
 	}
@@ -156,16 +186,17 @@ D3DXHANDLE d3d_mipfilterstages[] = {"mipfilter0", "mipfilter1", "mipfilter2"};
 D3DXHANDLE d3d_minfilterstages[] = {"minfilter0", "minfilter1", "minfilter2"};
 
 
+void D3DHLSL_SetCubemap (LPDIRECT3DBASETEXTURE9 tex)
+{
+	// changing texture no longer forces a commit here but it does store it out for later
+	d3d_HLSLState.newcubemap = tex;
+}
+
+
 void D3DHLSL_SetTexture (UINT stage, LPDIRECT3DBASETEXTURE9 tex)
 {
-	if (d3d_HLSLState.textures[stage] != tex)
-	{
-		// don't set a NULL texture but do record that it was changed for the next time
-		if (tex) d3d_MasterFX->SetTexture (d3d_hlslstages[stage], tex);
-
-		d3d_HLSLState.commitpending = true;
-		d3d_HLSLState.textures[stage] = tex;
-	}
+	// changing texture no longer forces a commit here but it does store it out for later
+	d3d_HLSLState.newtextures[stage] = tex;
 }
 
 
@@ -244,7 +275,7 @@ void D3DHLSL_BeginFrame (void)
 	// invalidate any cached states to keep each frame valid
 	D3DHLSL_InvalidateState ();
 
-	d3d_MasterFX->SetTechnique ("MasterRefresh");
+	// the technique is now only set when the shader needs to be changed
 	d3d_MasterFX->Begin (&numpasses, D3DXFX_DONOTSAVESTATE);
 
 	// set up anisotropic filtering
@@ -312,14 +343,26 @@ void D3DHLSL_SetFloatArray (D3DXHANDLE handle, float *fl, int len)
 
 void D3DHLSL_EnableFog (bool enable)
 {
+	LPD3DXEFFECT d3d_DesiredFX = NULL;
+
 	// just switch the shader; these are really the same shader but with different stuff #ifdef'ed in and out
 	if (enable && d3d_MasterFXWithFog)
-		d3d_MasterFX = d3d_MasterFXWithFog;
+		d3d_DesiredFX = d3d_MasterFXWithFog;
 	else if (d3d_MasterFXNoFog)
-		d3d_MasterFX = d3d_MasterFXNoFog;
+		d3d_DesiredFX = d3d_MasterFXNoFog;
 	else if (d3d_MasterFXWithFog)
-		d3d_MasterFX = d3d_MasterFXWithFog;
+		d3d_DesiredFX = d3d_MasterFXWithFog;
 	else Sys_Error ("No shaders were successfully loaded!");
+
+	// check for a change in shader state
+	if (d3d_MasterFX != d3d_DesiredFX)
+	{
+		// setting the technique is slow so only do it when the effect changes
+		d3d_DesiredFX->SetTechnique ("MasterRefresh");
+
+		// store out globally so that we can run it
+		d3d_MasterFX = d3d_DesiredFX;
+	}
 
 	// fix me - the shader might change but certain cached params don't - or are we invalidating the
 	// caches every frame??????????????????
@@ -334,9 +377,11 @@ void D3DHLSL_InvalidateState (void)
 	d3d_HLSLState.CurrLerp = -1;
 	d3d_HLSLState.LastLerp = -1;
 
-	d3d_HLSLState.textures[0] = NULL;
-	d3d_HLSLState.textures[1] = NULL;
-	d3d_HLSLState.textures[2] = NULL;
+	// this is sufficient to force a recache
+	d3d_HLSLState.oldtextures[0] = NULL;
+	d3d_HLSLState.oldtextures[1] = NULL;
+	d3d_HLSLState.oldtextures[2] = NULL;
+	d3d_HLSLState.oldcubemap = NULL;
 
 	d3d_HLSLState.addressmodes[0] = 0xffffffff;
 	d3d_HLSLState.addressmodes[1] = 0xffffffff;
@@ -476,6 +521,9 @@ void D3DHLSL_Init (void)
 	else if (d3d_MasterFXWithFog)
 		d3d_MasterFX = d3d_MasterFXWithFog;
 	else Sys_Error ("No shaders were successfully loaded!");
+
+	// now begin the effect by setting the technique
+	d3d_MasterFX->SetTechnique ("MasterRefresh");
 
 	if (!SilentLoad) Con_Printf ("Created Shaders OK\n");
 

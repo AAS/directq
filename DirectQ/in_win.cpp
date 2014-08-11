@@ -46,6 +46,42 @@ cmd_t joyadvancedupdate ("joyadvancedupdate", Joy_AdvancedUpdate_f);
 ========================================================================================================================
 */
 
+
+// typically there will only be one or two of these per frame
+#define MAX_INPUT_QUEUE	64
+
+typedef struct inputqueue_s
+{
+	int key;
+	bool down;
+} inputqueue_t;
+
+
+inputqueue_t inputqueue[MAX_INPUT_QUEUE];
+int numinputqueue = 0;
+
+
+void IN_QueueEvent (int key, bool down)
+{
+	if (numinputqueue >= MAX_INPUT_QUEUE) return;
+
+	inputqueue[numinputqueue].key = key;
+	inputqueue[numinputqueue].down = down;
+
+	numinputqueue++;
+}
+
+
+void IN_ProcessQueue (void)
+{
+	for (int i = 0; i < numinputqueue; i++)
+		Key_Event (inputqueue[i].key, inputqueue[i].down);
+
+	// if (numinputqueue) Con_Printf ("processed %i\n", numinputqueue);
+	numinputqueue = 0;
+}
+
+
 /*
 ===================================================================
 
@@ -84,8 +120,6 @@ int IN_MapKey (int key)
 }
 
 
-bool in_keydown[256] = {false};
-
 void IN_StartupKeyboard (void)
 {
 	RAWINPUTDEVICE ri_Keyboard;
@@ -123,23 +157,10 @@ void IN_ReadKeyboard (RAWKEYBOARD *ri_Keyboard)
 
 	int key = IN_MapKey (ri_Keyboard->MakeCode > 127 ? 0 : ri_Keyboard->MakeCode);
 
-	if (!ri_Keyboard->Flags && !in_keydown[key])
-	{
-		Key_Event (key, true);
-		in_keydown[key] = true;
-	}
-	else if ((ri_Keyboard->Flags & RI_KEY_BREAK) && in_keydown[key])
-	{
-		Key_Event (key, false);
-		in_keydown[key] = false;
-	}
-}
-
-
-void IN_ClearKeyState (int k)
-{
-	Key_Event (k, false);
-	in_keydown[k] = false;
+	if (!ri_Keyboard->Flags)
+		IN_QueueEvent (key, true);
+	else if (ri_Keyboard->Flags & RI_KEY_BREAK)
+		IN_QueueEvent (key, false);
 }
 
 
@@ -147,6 +168,8 @@ typedef struct in_mousestate_s
 {
 	long mx;
 	long my;
+	long lastmx;
+	long lastmy;
 } in_mousestate_t;
 
 in_mousestate_t in_mousestate = {0, 0};
@@ -226,7 +249,7 @@ void IN_ClearMouse (void)
 	{
 		if (ri_mousebuttons[i].down)
 		{
-			Key_Event (ri_mousebuttons[i].quakekey, false);
+			IN_QueueEvent (ri_mousebuttons[i].quakekey, false);
 			ri_mousebuttons[i].down = false;
 		}
 	}
@@ -235,22 +258,34 @@ void IN_ClearMouse (void)
 
 void IN_ReadMouse (RAWMOUSE *ri_Mouse)
 {
-	// read and accumulate the movement
-	in_mousestate.mx += ri_Mouse->lLastX;
-	in_mousestate.my += ri_Mouse->lLastY;
+	if (ri_Mouse->usFlags & MOUSE_MOVE_ABSOLUTE)
+	{
+		// read and accumulate the movement
+		in_mousestate.mx += (ri_Mouse->lLastX - in_mousestate.lastmx);
+		in_mousestate.my += (ri_Mouse->lLastY - in_mousestate.lastmy);
+
+		in_mousestate.lastmx = ri_Mouse->lLastX;
+		in_mousestate.lastmy = ri_Mouse->lLastY;
+	}
+	else
+	{
+		// read and accumulate the movement
+		in_mousestate.mx += ri_Mouse->lLastX;
+		in_mousestate.my += ri_Mouse->lLastY;
+	}
 
 	// 5 mouse buttons and we check them all
 	for (int i = 0; i < 5; i++)
 	{
 		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_downflag) && !ri_mousebuttons[i].down)
 		{
-			Key_Event (ri_mousebuttons[i].quakekey, true);
+			IN_QueueEvent (ri_mousebuttons[i].quakekey, true);
 			ri_mousebuttons[i].down = true;
 		}
 
 		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_upflag) && ri_mousebuttons[i].down)
 		{
-			Key_Event (ri_mousebuttons[i].quakekey, false);
+			IN_QueueEvent (ri_mousebuttons[i].quakekey, false);
 			ri_mousebuttons[i].down = false;
 		}
 	}
@@ -261,13 +296,13 @@ void IN_ReadMouse (RAWMOUSE *ri_Mouse)
 		// this needs to cast to a short so that we can catch the proper delta
 		if ((short) ri_Mouse->usButtonData > 0)
 		{
-			Key_Event (K_MWHEELUP, true);
-			Key_Event (K_MWHEELUP, false);
+			IN_QueueEvent (K_MWHEELUP, true);
+			IN_QueueEvent (K_MWHEELUP, false);
 		}
 		else
 		{
-			Key_Event (K_MWHEELDOWN, true);
-			Key_Event (K_MWHEELDOWN, false);
+			IN_QueueEvent (K_MWHEELDOWN, true);
+			IN_QueueEvent (K_MWHEELDOWN, false);
 		}
 	}
 }
@@ -746,8 +781,8 @@ void IN_Commands (void)
 
 	for (int i = 0; i < joy_numbuttons; i++)
 	{
-		if ((buttonstate & (1 << i)) && !(joy_oldbuttonstate & (1 << i))) Key_Event (K_JOY1 + i, true);
-		if (!(buttonstate & (1 << i)) && (joy_oldbuttonstate & (1 << i))) Key_Event (K_JOY1 + i, false);
+		if ((buttonstate & (1 << i)) && !(joy_oldbuttonstate & (1 << i))) IN_QueueEvent (K_JOY1 + i, true);
+		if (!(buttonstate & (1 << i)) && (joy_oldbuttonstate & (1 << i))) IN_QueueEvent (K_JOY1 + i, false);
 	}
 
 	joy_oldbuttonstate = buttonstate;
@@ -770,8 +805,8 @@ void IN_Commands (void)
 		// determine which bits have changed and key an auxillary event for each change
 		for (int i = 0; i < 4; i++)
 		{
-			if ((povstate & (1 << i)) && !(joy_oldpovstate & (1 << i))) Key_Event (K_POV1 + i, true);
-			if (!(povstate & (1 << i)) && (joy_oldpovstate & (1 << i))) Key_Event (K_POV1 + i, false);
+			if ((povstate & (1 << i)) && !(joy_oldpovstate & (1 << i))) IN_QueueEvent (K_POV1 + i, true);
+			if (!(povstate & (1 << i)) && (joy_oldpovstate & (1 << i))) IN_QueueEvent (K_POV1 + i, false);
 		}
 
 		joy_oldpovstate = povstate;

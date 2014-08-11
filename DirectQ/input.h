@@ -29,5 +29,5 @@ void IN_MouseMove (usercmd_t *cmd, float movetime);
 void IN_ClearStates (void);
 void IN_SetMouseState (bool fullscreen);
 
-void IN_ReadKeyEvents (void);
-void IN_ClearKeyStates (void);
+void IN_QueueEvent (int key, bool down);
+void IN_ProcessQueue (void);

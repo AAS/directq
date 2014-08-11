@@ -273,6 +273,7 @@ Writes key bindings and archived cvars
 ===============
 */
 void Cmd_WriteAlias (FILE *f);
+void D3DVid_SaveTextureMode (FILE *f);
 
 void Host_WriteConfiguration (void)
 {
@@ -315,6 +316,8 @@ void Host_WriteConfiguration (void)
 		Key_WriteBindings (f);
 		Cvar_WriteVariables (f);
 		Cmd_WriteAlias (f);	// needed for the RMQ hook otherwise it gets wiped
+
+		D3DVid_SaveTextureMode (f);	// per request
 
 		fclose (f);
 
@@ -667,21 +670,6 @@ void Host_Frame (DWORD time)
 
 	// attempt to compensate for integer division by rounding to the nearest
 	DWORD dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
-	float host_frametime = 0;
-
-	Sys_SendKeyEvents ();
-
-	// on a local server we run this stuff immediately
-	if (sv.active)
-	{
-		// prevent wacky physics
-		dwLockTime = (DWORD) ((1000.0f / 72.0f) + 0.5f);
-
-		IN_Commands ();
-		Cbuf_Execute ();
-		NET_Poll ();
-		CL_SendCmd ();
-	}
 
 	if (!cls.timedemo && (dwRealTime - dwOldRealTime) < dwLockTime)
 	{
@@ -691,7 +679,7 @@ void Host_Frame (DWORD time)
 	else
 	{
 		// move these back to DWORDs to keep timings steady; there is a tendency for them to drift at present
-		host_frametime = (float) (dwRealTime - dwOldRealTime) * 0.001f;
+		float host_frametime = (float) (dwRealTime - dwOldRealTime) * 0.001f;
 
 		realtime = (float) dwRealTime * 0.001f;
 		dwOldRealTime = dwRealTime;
@@ -702,19 +690,15 @@ void Host_Frame (DWORD time)
 			host_frametime = host_framerate.value;
 		else if (host_frametime > 0.1f) host_frametime = 0.1f;
 
-		if (sv.active)
-		{
-			// the server frame must run at the filtered speed to keep physics consistent
-			Host_ServerFrame (host_frametime);
-		}
-		else
-		{
-			// on a remote server we run client stuff at the filtered speed
-			IN_Commands ();
-			Cbuf_Execute ();
-			NET_Poll ();
-			CL_SendCmd ();
-		}
+		IN_Commands ();
+		Cbuf_Execute ();
+		NET_Poll ();
+		CL_SendCmd ();
+
+		// process any queued input events
+		IN_ProcessQueue ();
+
+		if (sv.active) Host_ServerFrame (host_frametime);
 
 		// fetch results from server
 		if (cls.state == ca_connected) CL_ReadFromServer (host_frametime);
@@ -726,6 +710,9 @@ void Host_Frame (DWORD time)
 		// this needs to run at the filtered speed so that events such as stair step-ups are handled correctly
 		V_RenderView (cl.time, host_frametime);
 
+		// update refresh
+		SCR_UpdateScreen (host_frametime);
+
 		// run anything that needs to be done after the screen update
 		// update particles
 		R_UpdateParticles ();
@@ -733,23 +720,17 @@ void Host_Frame (DWORD time)
 		// update dlights
 		if (cls.signon == SIGNONS) CL_DecayLights ();
 
+		// update sound
+		if (cls.signon == SIGNONS)
+			S_Update (host_frametime, r_origin, vpn, vright, vup);
+		else S_Update (host_frametime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
+
+		// finish sound
+		CDAudio_Update ();
+		MediaPlayer_Update ();
+
 		host_framecount++;
 	}
-
-	// get the new time for stuff we always run last
-	host_frametime = (float) time * 0.001f;
-
-	// update refresh
-	SCR_UpdateScreen (host_frametime);
-
-	// update sound
-	if (cls.signon == SIGNONS)
-		S_Update (host_frametime, r_origin, vpn, vright, vup);
-	else S_Update (host_frametime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
-
-	// finish sound
-	CDAudio_Update ();
-	MediaPlayer_Update ();
 }
 
 

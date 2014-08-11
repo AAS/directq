@@ -220,16 +220,16 @@ void Sys_Error (char *error, ...)
 	}
 
 	timeEndPeriod (sys_time_period);
-	exit (1);
+	exit (666);
 }
 
 
-void Sys_Quit (void)
+void Sys_Quit (int ExitCode)
 {
 	Host_Shutdown ();
 	timeEndPeriod (sys_time_period);
 	AllowAccessibilityShortcutKeys (true);
-	exit (0);
+	exit (ExitCode);
 }
 
 
@@ -304,7 +304,7 @@ void Sys_SendKeyEvents (void)
 		scr_skipupdate = 0;
 
 		if (!GetMessage (&msg, NULL, 0, 0))
-			Sys_Quit ();
+			Sys_Quit (msg.wParam);
 
 		TranslateMessage (&msg);
 		DispatchMessage (&msg);
@@ -511,7 +511,7 @@ void SetQuakeDirectory (void)
 
 	// oh shit
 	MessageBox (NULL, "Could not locate Quake on your PC.\n\nPerhaps you need to move DirectQ.exe into C:\\Quake?", "Error", MB_OK | MB_ICONERROR);
-	Sys_Quit ();
+	Sys_Quit (666);
 }
 
 
@@ -681,7 +681,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 	case WM_CLOSE:
 		if (MessageBox (d3d_Window, "Are you sure you want to quit?", "Confirm Exit", MB_YESNO | MB_SETFOREGROUND | MB_ICONQUESTION) == IDYES)
-			Sys_Quit ();
+			Sys_Quit (0);
 
 		return 0;
 
@@ -918,28 +918,35 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	Host_Init (&parms);
 
 	DWORD oldtime = Sys_Milliseconds ();
+	MSG msg;
 
-	// main window message loop
-	while (1)
+	// prime the message
+	PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE);
+
+	// restructured main loop inspired by http://www.mvps.org/directx/articles/writing_the_game_loop.htm
+	while (msg.message != WM_QUIT)
 	{
-		// yield the CPU for a little while when paused, minimized, or not the focus
-		if (cl.paused || !ActiveApp || Minimized || block_drawing)
-		{
-			// no point in bothering to draw
-			scr_skipupdate = 1;
-
-			if (cl.paused)
-				Sleep (PAUSE_SLEEP);
-			else Sleep (NOT_FOCUS_SLEEP);
-		}
-
 		DWORD newtime = Sys_Milliseconds ();
 
-		Host_Frame (newtime - oldtime);
-		oldtime = newtime;
+		if (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage (&msg);
+			DispatchMessage (&msg);
+		}
+		else if (cl.paused)
+			Sleep (PAUSE_SLEEP);
+		else if (!ActiveApp || Minimized || block_drawing)
+			Sleep (NOT_FOCUS_SLEEP);
+		else
+		{
+			// run a normal frame
+			Host_Frame (newtime - oldtime);
+			oldtime = newtime;
+		}
 	}
 
-	// success of application
-	return 0;
+	// run through correct shutdown
+	Sys_Quit (msg.wParam);
+	return 0;	// shut up compiler
 }
 

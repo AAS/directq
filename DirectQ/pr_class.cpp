@@ -678,9 +678,7 @@ void CProgsDat::PrintStatement (dstatement_t *s)
 	else
 	{
 		if (s->a) Con_SafePrintf ("%s", PR_GlobalString ((unsigned short) s->a));
-
 		if (s->b) Con_SafePrintf ("%s", PR_GlobalString ((unsigned short) s->b));
-
 		if (s->c) Con_SafePrintf ("%s", PR_GlobalStringNoContents ((unsigned short) s->c));
 	}
 

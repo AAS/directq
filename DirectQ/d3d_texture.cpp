@@ -81,22 +81,20 @@ void D3D_MakeQuakePalettes (byte *palette)
 		d3d_QuakePalette.standard[i].peBlue = rgb[2];
 		d3d_QuakePalette.standard[i].peFlags = alpha;
 
-		PALETTEENTRY *keepcolor = &d3d_QuakePalette.noluma[i];
-		PALETTEENTRY *discardcolor = &d3d_QuakePalette.luma[i];
-
 		if (vid.fullbright[i])
 		{
-			keepcolor = &d3d_QuakePalette.luma[i];
-			discardcolor = &d3d_QuakePalette.noluma[i];
+			d3d_QuakePalette.luma[i].peRed = rgb[0];
+			d3d_QuakePalette.luma[i].peGreen = rgb[1];
+			d3d_QuakePalette.luma[i].peBlue = rgb[2];
+			d3d_QuakePalette.luma[i].peFlags = alpha;
 		}
-
-		keepcolor->peRed = rgb[0];
-		keepcolor->peGreen = rgb[1];
-		keepcolor->peBlue = rgb[2];
-		keepcolor->peFlags = alpha;
-
-		discardcolor->peRed = discardcolor->peGreen = discardcolor->peBlue = 0;
-		discardcolor->peFlags = alpha;
+		else
+		{
+			d3d_QuakePalette.luma[i].peRed = 0;
+			d3d_QuakePalette.luma[i].peGreen = 0;
+			d3d_QuakePalette.luma[i].peBlue = 0;
+			d3d_QuakePalette.luma[i].peFlags = alpha;
+		}
 
 		d3d_QuakePalette.standard32[i] = D3DCOLOR_XRGB (rgb[0], rgb[1], rgb[2]);
 	}
@@ -485,7 +483,7 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 			activepal = d3d_QuakePalette.standard;
 		else if (flags & IMAGE_LUMA)
 			activepal = d3d_QuakePalette.luma;
-		else activepal = d3d_QuakePalette.noluma;
+		else activepal = d3d_QuakePalette.standard;
 	}
 	else activepal = d3d_QuakePalette.standard;
 
@@ -1116,11 +1114,8 @@ void D3D_RegisterExternalTexture (char *texname)
 	if (typefilter)
 	{
 		if (!strnicmp (typefilter, "gloss.", 6)) return;
-
 		if (!strnicmp (typefilter, "norm.", 5)) return;
-
 		if (!strnicmp (typefilter, "normal.", 7)) return;
-
 		if (!strnicmp (typefilter, "bump.", 5)) return;
 	}
 
@@ -1143,7 +1138,6 @@ void D3D_RegisterExternalTexture (char *texname)
 	char *checkstuff = strstr (et->texpath, "\\save\\");
 
 	if (!checkstuff) checkstuff = strstr (et->texpath, "\\maps\\");
-
 	if (!checkstuff) checkstuff = strstr (et->texpath, "\\screenshot\\");
 
 	// ignoring textures in maps, save and screenshot
@@ -1181,7 +1175,6 @@ void D3D_RegisterExternalTexture (char *texname)
 	for (int i = 0;; i++)
 	{
 		if (!et->basename[i]) break;
-
 		if (et->basename[i] == '/') et->basename[i] = '\\';
 	}
 
@@ -1194,7 +1187,6 @@ void D3D_RegisterExternalTexture (char *texname)
 	for (int i = strlen (et->basename); i; i--)
 	{
 		if (et->basename[i] == '/') break;
-
 		if (et->basename[i] == '\\') break;
 
 		if (et->basename[i] == '.')
@@ -1230,7 +1222,6 @@ void D3D_ExternalTextureDirectoryRecurse (char *dirname)
 	for (int i = 0;; i++)
 	{
 		if (find_filter[i] == 0) break;
-
 		if (find_filter[i] == '/') find_filter[i] = '\\';
 	}
 
@@ -1247,16 +1238,12 @@ void D3D_ExternalTextureDirectoryRecurse (char *dirname)
 	{
 		// not interested
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
-
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
-
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
-
 		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
 
 		// never these
 		if (!strcmp (FindFileData.cFileName, ".")) continue;
-
 		if (!strcmp (FindFileData.cFileName, "..")) continue;
 
 		// make the new directory or texture name
