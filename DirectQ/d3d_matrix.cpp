@@ -29,228 +29,235 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 		MATRIX OPS
 
 	These happen in place on the matrix and update it's current values.  Wherever possible OpenGL-like
-	functionality is replicated, and the D3DX versions of the functions are replaced with versions that
-	operate on D3DMATRIX structs (code adapted from the WINE source code).
+	functionality is replicated.
+
+	Why the fuck these ain't in the D3DXMATRIX class I'll never know...
 
 ============================================================================================================
 */
 
-D3DMATRIX *D3DMatrix_PerspectiveFovRH (D3DMATRIX *matrix, FLOAT fovy, FLOAT aspect, FLOAT zn, FLOAT zf)
+QMATRIX::QMATRIX (float _11, float _12, float _13, float _14,
+				  float _21, float _22, float _23, float _24,
+				  float _31, float _32, float _33, float _34,
+				  float _41, float _42, float _43, float _44)
 {
-	D3DMATRIX tmp;
-	D3DMatrix_Identity (&tmp);
-	fovy = D3DXToRadian (fovy);
-
-	tmp.m[0][0] = 1.0f / (aspect * tan (fovy / 2.0f));
-	tmp.m[1][1] = 1.0f / tan (fovy / 2.0f);
-	tmp.m[2][2] = zf / (zn - zf);
-	tmp.m[2][3] = -1.0f;
-	tmp.m[3][2] = (zf * zn) / (zn - zf);
-	tmp.m[3][3] = 0.0f;
-
-	D3DMatrix_Multiply (matrix, &tmp, matrix);
-	return matrix;
+	this->_11 = _11; this->_12 = _12; this->_13 = _13; this->_14 = _14;
+	this->_21 = _21; this->_22 = _22; this->_23 = _23; this->_24 = _24;
+	this->_31 = _31; this->_32 = _32; this->_33 = _33; this->_34 = _34;
+	this->_41 = _41; this->_42 = _42; this->_43 = _43; this->_44 = _44;
 }
 
 
-D3DMATRIX *D3DMatrix_OrthoOffCenterRH (D3DMATRIX *matrix, FLOAT l, FLOAT r, FLOAT b, FLOAT t, FLOAT zn, FLOAT zf)
+void QMATRIX::LoadIdentity (void)
 {
-	D3DMATRIX tmp;
-	D3DMatrix_Identity (&tmp);
-
-	tmp.m[0][0] = 2.0f / (r - l);
-	tmp.m[1][1] = 2.0f / (t - b);
-	tmp.m[2][2] = 1.0f / (zn - zf);
-	tmp.m[3][0] = (l + r) / (l - r);
-	tmp.m[3][1] = (t + b) / (b - t);
-	tmp.m[3][2] = zn / (zn - zf);
-
-	D3DMatrix_Multiply (matrix, &tmp, matrix);
-	return matrix;
+	D3DXMatrixIdentity (this);
 }
 
 
-void D3DMatrix_Translate (D3DMATRIX *matrix, float x, float y, float z)
+void QMATRIX::Translate (float x, float y, float z)
 {
-	D3DMATRIX tmp;
-	D3DMatrix_Identity (&tmp);
+	D3DXMATRIX m;
 
-	tmp.m[3][0] = x;
-	tmp.m[3][1] = y;
-	tmp.m[3][2] = z;
-
-	D3DMatrix_Multiply (matrix, &tmp, matrix);
+	D3DXMatrixTranslation (&m, x, y, z);
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-void D3DMatrix_Translate (D3DMATRIX *matrix, float *xyz)
+void QMATRIX::Translate (float *xyz)
 {
-	D3DMATRIX tmp;
-	D3DMatrix_Identity (&tmp);
+	D3DXMATRIX m;
 
-	tmp.m[3][0] = xyz[0];
-	tmp.m[3][1] = xyz[1];
-	tmp.m[3][2] = xyz[2];
-
-	D3DMatrix_Multiply (matrix, &tmp, matrix);
+	D3DXMatrixTranslation (&m, xyz[0], xyz[1], xyz[2]);
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-void D3DMatrix_Scale (D3DMATRIX *matrix, float x, float y, float z)
+void QMATRIX::SetFromYawPitchRoll (float y, float p, float r)
 {
-	D3DMATRIX tmp;
-	D3DMatrix_Identity (&tmp);
-
-	tmp.m[0][0] = x;
-	tmp.m[1][1] = y;
-	tmp.m[2][2] = z;
-
-	D3DMatrix_Multiply (matrix, &tmp, matrix);
+	D3DXMatrixRotationYawPitchRoll (this, D3DXToRadian (y), D3DXToRadian (p), D3DXToRadian (r));
 }
 
 
-void D3DMatrix_Scale (D3DMATRIX *matrix, float *xyz)
+void QMATRIX::YawPitchRoll (float y, float p, float r)
 {
-	D3DMATRIX tmp;
-	D3DMatrix_Identity (&tmp);
+	D3DXMATRIX m;
 
-	tmp.m[0][0] = xyz[0];
-	tmp.m[1][1] = xyz[1];
-	tmp.m[2][2] = xyz[2];
-
-	D3DMatrix_Multiply (matrix, &tmp, matrix);
+	D3DXMatrixRotationYawPitchRoll (&m, D3DXToRadian (y), D3DXToRadian (p), D3DXToRadian (r));
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-void D3DMatrix_TransformPoint (D3DMATRIX *matrix, float *in, float *out)
+void QMATRIX::Rotate (float x, float y, float z, float angle)
 {
-	out[0] = in[0] * matrix->_11 + in[1] * matrix->_21 + in[2] * matrix->_31 + matrix->_41;
-	out[1] = in[0] * matrix->_12 + in[1] * matrix->_22 + in[2] * matrix->_32 + matrix->_42;
-	out[2] = in[0] * matrix->_13 + in[1] * matrix->_23 + in[2] * matrix->_33 + matrix->_43;
+	D3DXMATRIX m;
+
+	D3DXMatrixRotationAxis (&m, &D3DXVECTOR3 (x, y, z), D3DXToRadian (angle));
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-void D3DMatrix_Rotate (D3DMATRIX *matrix, float x, float y, float z, float angle)
+void QMATRIX::Scale (float x, float y, float z)
 {
-	D3DMATRIX tmp;
-	float xyz[3] = {x, y, z};
+	D3DXMATRIX m;
 
-	VectorNormalize (xyz);
-	angle = D3DXToRadian (angle);
-
-	xyz[0] = angle * xyz[0];
-	xyz[1] = angle * xyz[1];
-	xyz[2] = angle * xyz[2];
-
-	if (xyz[0])
-	{
-		D3DMatrix_Identity (&tmp);
-
-		tmp.m[1][1] = cos (xyz[0]);
-		tmp.m[2][2] = cos (xyz[0]);
-		tmp.m[1][2] = sin (xyz[0]);
-		tmp.m[2][1] = -sin (xyz[0]);
-
-		D3DMatrix_Multiply (matrix, &tmp, matrix);
-	}
-
-	if (xyz[1])
-	{
-		D3DMatrix_Identity (&tmp);
-
-		tmp.m[0][0] = cos (xyz[1]);
-		tmp.m[2][2] = cos (xyz[1]);
-		tmp.m[0][2] = -sin (xyz[1]);
-		tmp.m[2][0] = sin (xyz[1]);
-
-		D3DMatrix_Multiply (matrix, &tmp, matrix);
-	}
-
-	if (xyz[2])
-	{
-		D3DMatrix_Identity (&tmp);
-
-		tmp.m[0][0] = cos (xyz[2]);
-		tmp.m[1][1] = cos (xyz[2]);
-		tmp.m[0][1] = sin (xyz[2]);
-		tmp.m[1][0] = -sin (xyz[2]);
-
-		D3DMatrix_Multiply (matrix, &tmp, matrix);
-	}
+	D3DXMatrixScaling (&m, x, y, z);
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-D3DMATRIX *D3DMatrix_Identity (D3DMATRIX *matrix)
+void QMATRIX::Scale (float *xyz)
 {
-	matrix->m[0][1] = matrix->m[0][2] = matrix->m[0][3] =
-		matrix->m[1][0] = matrix->m[1][2] = matrix->m[1][3] =
-		matrix->m[2][0] = matrix->m[2][1] = matrix->m[2][3] =
-		matrix->m[3][0] = matrix->m[3][1] = matrix->m[3][2] = 0.0f;
+	D3DXMATRIX m;
 
-	matrix->m[0][0] = matrix->m[1][1] = matrix->m[2][2] = matrix->m[3][3] = 1.0f;
-
-	return matrix;
+	D3DXMatrixScaling (&m, xyz[0], xyz[1], xyz[2]);
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-D3DXMATRIX *D3DMatrix_Identity (D3DXMATRIX *matrix)
+void QMATRIX::OrthoOffCenterRH (float l, float r, float b, float t, float zn, float zf)
 {
-	matrix->m[0][1] = matrix->m[0][2] = matrix->m[0][3] =
-		matrix->m[1][0] = matrix->m[1][2] = matrix->m[1][3] =
-		matrix->m[2][0] = matrix->m[2][1] = matrix->m[2][3] =
-		matrix->m[3][0] = matrix->m[3][1] = matrix->m[3][2] = 0.0f;
+	D3DXMATRIX m;
 
-	matrix->m[0][0] = matrix->m[1][1] = matrix->m[2][2] = matrix->m[3][3] = 1.0f;
-
-	return matrix;
+	D3DXMatrixOrthoOffCenterRH (&m, l, r, b, t, zn, zf);
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-void D3DMatrix_Multiply (D3DMATRIX *matrix1, D3DMATRIX *matrix2)
+void QMATRIX::Projection (float fovx, float fovy, float zn, float zf)
 {
-	D3DMATRIX matrixtmp;
+	D3DXMATRIX m;
 
-	for (int i = 0; i < 4; i++)
-	{
-		for (int j = 0; j < 4; j++)
-		{
-			matrixtmp.m[i][j] = matrix1->m[i][0] * matrix2->m[0][j] +
-								matrix1->m[i][1] * matrix2->m[1][j] +
-								matrix1->m[i][2] * matrix2->m[2][j] +
-								matrix1->m[i][3] * matrix2->m[3][j];
-		}
-	}
+	float Q = zf / (zf - zn);
 
-	memcpy (matrix1, &matrixtmp, sizeof (D3DMATRIX));
+	m.m[0][0] = 1.0f / tan ((fovx * D3DX_PI) / 360.0f);	// equivalent to D3DXToRadian (fovx) / 2
+	m.m[0][1] = m.m[0][2] = m.m[0][3] = 0;
+
+	m.m[1][1] = 1.0f / tan ((fovy * D3DX_PI) / 360.0f);	// equivalent to D3DXToRadian (fovy) / 2
+	m.m[1][0] = m.m[1][2] = m.m[1][3] = 0;
+
+	m.m[2][0] = m.m[2][1] = 0;
+	m.m[2][2] = -Q;	// flip to RH
+	m.m[2][3] = -1;	// flip to RH
+
+	m.m[3][0] = m.m[3][1] = m.m[3][3] = 0;
+	m.m[3][2] = -(Q * zn);
+
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-void D3DMatrix_Multiply (D3DMATRIX *matrixout, D3DMATRIX *matrix1, D3DMATRIX *matrix2)
+void QMATRIX::PerspectiveFovRH (float fovy, float Aspect, float zn, float zf)
 {
-	// because one of the input matrixes is allowed in d3dx to be the same as the output
-	// we initially multiply into a temp copy
-	D3DMATRIX matrixtmp;
+	D3DXMATRIX m;
 
-	for (int i = 0; i < 4; i++)
-	{
-		for (int j = 0; j < 4; j++)
-		{
-			matrixtmp.m[i][j] = matrix1->m[i][0] * matrix2->m[0][j] +
-								matrix1->m[i][1] * matrix2->m[1][j] +
-								matrix1->m[i][2] * matrix2->m[2][j] +
-								matrix1->m[i][3] * matrix2->m[3][j];
-		}
-	}
-
-	memcpy (matrixout, &matrixtmp, sizeof (D3DMATRIX));
+	D3DXMatrixPerspectiveFovRH (&m, D3DXToRadian (fovy), Aspect, zn, zf);
+	D3DXMatrixMultiply (this, &m, this);
 }
 
 
-D3DXMATRIX *D3DMatrix_ToD3DXMatrix (D3DMATRIX *matrix)
+void QMATRIX::MultMatrix (D3DXMATRIX *in)
 {
-	static D3DXMATRIX mx;
-	memcpy (mx.m, matrix->m, sizeof (matrix->m));
-	return &mx;
+	D3DXMatrixMultiply (this, in, this);
 }
 
+
+void QMATRIX::LoadMatrix (D3DXMATRIX *in)
+{
+	this->m[0][0] = in->m[0][0]; this->m[0][1] = in->m[0][1]; this->m[0][2] = in->m[0][2]; this->m[0][3] = in->m[0][3];
+	this->m[1][0] = in->m[1][0]; this->m[1][1] = in->m[1][1]; this->m[1][2] = in->m[1][2]; this->m[1][3] = in->m[1][3];
+	this->m[2][0] = in->m[2][0]; this->m[2][1] = in->m[2][1]; this->m[2][2] = in->m[2][2]; this->m[2][3] = in->m[2][3];
+	this->m[3][0] = in->m[3][0]; this->m[3][1] = in->m[3][1]; this->m[3][2] = in->m[3][2]; this->m[3][3] = in->m[3][3];
+}
+
+
+void QMATRIX::TransformPoint (float *in, float *out)
+{
+	out[0] = in[0] * this->_11 + in[1] * this->_21 + in[2] * this->_31 + this->_41;
+	out[1] = in[0] * this->_12 + in[1] * this->_22 + in[2] * this->_32 + this->_42;
+	out[2] = in[0] * this->_13 + in[1] * this->_23 + in[2] * this->_33 + this->_43;
+}
+
+
+void QMATRIX::UpdateMVP (QMATRIX *mvp, QMATRIX *m, QMATRIX *v, QMATRIX *p)
+{
+	mvp->LoadMatrix (p);
+	mvp->MultMatrix (v);
+	mvp->MultMatrix (m);
+}
+
+
+void QMATRIX::ToVectors (float *forward, float *up, float *right)
+{
+	forward[0] = this->_11;
+	forward[1] = this->_21;
+	forward[2] = this->_31;
+
+	right[0] = -this->_12;	// stupid Quake bug
+	right[1] = -this->_22;	// stupid Quake bug
+	right[2] = -this->_32;	// stupid Quake bug
+
+	up[0] = this->_13;
+	up[1] = this->_23;
+	up[2] = this->_33;
+}
+
+
+void QMATRIX::Rotate (float a0, float a2, float a1)
+{
+	QMATRIX m;
+
+	m.LoadIdentity ();
+	m.YawPitchRoll (a0, a2, a1);
+	m.Transpose ();
+	m.FixupRotation ();
+
+	D3DXMatrixMultiply (this, &m, this);
+}
+
+
+void QMATRIX::Rotate (float *angles)
+{
+	QMATRIX m;
+
+	m.LoadIdentity ();
+	m.YawPitchRoll (angles[0], -angles[2], angles[1]);
+	m.Transpose ();
+	m.FixupRotation ();
+
+	D3DXMatrixMultiply (this, &m, this);
+}
+
+
+void QMATRIX::FixupRotation (void)
+{
+	this->_12 = -this->_12;
+	this->_21 = -this->_21;
+	this->_32 = -this->_32;
+}
+
+
+void QMATRIX::Transpose (void)
+{
+	D3DXMatrixTranspose (this, this);
+}
+
+
+void QMATRIX::ToVectors (struct r_viewvecs_s *vecs)
+{
+	this->ToVectors (vecs->forward, vecs->up, vecs->right);
+}
+
+
+void QMATRIX::ExtractFrustum (struct mplane_s *f)
+{
+	f[0].normal[0] = this->_14 - this->_11; f[0].normal[1] = this->_24 - this->_21; f[0].normal[2] = this->_34 - this->_31;
+	f[1].normal[0] = this->_14 + this->_11; f[1].normal[1] = this->_24 + this->_21; f[1].normal[2] = this->_34 + this->_31;
+	f[2].normal[0] = this->_14 + this->_12; f[2].normal[1] = this->_24 + this->_22; f[2].normal[2] = this->_34 + this->_32;
+	f[3].normal[0] = this->_14 - this->_12; f[3].normal[1] = this->_24 - this->_22; f[3].normal[2] = this->_34 - this->_32;
+
+	VectorNormalize (f[0].normal);
+	VectorNormalize (f[1].normal);
+	VectorNormalize (f[2].normal);
+	VectorNormalize (f[3].normal);
+}
 

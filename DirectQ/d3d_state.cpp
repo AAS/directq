@@ -324,7 +324,7 @@ void D3DState_PicmipChange (cvar_t *var)
 
 	for (int i = 0; i < 8; i++)
 	{
-		D3D_SetSamplerState (i, D3DSAMP_MIPMAPLODBIAS, *((DWORD *) &picmip));
+		D3D_SetSamplerState (i, D3DSAMP_MAXMIPLEVEL, var->integer > 0 ? var->integer : 0);
 	}
 }
 
@@ -379,5 +379,33 @@ void D3DState_SetAlphaTest (BOOL enable, D3DCMPFUNC comp, DWORD ref)
 		D3D_SetRenderState (D3DRS_ALPHAREF, ref);
 	}
 	else D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
+}
+
+
+void D3DState_EnableShadows (bool enable)
+{
+	if (enable)
+	{
+		D3DState_SetAlphaBlend (TRUE);
+		D3DState_SetZBuffer (D3DZB_TRUE, FALSE);
+
+		// of course, we all know that Direct3D lacks Stencil Buffer and Polygon Offset support,
+		// so what you're looking at here doesn't really exist.  Just pretend you didn't see it,
+		// you'll be OK
+		if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
+		{
+			D3DState_SetStencil (TRUE);
+			D3DHLSL_SetAlpha (r_shadows.value);
+		}
+		else D3DHLSL_SetAlpha (1.0f);
+	}
+	else
+	{
+		if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
+			D3DState_SetStencil (FALSE);
+
+		D3DState_SetAlphaBlend (FALSE);
+		D3DState_SetZBuffer (D3DZB_TRUE, TRUE);
+	}
 }
 

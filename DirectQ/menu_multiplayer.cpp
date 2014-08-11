@@ -805,7 +805,7 @@ void Menu_InitMultiplayerMenu (void)
 	menu_Setup.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
 	menu_Setup.AddOption (new CQMenuTitle ("Setup Player Options"));
 	menu_Setup.AddOption (new CQMenuCustomEnter (Menu_SetupCustomEnter));
-	menu_Setup.AddOption (new CQMenuCvarTextbox ("Player Name", &dummy_name));
+	menu_Setup.AddOption (new CQMenuCvarTextbox ("Player Name", &dummy_name, TBFLAG_FUNNAME | TBFLAG_FREETEXT));
 	menu_Setup.AddOption (new CQMenuSubMenu ("Generate Custom Name", &menu_FunName));
 	menu_Setup.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Setup.AddOption (new CQMenuCvarTextbox ("Host Name", &dummy_hostname, TBFLAGS_ALPHANUMERICFLAGS));

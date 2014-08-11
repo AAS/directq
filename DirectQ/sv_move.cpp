@@ -243,12 +243,13 @@ facing it.
 ======================
 */
 void PF_changeyaw (void);
+
 bool SV_StepDirection (edict_t *ent, float yaw, float dist)
 {
-	vec3_t		move, oldorigin;
+	vec3_t move, oldorigin;
 
 	ent->v.ideal_yaw = yaw;
-	PF_changeyaw();
+	PF_changeyaw ();
 
 	yaw = yaw * D3DX_PI * 2 / 360;
 	move[0] = cos (yaw) * dist;
@@ -259,7 +260,7 @@ bool SV_StepDirection (edict_t *ent, float yaw, float dist)
 
 	if (SV_movestep (ent, move, false))
 	{
-		float delta = ent->v.angles[YAW] - ent->v.ideal_yaw;
+		float delta = ent->v.angles[1] - ent->v.ideal_yaw;
 
 		if (delta > 45 && delta < 315)
 		{
@@ -314,23 +315,20 @@ void SV_NewChaseDir (edict_t *actor, edict_t *enemy, float dist)
 		d[1] = 0;
 	else if (deltax < -10)
 		d[1] = 180;
-	else
-		d[1] = DI_NODIR;
+	else d[1] = DI_NODIR;
 
 	if (deltay < -10)
 		d[2] = 270;
 	else if (deltay > 10)
 		d[2] = 90;
-	else
-		d[2] = DI_NODIR;
+	else d[2] = DI_NODIR;
 
 	// try direct route
 	if (d[1] != DI_NODIR && d[2] != DI_NODIR)
 	{
 		if (d[1] == 0)
 			tdir = d[2] == 90 ? 45 : 315;
-		else
-			tdir = d[2] == 90 ? 135 : 215;
+		else tdir = d[2] == 90 ? 135 : 215;
 
 		if (tdir != turnaround && SV_StepDirection (actor, tdir, dist))
 			return;
@@ -344,16 +342,10 @@ void SV_NewChaseDir (edict_t *actor, edict_t *enemy, float dist)
 		d[2] = tdir;
 	}
 
-	if (d[1] != DI_NODIR && d[1] != turnaround
-			&& SV_StepDirection (actor, d[1], dist))
-		return;
+	if (d[1] != DI_NODIR && d[1] != turnaround && SV_StepDirection (actor, d[1], dist)) return;
+	if (d[2] != DI_NODIR && d[2] != turnaround && SV_StepDirection (actor, d[2], dist)) return;
 
-	if (d[2] != DI_NODIR && d[2] != turnaround
-			&& SV_StepDirection (actor, d[2], dist))
-		return;
-
-	/* there is no direct path to the player, so pick another direction */
-
+	// there is no direct path to the player, so pick another direction
 	if (olddir != DI_NODIR && SV_StepDirection (actor, olddir, dist))
 		return;
 
@@ -377,7 +369,6 @@ void SV_NewChaseDir (edict_t *actor, edict_t *enemy, float dist)
 
 	// if a bridge was pulled out from underneath a monster, it may not have
 	// a valid standing position at all
-
 	if (!SV_CheckBottom (actor))
 		SV_FixCheckBottom (actor);
 

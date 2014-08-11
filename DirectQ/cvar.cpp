@@ -29,6 +29,39 @@ cvar_t *Cmd_FindCvar (char *name);
 
 bool cvar_initialized = false;
 
+
+cvar_t *Cvar_GetNextServerRuleVar (char *prevCvarName)
+{
+	bool findprev = false;
+	bool prevfound = false;
+
+	if (prevCvarName && prevCvarName[0])
+		findprev = true;
+	else prevfound = true;
+
+	for (cvar_t *var = cvar_vars; var; var = var->next)
+	{
+		if (findprev)
+		{
+			if (!_stricmp (var->name, prevCvarName))
+			{
+				prevfound = true;
+				continue;
+			}
+		}
+
+		if (!prevfound) continue;
+		if (!(var->usage & CVAR_SERVER)) continue;
+
+		// this is the variable
+		return var;
+	}
+
+	// not found
+	return NULL;
+}
+
+
 /*
 ============
 Cvar_FindVar

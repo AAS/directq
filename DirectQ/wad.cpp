@@ -214,8 +214,7 @@ miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 
 // palettes need to be reloaded on every game change so do it here
 // this should really move to vidnt.cpp
-void D3D_MakeQuakePalettes (byte *palette);
-void PaletteFromColormap (byte *pal, byte *map);
+void D3DTexture_MakeQuakePalettes (byte *palette);
 
 cvar_t idgamma_gamma ("idgamma_gamma", "1", CVAR_ARCHIVE | CVAR_RESTART);
 cvar_t idgamma_intensity ("idgamma_intensity", "1", CVAR_ARCHIVE | CVAR_RESTART);
@@ -302,20 +301,13 @@ bool W_LoadPalette (void)
 {
 	// these need to be statics so that they can be freed OK
 	static byte *palette = NULL;
-	static byte *colormap = NULL;
 
 	if (palette) Zone_Free (palette);
-	if (colormap) Zone_Free (colormap);
 
-	palette = (byte *) COM_LoadFile ("gfx/palette.lmp");
-	colormap = (byte *) COM_LoadFile ("gfx/colormap.lmp");
-
-	if (palette && colormap)
+	if ((palette = (byte *) COM_LoadFile ("gfx/palette.lmp")) != NULL)
 	{
-		vid.colormap = colormap;
-		PaletteFromColormap (palette, vid.colormap);
 		W_ApplyIDGamma (palette);
-		D3D_MakeQuakePalettes (palette);
+		D3DTexture_MakeQuakePalettes (palette);
 
 		return true;
 	}

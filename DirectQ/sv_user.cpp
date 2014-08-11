@@ -61,7 +61,7 @@ void SV_SetIdealPitch (void)
 	if (!((int) sv_player->v.flags & FL_ONGROUND))
 		return;
 
-	angleval = sv_player->v.angles[YAW] * D3DX_PI * 2 / 360;
+	angleval = sv_player->v.angles[1] * D3DX_PI * 2 / 360;
 	sinval = sin (angleval);
 	cosval = cos (angleval);
 
@@ -225,10 +225,7 @@ void DropPunchAngle (double frametime)
 	float	len;
 
 	len = VectorNormalize (sv_player->v.punchangle);
-
-	if (kurok)
-		len -= 25 * frametime;
-	else len -= 10 * frametime;
+	len -= 10 * frametime;
 
 	if (len < 0)
 		len = 0;
@@ -255,11 +252,8 @@ void SV_WaterMove (double frametime)
 		wishvel[i] = userav.forward[i] * cmd.forwardmove + userav.right[i] * cmd.sidemove;
 
 	if (!cmd.forwardmove && !cmd.sidemove && !cmd.upmove)
-	{
-		if (!kurok) wishvel[2] -= 60;		// drift towards bottom
-	}
-	else
-		wishvel[2] += cmd.upmove;
+		wishvel[2] -= 60;		// drift towards bottom
+	else wishvel[2] += cmd.upmove;
 
 	wishspeed = Length (wishvel);
 
@@ -432,12 +426,12 @@ void SV_ClientThink (double frametime)
 	angles = sv_player->v.angles;
 
 	VectorAdd (sv_player->v.v_angle, sv_player->v.punchangle, v_angle);
-	angles[ROLL] = V_CalcRoll (sv_player->v.angles, sv_player->v.velocity) * 4;
+	angles[2] = V_CalcRoll (sv_player->v.angles, sv_player->v.velocity) * 4;
 
 	if (!sv_player->v.fixangle)
 	{
-		angles[PITCH] = -v_angle[PITCH] / 3;
-		angles[YAW] = v_angle[YAW];
+		angles[0] = -v_angle[0] / 3;
+		angles[1] = v_angle[1];
 	}
 
 	if ((int) sv_player->v.flags & FL_WATERJUMP)

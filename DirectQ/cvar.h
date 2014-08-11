@@ -44,9 +44,6 @@ typedef void (*cvarcallback_t) (class cvar_t *var);
 // helps to prevent extra cvar scanning overhead from nehahra ugliness
 #define CVAR_NEHAHRA		64
 
-// compatibility cvars are registered for the purposes of soaking abuse from QC, but don't appear in the autocomplete lists
-#define CVAR_COMPAT			128
-
 // if this cvar has it's value changed then directq needs to be restarted
 #define CVAR_RESTART		256
 
@@ -127,9 +124,6 @@ void 	Cvar_WriteVariables (FILE *f);
 // with the archive flag set to true.
 
 cvar_t *Cvar_FindVar (char *var_name);
-
-extern cvar_t	*cvar_vars;
-extern cvar_alias_t *cvar_alias_vars;
 
 // i no longer have to extern my cvars.  FUCK yeah.
 #define Cvar_Get(var, varname) static cvar_t *(var) = NULL; if (!(var)) (var) = Cvar_FindVar (varname);if (!(var)) Sys_Error ("%s is not a cvar", varname);

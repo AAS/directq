@@ -19,14 +19,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // client.h
 
-// if this is changed then CL_ClearCmd in cl_main.cpp must be updated to reflect it!!!!
+// R_RocketTrail types (yayy!  self-documenting code!)
+#define RT_ROCKET			0
+#define RT_GRENADE			1
+#define RT_GIB				2
+#define RT_WIZARD			3
+#define RT_ZOMGIB			4
+#define RT_KNIGHT			5
+#define RT_VORE				6
+
+
+// if this is changed then CL_SendCmd in cl_main.cpp must be updated to reflect it!!!!
 typedef struct
 {
 	// intended velocities
 	float	forwardmove;
 	float	sidemove;
 	float	upmove;
-	bool	accumulated;
 } usercmd_t;
 
 typedef struct
@@ -61,11 +70,14 @@ typedef struct
 	int		percent;		// 0-256
 } cshift_t;
 
+// add an extra shift for v_cshift commands so that they don't mess with contents
 #define	CSHIFT_CONTENTS	0
 #define	CSHIFT_DAMAGE	1
 #define	CSHIFT_BONUS	2
 #define	CSHIFT_POWERUP	3
-#define	NUM_CSHIFTS		4
+#define CSHIFT_VCSHIFT	4
+
+#define	NUM_CSHIFTS		5
 
 #define	NAME_LENGTH	64
 
@@ -79,19 +91,22 @@ typedef struct
 
 typedef struct
 {
-	vec3_t	origin;
+	float	origin[3];
+	float	transformed[3];
 	float	radius;
 	float	die;				// stop lighting after this time
 	float	decay;				// drop this each second
 	int		key;
 	int		flags;
+	int		visframe;
+
+	// dlights only need to be updated when they're dirtied and the time they are dirtied at is recorded
+	bool dirty;
+	double dirtytime;
 
 	// coloured light
 	unsigned short rgb[3];
 } dlight_t;
-
-
-void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b);
 
 
 #define	MAX_MAPSTRING	2048
@@ -202,6 +217,12 @@ typedef struct client_state_s
 								// servertime and oldservertime to generate
 								// a lerp point for other data
 
+	float		idealpitch;
+	float		pitchvel;
+	bool		nodrift;
+	float		driftmove;
+	double		laststop;
+
 	double		nexteffecttime;	// the next cl.time at which effects will be spawned
 	double		frametime;		// cl.time - cl.oldtime
 
@@ -291,8 +312,7 @@ extern	dlight_t		*cl_dlights;
 //=============================================================================
 
 // cl_main
-dlight_t *CL_AllocDlight (int key);
-void	CL_DecayLights (void);
+void CL_DecayLights (void);
 void CL_PrepEntitiesForRendering (void);
 
 void CL_Init (void);
@@ -322,7 +342,7 @@ extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
 
 void CL_InitInput (void);
-void CL_SendCmd (void);
+void CL_SendCmd (double frametime);
 void CL_SendMove (usercmd_t *cmd);
 
 void CL_ParseTEnt (void);
@@ -333,7 +353,6 @@ void CL_ClearState (void);
 
 void CL_UpdateClient (double frametime, bool readfromserver);
 void CL_WriteToServer (usercmd_t *cmd);
-void CL_BaseMove (usercmd_t *cmd, double frametime);
 
 
 float CL_KeyState (kbutton_t *key);
@@ -370,6 +389,4 @@ void CL_SignonReply (void);
 #define CLEAR_ALLLERP	(CLEAR_POSES | CLEAR_ORIGIN | CLEAR_ANGLES)
 
 void CL_ClearInterpolation (entity_t *ent, int clearflags);
-entity_t *CL_AllocEntity (void);
-extern int cl_entityallocs;
 

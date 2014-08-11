@@ -43,12 +43,12 @@ void S_StopAllSoundsC (void);
 channel_t   channels[MAX_CHANNELS];
 int			total_channels;
 
-int				snd_blocked = 0;
+int			snd_blocked = 0;
 static bool	snd_ambient = 1;
 bool		snd_initialized = false;
 
 // pointer should go away
-volatile dma_t  *shm = 0;
+volatile dma_t *shm = 0;
 volatile dma_t sn;
 
 vec3_t		listener_origin;
@@ -84,6 +84,25 @@ cvar_t snd_show ("snd_show", "0");
 cvar_t _snd_mixahead ("_snd_mixahead", "0.1", CVAR_ARCHIVE);
 
 
+void S_UpdateContentSounds (cvar_t *unused);
+
+cvar_t sfx_water ("sfx_water", "ambience/water1.wav", 0, S_UpdateContentSounds);
+cvar_t sfx_wind ("sfx_wind", "ambience/wind2.wav", 0, S_UpdateContentSounds);
+cvar_t sfx_slime ("sfx_slime","misc/null.wav", 0, S_UpdateContentSounds);
+cvar_t sfx_lava ("sfx_lava","misc/null.wav", 0, S_UpdateContentSounds);
+
+
+void S_UpdateContentSounds (cvar_t *unused)
+{
+	S_StopAllSounds (true);
+
+	if (sfx_water.string) {ambient_sfx[AMBIENT_WATER] = S_PrecacheSound (sfx_water.string);}
+	if (sfx_wind.string) {ambient_sfx[AMBIENT_SKY] = S_PrecacheSound (sfx_wind.string);}
+	if (sfx_slime.string) {ambient_sfx[AMBIENT_SLIME] = S_PrecacheSound (sfx_slime.string);}
+	if (sfx_lava.string) {ambient_sfx[AMBIENT_LAVA] = S_PrecacheSound (sfx_lava.string);}
+}
+
+
 // ====================================================================
 // User-setable variables
 // ====================================================================
@@ -109,10 +128,8 @@ void S_SoundInfo_f (void)
 		return;
 	}
 
-	Con_Printf ("%5d stereo\n", shm->channels - 1);
 	Con_Printf ("%5d samples\n", shm->samples);
 	Con_Printf ("%5d samplepos\n", shm->samplepos);
-	Con_Printf ("%5d samplebits\n", shm->samplebits);
 	Con_Printf ("%5d submission_chunk\n", shm->submission_chunk);
 	Con_Printf ("%5d speed\n", shm->speed);
 	Con_Printf ("0x%x dma buffer\n", shm->buffer);
@@ -133,9 +150,7 @@ void S_Startup (void)
 	if (!snd_initialized)
 		return;
 
-	rc = SNDDMA_Init ();
-
-	if (!rc)
+	if ((rc = SNDDMA_Init ()) == NULL)
 	{
 		sound_started = 0;
 		return;
@@ -179,8 +194,7 @@ void S_Init (void)
 
 void S_InitAmbients (void)
 {
-	ambient_sfx[AMBIENT_WATER] = S_PrecacheSound ("ambience/water1.wav");
-	ambient_sfx[AMBIENT_SKY] = S_PrecacheSound ("ambience/wind2.wav");
+	S_UpdateContentSounds (NULL);
 }
 
 
@@ -192,7 +206,6 @@ void S_InitAmbients (void)
 void S_Shutdown (void)
 {
 	if (!sound_started) return;
-
 	if (shm) shm->gamealive = 0;
 
 	shm = 0;
@@ -260,12 +273,6 @@ void S_ClearSounds (void)
 	{
 		if (known_sfx[i])
 		{
-			if (known_sfx[i]->Buffer)
-			{
-				known_sfx[i]->Buffer->Release ();
-				known_sfx[i]->Buffer = NULL;
-			}
-
 			SoundHeap->Free (known_sfx[i]);
 			known_sfx[i] = NULL;
 		}
@@ -379,136 +386,46 @@ void SND_Spatialize (channel_t *ch)
 	vec3_t source_vec;
 
 	// anything coming from the view entity will allways be full volume
-	if (ch->entnum == cl.viewentity)
+	if (ch->entnum == cl.viewentity || !(ch->dist_mult > 0))
 	{
 		ch->leftvol = ch->master_vol;
 		ch->rightvol = ch->master_vol;
-		return;
-	}
-
-	// fixme - do we actually need to update ch->origin here or can we just use a different origin vec (a local?) purely for spatialization?
-	if (ch->entnum > 0 && cls.state == ca_connected) // && cl_gameplayfix_soundsmovewithentities.integer)
-	{
-		if (cl_entities[ch->entnum] && cl_entities[ch->entnum]->model)
-		{
-			// brush model entities have their origins at 0|0|0 and move relative to that so we need to use trueorigin instead
-			// update sound origin
-			VectorCopy2 (ch->origin, cl_entities[ch->entnum]->trueorigin);
-		}
-	}
-
-	// calculate stereo seperation and distance attenuation
-	VectorSubtract (ch->origin, listener_origin, source_vec);
-	dist = VectorNormalize (source_vec) * ch->dist_mult;
-	dot = DotProduct (listener_right, source_vec);
-
-	if (shm->channels == 1)
-	{
-		rscale = 1.0;
-		lscale = 1.0;
 	}
 	else
 	{
+		// fixme - do we actually need to update ch->origin here or can we just use a different origin vec (a local?) purely for spatialization?
+		/*
+		if (ch->entnum > 0 && cls.state == ca_connected) // && cl_gameplayfix_soundsmovewithentities.integer)
+		{
+			if (cl_entities[ch->entnum] && cl_entities[ch->entnum]->model)
+			{
+				// brush model entities have their origins at 0|0|0 and move relative to that so we need to use trueorigin instead
+				// update sound origin
+				VectorCopy2 (ch->origin, cl_entities[ch->entnum]->trueorigin);
+			}
+		}
+		*/
+
+		// calculate stereo seperation and distance attenuation
+		VectorSubtract (ch->origin, listener_origin, source_vec);
+		dist = VectorNormalize (source_vec) * ch->dist_mult;
+		dot = DotProduct (listener_right, source_vec);
+
 		rscale = 1.0 + dot;
 		lscale = 1.0 - dot;
+
+		// add in distance effect
+		scale = (1.0 - dist) * rscale;
+		ch->rightvol = (int) (ch->master_vol * scale);
+
+		scale = (1.0 - dist) * lscale;
+		ch->leftvol = (int) (ch->master_vol * scale);
 	}
 
-	// add in distance effect
-	scale = (1.0 - dist) * rscale;
-	ch->rightvol = (int) (ch->master_vol * scale);
-
-	if (ch->rightvol < 0)
-		ch->rightvol = 0;
-
-	scale = (1.0 - dist) * lscale;
-	ch->leftvol = (int) (ch->master_vol * scale);
-
-	if (ch->leftvol < 0)
-		ch->leftvol = 0;
-}
-
-
-HRESULT CreateBasicBuffer (LPDIRECTSOUNDBUFFER8 *ppDsb8, wavinfo_t *info, void *data)
-{
-	extern LPDIRECTSOUND8 ds_Device;
-	WAVEFORMATEX wfx;
-	DSBUFFERDESC dsbdesc;
-	LPDIRECTSOUNDBUFFER pDsb = NULL;
-
-	// Set up WAV format structure.
-	memset (&wfx, 0, sizeof (WAVEFORMATEX));
-	wfx.wFormatTag = WAVE_FORMAT_PCM;
-	wfx.nChannels = info->channels;
-	wfx.nSamplesPerSec = info->rate;
-	wfx.nBlockAlign = info->blockalign;
-	wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
-	wfx.wBitsPerSample = info->width * 8;
-
-	// Set up DSBUFFERDESC structure.
-	memset (&dsbdesc, 0, sizeof (DSBUFFERDESC));
-	dsbdesc.dwSize = sizeof (DSBUFFERDESC);
-	dsbdesc.dwFlags = DSBCAPS_CTRLPAN | DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLFREQUENCY | DSBCAPS_GLOBALFOCUS;
-	dsbdesc.dwBufferBytes = info->samples;
-	dsbdesc.lpwfxFormat = &wfx;
-
-	// Create buffer.
-	hr = ds_Device->CreateSoundBuffer (&dsbdesc, &pDsb, NULL);
-
-	if (SUCCEEDED (hr))
-	{
-		hr = pDsb->QueryInterface (IID_IDirectSoundBuffer8, (LPVOID *) ppDsb8);
-		pDsb->Release ();
-
-		void *audioptr[2] = {NULL, NULL};
-		DWORD lockbytes[2] = {0, 0};
-
-		ppDsb8[0]->Lock (0, 0, (void **) &audioptr[0], &lockbytes[0], (void **) &audioptr[1], &lockbytes[1], DSBLOCK_ENTIREBUFFER);
-		memcpy (audioptr[0], data, info->samples);
-		ppDsb8[0]->Unlock ((void *) audioptr[0], lockbytes[0], (void *) audioptr[1], lockbytes[1]);
-	}
-
-	return hr;
-}
-
-
-LONG LinearToDB (float linear)
-{
-	// fixme - do a lookup for this...
-	LONG db;
-
-	// allow players to scale it down
-	linear *= volume.value;
-
-	// whoever in ms designed this must have really prided themselves on being so technically correct.  bastards.
-	// decibels are great if you're an audio engineer, but if you're just writing a simple sliding volume control...
-	if (linear <= 0)
-		db = -10000;
-	else if (linear >= 1)
-		db = 0;
-	else db = log10 (linear) * 2000;
-
-	if (db < DSBVOLUME_MIN) db = DSBVOLUME_MIN;
-	if (db > DSBVOLUME_MAX) db = DSBVOLUME_MAX;
-
-	return db;
-}
-
-
-void S_PlaySoundFromBuffer (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float fvol, float attenuation)
-{
-	if (sfx->Buffer)
-	{
-		// fixme - do looping sounds too...
-		// fixme - what happens if we need to play the same sound twice?  Clone the buffer?
-		sfx->Buffer->Stop ();
-		sfx->Buffer->SetCurrentPosition (0);
-		sfx->Buffer->SetVolume (LinearToDB (fvol));
-		sfx->Buffer->Play (0, 0, 0);
-	}
-	else
-	{
-		S_StartSound (entnum, entchannel, sfx, origin, fvol, attenuation);
-	}
+	if (ch->rightvol < 0) ch->rightvol = 0;
+	if (ch->rightvol > 255) ch->rightvol = 255;
+	if (ch->leftvol < 0) ch->leftvol = 0;
+	if (ch->leftvol > 255) ch->leftvol = 255;
 }
 
 
@@ -545,7 +462,7 @@ void S_StartSound (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float 
 	target_chan->entchannel = entchannel;
 	SND_Spatialize (target_chan);
 
-	if (!target_chan->leftvol && !target_chan->rightvol)
+	if (target_chan->leftvol < 1 || target_chan->rightvol < 1)
 		return;		// not audible at all
 
 	// new channel
@@ -633,21 +550,15 @@ void S_StopAllSoundsC (void)
 
 void S_ClearBuffer (void)
 {
-	int		clear;
-
 	if (!sound_started || !shm || (!shm->buffer && !ds_SecondaryBuffer8))
 		return;
-
-	if (shm->samplebits == 8)
-		clear = 0x80;
-	else clear = 0;
 
 	DWORD	dwSize;
 	DWORD	*pData;
 
 	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &pData, &dwSize, NULL, NULL, 0)) return;
 
-	memset (pData, clear, shm->samples * shm->samplebits / 8);
+	memset (pData, 0, dwSize);
 	ds_SecondaryBuffer8->Unlock (pData, dwSize, NULL, 0);
 }
 
@@ -761,6 +672,16 @@ S_Update
 Called once each time through the main loop
 ============
 */
+typedef struct s_threadcontext_s
+{
+	double frametime;
+	vec3_t origin;
+	vec3_t forward;
+	vec3_t right;
+	vec3_t up;
+} s_threadcontext_t;
+
+
 void S_Update (double frametime, vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 {
 	int			i, j;
@@ -796,7 +717,7 @@ void S_Update (double frametime, vec3_t origin, vec3_t forward, vec3_t right, ve
 		SND_Spatialize (ch);
 
 		// no volume
-		if (ch->leftvol < 1 && ch->rightvol < 1) continue;
+		if (ch->leftvol < 1 || ch->rightvol < 1) continue;
 
 		// try to combine static sounds with a previous channel of the same
 		// sound effect so we don't mix five torches every frame
@@ -856,6 +777,33 @@ void S_Update (double frametime, vec3_t origin, vec3_t forward, vec3_t right, ve
 	S_Update_ ();
 }
 
+
+// this is currently unsafe to use but may become safe one day if we ever work over the use of globals and resolve I/O and memory crap
+DWORD WINAPI S_UpdateThread (LPVOID lpParameter)
+{
+	s_threadcontext_t *ctx = (s_threadcontext_t *) lpParameter;
+
+	S_Update (ctx->frametime, ctx->origin, ctx->forward, ctx->right, ctx->up);
+	return 0;
+}
+
+
+// this is currently unsafe to use but may become safe some day if we ever work over the use of globals and resolve I/O and memory crap
+void S_UpdateMultiThreadedNotSafeDoNotUse (double frametime, vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
+{
+	s_threadcontext_t ctx;
+
+	ctx.frametime = frametime;
+
+	VectorCopy2 (ctx.origin, origin);
+	VectorCopy2 (ctx.forward, forward);
+	VectorCopy2 (ctx.right, right);
+	VectorCopy2 (ctx.up, up);
+
+	QueueUserWorkItem (S_UpdateThread, &ctx, WT_EXECUTEDEFAULT);
+}
+
+
 void GetSoundtime (void)
 {
 	int		samplepos;
@@ -863,7 +811,8 @@ void GetSoundtime (void)
 	static	int		oldsamplepos;
 	int		fullsamples;
 
-	fullsamples = shm->samples / shm->channels;
+	// 2 channels
+	fullsamples = shm->samples >> 1;
 
 	// it is possible to miscount buffers if it has wrapped twice between
 	// calls to S_Update.  Oh well.
@@ -884,7 +833,8 @@ void GetSoundtime (void)
 
 	oldsamplepos = samplepos;
 
-	soundtime = buffers * fullsamples + samplepos / shm->channels;
+	// 2 channels
+	soundtime = buffers * fullsamples + (samplepos >> 1);
 }
 
 
@@ -912,7 +862,9 @@ void S_Update_ (void)
 
 	// mix ahead of current position
 	endtime = soundtime + _snd_mixahead.value * shm->speed;
-	samps = shm->samples >> (shm->channels - 1);
+
+	// 2 channels
+	samps = shm->samples >> 1;
 
 	if (endtime - soundtime > samps)
 		endtime = soundtime + samps;
@@ -993,8 +945,7 @@ void S_PlayVol (void)
 			strcpy (name, Cmd_Argv (i));
 			strcat (name, ".wav");
 		}
-		else
-			strcpy (name, Cmd_Argv (i));
+		else strcpy (name, Cmd_Argv (i));
 
 		sfx = S_PrecacheSound (name);
 		vol = atof (Cmd_Argv (i + 1));
@@ -1049,7 +1000,7 @@ void S_LocalSound (char *sound)
 		if (!_stricmp (sound, sfx->name))
 		{
 			// play the sound we got
-			S_PlaySoundFromBuffer (cl.viewentity, -1, sfx, vec3_origin, 1, 1);
+			S_StartSound (cl.viewentity, -1, sfx, vec3_origin, 1, 1);
 			return;
 		}
 	}
@@ -1058,7 +1009,7 @@ void S_LocalSound (char *sound)
 	if ((sfx = S_PrecacheSound (sound)) != NULL)
 	{
 		// play the sound we got
-		S_PlaySoundFromBuffer (cl.viewentity, -1, sfx, vec3_origin, 1, 1);
+		S_StartSound (cl.viewentity, -1, sfx, vec3_origin, 1, 1);
 	}
 	else Con_Printf ("S_LocalSound: can't cache %s\n", sound);
 }

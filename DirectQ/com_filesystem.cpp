@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <shlwapi.h>
 #pragma comment (lib, "shlwapi.lib")
 
+#include <io.h>
+
 int COM_ListSortFunc (const void *a, const void *b);
 
 void Host_WriteConfiguration (void);
@@ -268,7 +270,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 				if (_stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
-				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
+				fl[len] = (char *) MainHunk->Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
 				strcpy (fl[len++], &pak->files[i].name[dirlen]);
 				fl[len] = NULL;
 			}
@@ -286,7 +288,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 				if (_stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
-				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
+				fl[len] = (char *) MainHunk->Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
 				strcpy (fl[len++], &pak->files[i].name[dirlen]);
 				fl[len] = NULL;
 			}
@@ -328,12 +330,12 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 				if (flags & PREPEND_PATH)
 				{
 					int itemlen = strlen (FindFileData.cFileName) + strlen (search->filename) + strlen (basedir) + 3;
-					fl[len] = (char *) Zone_Alloc (itemlen);
+					fl[len] = (char *) MainHunk->Alloc (itemlen);
 					sprintf (fl[len++], "%s\\%s%s", search->filename, basedir, FindFileData.cFileName);
 				}
 				else
 				{
-					fl[len] = (char *) Zone_Alloc (strlen (FindFileData.cFileName) + 1);
+					fl[len] = (char *) MainHunk->Alloc (strlen (FindFileData.cFileName) + 1);
 					strcpy (fl[len++], FindFileData.cFileName);
 				}
 
@@ -347,6 +349,13 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 
 	// sort the list unless there is no list or we've specified not to sort it
 	if (len && !(flags & NO_SORT_RESULT)) qsort (fl, len, sizeof (char *), COM_ListSortFunc);
+
+	if (len)
+	{
+		// move from scratch to zone as actually attempting to access these files may use scratch which will crash the engine
+		FileList[0] = (char **) MainHunk->Alloc (len * sizeof (char **));
+		memcpy (FileList[0], scratchbuf, len * sizeof (char **));
+	}
 
 	// return how many we got
 	return len;
@@ -470,6 +479,12 @@ done:;
 
 HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 {
+	// (note - using scratchbuf is potentially unsafe here as it may be used for other stuff
+	// further up the call stack (map list enumeration was using it which caused crashes))
+	// it is expected that the caller will manage hunk usage here
+	const int maxbytestoread = 65536;
+	byte *unztemp = (byte *) MainHunk->Alloc (maxbytestoread);
+
 	// initial scan ensures the file is present before opening the zip (perf)
 	for (int i = 0; i < pk3->numfiles; i++)
 	{
@@ -507,8 +522,6 @@ HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 						if (!_stricmp (filename_inzip, filename))
 						{
 							// got it, so unzip it to the temp folder
-							byte *unztemp = (byte *) scratchbuf;
-
 							HANDLE pk3handle = COM_MakeTempFile (filename);
 
 							// didn't create it successfully
@@ -517,7 +530,7 @@ HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 							for (;;)
 							{
 								// read in SCRATCHBUF_SIZE blocks
-								int bytesread = unzReadCurrentFile (uf, unztemp, SCRATCHBUF_SIZE);
+								int bytesread = unzReadCurrentFile (uf, unztemp, maxbytestoread);
 
 								if (bytesread < 0)
 								{
@@ -632,6 +645,15 @@ int COM_FOpenFile (char *filename, void *hf)
 	// so that we can confirm if it's REALLY an MDL... grrrr...
 	bool checkmdl = false;
 
+	// a mod exists that does something evil - it includes a config.cfg and autoexec.cfg in it's pak file that overwrites the player's settings.
+	// let's not allow that to happen.
+	bool allowpak = true;
+
+	// prevent mods from overwriting player settings
+	if (!_stricmp (filename, "config.cfg")) allowpak = false;
+	if (!_stricmp (filename, "directq.cfg")) allowpak = false;
+	if (!_stricmp (filename, "autoexec.cfg")) allowpak = false;
+
 	for (int i = strlen (filename); i; i--)
 	{
 		if (!_stricmp (&filename[i], ".mdl"))
@@ -651,6 +673,9 @@ int COM_FOpenFile (char *filename, void *hf)
 	{
 		// ensure...
 		if (*hFile != INVALID_HANDLE_VALUE) COM_FCloseFile (hFile);
+
+		// refuse to load these files from a PAK
+		if ((search->pack || search->pk3) && !allowpak) continue;
 
 		*hFile = INVALID_HANDLE_VALUE;
 		com_filesize = -1;
@@ -698,7 +723,9 @@ int COM_FOpenFile (char *filename, void *hf)
 		}
 		else if (search->pk3)
 		{
+			int hunkmark = MainHunk->GetLowMark ();
 			HANDLE pk3handle = COM_UnzipPK3FileToTemp (search->pk3, filename);
+			MainHunk->FreeToLowMark (hunkmark);
 
 			if (pk3handle != INVALID_HANDLE_VALUE)
 			{
@@ -721,7 +748,10 @@ int COM_FOpenFile (char *filename, void *hf)
 			char netpath[MAX_PATH];
 
 			// check for a file in the directory tree
-			_snprintf (netpath, 128, "%s/%s", search->filename, filename);
+			_snprintf (netpath, 256, "%s/%s", search->filename, filename);
+
+			// quick check
+			if (_access (netpath, 04) == -1) continue;
 
 			// note - we need to share read access because e.g. a demo could result in 2 simultaneous
 			// reads, one for the .dem file and one for a .bsp file
@@ -883,8 +913,14 @@ pack_t *COM_LoadPackFile (char *packfile)
 }
 
 
+// runtime toggleable com_multiuser can put the engine into an infinite loop if cfg settings
+// send it ping-ponging back and forth between on and off so we do it as a cmdline instead
+void COM_CheckMultiUser (void);
+
 void COM_InitFilesystem (void)
 {
+	COM_CheckMultiUser ();
+
 	// check for expansion packs
 	// (these are only checked at startup as the player might want to switch them off during gameplay; otherwise
 	// they would be enforced on always)
@@ -1032,6 +1068,57 @@ void COM_ValidateUserSettableDir (cvar_t *var)
 	{
 		Con_Printf ("Resetting to default \"%s\"\n", var->defaultvalue);
 		Cvar_Set (var, var->defaultvalue);
+	}
+}
+
+
+void COM_ValidatePaths (char **paths)
+{
+	// PathIsDirectory
+	for (int i = 0; ; i++)
+	{
+		if (!paths[i]) break;
+		if (!paths[i][0]) continue;
+
+		// so that we don't need to text this every time
+		int len = strlen (paths[i]);
+		bool found = false;
+
+		for (searchpath_t *search = com_searchpaths; search; search = search->next)
+		{
+			if (search->pack)
+			{
+				pack_t *pak = search->pack;
+
+				for (int j = 0; j < pak->numfiles; j++)
+				{
+					if (!_strnicmp (pak->files[j].name, paths[i], len))
+					{
+						found = true;
+						break;
+					}
+				}
+			}
+			else if (search->pk3)
+			{
+				pk3_t *pak = search->pk3;
+
+				for (int j = 0; j < pak->numfiles; j++)
+				{
+					if (!_strnicmp (pak->files[j].name, paths[i], len))
+					{
+						found = true;
+						break;
+					}
+				}
+			}
+			else if (PathIsDirectory (va ("%s/%s", search->filename, paths[i])))
+				found = true;
+
+			if (found) break;
+		}
+
+		if (!found) paths[i][0] = 0;
 	}
 }
 

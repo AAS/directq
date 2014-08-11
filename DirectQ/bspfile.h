@@ -58,10 +58,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define PR_BSPVERSION	28	// pre-release maps
 #define Q1_BSPVERSION	29	// final release maps
+#define BSPVERSIONRMQ	(('B' << 24) | ('S' << 16) | ('P' << 8) | '2')
 
 #define	TOOLVERSION	2
 
-typedef struct
+typedef struct lump_s
 {
 	int		fileofs, filelen;
 } lump_t;
@@ -84,7 +85,7 @@ typedef struct
 
 #define	HEADER_LUMPS	15
 
-typedef struct
+typedef struct dmodel_s
 {
 	float		mins[3], maxs[3];
 	float		origin[3];
@@ -93,13 +94,13 @@ typedef struct
 	int			firstface, numfaces;
 } dmodel_t;
 
-typedef struct
+typedef struct dheader_s
 {
 	int			version;
 	lump_t		lumps[HEADER_LUMPS];
 } dheader_t;
 
-typedef struct
+typedef struct dmiptexlump_s
 {
 	int			nummiptex;
 	int			dataofs[4];		// [nummiptex]
@@ -131,7 +132,7 @@ typedef struct dvertex_s
 #define	PLANE_ANYY		4
 #define	PLANE_ANYZ		5
 
-typedef struct
+typedef struct dplane_s
 {
 	float	normal[3];
 	float	dist;
@@ -158,7 +159,7 @@ typedef struct
 
 
 // !!! if this is changed, it must be changed in asm_i386.h too !!!
-typedef struct
+typedef struct dnode_s
 {
 	int			planenum;
 	short		children[2];	// negative numbers are -(leafs+1), not nodes
@@ -168,11 +169,27 @@ typedef struct
 	unsigned short	numfaces;	// counting both sides
 } dnode_t;
 
+typedef struct dnode29a_s
+{
+	int			planenum;
+	int			children[2];	// negative numbers are -(leafs+1), not nodes
+	short		mins[3];		// for sphere culling
+	short		maxs[3];
+	unsigned int	firstface;
+	unsigned int	numfaces;	// counting both sides
+} dnode29a_t;
+
 typedef struct dclipnode_s
 {
 	int			planenum;
 	short		children[2];	// negative numbers are contents
 } dclipnode_t;
+
+typedef struct dclipnode29a_s
+{
+	int			planenum;
+	int			children[2];	// negative numbers are contents
+} dclipnode29a_t;
 
 
 typedef struct texinfo_s
@@ -185,14 +202,19 @@ typedef struct texinfo_s
 
 // note that edge 0 is never used, because negative edge nums are used for
 // counterclockwise use of the edge in a face
-typedef struct
+typedef struct dedge_s
 {
 	unsigned short	v[2];		// vertex numbers
 } dedge_t;
 
-#define	MAXLIGHTMAPS	4
+typedef struct dedge29a_s
+{
+	unsigned int	v[2];		// vertex numbers
+} dedge29a_t;
 
-typedef struct
+#define	MAX_SURFACE_STYLES	4
+
+typedef struct dface_s
 {
 	short		planenum;
 	short		side;
@@ -202,10 +224,24 @@ typedef struct
 	short		texinfo;
 
 	// lighting info
-	byte		styles[MAXLIGHTMAPS];
+	byte		styles[MAX_SURFACE_STYLES];
 	int			lightofs;		// start of [numstyles*surfsize] samples
 } dface_t;
 
+
+typedef struct dface29a_s
+{
+	int			planenum;
+	int			side;
+
+	int			firstedge;		// we must support > 64k edges
+	int			numedges;
+	int			texinfo;
+
+	// lighting info
+	byte		styles[MAX_SURFACE_STYLES];
+	int			lightofs;		// start of [numstyles*surfsize] samples
+} dface29a_t;
 
 
 #define	AMBIENT_WATER	0
@@ -217,7 +253,7 @@ typedef struct
 
 // leaf 0 is the generic CONTENTS_SOLID leaf, used for all solid areas
 // all other leafs need visibility info
-typedef struct
+typedef struct dleaf_s
 {
 	int			contents;
 	int			visofs;				// -1 = no visibility info
@@ -232,12 +268,21 @@ typedef struct
 } dleaf_t;
 
 
+
+typedef struct dleaf29a_s
+{
+	int			contents;
+	int			visofs;				// -1 = no visibility info
+
+	short		mins[3];			// for frustum culling
+	short		maxs[3];
+
+	unsigned int		firstmarksurface;
+	unsigned int		nummarksurfaces;
+
+	byte		ambient_level[NUM_AMBIENTS];
+} dleaf29a_t;
+
 //============================================================================
-
-
-// bspfile structs
-extern dnode_t *dnodes;
-extern dleaf_t *dleafs;
-extern dplane_t *dplanes;
 
 

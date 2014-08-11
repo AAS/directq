@@ -136,8 +136,8 @@ void SV_InitBoxHull (void)
 		box_clipnodes[i].children[side] = CONTENTS_EMPTY;
 
 		if (i != 5)
-			box_clipnodes[i].children[side^1] = i + 1;
-		else box_clipnodes[i].children[side^1] = CONTENTS_SOLID;
+			box_clipnodes[i].children[side ^ 1] = i + 1;
+		else box_clipnodes[i].children[side ^ 1] = CONTENTS_SOLID;
 
 		box_planes[i].type = i >> 1;
 		box_planes[i].normal[i >> 1] = 1;
@@ -350,7 +350,7 @@ loc0:;
 		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER) continue;
 
 		if (ent->v.absmin[0] > touch->v.absmax[0] || ent->v.absmin[1] > touch->v.absmax[1] || ent->v.absmin[2] > touch->v.absmax[2] ||
-				ent->v.absmax[0] < touch->v.absmin[0] || ent->v.absmax[1] < touch->v.absmin[1] || ent->v.absmax[2] < touch->v.absmin[2])
+			ent->v.absmax[0] < touch->v.absmin[0] || ent->v.absmax[1] < touch->v.absmin[1] || ent->v.absmax[2] < touch->v.absmin[2])
 			continue;
 
 		list[touched++] = touch;
@@ -405,12 +405,11 @@ loc0:;
 
 void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins, float *rmaxs)
 {
-	int i, j;
 	vec3_t bbox[8];
 	avectors_t av;
 
 	// compute a full bounding box
-	for (i = 0; i < 8; i++)
+	for (int i = 0; i < 8; i++)
 	{
 		bbox[i][0] = (i & 1) ? bbmin[0] : bbmax[0];
 		bbox[i][1] = (i & 2) ? bbmin[1] : bbmax[1];
@@ -421,11 +420,10 @@ void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins
 	AngleVectors (ent->v.angles, &av);
 
 	// compute the rotated bbox corners
-	rmins[0] = rmins[1] = rmins[2] = 9999999;
-	rmaxs[0] = rmaxs[1] = rmaxs[2] = -9999999;
+	Mod_ClearBoundingBox (rmins, rmaxs);
 
 	// and rotate the bounding box
-	for (i = 0; i < 8; i++)
+	for (int i = 0; i < 8; i++)
 	{
 		vec3_t tmp;
 
@@ -436,25 +434,20 @@ void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins
 		bbox[i][2] = DotProduct (av.up, tmp);
 
 		// and convert them to mins and maxs
-		for (j = 0; j < 3; j++)
-		{
-			if (bbox[i][j] < rmins[j]) rmins[j] = bbox[i][j];
-			if (bbox[i][j] > rmaxs[j]) rmaxs[j] = bbox[i][j];
-		}
+		Mod_AccumulateBox (rmins, rmaxs, bbox[i]);
 	}
 }
 
 
 void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 {
-	int i, j;
 	float mins[3];
 	float maxs[3];
 	vec3_t bbox[8];
 	avectors_t av;
 
 	// compute a full bounding box
-	for (i = 0; i < 8; i++)
+	for (int i = 0; i < 8; i++)
 	{
 		bbox[i][0] = (i & 1) ? ent->v.mins[0] : ent->v.maxs[0];
 		bbox[i][1] = (i & 2) ? ent->v.mins[1] : ent->v.maxs[1];
@@ -465,11 +458,10 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 	AngleVectors (ent->v.angles, &av);
 
 	// compute the rotated bbox corners
-	mins[0] = mins[1] = mins[2] = 9999999;
-	maxs[0] = maxs[1] = maxs[2] = -9999999;
+	Mod_ClearBoundingBox (mins, maxs);
 
 	// and rotate the bounding box
-	for (i = 0; i < 8; i++)
+	for (int i = 0; i < 8; i++)
 	{
 		vec3_t tmp;
 
@@ -480,11 +472,7 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 		bbox[i][2] = DotProduct (av.up, tmp);
 
 		// and convert them to mins and maxs
-		for (j = 0; j < 3; j++)
-		{
-			if (bbox[i][j] < mins[j]) mins[j] = bbox[i][j];
-			if (bbox[i][j] > maxs[j]) maxs[j] = bbox[i][j];
-		}
+		Mod_AccumulateBox (mins, maxs, bbox[i]);
 	}
 
 	// translate the bbox to it's final position at the entity origin
@@ -497,44 +485,28 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 
 void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node)
 {
-LOC0:;
-	if (node->contents == CONTENTS_SOLID)
-		return;
+	if (node->contents == CONTENTS_SOLID) return;
 
 	// add an efrag if the node is a leaf
 	if (node->contents < 0)
 	{
-		if (ent->num_leafs == MAX_ENT_LEAFS)
-			return;
+		mleaf_t *leaf = (mleaf_t *) node;
 
-		int leafnum = ((mleaf_t *) node) - sv.worldmodel->brushhdr->leafs - 1;
+		if (ent->num_leafs < MAX_ENT_LEAFS)
+		{
+			ent->leafnums[ent->num_leafs] = ((mleaf_t *) node) - sv.worldmodel->brushhdr->leafs - 1;
+			ent->num_leafs++;
+		}
 
-		ent->leafnums[ent->num_leafs] = leafnum;
-		ent->num_leafs++;
 		return;
 	}
 
-	// NODE_MIXED
-	mplane_t *splitplane = node->plane;
-	int sides = BOX_ON_PLANE_SIDE (ent->v.absmin, ent->v.absmax, splitplane);
+	// split on this plane
+	int sides = SphereOnPlaneSide (ent->bsphere, ent->bsphere[3], node->plane);
 
 	// recurse down the contacted sides
-	if (sides & 1)
-	{
-		if (!(sides & 2))
-		{
-			node = node->children[0];
-			goto LOC0;
-		}
-		else SV_FindTouchedLeafs (ent, node->children[0]);
-	}
-
-	if (sides & 2)
-	{
-		// the compiler should just optimize this out but oh well
-		node = node->children[1];
-		goto LOC0;
-	}
+	if (sides & 1) SV_FindTouchedLeafs (ent, node->children[0]);
+	if (sides & 2) SV_FindTouchedLeafs (ent, node->children[1]);
 }
 
 
@@ -585,13 +557,16 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 
 	// link to PVS leafs (this may be inherited across multiple frames...)
 	if (ent->v.modelindex)
+	{
+		Mod_SphereFromBounds (ent->v.absmin, ent->v.absmax, ent->bsphere);
 		SV_FindTouchedLeafs (ent, sv.worldmodel->brushhdr->nodes);
+	}
 
 	if (ent->v.solid == SOLID_NOT)
 		return;
 
 	// find the first node that the ent's box crosses
-	areanode_t	*node = sv_areanodes;
+	areanode_t *node = sv_areanodes;
 
 	while (1)
 	{
@@ -712,12 +687,10 @@ SV_RecursiveHullCheck
 */
 bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace)
 {
-#if 1
 	mclipnode_t	*node;
 	mplane_t	*plane;
 	float		t1, t2;
 	float		frac;
-	int			i;
 	vec3_t		mid;
 	int			side;
 	float		midf;
@@ -742,6 +715,8 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 		return true;		// empty
 	}
 
+	if (num < hull->firstclipnode) num += 65536;
+
 	if (num < hull->firstclipnode || num > hull->lastclipnode)
 		Sys_Error ("SV_RecursiveHullCheck: bad node number");
 
@@ -765,163 +740,27 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 
 	// put the crosspoint DIST_EPSILON pixels on the near side
 	if (t1 < 0)
-		frac = (t1 + DIST_EPSILON)/(t1-t2);
-	else frac = (t1 - DIST_EPSILON)/(t1-t2);
-
-	if (frac < 0) frac = 0;
-	if (frac > 1) frac = 1;
-
-	midf = p1f + (p2f - p1f)*frac;
-	for (i=0 ; i<3 ; i++)
-		mid[i] = p1[i] + frac*(p2[i] - p1[i]);
-
-	side = (t1 < 0);
-
-	// move up to the node
-	if (!SV_RecursiveHullCheck (hull, node->children[side], p1f, midf, p1, mid, trace) )
-		return false;
-
-	// go past the node
-	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
-		return SV_RecursiveHullCheck (hull, node->children[side^1], midf, p2f, mid, p2, trace);
-
-	if (trace->allsolid)
-		return false;		// never got out of the solid area
-
-	// the other side of the node is solid, this is the impact point
-	if (!side)
-	{
-		VectorCopy (plane->normal, trace->plane.normal);
-		trace->plane.dist = plane->dist;
-	}
-	else
-	{
-		VectorSubtract (vec3_origin, plane->normal, trace->plane.normal);
-		trace->plane.dist = -plane->dist;
-	}
-
-	while (SV_HullPointContents (hull, hull->firstclipnode, mid) == CONTENTS_SOLID)
-	{
-		// shouldn't really happen, but does occasionally
-		frac -= 0.1;
-
-		if (frac < 0)
-		{
-			trace->fraction = midf;
-			VectorCopy (mid, trace->endpos);
-			Con_DPrintf ("backup past 0\n");
-			return false;
-		}
-		midf = p1f + (p2f - p1f)*frac;
-		for (i=0 ; i<3 ; i++)
-			mid[i] = p1[i] + frac*(p2[i] - p1[i]);
-	}
-
-	trace->fraction = midf;
-	VectorCopy (mid, trace->endpos);
-
-	return false;
-#else
-	float		t1, t2;
-	float		frac;
-	int			i;
-	vec3_t		mid;
-
-loc0:;
-	// check for empty
-	if (num < 0)
-	{
-		if (num != CONTENTS_SOLID)
-		{
-			trace->allsolid = false;
-
-			if (num == CONTENTS_EMPTY)
-				trace->inopen = true;
-			else trace->inwater = true;
-		}
-		else trace->startsolid = true;
-
-		return true;		// empty
-	}
-
-	if (num < hull->firstclipnode || num > hull->lastclipnode)
-		Sys_Error ("SV_RecursiveHullCheck: bad node number");
-
-	// find the point distances
-	mclipnode_t	*node = hull->clipnodes + num;
-	mplane_t	*plane = hull->planes + node->planenum;
-
-	if (plane->type < 3)
-	{
-		t1 = p1[plane->type] - plane->dist;
-		t2 = p2[plane->type] - plane->dist;
-	}
-	else
-	{
-		t1 = DotProduct (plane->normal, p1) - plane->dist;
-		t2 = DotProduct (plane->normal, p2) - plane->dist;
-	}
-
-	// LordHavoc: recursion optimization
-	if (t1 >= 0 && t2 >= 0)
-	{
-		num = node->children[0];
-		goto loc0;
-	}
-
-	if (t1 < 0 && t2 < 0)
-	{
-		num = node->children[1];
-		goto loc0;
-	}
-
-	// restore the original trace
-	if (plane->type < 3)
-	{
-		t1 = p1[plane->type] - plane->dist;
-		t2 = p2[plane->type] - plane->dist;
-	}
-	else
-	{
-		t1 = DotProduct (plane->normal, p1) - plane->dist;
-		t2 = DotProduct (plane->normal, p2) - plane->dist;
-	}
-
-	// put the crosspoint DIST_EPSILON pixels on the near side
-	if (t1 < 0)
 		frac = (t1 + DIST_EPSILON) / (t1 - t2);
 	else frac = (t1 - DIST_EPSILON) / (t1 - t2);
 
 	if (frac < 0) frac = 0;
 	if (frac > 1) frac = 1;
 
-	float midf = p1f + (p2f - p1f) * frac;
+	midf = p1f + (p2f - p1f) * frac;
 
-	for (i = 0; i < 3; i++)
-		mid[i] = p1[i] + frac * (p2[i] - p1[i]);
+	mid[0] = p1[0] + frac * (p2[0] - p1[0]);
+	mid[1] = p1[1] + frac * (p2[1] - p1[1]);
+	mid[2] = p1[2] + frac * (p2[2] - p1[2]);
 
-	int side = (t1 < 0);
+	side = (t1 < 0);
 
 	// move up to the node
 	if (!SV_RecursiveHullCheck (hull, node->children[side], p1f, midf, p1, mid, trace))
 		return false;
 
 	// go past the node
-#if 0
-	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
-		return SV_RecursiveHullCheck (hull, node->children[side^1], midf, p2f, mid, p2, trace);
-#else
-	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
-	{
-		// Con_Printf ("go past the node\n");
-		num = node->children[side ^ 1];
-		p1f = midf;
-		VectorCopy2 (p1, mid);
-		goto loc0;
-
-		//return SV_RecursiveHullCheck (hull, node->children[side ^ 1], midf, p2f, mid, p2, trace);
-	}
-#endif
+	if (SV_HullPointContents (hull, node->children[side ^ 1], mid) != CONTENTS_SOLID)
+		return SV_RecursiveHullCheck (hull, node->children[side ^ 1], midf, p2f, mid, p2, trace);
 
 	if (trace->allsolid)
 		return false;		// never got out of the solid area
@@ -953,15 +792,15 @@ loc0:;
 
 		midf = p1f + (p2f - p1f) * frac;
 
-		for (i = 0; i < 3; i++)
-			mid[i] = p1[i] + frac * (p2[i] - p1[i]);
+		mid[0] = p1[0] + frac * (p2[0] - p1[0]);
+		mid[1] = p1[1] + frac * (p2[1] - p1[1]);
+		mid[2] = p1[2] + frac * (p2[2] - p1[2]);
 	}
 
 	trace->fraction = midf;
 	VectorCopy (mid, trace->endpos);
 
 	return false;
-#endif
 }
 
 
@@ -1070,6 +909,7 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 	edict_t		*touch;
 	trace_t		trace;
 
+loc0:;
 	// touch linked edicts
 	for (l = node->solid_edicts.next; l != &node->solid_edicts; l = next)
 	{
@@ -1092,15 +932,6 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 		{
 			if (PROG_TO_EDICT (touch->v.owner) == clip->passedict) continue;	// don't clip against own missiles
 			if (PROG_TO_EDICT (clip->passedict->v.owner) == touch) continue;	// don't clip against owner
-
-			if (kurok)
-			{
-				// Preach - monsterclip
-		 		if (((int) touch->v.flags & FL_MONSTERCLIP) && !((int) clip->passedict->v.flags & FL_MONSTER))
-					continue;	// don't clip if touched entity is monsterclip and you aren't a monster
-				if (((int) clip->passedict->v.flags & FL_MONSTERCLIP) && !((int) touch->v.flags & FL_MONSTER))
-					continue;	// don't clip if you are monsterclip and touched entity aren't a monster
-			}
 		}
 
 		if ((int) touch->v.flags & FL_MONSTER)
@@ -1125,9 +956,22 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 	// recurse down both sides
 	if (node->axis == -1) return;
 
-	if (clip->boxmaxs[node->axis] > node->dist) SV_ClipToLinks (node->children[0], clip);
+	//if (clip->boxmaxs[node->axis] > node->dist) SV_ClipToLinks (node->children[0], clip);
+	//if (clip->boxmins[node->axis] < node->dist) SV_ClipToLinks (node->children[1], clip);
 
-	if (clip->boxmins[node->axis] < node->dist) SV_ClipToLinks (node->children[1], clip);
+	if (clip->boxmaxs[node->axis] > node->dist)
+	{
+		if (clip->boxmins[node->axis] < node->dist)
+			SV_ClipToLinks(node->children[1], clip);
+
+		node = node->children[0];
+		goto loc0;
+	}
+	else if (clip->boxmins[node->axis] < node->dist)
+	{
+		node = node->children[1];
+		goto loc0;
+	}
 }
 
 

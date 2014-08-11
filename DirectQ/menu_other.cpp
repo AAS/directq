@@ -141,52 +141,6 @@ void Menu_ExitMenus (void)
 }
 
 
-void Menu_ToggleSimpleMenus (void)
-{
-	if (!menu_advanced.integer)
-	{
-		menu_Main.ShowMenuOptions (MENU_TAG_SIMPLE);
-		menu_Main.HideMenuOptions (MENU_TAG_FULL);
-
-		menu_Singleplayer.ShowMenuOptions (MENU_TAG_SIMPLE);
-		menu_Singleplayer.HideMenuOptions (MENU_TAG_FULL);
-
-		menu_Multiplayer.ShowMenuOptions (MENU_TAG_SIMPLE);
-		menu_Multiplayer.HideMenuOptions (MENU_TAG_FULL);
-
-		menu_Options.ShowMenuOptions (MENU_TAG_SIMPLE);
-		menu_Options.HideMenuOptions (MENU_TAG_FULL);
-
-		menu_Video.ShowMenuOptions (MENU_TAG_SIMPLE);
-		menu_Video.HideMenuOptions (MENU_TAG_FULL);
-	}
-	else
-	{
-		menu_Main.ShowMenuOptions (MENU_TAG_FULL);
-		menu_Main.HideMenuOptions (MENU_TAG_SIMPLE);
-
-		menu_Singleplayer.ShowMenuOptions (MENU_TAG_FULL);
-		menu_Singleplayer.HideMenuOptions (MENU_TAG_SIMPLE);
-
-		menu_Multiplayer.ShowMenuOptions (MENU_TAG_FULL);
-		menu_Multiplayer.HideMenuOptions (MENU_TAG_SIMPLE);
-
-		menu_Options.ShowMenuOptions (MENU_TAG_FULL);
-		menu_Options.HideMenuOptions (MENU_TAG_SIMPLE);
-
-		menu_Video.ShowMenuOptions (MENU_TAG_FULL);
-		menu_Video.HideMenuOptions (MENU_TAG_SIMPLE);
-	}
-}
-
-
-int Menu_MainCustomDraw (int y)
-{
-	Menu_ToggleSimpleMenus ();
-	return y;
-}
-
-
 void Menu_MainCustomEnter (void)
 {
 	m_save_demonum = cls.demonum;
@@ -211,7 +165,6 @@ void Menu_InitMainMenu (void)
 	extern qpic_t *gfx_mainmenu_lmp;
 	extern qpic_t *gfx_ttl_main_lmp;
 
-	menu_Main.AddOption (new CQMenuCustomDraw (Menu_MainCustomDraw));
 	menu_Main.AddOption (new CQMenuBanner (&gfx_ttl_main_lmp));
 	menu_Main.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Main.AddOption (new CQMenuCursorSubMenu (&menu_Singleplayer));
@@ -255,37 +208,42 @@ void Menu_OptionsGoToConsole (void)
 }
 
 
-char *key_bindnames[][2] =
+typedef struct keybind_s
 {
-	{"+attack", 		"Attack"},
-	{"impulse 10", 		"Next Weapon"},
-	{"impulse 12", 		"Previous Weapon"},
-	{"+jump", 			"Jump/Swim up"},
-	{"+forward", 		"Walk Forward"},
-	{"+back", 			"Backpedal"},
-	{"+left", 			"Turn Left"},
-	{"+right", 			"Turn Right"},
-	{"+speed", 			"Run"},
-	{"+moveleft", 		"Step Left"},
-	{"+moveright", 		"Step Right"},
-	{"+strafe", 		"Sidestep"},
-	{"centerview", 		"Center View"},
-	{"+mlook", 			"Mouse Look"},
-	{"+quickshot",		"Quick Shot"},
-	{"+quickgrenade",	"Quick Grenade"},
-	{"+quickrocket",	"Quick Rocket"},
-	{"+quickshaft",		"Quick Shaft"},
-	{"bestsafe",		"Best Safe Weapon"},
-	{"lastweapon",		"Last Weapon"},
+	char *cmd;
+	char *txt;
+	bool spaceafter;
+} keybind_t;
+
+
+keybind_t keybinds[] =
+{
+	// weapons
+	{"+attack", 		"Attack",			false},
+	{"impulse 10", 		"Next Weapon",		false},
+	{"impulse 12", 		"Previous Weapon",	true},
+	// movement
+	{"+forward", 		"Walk Forward",		false},
+	{"+back", 			"Backpedal",		false},
+	{"+left", 			"Turn Left",		false},
+	{"+right", 			"Turn Right",		true},
+	// strafing
+	{"+moveleft", 		"Step Left",		false},
+	{"+moveright", 		"Step Right",		true},
+	// modifier keys
+	{"+jump", 			"Jump/Swim up",		false},
+	{"+speed", 			"Run",				false},
+	{"+strafe", 		"Sidestep",			true},
+	// old non-freelook interface
+	{"+mlook", 			"Mouse Look",		false},
+	{"+lookup",			"Look Up",			false},
+	{"+lookdown",		"Look Down",		false},
+	{"centerview", 		"Center View",		false},
 };
 
 
 bool keybind_grab = false;
-
-#define	NUMBINDINGS		(sizeof (key_bindnames) / sizeof (key_bindnames[0]))
-
 int bind_cursor = 0;
-
 
 void Menu_FindKeybindingsForAction (char *action, int *twokeys)
 {
@@ -321,15 +279,15 @@ int Menu_KeybindingsCustomDraw (int y)
 
 	y += 30;
 
-	for (int i = 0; i < NUMBINDINGS; i++)
+	for (int i = 0; i < STRUCT_ARRAY_LENGTH (keybinds); i++)
 	{
 		// draw the current option highlight wider so that we have room for everything
 		if (i == bind_cursor) Menu_HighlightBar (-200, y, 400);
 
 		// action
-		Menu_Print (124 - strlen (key_bindnames[i][1]) * 8, y, key_bindnames[i][1]);
+		Menu_Print (124 - strlen (keybinds[i].txt) * 8, y, keybinds[i].txt);
 
-		Menu_FindKeybindingsForAction (key_bindnames[i][0], keys);
+		Menu_FindKeybindingsForAction (keybinds[i].cmd, keys);
 
 		if (keys[0] == -1)
 			Menu_Print (148, y, "(unbound)");
@@ -348,7 +306,12 @@ int Menu_KeybindingsCustomDraw (int y)
 		}
 
 		// next bind name
-		y += 15;
+		if (keybinds[i].spaceafter)
+		{
+			Menu_PrintCenter (y + 15, DIVIDER_LINE);
+			y += 30;
+		}
+		else y += 15;
 	}
 
 	return y;
@@ -390,7 +353,7 @@ void Menu_KeybindingsCustomKey (int key)
 
 			// set the new binding
 			char cmd[256];
-			_snprintf (cmd, 256, "bind \"%s\" \"%s\"\n", Key_KeynumToString (key), key_bindnames[bind_cursor][0]);
+			_snprintf (cmd, 256, "bind \"%s\" \"%s\"\n", Key_KeynumToString (key), keybinds[bind_cursor].cmd);
 			Cbuf_InsertText (cmd);
 		}
 
@@ -401,7 +364,7 @@ void Menu_KeybindingsCustomKey (int key)
 
 	// get keys for currently selected action
 	int keys[2];
-	Menu_FindKeybindingsForAction (key_bindnames[bind_cursor][0], keys);
+	Menu_FindKeybindingsForAction (keybinds[bind_cursor].cmd, keys);
 
 	switch (key)
 	{
@@ -412,14 +375,14 @@ void Menu_KeybindingsCustomKey (int key)
 	case K_UPARROW:
 		menu_soundlevel = m_sound_nav;
 
-		if ((--bind_cursor) < 0) bind_cursor = NUMBINDINGS - 1;
+		if ((--bind_cursor) < 0) bind_cursor = STRUCT_ARRAY_LENGTH (keybinds) - 1;
 
 		break;
 
 	case K_DOWNARROW:
 		menu_soundlevel = m_sound_nav;
 
-		if ((++bind_cursor) >= NUMBINDINGS) bind_cursor = 0;
+		if ((++bind_cursor) >= STRUCT_ARRAY_LENGTH (keybinds)) bind_cursor = 0;
 
 		break;
 
@@ -429,7 +392,7 @@ void Menu_KeybindingsCustomKey (int key)
 		keybind_grab = true;
 
 		// if two keys are bound we delete the first binding
-		if (keys[1] != -1) Menu_UnbindAction (key_bindnames[bind_cursor][0]);
+		if (keys[1] != -1) Menu_UnbindAction (keybinds[bind_cursor].cmd);
 
 		break;
 
@@ -495,7 +458,6 @@ bool IsGameDir (char *path)
 	if (CheckKnownContent (va ("%s/%s/progs/*.mdl", basedir, path))) return true;
 	if (CheckKnownContent (va ("%s/%s/*.pak", basedir, path))) return true;
 	if (CheckKnownContent (va ("%s/%s/*.pk3", basedir, path))) return true;
-	if (CheckKnownContent (va ("%s/%s/*.zip", basedir, path))) return true;
 
 	// some gamedirs are just used for keeping stuff separate
 	if (CheckKnownContent (va ("%s/%s/*.sav", basedir, path))) return true;
@@ -707,9 +669,6 @@ int Menu_ContentCustomDraw (int y)
 char *skywarpstyles[] = {"Simple", "Classic", NULL};
 
 // keep these consistent with the loader
-extern char *TextureExtensions[];
-extern char *sbdir[];
-extern char *suf[];
 char **skybox_menulist = NULL;
 int skybox_menunumber = 0;
 int old_skybox_menunumber = 0;
@@ -717,98 +676,6 @@ int old_skybox_menunumber = 0;
 void Menu_LoadAvailableSkyboxes (void)
 {
 	skybox_menulist = NULL;
-	int listlen = 0;
-	char **SkyboxList = NULL;
-
-	for (int i = 0;; i++)
-	{
-		if (!sbdir[i]) break;
-
-		for (int j = 0;; j++)
-		{
-			if (!TextureExtensions[j]) break;
-
-			// because we allow skyboxes components to be missing (crazy modders!) we need to check all 6 suffixes
-			for (int s = 0; s < 6; s++)
-			{
-				listlen = COM_BuildContentList (&SkyboxList, va ("%s/", sbdir[i]), va ("%s.%s", suf[s], TextureExtensions[j]));
-			}
-		}
-	}
-
-	// because we added each skybox component (to cover for crazy modders who leave one out) we now go
-	// through the list and remove duplicates, copying it into a second list as we go.  this is what we're reduced to. :(
-	// add 1 for NULL termination
-	char **NewSkyboxList = (char **) Zone_Alloc ((listlen + 1) * sizeof (char *));
-	NewSkyboxList[0] = NULL;
-	int newboxes = 0;
-
-	for (int i = 0; i < listlen; i++)
-	{
-		for (int j = strlen (SkyboxList[i]); j; j--)
-		{
-			if (SkyboxList[i][j] == '/') break;
-			if (SkyboxList[i][j] == '\\') break;
-
-			if (SkyboxList[i][j] == '.' && j > 2)
-			{
-				SkyboxList[i][j - 2] = 0;
-				break;
-			}
-		}
-
-		bool present = false;
-
-		for (int j = 0;; j++)
-		{
-			if (!NewSkyboxList[j]) break;
-
-			if (!_stricmp (NewSkyboxList[j], SkyboxList[i]))
-			{
-				present = true;
-				break;
-			}
-		}
-
-		if (!present)
-		{
-			NewSkyboxList[newboxes] = (char *) Zone_Alloc (strlen (SkyboxList[i]) + 1);
-			strcpy (NewSkyboxList[newboxes], SkyboxList[i]);
-			newboxes++;
-			NewSkyboxList[newboxes] = NULL;
-		}
-
-		Zone_Free (SkyboxList[i]);
-	}
-
-	listlen = newboxes;
-
-	// alloc a buffer for the menu list (add 1 to null term the list)
-	// and a second for the first item, which will be "no skybox"
-	skybox_menulist = (char **) GameZone->Alloc ((listlen + 2) * sizeof (char *));
-
-	// this is needed for cases where there are no skyboxes present
-	skybox_menulist[1] = NULL;
-
-	for (int i = 0; i < listlen; i++)
-	{
-		skybox_menulist[i + 1] = (char *) GameZone->Alloc (strlen (NewSkyboxList[i]) + 1);
-		strcpy (skybox_menulist[i + 1], NewSkyboxList[i]);
-
-		// it's the callers responsibility to free up the list generated by COM_BuildContentList
-		Zone_Free (NewSkyboxList[i]);
-
-		// always null term the next item to ensure that the menu list is null termed itself
-		skybox_menulist[i + 2] = NULL;
-	}
-
-	Zone_Free (NewSkyboxList);
-
-	// set up item 0 (ensure that it's name can't conflict with a valid name)
-	skybox_menulist[0] = (char *) GameZone->Alloc (20);
-	strcpy (skybox_menulist[0], "none/no skybox");
-
-	// new menu
 	skybox_menunumber = 0;
 	old_skybox_menunumber = 0;
 }
@@ -831,7 +698,7 @@ int hud_invshownum = 0;
 char *waterwarp_options[] = {"Off", "Classic", "Perspective", NULL};
 int waterwarp_num = 1;
 
-char *particle_options[] = {"Dots", "Squares", "Enhanced", NULL};
+char *particle_options[] = {"Dots", "Squares", NULL};
 int particle_num = 0;
 
 // the wording has been chosen to hint at the player that there is something more here...
@@ -945,7 +812,7 @@ void Menu_WarpCustomEnter (void)
 
 	GETCVAROPTION (hudstyle->integer, hudstyleselection, 0, 3);
 	GETCVAROPTION (r_waterwarp.integer, waterwarp_num, 0, 2);
-	GETCVAROPTION (r_particlestyle.integer, particle_num, 0, 3);
+	GETCVAROPTION (r_particlestyle.integer, particle_num, 0, 2);
 
 	// set correct flashblend mode
 	if (gl_flashblend.integer)
@@ -960,6 +827,7 @@ void Menu_WarpCustomEnter (void)
 		overbright_num = 1;
 	else overbright_num = 0;
 
+	/*
 	extern char CachedSkyBoxName[];
 
 	// find the current skybox
@@ -975,6 +843,7 @@ void Menu_WarpCustomEnter (void)
 			break;
 		}
 	}
+	*/
 }
 
 
@@ -982,16 +851,6 @@ void D3DSky_LoadSkyBox (char *basename, bool feedback);
 
 void Menu_WarpSkyBoxApply (void)
 {
-	if (skybox_menunumber)
-		D3DSky_LoadSkyBox (skybox_menulist[skybox_menunumber], true);
-	else
-	{
-		// item 0 is "no skybox"
-		D3DSky_LoadSkyBox (skybox_menulist[skybox_menunumber], false);
-		Con_Printf ("Skybox Unloaded\n");
-	}
-
-	old_skybox_menunumber = skybox_menunumber;
 }
 
 
@@ -999,9 +858,6 @@ int Menu_OptionsCustomDraw (int y)
 {
 	// save out menu highlight colour
 	Cvar_Set (&menu_fillcolor, menu_fillcolor.integer);
-
-	// toggle simplemenus option
-	Menu_ToggleSimpleMenus ();
 
 	return y;
 }
@@ -1416,20 +1272,15 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 	if (!data) return;
 
 	// parse the opening brace
-	data = COM_Parse (data);
-
-	// likewise can never happen
-	if (!data) return;
+	if (!(data = COM_Parse (data))) return;
 
 	if (com_token[0] != '{') return;
 
 	while (1)
 	{
 		// parse the key
-		data = COM_Parse (data);
-
 		// there is no key (end of worldspawn)
-		if (!data) break;
+		if (!(data = COM_Parse (data))) break;
 
 		if (com_token[0] == '}') break;
 
@@ -1442,11 +1293,9 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 		while (key[strlen (key) - 1] == ' ') key[strlen (key) - 1] = 0;
 
 		// parse the value
-		data = COM_Parse (data);
-
 		// likewise should never happen (has already been successfully parsed server-side and any errors that
 		// were going to happen would have happened then; we only check to guard against pointer badness)
-		if (!data) return;
+		if (!(data = COM_Parse (data))) return;
 
 		// check the key for info we wanna cache - value is stored in com_token
 		if (!_stricmp (key, "message"))
@@ -1578,7 +1427,7 @@ bool ValidateMap (char *mapname, int itemnum)
 		return false;
 	}
 
-	if (bsphead.version != PR_BSPVERSION && bsphead.version != Q1_BSPVERSION)
+	if (bsphead.version != PR_BSPVERSION && bsphead.version != Q1_BSPVERSION && bsphead.version != BSPVERSIONRMQ)
 	{
 		// don't add maps with a bad version number to the list
 		COM_FCloseFile (&fh);
@@ -1642,6 +1491,7 @@ void Menu_MapsPopulate (void)
 	menu_mapslist = NULL;
 
 	char **MapList = NULL;
+	int hunkmark = MainHunk->GetLowMark ();
 	int listlen = COM_BuildContentList (&MapList, "maps/", ".bsp");
 
 	// set up the array for use
@@ -1657,10 +1507,9 @@ void Menu_MapsPopulate (void)
 			menu_mapslist[maplistlen].loaded = false;
 			maplistlen++;
 		}
-
-		// clear down the source item as we don't need it any more
-		Zone_Free (MapList[i]);
 	}
+
+	MainHunk->FreeToLowMark (hunkmark);
 
 	if (!maplistlen)
 	{
@@ -1732,6 +1581,7 @@ void Menu_DemoPopulate (void)
 	demolist = NULL;
 
 	char **alldemos = NULL;
+	int hunkmark = MainHunk->GetLowMark ();
 	int numdemos = COM_BuildContentList (&alldemos, "", ".dem");
 	demolist = (char **) GameZone->Alloc ((numdemos + 1) * sizeof (char *));
 
@@ -1754,10 +1604,11 @@ void Menu_DemoPopulate (void)
 			}
 
 			demolist[i + 1] = NULL;
-			Zone_Free (alldemos[i]);
 		}
 	}
 	else demolist[0] = NULL;
+
+	MainHunk->FreeToLowMark (hunkmark);
 
 	// set defaults
 	demonum = 0;

@@ -23,6 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "modelgen.h"
 #include "spritegn.h"
 
+#define AM_NOSHADOW			1
+#define AM_FULLBRIGHT		2
+#define AM_EYES				4
+#define AM_DRAWSHADOW		8
+#define AM_VIEWMODEL		16
+
 /*
 
 d*_t structures are on-disk representations
@@ -69,7 +75,7 @@ typedef struct mclipnode_s
 // !!! if this is changed, it must be changed in asm_i386.h too !!!
 typedef struct mplane_s
 {
-	vec3_t	normal;
+	float	normal[3];
 	float	dist;
 	byte	type;			// for texture axis selection and fast side tests
 	byte	signbits;		// signx + signy<<1 + signz<<1
@@ -86,8 +92,8 @@ typedef struct texture_s
 
 	float		size[2];
 
-	struct image_s *teximage;
-	struct image_s *lumaimage;
+	LPDIRECT3DTEXTURE9 teximage;
+	LPDIRECT3DTEXTURE9 lumaimage;
 
 	int			visframe;
 
@@ -118,7 +124,7 @@ typedef struct texture_s
 
 typedef struct medge_s
 {
-	unsigned short	v[2];
+	unsigned int	v[2];
 	unsigned int	cachededgeoffset;
 } medge_t;
 
@@ -196,7 +202,6 @@ typedef struct msurface_s
 
 	// rectangle specifying the surface lightmap
 	RECT		LightRect;
-	int			LightmapOffset;
 
 	// lighting info
 	int			dlightframe;
@@ -208,15 +213,15 @@ typedef struct msurface_s
 	// extents of the surf in world space
 	float		mins[3];
 	float		maxs[3];
+	float		sphere[4];
 
-	byte		styles[MAXLIGHTMAPS];
-	int			cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
-	int			numstyles;
+	byte		styles[MAX_SURFACE_STYLES];
+	int			cached_light[MAX_SURFACE_STYLES];	// values currently used in lightmap
 
-	byte		*samples[MAXLIGHTMAPS];		// [numstyles*surfsize]
+	byte		*samples;		// [numstyles*surfsize]
 
 	// for alpha sorting
-	float		midpoint[3];
+	D3DXVECTOR3		midpoint;
 } msurface_t;
 
 
@@ -227,6 +232,7 @@ typedef struct mnode_s
 	int			visframe;		// node needs to be traversed if current
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
+	float		sphere[4];
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -249,6 +255,7 @@ typedef struct mleaf_s
 	int			visframe;		// node needs to be traversed if current
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
+	float		sphere[4];
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -275,7 +282,9 @@ typedef struct
 	int			lastclipnode;
 	vec3_t		clip_mins;
 	vec3_t		clip_maxs;
+	float		sphere[4];
 } hull_t;
+
 
 /*
 ==============================================================================
@@ -293,7 +302,7 @@ typedef struct mspriteframe_s
 	int		height;
 	float	up, down, left, right;
 	float	s, t;
-	struct image_s *texture;
+	LPDIRECT3DTEXTURE9 texture;
 } mspriteframe_t;
 
 typedef struct
@@ -364,16 +373,17 @@ typedef struct aliasmesh_s
 
 typedef struct aliasskin_s
 {
-	struct image_s *cmapimage[4];	// player skins only
-	struct image_s *teximage[4];
-	struct image_s *lumaimage[4];
+	LPDIRECT3DTEXTURE9 cmapimage[4];	// player skins only
+	LPDIRECT3DTEXTURE9 teximage[4];
+	LPDIRECT3DTEXTURE9 lumaimage[4];
 } aliasskin_t;
 
 
 typedef struct aliasbbox_s
 {
-	float mins[3];
-	float maxs[3];
+	D3DXVECTOR3 mins;
+	D3DXVECTOR3 maxs;
+	float		sphere[4];
 } aliasbbox_t;
 
 
@@ -421,19 +431,33 @@ typedef struct aliashdr_s
 
 // Whole model
 
-typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
+typedef enum {mod_brush, mod_sprite, mod_alias, mod_iqm, mod_null} modtype_t;
 
-#define	EF_ROCKET	1			// leave a trail
-#define	EF_GRENADE	2			// leave a trail
-#define	EF_GIB		4			// leave a trail
-#define	EF_ROTATE	8			// rotate (bonus items)
-#define	EF_TRACER	16			// green split trail
-#define	EF_ZOMGIB	32			// small blood trail
-#define	EF_TRACER2	64			// orange split trail + rotate
-#define	EF_TRACER3	128			// purple trail
+#define	EF_ROCKET		1			// leave a trail
+#define	EF_GRENADE		2			// leave a trail
+#define	EF_GIB			4			// leave a trail
+#define	EF_ROTATE		8			// rotate (bonus items)
+#define	EF_WIZARDTRAIL	16			// green split trail
+#define	EF_ZOMGIB		32			// small blood trail
+#define	EF_KNIGHTTRAIL	64			// orange split trail + rotate
+#define	EF_VORETRAIL	128			// purple trail
 
 // mh - special flags
-#define EF_PLAYER	(1 << 21)
+#define EF_PLAYER			(1 << 21)
+
+// bad guy muzzle flashes
+#define EF_WIZARDFLASH		(1 << 22)
+#define EF_SHALRATHFLASH	(1 << 23)
+#define EF_SHAMBLERFLASH	(1 << 24)
+
+// generic flashes (the first 3 of these line up with the id bad guys)
+#define EF_GREENFLASH		(1 << 22)
+#define EF_PURPLEFLASH		(1 << 23)
+#define EF_BLUEFLASH		(1 << 24)
+#define EF_ORANGEFLASH		(1 << 25)
+#define EF_REDFLASH			(1 << 26)
+#define EF_YELLOWFLASH		(1 << 27)
+
 
 // prevent bmodels from picking up entity dlight effects
 #define MOD_WORLD	65536
@@ -476,9 +500,11 @@ typedef struct brushheader_s
 	byte		*lightdata;
 	char		*entities;
 
+	int			numedges;
+	medge_t		*edges;
+
 	// loaded directly from disk with no intermediate processing
 	dvertex_t	*dvertexes;
-	dedge_t		*dedges;
 	int			*dsurfedges;
 
 	int			numsurfvertexes;
@@ -489,6 +515,7 @@ typedef struct brushheader_s
 	// bounding box used for rendering with
 	float		bmins[3];
 	float		bmaxs[3];
+	float		sphere[4];
 } brushhdr_t;
 
 
@@ -507,11 +534,13 @@ typedef struct model_s
 	// alias models normally check this per frame rather than for the entire model;
 	// this is retained for compatibility with anything server-side that sill uses it
 	vec3_t		mins, maxs;
+	float		sphere[4];
 	float		radius;
 
 	// solid volume for clipping
 	bool	clipbox;
 	vec3_t	clipmins, clipmaxs;
+	float		clipsphere[4];
 
 	// brush/alias/sprite headers
 	// this gets a LOT of polluting data OUT of the model_t struct
@@ -521,6 +550,7 @@ typedef struct model_s
 	brushhdr_t	*brushhdr;
 	aliashdr_t	*aliashdr;
 	msprite_t	*spritehdr;
+	struct iqmdata_s *iqmheader;
 
 	// will be == d3d_RenderDef.RegistrationSequence is this model was touched on this map load
 	int RegistrationSequence;
@@ -540,6 +570,7 @@ extern model_t	**mod_known;
 extern int mod_numknown;
 
 mleaf_t *Mod_PointInLeaf (float *p, model_t *model);
+void Mod_SphereFromBounds (float *mins, float *maxs, float *sphere);
 byte	*Mod_LeafPVS (mleaf_t *leaf, model_t *model);
 byte *Mod_FatPVS (vec3_t org);
 

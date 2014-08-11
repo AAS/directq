@@ -341,13 +341,13 @@ public:
 
 		// remake quake compatibility
 		if (cl.stats[STAT_TOTALMONSTERS] == 0)
-			_snprintf (this->SaveInfo.kills, 64, "Kills:   %i", cl.stats[STAT_MONSTERS]);
-		else _snprintf (this->SaveInfo.kills, 64, "Kills:   %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
+			_snprintf (this->SaveInfo.kills, 64, "%i", cl.stats[STAT_MONSTERS]);
+		else _snprintf (this->SaveInfo.kills, 64, "%i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
 
 		// remake quake compatibility
 		if (cl.stats[STAT_TOTALSECRETS] == 0)
-			_snprintf (this->SaveInfo.secrets, 64, "Secrets: %i", cl.stats[STAT_SECRETS]);
-		else _snprintf (this->SaveInfo.secrets, 64, "Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+			_snprintf (this->SaveInfo.secrets, 64, "%i", cl.stats[STAT_SECRETS]);
+		else _snprintf (this->SaveInfo.secrets, 64, "%i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
 
 		this->SaveInfo.skill = (int) skill.value;
 

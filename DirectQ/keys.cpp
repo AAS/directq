@@ -31,9 +31,13 @@ key up events are sent even if in console mode
 #define		MAXCMDLINE	256
 #define		CMDLINES	256
 
+int Key_ModifyKey (int key);
+
 char	key_lines[CMDLINES][MAXCMDLINE];
 int		key_linepos;
 int		shift_down = false;
+int		ctrl_down = false;
+int		alt_down = false;
 int		key_lastpress;
 int		key_insert = 0;
 
@@ -248,7 +252,6 @@ extern char **skybox_menulist;
 extern char **demolist;
 extern char **saveloadlist;
 extern char *gamedirs[];
-extern char **d3d_TextureNames;
 
 
 typedef struct key_autotablist_s
@@ -426,9 +429,6 @@ void Key_Console (int key)
 		{
 			{"map ", spinbox_bsps},
 			{"changelevel ", spinbox_bsps},
-			{"loadsky ", skybox_menulist},
-			{"skybox ", skybox_menulist},
-			{"sky ", skybox_menulist},
 			{"playdemo ", demolist},
 			{"timedemo ", demolist},
 			{"save ", saveloadlist},
@@ -437,7 +437,6 @@ void Key_Console (int key)
 			{"gamedir ", gamedirs},
 			{"sv_protocol ", protolist},
 			{"gl_texturemode ", d3d_filtermodelist},
-			{"copytexture ", d3d_TextureNames},
 			{NULL, NULL}
 		};
 
@@ -687,8 +686,7 @@ void Key_Console (int key)
 		}
 	}
 
-	// non-printable
-	if ((key & 127) < 32) return;
+	if ((key = Key_ModifyKey (key)) == 0) return;
 
 	if (key_linepos < MAXCMDLINE - 1)
 	{
@@ -1110,8 +1108,9 @@ void Key_Event (int key, bool down)
 			Con_Printf ("%s is unbound, hit F4 to set.\n", Key_KeynumToString (key));
 	}
 
-	if (key == K_SHIFT)
-		shift_down = down;
+	if (key == K_SHIFT) shift_down = down;
+	if (key == K_ALT) alt_down = down;
+	if (key == K_CTRL) ctrl_down = down;
 
 	// handle escape specialy, so the user can never unbind it
 	if (key == K_ESCAPE)
@@ -1259,6 +1258,57 @@ void ClearAllStates (void)
 		key_repeats[i] = 0;
 	}
 
+	shift_down = false;
+	ctrl_down = false;
+	alt_down = false;
+
 	IN_ClearMouseState ();
+}
+
+
+int Key_ModifyKey (int key)
+{
+	// non-printable
+	bool passed = !((key & 127) < 32);
+
+	// Is either printable or printable if extended by CTRL or ALT sequence
+	if (ctrl_down)
+	{
+		if (key >= '0' && key <= '9')
+		{
+			key = key - '0' + 0x12;	// yellow number
+			passed = true;
+		}
+		else
+		{
+			switch (key)
+			{
+			case '[': key = 0x10; passed = true; break;
+			case ']': key = 0x11; passed = true; break;
+			case 'g': key = 0x86; passed = true; break;
+			case 'r': key = 0x87; passed = true; break;
+			case 'y': key = 0x88; passed = true; break;
+			case 'b': key = 0x89; passed = true; break;
+			case '(': key = 0x80; passed = true; break;
+			case '=': key = 0x81; passed = true; break;
+			case ')': key = 0x82; passed = true; break;
+			case 'a': key = 0x83; passed = true; break;
+			case '<': key = 0x1d; passed = true; break;
+			case '-': key = 0x1e; passed = true; break;
+			case '>': key = 0x1f; passed = true; break;
+			case ',': key = 0x1c; passed = true; break;
+			case '.': key = 0x9c; passed = true; break;
+			case 'B': key = 0x8b; passed = true; break;
+			case 'C': key = 0x8d; passed = true; break;
+			}
+		}
+	}
+
+	// bronzing
+	if (alt_down && passed) key |= 128;
+
+	if (!passed)
+		return 0;
+	else return key;
 }
 

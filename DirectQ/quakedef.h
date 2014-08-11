@@ -20,7 +20,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // quakedef.h -- primary header for client
 
 // defined as early as possible as it's needed in multiple headers
-#define	MAX_DLIGHTS		128
+#define	MAX_DLIGHTS		64
+
+#define STRUCT_ARRAY_LENGTH(sa) (sizeof (sa) / sizeof ((sa)[0]))
+
+// get rid of a lot of cruddy code
+void Mod_ClearBoundingBox (float *mins, float *maxs);
+void Mod_AccumulateBox (float *bbmins, float *bbmaxs, float *point);
+void Mod_AccumulateBox (float *bbmins, float *bbmaxs, float *pmins, float *pmaxs);
 
 // make qsort calls easier on the eye...
 typedef int (*sortfunc_t) (const void *, const void *);
@@ -40,6 +47,40 @@ typedef int (*sortfunc_t) (const void *, const void *);
 
 // likewise
 #include <dsound.h>
+
+
+// helpers for in-place transforms
+class QMATRIX : public D3DXMATRIX
+{
+public:
+	QMATRIX () {};
+	QMATRIX (float _11, float _12, float _13, float _14,
+			 float _21, float _22, float _23, float _24,
+			 float _31, float _32, float _33, float _34,
+			 float _41, float _42, float _43, float _44);
+	void LoadIdentity (void);
+	void Transpose (void);
+	void FixupRotation (void);
+	void Rotate (float *angles);
+	void Rotate (float a0, float a2, float a1);
+	void Translate (float x, float y, float z);
+	void Translate (float *xyz);
+	void Rotate (float x, float y, float z, float angle);
+	void YawPitchRoll (float y, float p, float r);
+	void SetFromYawPitchRoll (float y, float p, float r);
+	void ToVectors (float *forward, float *up, float *right);
+	void ToVectors (struct r_viewvecs_s *vecs);
+	void ExtractFrustum (struct mplane_s *f);
+	void Scale (float x, float y, float z);
+	void Scale (float *xyz);
+	void OrthoOffCenterRH (float l, float r, float b, float t, float zn, float zf);
+	void PerspectiveFovRH (float fovy, float Aspect, float zn, float zf);
+	void Projection (float fovx, float fovy, float zn, float zf);
+	void MultMatrix (D3DXMATRIX *in);
+	void LoadMatrix (D3DXMATRIX *in);
+	void TransformPoint (float *in, float *out);
+	static void UpdateMVP (QMATRIX *mvp, QMATRIX *m, QMATRIX *v, QMATRIX *p);
+};
 
 
 // disable unwanted warnings
@@ -101,15 +142,6 @@ typedef char quakepath[260];
 #define UNUSED(x)	(x = x)	// for pesky compiler / lint warnings
 
 #define MAX_NUM_ARGVS	50
-
-// up / down
-#define	PITCH	0
-
-// left / right
-#define	YAW		1
-
-// fall over
-#define	ROLL	2
 
 
 // max length of a quake game pathname
@@ -184,27 +216,6 @@ extern int		sv_max_datagram;	// is default MAX_DATAGRAM
 #define IT_SIGIL2               (1<<29)
 #define IT_SIGIL3               (1<<30)
 #define IT_SIGIL4               (1<<31)
-
-// kurok stuff
-#define KIT_SHELLS              128
-#define KIT_NAILS               256
-#define KIT_ROCKETS             512
-#define KIT_CELLS               1024
-#define KIT_AXE                 2048
-#define KIT_TEKBOW			    4096
-#define KIT_UZI					8192
-#define KIT_M99					16384
-#define KIT_EXTRAW1		        32768
-#define KIT_EXTRAW2		        65536
-#define KIT_ARMOR1              8388608
-#define KIT_ARMOR2              16777216
-#define KIT_ARMOR3              33554432
-#define KIT_50CAL		        67108864
-#define KIT_60CAL		        134217728
-#define KIT_EXTRA1			    268435456
-#define KIT_EXTRA2              536870912
-#define KIT_EXTRA3              1073741824
-#define KIT_SUPERHEALTH         2147483648
 
 //===========================================
 //rogue changed and added defines

@@ -51,14 +51,15 @@ extern int ed_gravity;
 #define GETEDICTFIELDVALUEFAST(ed, fieldoffset) ((fieldoffset) ? (eval_t *) ((byte *) &(ed)->v + (fieldoffset)) : NULL)
 
 // 16 is sufficient with the new bbox code; 32 is just for paranoia
-#define MAX_ENT_LEAFS	32
+// bumped to 64 for bounding spheres as they can enclose greater extents (tradeoff is that the test is faster)
+#define MAX_ENT_LEAFS	64
 
 typedef struct edict_s
 {
 	bool			free;
 	link_t			area;			// linked to a division node or leaf
 	int				num_leafs;
-	unsigned short	leafnums[MAX_ENT_LEAFS];
+	unsigned int	leafnums[MAX_ENT_LEAFS];	// BSP2 can have > 64k leafs
 	entity_state_t	baseline;
 	float			freetime;		// time when the object was freed
 	float			tracetimer;		// timer for cullentities tracing
@@ -66,6 +67,7 @@ typedef struct edict_s
 	bool			sendinterval;
 	int				ednum;
 	int				Prog;
+	float			bsphere[4];
 
 	// LordHavoc: for MOVETYPE_STEP interpolation
 	vec3_t		steporigin;

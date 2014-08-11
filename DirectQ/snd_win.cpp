@@ -22,11 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #pragma comment (lib, "dsound.lib")
 
-// 64K is > 1 second at 16-bit, 22050 Hz
-#define	WAV_BUFFERS				64
-#define	WAV_MASK				0x3F
-#define	WAV_BUFFER_SIZE			0x0400
-
 // 1 second at 16-bit stereo 44100hz
 #define SECONDARY_BUFFER_SIZE	0x100000
 
@@ -194,8 +189,6 @@ BOOL CALLBACK DSEnumCallback (LPGUID lpGuid, LPCSTR lpcstrDescription, LPCSTR lp
 			memcpy (&ds_BestGuid, lpGuid, sizeof (GUID));
 			ds_BestSampleRate = ds_FakeCaps.dwMaxSecondarySampleRate;
 			ds_BestBuffers = ds_FakeCaps.dwMaxHwMixingAllBuffers;
-
-			ds_Devices[ds_NumDevices];
 		}
 	}
 
@@ -221,13 +214,11 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	CoInitialize (NULL);
 
-	memset ( (void *) &sn, 0, sizeof (sn));
+	memset ((void *) &sn, 0, sizeof (sn));
 
 	shm = &sn;
 
 	// defaults
-	shm->channels = 2;
-	shm->samplebits = 16;
 	shm->speed = 11025;
 
 	// people like higher sampling rates even though Quake's resampling is actually lower quality...
@@ -254,7 +245,6 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	// qrack users expect this
 	if (COM_CheckParm ("-44khz")) shm->speed = 44100;
-
 	if (COM_CheckParm ("-22khz")) shm->speed = 22050;
 
 	// now we need to tidy up the speed as users may provide invalid values...
@@ -266,8 +256,8 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	memset (&format, 0, sizeof (format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
-	format.nChannels = shm->channels;
-	format.wBitsPerSample = shm->samplebits;
+	format.nChannels = 2;
+	format.wBitsPerSample = 16;
 	format.nSamplesPerSec = shm->speed;
 	format.nBlockAlign = format.nChannels * format.wBitsPerSample / 8;
 	format.cbSize = 0;
@@ -297,7 +287,6 @@ sndinitstat SNDDMA_InitDirect (void)
 	}
 
 	if (ds_device.integer < 0) Cvar_Set (&ds_device, 0.0f);
-
 	if (ds_device.integer >= MAX_DS_DEVICES) Cvar_Set (&ds_device, (float) (MAX_DS_DEVICES - 1));
 
 	if (!ds_Devices[ds_device.integer].Valid)
@@ -327,13 +316,13 @@ sndinitstat SNDDMA_InitDirect (void)
 		}
 
 		int MBReturn = MessageBox
-					   (
-						   NULL,
-						   "The sound hardware is in use by another Application.\n\n"
-						   "Select Retry to try to start sound again or Cancel to run Quake with no sound.",
-						   "Sound not available",
-						   MB_RETRYCANCEL | MB_SETFOREGROUND | MB_ICONEXCLAMATION
-					   );
+		(
+			NULL,
+			"The sound hardware is in use by another Application.\n\n"
+			"Select Retry to try to start sound again or Cancel to run Quake with no sound.",
+			"Sound not available",
+			MB_RETRYCANCEL | MB_SETFOREGROUND | MB_ICONEXCLAMATION
+		);
 
 		if (MBReturn != IDRETRY)
 		{
@@ -356,7 +345,6 @@ sndinitstat SNDDMA_InitDirect (void)
 	else
 	{
 		if (ds_DeviceCaps.dwFlags & DSCAPS_CERTIFIED) Con_SafePrintf ("Using Certified Sound Device\n");
-
 		if (ds_DeviceCaps.dwFlags & DSCAPS_EMULDRIVER) Con_SafePrintf ("Using Emulated Sound Device\n");
 	}
 
@@ -374,7 +362,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	// create the secondary buffer we'll actually work with
 	memset (&ds_BufferDesc, 0, sizeof (ds_BufferDesc));
 	ds_BufferDesc.dwSize = sizeof (DSBUFFERDESC);
-	ds_BufferDesc.dwFlags = DSBCAPS_CTRLFREQUENCY | DSBCAPS_LOCSOFTWARE | DSBCAPS_CTRLFX;
+	ds_BufferDesc.dwFlags = DSBCAPS_LOCSOFTWARE;
 	ds_BufferDesc.dwBufferBytes = SECONDARY_BUFFER_SIZE;
 	ds_BufferDesc.lpwfxFormat = &format;
 
@@ -406,8 +394,6 @@ sndinitstat SNDDMA_InitDirect (void)
 	ds_LegacyBuffer->Release ();
 
 	// now update it with what we got
-	shm->channels = format.nChannels;
-	shm->samplebits = format.wBitsPerSample;
 	shm->speed = format.nSamplesPerSec;
 
 	if (DS_OK != ds_SecondaryBuffer8->GetCaps (&ds_BufferCaps))
@@ -422,8 +408,6 @@ sndinitstat SNDDMA_InitDirect (void)
 	// Make sure mixer is active
 	ds_SecondaryBuffer8->Play (0, 0, DSBPLAY_LOOPING);
 
-	Con_SafePrintf ("   %d channel(s)\n", shm->channels);
-	Con_SafePrintf ("   %d bits/sample\n", shm->samplebits);
 	Con_SafePrintf ("   %d bytes/sec\n", shm->speed);
 
 	ds_SoundBufferSize = ds_BufferCaps.dwBufferBytes;
@@ -452,11 +436,11 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	shm->soundalive = true;
 	shm->splitbuffer = false;
-	shm->samples = ds_SoundBufferSize / (shm->samplebits / 8);
+	shm->samples = ds_SoundBufferSize >> 1;
 	shm->samplepos = 0;
 	shm->submission_chunk = 1;
 	shm->buffer = (unsigned char *) lpData;
-	sample16 = (shm->samplebits / 8) - 1;
+	sample16 = 1;
 
 	dsound_init = true;
 
@@ -486,8 +470,7 @@ bool SNDDMA_Init (void)
 
 	if (stat == SIS_SUCCESS)
 		Con_SafePrintf ("DirectSound Initialization Complete\n");
-	else
-		Con_SafePrintf ("DirectSound failed to init\n");
+	else Con_SafePrintf ("DirectSound failed to init\n");
 
 	if (!dsound_init)
 	{
@@ -523,7 +506,6 @@ int SNDDMA_GetDMAPos (void)
 	else return 0;
 
 	s >>= sample16;
-
 	s &= (shm->samples - 1);
 
 	return s;

@@ -20,6 +20,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "menu_common.h"
 
+int Key_ModifyKey (int key);
+
 qpic_t *menu_dot_lmp[6];
 qpic_t *gfx_qplaque_lmp;
 qpic_t *gfx_sp_menu_lmp;
@@ -55,7 +57,7 @@ void Menu_InitPics (void)
 
 	gfx_mp_menu_lmp = Draw_LoadPic ("gfx/mp_menu.lmp");
 	gfx_bigbox_lmp = Draw_LoadPic ("gfx/bigbox.lmp");
-	gfx_menuplyr_lmp = Draw_LoadPic ("gfx/menuplyr.lmp");
+	gfx_menuplyr_lmp = Draw_LoadPic ("gfx/menuplyr.lmp", false);
 	gfx_ttl_sgl_lmp = Draw_LoadPic ("gfx/ttl_sgl.lmp");
 	gfx_p_save_lmp = Draw_LoadPic ("gfx/p_save.lmp");
 	gfx_p_load_lmp = Draw_LoadPic ("gfx/p_load.lmp");
@@ -792,7 +794,6 @@ void CQMenuCvarTextbox::Key (int k)
 		break;
 
 	case K_DEL:
-
 		// prevent deletion if at end of string
 		if (RealTextPos >= strlen (this->WorkingText))
 		{
@@ -813,7 +814,6 @@ void CQMenuCvarTextbox::Key (int k)
 		break;
 
 	case K_BACKSPACE:
-
 		// prevent deletion at start of string
 		if (!RealTextPos)
 		{
@@ -840,7 +840,6 @@ void CQMenuCvarTextbox::Key (int k)
 		break;
 
 	default:
-
 		// non alphanumeric
 		if (k < 32 || k > 127)
 		{
@@ -855,6 +854,8 @@ void CQMenuCvarTextbox::Key (int k)
 			break;
 		}
 
+		// this needs working over and it's not used anymore anyway
+#if 0
 		bool validinput = false;
 
 		if (!this->Flags)
@@ -876,6 +877,12 @@ void CQMenuCvarTextbox::Key (int k)
 		{
 			menu_soundlevel = m_sound_deny;
 			break;
+		}
+#endif
+
+		if (this->Flags & TBFLAG_FUNNAME)
+		{
+			if ((k = Key_ModifyKey (k)) == 0) return;
 		}
 
 		menu_soundlevel = m_sound_option;
@@ -1300,7 +1307,7 @@ void CQMenuChunkyPic::Draw (int y)
 	y -= this->Parent->NumCursorOptions * 20;
 
 	// quake plaque
-	if (!kurok) Draw_Pic (((vid.currsize->width - 240) >> 1) - 35, y - 15, gfx_qplaque_lmp, 1, true);
+	Draw_Pic (((vid.currsize->width - 240) >> 1) - 35, y - 15, gfx_qplaque_lmp, 1, true);
 
 	// draw centered on screen and offset down
 	// avoid bilerp seam

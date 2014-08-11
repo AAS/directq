@@ -24,75 +24,72 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 #include "particles.h"
+#include "cl_fx.h"
 
 particle_t	*free_particles;
-particle_type_t *active_particle_types, *free_particle_types;
+particle_emitter_t *active_particle_emitters, *free_particle_emitters;
+particle_effect_t *active_particle_effects, *free_particle_effects;
 
 // particle colour ramps - the extra values of -1 at the end of each are to protect us if the engine locks for a few seconds
-int		ramp1[] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61, -1, -1, -1, -1, -1};
-int		ramp2[] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66, -1, -1, -1, -1, -1};
-int		ramp3[] = {0x6d, 0x6b, 6, 5, 4, 3, -1, -1, -1, -1, -1};
+int		ramp1[] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+int		ramp2[] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+int		ramp3[] = {0x6d, 0x6b, 6, 5, 4, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 
 int	r_numparticles;
 int r_numallocations;
 
 particle_t	r_defaultparticle;
 
-// these were never used in the alias render
-#define NUMVERTEXNORMALS	162
-
+// to do - how is this calculated anyway?  looks like normals for a sphere to me...
 float r_avertexnormals[NUMVERTEXNORMALS][3] =
 {
-#include "anorms.h"
+	{-0.525731f, 0.000000f, 0.850651f}, {-0.442863f, 0.238856f, 0.864188f}, {-0.295242f, 0.000000f, 0.955423f}, {-0.309017f, 0.500000f, 0.809017f},
+	{-0.162460f, 0.262866f, 0.951056f}, {0.000000f, 0.000000f, 1.000000f}, {0.000000f, 0.850651f, 0.525731f}, {-0.147621f, 0.716567f, 0.681718f},
+	{0.147621f, 0.716567f, 0.681718f}, {0.000000f, 0.525731f, 0.850651f}, {0.309017f, 0.500000f, 0.809017f}, {0.525731f, 0.000000f, 0.850651f},
+	{0.295242f, 0.000000f, 0.955423f}, {0.442863f, 0.238856f, 0.864188f}, {0.162460f, 0.262866f, 0.951056f}, {-0.681718f, 0.147621f, 0.716567f},
+	{-0.809017f, 0.309017f, 0.500000f}, {-0.587785f, 0.425325f, 0.688191f}, {-0.850651f, 0.525731f, 0.000000f}, {-0.864188f, 0.442863f, 0.238856f},
+	{-0.716567f, 0.681718f, 0.147621f}, {-0.688191f, 0.587785f, 0.425325f}, {-0.500000f, 0.809017f, 0.309017f}, {-0.238856f, 0.864188f, 0.442863f},
+	{-0.425325f, 0.688191f, 0.587785f}, {-0.716567f, 0.681718f, -0.147621f}, {-0.500000f, 0.809017f, -0.309017f}, {-0.525731f, 0.850651f, 0.000000f},
+	{0.000000f, 0.850651f, -0.525731f}, {-0.238856f, 0.864188f, -0.442863f}, {0.000000f, 0.955423f, -0.295242f}, {-0.262866f, 0.951056f, -0.162460f},
+	{0.000000f, 1.000000f, 0.000000f}, {0.000000f, 0.955423f, 0.295242f}, {-0.262866f, 0.951056f, 0.162460f}, {0.238856f, 0.864188f, 0.442863f},
+	{0.262866f, 0.951056f, 0.162460f}, {0.500000f, 0.809017f, 0.309017f}, {0.238856f, 0.864188f, -0.442863f}, {0.262866f, 0.951056f, -0.162460f},
+	{0.500000f, 0.809017f, -0.309017f}, {0.850651f, 0.525731f, 0.000000f}, {0.716567f, 0.681718f, 0.147621f}, {0.716567f, 0.681718f, -0.147621f},
+	{0.525731f, 0.850651f, 0.000000f}, {0.425325f, 0.688191f, 0.587785f}, {0.864188f, 0.442863f, 0.238856f}, {0.688191f, 0.587785f, 0.425325f},
+	{0.809017f, 0.309017f, 0.500000f}, {0.681718f, 0.147621f, 0.716567f}, {0.587785f, 0.425325f, 0.688191f}, {0.955423f, 0.295242f, 0.000000f},
+	{1.000000f, 0.000000f, 0.000000f}, {0.951056f, 0.162460f, 0.262866f}, {0.850651f, -0.525731f, 0.000000f}, {0.955423f, -0.295242f, 0.000000f},
+	{0.864188f, -0.442863f, 0.238856f}, {0.951056f, -0.162460f, 0.262866f}, {0.809017f, -0.309017f, 0.500000f}, {0.681718f, -0.147621f, 0.716567f},
+	{0.850651f, 0.000000f, 0.525731f}, {0.864188f, 0.442863f, -0.238856f}, {0.809017f, 0.309017f, -0.500000f}, {0.951056f, 0.162460f, -0.262866f},
+	{0.525731f, 0.000000f, -0.850651f}, {0.681718f, 0.147621f, -0.716567f}, {0.681718f, -0.147621f, -0.716567f}, {0.850651f, 0.000000f, -0.525731f},
+	{0.809017f, -0.309017f, -0.500000f}, {0.864188f, -0.442863f, -0.238856f}, {0.951056f, -0.162460f, -0.262866f}, {0.147621f, 0.716567f, -0.681718f},
+	{0.309017f, 0.500000f, -0.809017f}, {0.425325f, 0.688191f, -0.587785f}, {0.442863f, 0.238856f, -0.864188f}, {0.587785f, 0.425325f, -0.688191f},
+	{0.688191f, 0.587785f, -0.425325f}, {-0.147621f, 0.716567f, -0.681718f}, {-0.309017f, 0.500000f, -0.809017f}, {0.000000f, 0.525731f, -0.850651f},
+	{-0.525731f, 0.000000f, -0.850651f}, {-0.442863f, 0.238856f, -0.864188f}, {-0.295242f, 0.000000f, -0.955423f}, {-0.162460f, 0.262866f, -0.951056f},
+	{0.000000f, 0.000000f, -1.000000f}, {0.295242f, 0.000000f, -0.955423f}, {0.162460f, 0.262866f, -0.951056f}, {-0.442863f, -0.238856f, -0.864188f},
+	{-0.309017f, -0.500000f, -0.809017f}, {-0.162460f, -0.262866f, -0.951056f}, {0.000000f, -0.850651f, -0.525731f}, {-0.147621f, -0.716567f, -0.681718f},
+	{0.147621f, -0.716567f, -0.681718f}, {0.000000f, -0.525731f, -0.850651f}, {0.309017f, -0.500000f, -0.809017f}, {0.442863f, -0.238856f, -0.864188f},
+	{0.162460f, -0.262866f, -0.951056f}, {0.238856f, -0.864188f, -0.442863f}, {0.500000f, -0.809017f, -0.309017f}, {0.425325f, -0.688191f, -0.587785f},
+	{0.716567f, -0.681718f, -0.147621f}, {0.688191f, -0.587785f, -0.425325f}, {0.587785f, -0.425325f, -0.688191f}, {0.000000f, -0.955423f, -0.295242f},
+	{0.000000f, -1.000000f, 0.000000f}, {0.262866f, -0.951056f, -0.162460f}, {0.000000f, -0.850651f, 0.525731f}, {0.000000f, -0.955423f, 0.295242f},
+	{0.238856f, -0.864188f, 0.442863f}, {0.262866f, -0.951056f, 0.162460f}, {0.500000f, -0.809017f, 0.309017f}, {0.716567f, -0.681718f, 0.147621f},
+	{0.525731f, -0.850651f, 0.000000f}, {-0.238856f, -0.864188f, -0.442863f}, {-0.500000f, -0.809017f, -0.309017f}, {-0.262866f, -0.951056f, -0.162460f},
+	{-0.850651f, -0.525731f, 0.000000f}, {-0.716567f, -0.681718f, -0.147621f}, {-0.716567f, -0.681718f, 0.147621f}, {-0.525731f, -0.850651f, 0.000000f},
+	{-0.500000f, -0.809017f, 0.309017f}, {-0.238856f, -0.864188f, 0.442863f}, {-0.262866f, -0.951056f, 0.162460f}, {-0.864188f, -0.442863f, 0.238856f},
+	{-0.809017f, -0.309017f, 0.500000f}, {-0.688191f, -0.587785f, 0.425325f}, {-0.681718f, -0.147621f, 0.716567f}, {-0.442863f, -0.238856f, 0.864188f},
+	{-0.587785f, -0.425325f, 0.688191f}, {-0.309017f, -0.500000f, 0.809017f}, {-0.147621f, -0.716567f, 0.681718f}, {-0.425325f, -0.688191f, 0.587785f},
+	{-0.162460f, -0.262866f, 0.951056f}, {0.442863f, -0.238856f, 0.864188f}, {0.162460f, -0.262866f, 0.951056f}, {0.309017f, -0.500000f, 0.809017f},
+	{0.147621f, -0.716567f, 0.681718f}, {0.000000f, -0.525731f, 0.850651f}, {0.425325f, -0.688191f, 0.587785f}, {0.587785f, -0.425325f, 0.688191f},
+	{0.688191f, -0.587785f, 0.425325f}, {-0.955423f, 0.295242f, 0.000000f}, {-0.951056f, 0.162460f, 0.262866f}, {-1.000000f, 0.000000f, 0.000000f},
+	{-0.850651f, 0.000000f, 0.525731f}, {-0.955423f, -0.295242f, 0.000000f}, {-0.951056f, -0.162460f, 0.262866f}, {-0.864188f, 0.442863f, -0.238856f},
+	{-0.951056f, 0.162460f, -0.262866f}, {-0.809017f, 0.309017f, -0.500000f}, {-0.864188f, -0.442863f, -0.238856f}, {-0.951056f, -0.162460f, -0.262866f},
+	{-0.809017f, -0.309017f, -0.500000f}, {-0.681718f, 0.147621f, -0.716567f}, {-0.681718f, -0.147621f, -0.716567f}, {-0.850651f, 0.000000f, -0.525731f},
+	{-0.688191f, 0.587785f, -0.425325f}, {-0.587785f, 0.425325f, -0.688191f}, {-0.425325f, 0.688191f, -0.587785f}, {-0.425325f, -0.688191f, -0.587785f},
+	{-0.587785f, -0.425325f, -0.688191f}, {-0.688191f, -0.587785f, -0.425325f}
 };
 
 extern cvar_t sv_gravity;
 extern cvar_t r_particlestyle;
 
-particlest_t *r_particlest;
-int r_numparticlest;
-
-void R_MakeParticleLocations (float s, float t, float size, particlest_t *loc, int numloc)
-{
-	loc[0].stbase[0] = s;
-	loc[0].stbase[1] = t;
-	loc[0].stadd[0] = size;
-	loc[0].stadd[1] = size;
-
-	r_numparticlest++;
-
-	if (numloc == 4)
-	{
-		loc[1].stbase[0] = s;
-		loc[1].stbase[1] = t + size;
-		loc[1].stadd[0] = size;
-		loc[1].stadd[1] = -size;
-
-		loc[2].stbase[0] = s + size;
-		loc[2].stbase[1] = t + size;
-		loc[2].stadd[0] = -size;
-		loc[2].stadd[1] = -size;
-
-		loc[3].stbase[0] = s + size;
-		loc[3].stbase[1] = t;
-		loc[3].stadd[0] = -size;
-		loc[3].stadd[1] = size;
-
-		r_numparticlest += 3;
-	}
-}
-
-
-#define ST_OFFSET_DEFAULT		0
-#define ST_OFFSET_BLOOD			1
-#define ST_OFFSET_SMOKE			5
-#define ST_OFFSET_SPARK1		9
-#define ST_OFFSET_SPARK2		10
-#define ST_OFFSET_WIZARDGOO		14
-#define ST_OFFSET_VOREGOO		18
-#define ST_OFFSET_KNIGHTFIRE	22
-#define ST_OFFSET_BLOOD2		26
-#define ST_OFFSET_BLAST			30
+float avelocities[NUMVERTEXNORMALS][2];
 
 
 /*
@@ -102,42 +99,21 @@ R_InitParticles
 */
 void R_InitParticles (void)
 {
-	if (r_particlest)
+	for (int i = 0; i < NUMVERTEXNORMALS; i++)
 	{
-		MainZone->Free (r_particlest);
-		r_particlest = NULL;
+		avelocities[i][0] = (float) (rand () & 255) * 0.01;
+		avelocities[i][1] = (float) (rand () & 255) * 0.01;
 	}
-
-	r_particlest = (particlest_t *) scratchbuf;
-	r_numparticlest = 0;
-
-	// set up our locations
-	R_MakeParticleLocations (0.00f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_DEFAULT], 1);
-	R_MakeParticleLocations (0.75f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_BLOOD], 4);
-	R_MakeParticleLocations (0.00f, 0.50f, 0.50f, &r_particlest[ST_OFFSET_SMOKE], 4);
-	R_MakeParticleLocations (0.00f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_SPARK1], 1);
-	R_MakeParticleLocations (0.25f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_SPARK2], 4);
-	R_MakeParticleLocations (0.25f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_WIZARDGOO], 4);
-	R_MakeParticleLocations (0.50f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_VOREGOO], 4);
-	R_MakeParticleLocations (0.50f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_KNIGHTFIRE], 4);
-	R_MakeParticleLocations (0.75f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_BLOOD2], 4);
-	R_MakeParticleLocations (0.50f, 0.50f, 0.25f, &r_particlest[ST_OFFSET_BLAST], 4);
-
-	r_particlest = (particlest_t *) MainZone->Alloc (sizeof (particlest_t) * r_numparticlest);
-	memcpy (r_particlest, scratchbuf, sizeof (particlest_t) * r_numparticlest);
 
 	// setup default particle state
 	r_defaultparticle.scale = 2.666f;
 	r_defaultparticle.alpha = 1.0f;
-	r_defaultparticle.fade = 0;
-	r_defaultparticle.growth = 0;
 
 	// default velocity change and gravity
 	r_defaultparticle.dvel[0] = r_defaultparticle.dvel[1] = r_defaultparticle.dvel[2] = 0;
 	r_defaultparticle.grav = 0;
 
 	// colour and ramps
-	r_defaultparticle.st = &r_particlest[ST_OFFSET_DEFAULT];
 	r_defaultparticle.colorramp = NULL;
 	r_defaultparticle.color = 0;
 	r_defaultparticle.ramp = 0;
@@ -163,14 +139,24 @@ void R_ClearParticles (void)
 		free_particles[i].next = NULL;
 	}
 
-	// particle type chains
-	free_particle_types = (particle_type_t *) ClientZone->Alloc (PARTICLE_TYPE_BATCH_SIZE * sizeof (particle_type_t));
-	active_particle_types = NULL;
+	// particle emitter chains
+	free_particle_emitters = (particle_emitter_t *) ClientZone->Alloc (PARTICLE_EMITTER_BATCH_SIZE * sizeof (particle_emitter_t));
+	active_particle_emitters = NULL;
 
-	for (i = 1; i < PARTICLE_TYPE_BATCH_SIZE; i++)
+	for (i = 1; i < PARTICLE_EMITTER_BATCH_SIZE; i++)
 	{
-		free_particle_types[i - 1].next = &free_particle_types[i];
-		free_particle_types[i].next = NULL;
+		free_particle_emitters[i - 1].next = &free_particle_emitters[i];
+		free_particle_emitters[i].next = NULL;
+	}
+
+	// particle effect chains
+	free_particle_effects = (particle_effect_t *) ClientZone->Alloc (PARTICLE_EFFECT_BATCH_SIZE * sizeof (particle_effect_t));
+	active_particle_effects = NULL;
+
+	for (i = 1; i < PARTICLE_EFFECT_BATCH_SIZE; i++)
+	{
+		free_particle_effects[i - 1].next = &free_particle_effects[i];
+		free_particle_effects[i].next = NULL;
 	}
 
 	// track the number of particles
@@ -181,48 +167,83 @@ void R_ClearParticles (void)
 }
 
 
-particle_type_t *R_NewParticleType (vec3_t spawnorg)
+particle_emitter_t *R_NewParticleEmitter (vec3_t spawnorg)
 {
-	particle_type_t *pt;
+	particle_emitter_t *pe;
 	int i;
 
-	if (free_particle_types)
+	if (free_particle_emitters)
 	{
 		// just take from the free list
-		pt = free_particle_types;
-		free_particle_types = pt->next;
+		pe = free_particle_emitters;
+		free_particle_emitters = pe->next;
 
 		// no particles yet
-		pt->particles = NULL;
-		pt->numparticles = 0;
+		pe->particles = NULL;
+		pe->numparticles = 0;
 
 		// copy across origin
-		VectorCopy2 (pt->spawnorg, spawnorg);
+		VectorCopy2 (pe->spawnorg, spawnorg);
+		pe->spawntime = cl.time;
 
 		// link it in
-		pt->next = active_particle_types;
-		active_particle_types = pt;
+		pe->next = active_particle_emitters;
+		active_particle_emitters = pe;
 
 		// done
-		return pt;
+		return pe;
 	}
 
 	// alloc some more free particles
-	free_particle_types = (particle_type_t *) ClientZone->Alloc (PARTICLE_TYPE_EXTRA_SIZE * sizeof (particle_type_t));
+	free_particle_emitters = (particle_emitter_t *) ClientZone->Alloc (PARTICLE_EMITTER_EXTRA_SIZE * sizeof (particle_emitter_t));
 
 	// link them up
-	for (i = 0; i < PARTICLE_TYPE_EXTRA_SIZE; i++)
-		free_particle_types[i].next = &free_particle_types[i + 1];
+	for (i = 0; i < PARTICLE_EMITTER_EXTRA_SIZE; i++)
+		free_particle_emitters[i].next = &free_particle_emitters[i + 1];
 
 	// finish the link
-	free_particle_types[PARTICLE_TYPE_EXTRA_SIZE - 1].next = NULL;
+	free_particle_emitters[PARTICLE_EMITTER_EXTRA_SIZE - 1].next = NULL;
 
 	// call recursively to return the first new free particle type
-	return R_NewParticleType (spawnorg);
+	return R_NewParticleEmitter (spawnorg);
 }
 
 
-particle_t *R_NewParticle (particle_type_t *pt)
+particle_effect_t *R_NewParticleEffect (void)
+{
+	particle_effect_t *pe;
+	int i;
+
+	if (free_particle_effects)
+	{
+		// just take from the free list
+		pe = free_particle_effects;
+		free_particle_effects = pe->next;
+
+		// link it in
+		pe->next = active_particle_effects;
+		active_particle_effects = pe;
+
+		// done
+		return pe;
+	}
+
+	// alloc some more free particles
+	free_particle_effects = (particle_effect_t *) ClientZone->Alloc (PARTICLE_EFFECT_EXTRA_SIZE * sizeof (particle_effect_t));
+
+	// link them up
+	for (i = 0; i < PARTICLE_EFFECT_EXTRA_SIZE; i++)
+		free_particle_effects[i].next = &free_particle_effects[i + 1];
+
+	// finish the link
+	free_particle_effects[PARTICLE_EFFECT_EXTRA_SIZE - 1].next = NULL;
+
+	// call recursively to return the first new free particle type
+	return R_NewParticleEffect ();
+}
+
+
+particle_t *R_NewParticle (particle_emitter_t *pe)
 {
 	particle_t *p;
 	int i;
@@ -237,9 +258,9 @@ particle_t *R_NewParticle (particle_type_t *pt)
 		memcpy (p, &r_defaultparticle, sizeof (particle_t));
 
 		// link it in
-		p->next = pt->particles;
-		pt->particles = p;
-		pt->numparticles++;
+		p->next = pe->particles;
+		pe->particles = p;
+		pe->numparticles++;
 
 		// track the number of particles we have
 		r_numparticles++;
@@ -259,7 +280,7 @@ particle_t *R_NewParticle (particle_type_t *pt)
 	free_particles[PARTICLE_EXTRA_SIZE - 1].next = NULL;
 
 	// call recursively to return the first new free particle
-	return R_NewParticle (pt);
+	return R_NewParticle (pe);
 }
 
 
@@ -268,65 +289,13 @@ particle_t *R_NewParticle (particle_type_t *pt)
 R_EntityParticles
 ===============
 */
-
-vec3_t	avelocities[NUMVERTEXNORMALS];
-float	beamlength = 16;
-vec3_t	avelocity = {23, 7, 3};
-float	partstep = 0.01f;
-float	timescale = 0.01f;
+void D3DAlpha_AddToList (entity_t *ent, int effects);
+void D3DAlpha_AddToList (particle_effect_t *particle);
 
 void R_EntityParticles (entity_t *ent)
 {
-	if (key_dest != key_game) return;
-
-	particle_t	*p;
-	float		angle;
-	float		sp, sy, cp, cy;
-	vec3_t		forward;
-	float		dist;
-
-	dist = 64;
-
-	if (!avelocities[0][0])
-		for (int i = 0; i < NUMVERTEXNORMALS * 3; i++)
-			avelocities[0][i] = (rand () & 255) * 0.01;
-
-	particle_type_t *pt = R_NewParticleType (ent->origin);
-
-	for (int i = 0; i < NUMVERTEXNORMALS; i++)
-	{
-		angle = cl.time * avelocities[i][0];
-		sy = sin (angle);
-		cy = cos (angle);
-		angle = cl.time * avelocities[i][1];
-		sp = sin (angle);
-		cp = cos (angle);
-
-		forward[0] = cp * cy;
-		forward[1] = cp * sy;
-		forward[2] = -sp;
-
-		if (!(p = R_NewParticle (pt))) return;
-
-		// fixme - these particles should be automatically killed after 1 frame
-		p->die = cl.time + 0.01f;
-		p->color = 0x6f;
-		p->colorramp = ramp1;
-		p->ramptime = 10;
-		p->grav = -1;
-
-		p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
-
-		p->org[0] = ent->origin[0] + r_avertexnormals[i][0] * dist + forward[0] * beamlength;
-		p->org[1] = ent->origin[1] + r_avertexnormals[i][1] * dist + forward[1] * beamlength;
-		p->org[2] = ent->origin[2] + r_avertexnormals[i][2] * dist + forward[2] * beamlength;
-
-		if (r_particlestyle.integer > 1)
-		{
-			p->st = &r_particlest[ST_OFFSET_DEFAULT];
-			p->scale = 1.333f;
-		}
-	}
+	// these are entirely drawn and animated on the GPU now
+	D3DAlpha_AddToList (ent, EF_BRIGHTFIELD);
 }
 
 
@@ -354,7 +323,7 @@ void R_ReadPointFile_f (void)
 	Con_Printf ("Reading %s...\n", name);
 	c = 0;
 
-	particle_type_t *pt = R_NewParticleType (vec3_origin);
+	particle_emitter_t *pe = R_NewParticleEmitter (vec3_origin);
 
 	for (;;)
 	{
@@ -365,17 +334,11 @@ void R_ReadPointFile_f (void)
 
 		c++;
 
-		if (!(p = R_NewParticle (pt)))
+		if (!(p = R_NewParticle (pe)))
 		{
 			// woah!  this was a return!  NOT clever!
 			Con_Printf ("Pointfile overflow - ");
 			break;
-		}
-
-		if (r_particlestyle.integer > 1)
-		{
-			p->st = &r_particlest[ST_OFFSET_DEFAULT];
-			p->scale = 1.333f;
 		}
 
 		p->die = cl.time + 999999;
@@ -419,16 +382,34 @@ R_ParticleExplosion
 
 ===============
 */
-void R_ParticleExplosion (vec3_t org, int count)
+void R_ParticleExplosion (vec3_t org)
 {
+	// reserving this for D3D11 as the lack of constant buffers, not being able to use geometry shaders
+	// or vertex textures, and use of the effects framework makes it a huge mess under 9
+	// eventually all, or most, particles will move to effects, and most of this file will die
+	if (0)
+	{
+		particle_effect_t *pe = R_NewParticleEffect ();
+
+		pe->origin[0] = org[0];
+		pe->origin[1] = org[1];
+		pe->origin[2] = org[2];
+
+		pe->starttime = cl.time;
+		pe->die = cl.time + 5;
+		pe->type = peff_explosion;
+
+		return;
+	}
+
 	int			i, j;
 	particle_t	*p;
 
-	particle_type_t *pt = R_NewParticleType (org);
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
-	for (i = 0; i < count; i++)
+	for (i = 0; i < 1024; i++)
 	{
-		if (!(p = R_NewParticle (pt))) return;
+		if (!(p = R_NewParticle (pe))) return;
 
 		p->die = cl.time + 5;
 		p->color = ramp1[0];
@@ -440,96 +421,20 @@ void R_ParticleExplosion (vec3_t org, int count)
 			p->colorramp = ramp1;
 			p->ramptime = 10;
 			p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
-
-			for (j = 0; j < 3; j++)
-			{
-				p->org[j] = org[j] + ((rand () % 32) - 16);
-				p->vel[j] = (rand () % 512) - 256;
-			}
-
-			if (r_particlestyle.integer > 1)
-			{
-				p->st = &r_particlest[ST_OFFSET_SPARK1];
-				p->scale = 1.333f * (rand () & 3) + 1;
-			}
 		}
 		else
 		{
 			p->colorramp = ramp2;
 			p->ramptime = 15;
-
 			p->dvel[0] = p->dvel[1] = p->dvel[2] = -1;
-
-			for (j = 0; j < 3; j++)
-			{
-				p->org[j] = org[j] + ((rand () % 32) - 16);
-				p->vel[j] = (rand () % 512) - 256;
-			}
-
-			if (r_particlestyle.integer > 1)
-			{
-				p->st = &r_particlest[ST_OFFSET_SPARK2 + (rand () & 3)];
-				p->scale = 1.333f * (rand () & 3) + 1;
-			}
 		}
-	}
-}
 
-
-void R_ExplosionSmoke (vec3_t org)
-{
-	int			i, j, k;
-	particle_t	*p;
-	float		vel;
-	vec3_t		dir;
-
-	particle_type_t *pt = R_NewParticleType (org);
-
-	// this skips the "12" but because we're incrementing by 4 and because we're adding rand () & 7 that's OK;
-	for (i = -12; i < 12; i += 4)
-	{
-		for (j = -12; j < 12; j += 4)
+		for (j = 0; j < 3; j++)
 		{
-			for (k = 0; k < 1; k++)
-			{
-				if (!(p = R_NewParticle (pt))) return;
-
-				p->die = cl.time + 666.0f;
-
-				p->grav = -1;
-				p->color = ramp3[rand () % 6];
-
-				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SMOKE];
-				p->scale = (rand () & 31) + 4;
-				p->growth = 6.666f;
-				p->fade = 0.5f;
-				p->alpha = 0.666f;
-
-				dir[0] = j * 3 + (rand () & 7);
-				dir[1] = i * 3 + (rand () & 7);
-				dir[2] = 32;
-
-				p->org[0] = org[0] + dir[0];
-				p->org[1] = org[1] + dir[1];
-				p->org[2] = org[2] + (rand () & 15);
-
-				VectorNormalize (dir);
-				vel = 50 + (rand () & 31);
-				VectorScale (dir, vel, p->vel);
-			}
+			p->org[j] = org[j] + ((rand () % 32) - 16);
+			p->vel[j] = (rand () % 512) - 256;
 		}
 	}
-}
-
-
-void R_ParticleExplosion (vec3_t org)
-{
-	if (r_particlestyle.integer > 1)
-	{
-		R_ParticleExplosion (org, 256);
-		R_ExplosionSmoke (org);
-	}
-	else R_ParticleExplosion (org, 1024);
 }
 
 
@@ -539,27 +444,21 @@ R_ParticleExplosion2
 
 ===============
 */
-void R_ParticleExplosion2 (vec3_t org, int count, int colorStart, int colorLength)
+void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
 {
 	int			i, j;
 	particle_t	*p;
 	int			colorMod = 0;
 
-	particle_type_t *pt = R_NewParticleType (org);
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
-	for (i = 0; i < count; i++)
+	for (i = 0; i < 512; i++)
 	{
-		if (!(p = R_NewParticle (pt))) return;
+		if (!(p = R_NewParticle (pe))) return;
 
 		p->die = cl.time + 0.3f;
 		p->color = colorStart + (colorMod % colorLength);
 		colorMod++;
-
-		if (r_particlestyle.integer > 1)
-		{
-			p->st = &r_particlest[ST_OFFSET_DEFAULT];
-			p->scale = 1.333f;
-		}
 
 		p->grav = -1;
 		p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
@@ -573,33 +472,22 @@ void R_ParticleExplosion2 (vec3_t org, int count, int colorStart, int colorLengt
 }
 
 
-void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
-{
-	if (r_particlestyle.integer > 1)
-	{
-		R_ParticleExplosion2 (org, 512, colorStart, colorLength);
-		R_ExplosionSmoke (org);
-	}
-	else R_ParticleExplosion2 (org, 512, colorStart, colorLength);
-}
-
-
 /*
 ===============
 R_BlobExplosion
 
 ===============
 */
-void R_BlobExplosion (vec3_t org, int count)
+void R_BlobExplosion (vec3_t org)
 {
 	int			i, j;
 	particle_t	*p;
 
-	particle_type_t *pt = R_NewParticleType (org);
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
-	for (i = 0; i < count; i++)
+	for (i = 0; i < 1024; i++)
 	{
-		if (!(p = R_NewParticle (pt))) return;
+		if (!(p = R_NewParticle (pe))) return;
 
 		p->die = cl.time + (1 + (rand () & 8) * 0.05);
 		p->grav = -1;
@@ -608,36 +496,19 @@ void R_BlobExplosion (vec3_t org, int count)
 		{
 			p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
 			p->color = 66 + rand () % 6;
-
-			for (j = 0; j < 3; j++)
-			{
-				p->org[j] = org[j] + ((rand () % 32) - 16);
-				p->vel[j] = (rand () % 512) - 256;
-			}
 		}
 		else
 		{
 			p->dvel[0] = p->dvel[1] = -4;
 			p->color = 150 + rand () % 6;
+		}
 
-			for (j = 0; j < 3; j++)
-			{
-				p->org[j] = org[j] + ((rand () % 32) - 16);
-				p->vel[j] = (rand () % 512) - 256;
-			}
+		for (j = 0; j < 3; j++)
+		{
+			p->org[j] = org[j] + ((rand () % 32) - 16);
+			p->vel[j] = (rand () % 512) - 256;
 		}
 	}
-}
-
-
-void R_BlobExplosion (vec3_t org)
-{
-	if (r_particlestyle.integer > 1)
-	{
-		R_BlobExplosion (org, 1024);
-		R_ExplosionSmoke (org);
-	}
-	else R_BlobExplosion (org, 1024);
 }
 
 
@@ -646,26 +517,15 @@ void R_BloodParticles (vec3_t org, vec3_t dir, int color, int count)
 	int			i, j;
 	particle_t	*p;
 
-	particle_type_t *pt = R_NewParticleType (org);
-
-	// save fillrate by spawning less particles
-	if (r_particlestyle.integer > 1) count >>= 1;
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
 	for (i = 0; i < count; i++)
 	{
-		if (!(p = R_NewParticle (pt))) return;
+		if (!(p = R_NewParticle (pe))) return;
 
 		p->die = cl.time + (0.1 * (rand () % 5));
 		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
-
-		if (r_particlestyle.integer > 1)
-		{
-			p->st = &r_particlest[(rand () & 3) + ST_OFFSET_BLOOD];
-			p->scale = (rand () % 5) + 2;
-			p->growth = 2.666f;
-			p->fade = 0.25f;
-		}
 
 		for (j = 0; j < 3; j++)
 		{
@@ -713,21 +573,15 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 	}
 
 	// standard/undefined effect
-	particle_type_t *pt = R_NewParticleType (org);
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
 	for (i = 0; i < count; i++)
 	{
-		if (!(p = R_NewParticle (pt))) return;
+		if (!(p = R_NewParticle (pe))) return;
 
 		p->die = cl.time + (0.1 * (rand () % 5));
 		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
-
-		if (r_particlestyle.integer > 1)
-		{
-			p->st = &r_particlest[ST_OFFSET_DEFAULT];
-			p->scale = 1.333f;
-		}
 
 		for (j = 0; j < 3; j++)
 		{
@@ -743,26 +597,15 @@ void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count)
 	particle_t *p;
 	int i;
 
-	particle_type_t *pt = R_NewParticleType (org);
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
 	for (i = 0; i < count; i++)
 	{
-		if (!(p = R_NewParticle (pt))) break;
+		if (!(p = R_NewParticle (pe))) break;
 
 		p->grav = -1;
 		p->die = cl.time + (0.1 * (rand () % 5));
-
-		if (r_particlestyle.integer > 1)
-		{
-			p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SPARK2];
-			p->scale = 1.0f + (rand () & 15) * 0.1f;
-			p->alpha = 1.0f;
-			p->color = 103 + (rand () & 7);	// fixme
-		}
-		else
-		{
-			p->color = (color & ~7) + (rand () & 7);
-		}
+		p->color = (color & ~7) + (rand () & 7);
 
 		for (int j = 0; j < 3; j++)
 		{
@@ -773,10 +616,10 @@ void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count)
 }
 
 
-void R_SpawnRainParticle (particle_type_t *pt, vec3_t mins, vec3_t maxs, int color, vec3_t vel, float time, float z, int type)
+void R_SpawnRainParticle (particle_emitter_t *pe, vec3_t mins, vec3_t maxs, int color, vec3_t vel, float time, float z, int type)
 {
 	// type 1 is snow, 0 is rain
-	particle_t *p = R_NewParticle (pt);
+	particle_t *p = R_NewParticle (pe);
 
 	if (!p) return;
 
@@ -797,7 +640,7 @@ void R_SpawnRainParticle (particle_type_t *pt, vec3_t mins, vec3_t maxs, int col
 
 void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorbase, int type)
 {
-	particle_type_t *pt = R_NewParticleType (mins);
+	particle_emitter_t *pe = R_NewParticleEmitter (mins);
 
 	// increase the number of particles
 	count *= 2;
@@ -833,7 +676,7 @@ void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorb
 			vel[1] = dir[1] + Q_Random (-16, 16);
 			vel[2] = dir[2] + Q_Random (-32, 32);
 
-			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z, type);
+			R_SpawnRainParticle (pe, mins, maxs, colorbase + (rand () & 3), vel, t, z, type);
 		}
 
 		break;
@@ -845,7 +688,7 @@ void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorb
 			vel[1] = dir[1] + Q_Random (-16, 16);
 			vel[2] = dir[2] + Q_Random (-32, 32);
 
-			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z, type);
+			R_SpawnRainParticle (pe, mins, maxs, colorbase + (rand () & 3), vel, t, z, type);
 		}
 
 		break;
@@ -869,70 +712,31 @@ void R_LavaSplash (vec3_t org)
 	float		vel;
 	vec3_t		dir;
 
-	particle_type_t *pt = R_NewParticleType (org);
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
-	if (r_particlestyle.integer > 1)
+	for (i = -16; i < 16; i++)
 	{
-		for (i = -16; i < 16; i += 4)
+		for (j = -16; j < 16; j++)
 		{
-			for (j = -16; j < 16; j += 4)
+			for (k = 0; k < 1; k++)
 			{
-				for (k = 0; k < 1; k++)
-				{
-					if (!(p = R_NewParticle (pt))) return;
+				if (!(p = R_NewParticle (pe))) return;
 
-					p->die = cl.time + 666.0f;
+				p->die = cl.time + (2 + (rand () & 31) * 0.02);
+				p->color = 224 + (rand () & 7);
+				p->grav = -1;
 
-					p->grav = -1;
-					p->color = ramp3[rand () % 6];
+				dir[0] = j * 8 + (rand () & 7);
+				dir[1] = i * 8 + (rand () & 7);
+				dir[2] = 256;
 
-					p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SMOKE];
-					p->scale = (rand () & 63) + 8;
-					p->growth = 13.666f;
-					p->fade = 0.1f;
-					p->alpha = 0.666f;
+				p->org[0] = org[0] + dir[0];
+				p->org[1] = org[1] + dir[1];
+				p->org[2] = org[2] + (rand () & 63);
 
-					dir[0] = j * 8 + (rand () & 7);
-					dir[1] = i * 8 + (rand () & 7);
-					dir[2] = 256;
-
-					p->org[0] = org[0] + dir[0];
-					p->org[1] = org[1] + dir[1];
-					p->org[2] = org[2] + (rand () & 63);
-
-					VectorNormalize (dir);
-					vel = 50 + (rand () & 63);
-					VectorScale (dir, vel, p->vel);
-				}
-			}
-		}
-	}
-	else
-	{
-		for (i = -16; i < 16; i++)
-		{
-			for (j = -16; j < 16; j++)
-			{
-				for (k = 0; k < 1; k++)
-				{
-					if (!(p = R_NewParticle (pt))) return;
-
-					p->die = cl.time + (2 + (rand () & 31) * 0.02);
-					p->color = 224 + (rand () & 7);
-					p->grav = -1;
-
-					dir[0] = j * 8 + (rand () & 7);
-					dir[1] = i * 8 + (rand () & 7);
-					dir[2] = 256;
-
-					p->org[0] = org[0] + dir[0];
-					p->org[1] = org[1] + dir[1];
-					p->org[2] = org[2] + (rand () & 63);
-
-					VectorNormalize (dir);
-					vel = 50 + (rand () & 63);
-					VectorScale (dir, vel, p->vel);
-				}
+				VectorNormalize (dir);
+				vel = 50 + (rand () & 63);
+				VectorScale (dir, vel, p->vel);
 			}
 		}
 	}
@@ -952,176 +756,149 @@ void R_TeleportSplash (vec3_t org)
 	float		vel;
 	vec3_t		dir;
 
-	particle_type_t *pt = R_NewParticleType (org);
+	particle_emitter_t *pe = R_NewParticleEmitter (org);
 
-	if (r_particlestyle.integer > 1)
+	for (i = -16; i < 16; i += 4)
 	{
-		for (i = -16; i < 16; i += 4)
+		for (j = -16; j < 16; j += 4)
 		{
-			for (j = -16; j < 16; j += 4)
+			for (k = -24; k < 32; k += 4)
 			{
-				for (k = -24; k < 32; k += 4)
-				{
-					if (!(p = R_NewParticle (pt))) return;
+				if (!(p = R_NewParticle (pe))) return;
 
-					p->die = cl.time + 666;//(0.2 + (rand () & 7) * 0.02);
-					p->grav = -1;
+				p->die = cl.time + (0.2 + (rand () & 7) * 0.02);
+				p->color = 7 + (rand () & 7);
+				p->grav = -1;
 
-					if (!(rand () & 3))
-						p->color = 39 + (rand () & 7);
-					else p->color = 7 + (rand () & 7);
+				dir[0] = j * 8;
+				dir[1] = i * 8;
+				dir[2] = k * 8;
 
-					p->st = &r_particlest[ST_OFFSET_SPARK1];
-					p->scale = ((float) (rand () & 3) + 1) * 0.25f;
-					p->growth = 0;
-					p->fade = 2.666f;
-					p->alpha = 1.5f;
+				p->org[0] = org[0] + i + (rand () & 3);
+				p->org[1] = org[1] + j + (rand () & 3);
+				p->org[2] = org[2] + k + (rand () & 3);
 
-					dir[0] = j * 8;
-					dir[1] = i * 8;
-					dir[2] = k * 8;
-
-					p->org[0] = org[0] + i + (rand () & 3);
-					p->org[1] = org[1] + j + (rand () & 3);
-					p->org[2] = org[2] + k + (rand () & 3);
-
-					VectorNormalize (dir);
-					vel = 50 + (rand () & 63);
-					VectorScale (dir, vel, p->vel);
-				}
-			}
-		}
-	}
-	else
-	{
-		for (i = -16; i < 16; i += 4)
-		{
-			for (j = -16; j < 16; j += 4)
-			{
-				for (k = -24; k < 32; k += 4)
-				{
-					if (!(p = R_NewParticle (pt))) return;
-
-					p->die = cl.time + (0.2 + (rand () & 7) * 0.02);
-					p->color = 7 + (rand () & 7);
-					p->grav = -1;
-
-					dir[0] = j * 8;
-					dir[1] = i * 8;
-					dir[2] = k * 8;
-
-					p->org[0] = org[0] + i + (rand () & 3);
-					p->org[1] = org[1] + j + (rand () & 3);
-					p->org[2] = org[2] + k + (rand () & 3);
-
-					VectorNormalize (dir);
-					vel = 50 + (rand () & 63);
-					VectorScale (dir, vel, p->vel);
-				}
+				VectorNormalize (dir);
+				vel = 50 + (rand () & 63);
+				VectorScale (dir, vel, p->vel);
 			}
 		}
 	}
 }
 
 
-void R_RocketTrail (vec3_t start, vec3_t end, int type)
+int R_TrailLength (vec3_t start, vec3_t end, int dec)
 {
-	vec3_t		vec;
-	float		len;
+	vec3_t vec;
+
+	VectorSubtract (end, start, vec);
+
+	float len = VectorNormalize (vec);
+	int nump = (len / dec) + 0.5f;
+
+	return nump < 1 ? 1 : nump;
+}
+
+
+void R_RocketTrail (vec3_t start, vec3_t end, int trailtype)
+{
 	int			j;
 	particle_t	*p;
 	int			dec;
 	static int	tracercount;
 
-	VectorSubtract (end, start, vec);
-	len = VectorNormalize (vec);
-
-	if (type < 128)
+	if (trailtype < 128)
 		dec = 3;
 	else
 	{
 		dec = 1;
-		type -= 128;
+		trailtype -= 128;
 	}
 
-	particle_type_t *pt = R_NewParticleType (start);
+	if (trailtype == RT_ZOMGIB) dec += 3;
 
-	while (len > 0)
+	float porg[3];
+	float plerp;
+	int nump = R_TrailLength (start, end, dec);
+
+	if (nump < 1) return;
+
+	// a particle trail adds too few new particles to the emiiter, even over a 1/36 second interval
+	// (maxes out at approx. 10) so we can't make this a single draw call....
+	particle_emitter_t *pe = R_NewParticleEmitter (start);
+
+	for (int i = 0; i < nump; i++)
 	{
-		len -= dec;
+		if (!(p = R_NewParticle (pe))) return;
 
-		if (!(p = R_NewParticle (pt))) return;
+		// at 36 fps particles have a tendency to clump in discrete packets so interpolate them along the trail length instead
+		if (nump == 1)
+		{
+			porg[0] = start[0];
+			porg[1] = start[1];
+			porg[2] = start[2];
+		}
+		else if (nump == 2)
+		{
+			porg[0] = i ? end[0] : start[0];
+			porg[1] = i ? end[1] : start[1];
+			porg[2] = i ? end[2] : start[2];
+		}
+		else
+		{
+			plerp = (float) i / (float) (nump - 1);
+
+			porg[0] = start[0] + plerp * (end[0] - start[0]);
+			porg[1] = start[1] + plerp * (end[1] - start[1]);
+			porg[2] = start[2] + plerp * (end[2] - start[2]);
+		}
 
 		VectorCopy2 (p->vel, vec3_origin);
 		p->die = cl.time + 2;
 
-		switch (type)
+		switch (trailtype)
 		{
-		case 0:
-		case 1:
+		case RT_ROCKET:
+		case RT_GRENADE:
 			// rocket/grenade trail
 			p->ramp = (rand () & 3);
 			p->ramptime = 5;
 			p->grav = 1;
 			p->colorramp = ramp3;
 
-			if (r_particlestyle.integer > 1)
-			{
-				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SMOKE];
-				p->scale = (rand () & 3) + 1;
-				p->growth = 2.666f;
-				p->fade = 0.75f;
-				p->alpha = 0.666f;
-
-				// 0 is rocket, 1 is grenade
-				len -= 2;
-			}
-
 			// grenade trail decays faster
-			if (type == 1) p->ramp += 2;
+			if (trailtype == RT_GRENADE) p->ramp += 2;
 
 			// leave color to here as it depends on the possibly adjusted ramp
 			p->color = ramp3[(int) p->ramp];
 
 			for (j = 0; j < 3; j++)
-				p->org[j] = start[j] + ((rand () % 6) - 3);
+				p->org[j] = porg[j] + ((rand () % 6) - 3);
 
 			break;
 
-		case 2:
-		case 4:
+		case RT_GIB:
+		case RT_ZOMGIB:
 			// blood/slight blood
 			p->grav = -1;
-
-			if (r_particlestyle.integer > 1)
-			{
-				p->color = (73 & ~7) + (rand () & 7);
-
-				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_BLOOD2];
-				p->scale = 0.5f * ((rand () & 3) + 2);
-				p->growth = 1.0f;
-				p->fade = 0.15f;
-			}
-			else p->color = 67 + (rand () & 3);
+			p->color = 67 + (rand () & 3);
 
 			for (j = 0; j < 3; j++)
-				p->org[j] = start[j] + ((rand () % 6) - 3);
-
-			// slight blood
-			if (type == 4) len -= 3;
+				p->org[j] = porg[j] + ((rand () % 6) - 3);
 
 			break;
 
-		case 3:
-		case 5:
+		case RT_WIZARD:
+		case RT_KNIGHT:
 			// tracer - wizard/hellknight
 			p->die = cl.time + 0.5f;
 
 			tracercount++;
 
-			VectorCopy2 (p->org, start);
+			VectorCopy2 (p->org, porg);
 
 			// split trail left/right
+			/*
 			if (tracercount & 1)
 			{
 				p->vel[0] = 30 * vec[1];
@@ -1132,43 +909,21 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				p->vel[0] = 30 * -vec[1];
 				p->vel[1] = 30 * vec[0];
 			}
+			*/
 
-			if (r_particlestyle.integer > 1 && type == 3)
-			{
-				p->color = 52 + ((tracercount & 4) << 1);
-				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_WIZARDGOO];
-				p->scale = 0.5f * ((rand () & 3) + 2);
-				p->fade = 0.15f;
-			}
-			else if (r_particlestyle.integer > 1 && type == 5)
-			{
-				p->color = 230 + (tracercount & 3);
-				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_KNIGHTFIRE];
-				p->scale = 0.5f * ((rand () & 3) + 2);
-				p->fade = 0.15f;
-			}
-			else p->color = ((type == 3) ? 52 : 230) + ((tracercount & 4) << 1);
+			p->color = ((trailtype == RT_WIZARD) ? 52 : 230) + ((tracercount & 4) << 1);
 
 			break;
 
-		case 6:	// voor trail
+		case RT_VORE:
 			p->color = 9 * 16 + 8 + (rand () & 3);
 			p->die = cl.time + 0.3f;
 
 			for (j = 0; j < 3; j++)
-				p->org[j] = start[j] + ((rand () & 15) - 8);
-
-			if (r_particlestyle.integer > 1)
-			{
-				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_VOREGOO];
-				p->scale = ((rand () & 3) + 4);
-				p->fade = 0.15f;
-			}
+				p->org[j] = porg[j] + ((rand () & 15) - 8);
 
 			break;
 		}
-
-		VectorAdd (start, vec, start);
 	}
 }
 
@@ -1176,41 +931,44 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 void CL_WipeParticles (void)
 {
 	// these need to be wiped immediately on going to a new server
-	active_particle_types = NULL;
-	free_particle_types = NULL;
+	active_particle_emitters = NULL;
+	free_particle_emitters = NULL;
+
+	active_particle_effects = NULL;
+	free_particle_effects = NULL;
+
 	free_particles = NULL;
 }
 
 
-void R_SetupParticleType (particle_type_t *pt)
+void R_SetupParticleEmitter (particle_emitter_t *pe)
 {
 	// no particles at all!
-	if (!pt->particles) return;
+	if (!pe->particles) return;
 
 	// removes expired particles from the active particles list
 	particle_t *p;
 	particle_t *kill;
 
 	// this is the count of particles that will be drawn this frame
-	pt->numactiveparticles = 0;
+	pe->numactiveparticles = 0;
 
 	// begin a new bounding box for this type
-	pt->mins[0] = pt->mins[1] = pt->mins[2] = 9999999;
-	pt->maxs[0] = pt->maxs[1] = pt->maxs[2] = -9999999;
+	Mod_ClearBoundingBox (pe->mins, pe->maxs);
 
 	// remove from the head of the list
 	for (;;)
 	{
-		kill = pt->particles;
+		kill = pe->particles;
 
 		// note - client time is correct here
 		if (kill && kill->die < cl.time)
 		{
-			pt->particles = kill->next;
+			pe->particles = kill->next;
 			kill->next = free_particles;
 			free_particles = kill;
 			r_numparticles--;
-			pt->numparticles--;
+			pe->numparticles--;
 
 			continue;
 		}
@@ -1218,7 +976,7 @@ void R_SetupParticleType (particle_type_t *pt)
 		break;
 	}
 
-	for (p = pt->particles; p; p = p->next)
+	for (p = pe->particles; p; p = p->next)
 	{
 		// remove from a mid-point in the list
 		for (;;)
@@ -1232,7 +990,7 @@ void R_SetupParticleType (particle_type_t *pt)
 				kill->next = free_particles;
 				free_particles = kill;
 				r_numparticles--;
-				pt->numparticles--;
+				pe->numparticles--;
 
 				continue;
 			}
@@ -1245,136 +1003,33 @@ void R_SetupParticleType (particle_type_t *pt)
 		if (p->color > 255) p->color = 255;
 
 		// re-eval bbox
-		for (int i = 0; i < 3; i++)
-		{
-			if (p->org[i] < pt->mins[i]) pt->mins[i] = p->org[i];
-			if (p->org[i] > pt->maxs[i]) pt->maxs[i] = p->org[i];
-		}
+		Mod_AccumulateBox (pe->mins, pe->maxs, p->org);
 
 		// count the active particles for this type
-		pt->numactiveparticles++;
-	}
-}
-
-
-void CL_UpdateParticles (void)
-{
-	// no types currently active
-	if (!active_particle_types) return;
-
-	// particle updating has been moved back to here to preserve cache-friendliness
-	extern cvar_t sv_gravity;
-	float grav = cl.frametime * sv_gravity.value * 0.025f;
-	float gravchange;
-	float velchange[3];
-	float gravtime = cl.frametime * 0.5f;
-
-	for (particle_type_t *pt = active_particle_types; pt; pt = pt->next)
-	{
-		for (particle_t *p = pt->particles; p; p = p->next)
-		{
-			// fade alpha and increase size
-			p->alpha -= (p->fade * cl.frametime);
-			p->scale += (p->growth * cl.frametime);
-
-			// kill if fully faded or too small
-			if (p->alpha <= 0 || p->scale <= 0)
-			{
-				// no further adjustments needed
-				p->die = -1;
-				continue;
-			}
-
-			if (p->colorramp)
-			{
-				// colour ramps
-				p->ramp += p->ramptime * cl.frametime;
-
-				// adjust color for ramp
-				if (p->colorramp[(int) p->ramp] < 0)
-				{
-					// no further adjustments needed
-					p->die = -1;
-					continue;
-				}
-				else p->color = p->colorramp[(int) p->ramp];
-			}
-
-			// framerate independent delta factors
-			gravchange = grav * p->grav;
-			velchange[0] = p->dvel[0] * gravtime;
-			velchange[1] = p->dvel[1] * gravtime;
-			velchange[2] = p->dvel[2] * gravtime;
-
-			// adjust for gravity (framerate independent)
-			p->vel[2] += gravchange;
-
-			// adjust for velocity change (framerate-independent)
-			p->vel[0] += velchange[0];
-			p->vel[1] += velchange[1];
-			p->vel[2] += velchange[2];
-
-			// update origin (framerate-independent)
-			p->org[0] += p->vel[0] * cl.frametime;
-			p->org[1] += p->vel[1] * cl.frametime;
-			p->org[2] += p->vel[2] * cl.frametime;
-
-			// adjust for gravity (framerate independent)
-			p->vel[2] += gravchange;
-
-			// adjust for velocity change (framerate-independent)
-			p->vel[0] += velchange[0];
-			p->vel[1] += velchange[1];
-			p->vel[2] += velchange[2];
-		}
+		pe->numactiveparticles++;
 	}
 }
 
 
 void D3D_AddParticesToAlphaList (void)
 {
-	// nothing to draw
-	if (!active_particle_types) return;
-
-	// removes expired particles from the active particles list
-	particle_type_t *pt;
-	particle_type_t *kill;
-
-	// remove from the head of the list
-	for (;;)
+	if (active_particle_effects)
 	{
-		kill = active_particle_types;
+		// removes expired particles from the active particles list
+		particle_effect_t *pe;
+		particle_effect_t *kill;
 
-		if (kill && !kill->particles)
-		{
-			// return to the free list
-			active_particle_types = kill->next;
-			kill->next = free_particle_types;
-			kill->numparticles = 0;
-			free_particle_types = kill;
-
-			continue;
-		}
-
-		break;
-	}
-
-	// no types currently active
-	if (!active_particle_types) return;
-
-	for (pt = active_particle_types; pt; pt = pt->next)
-	{
-		// remove from a mid-point in the list
+		// remove from the head of the list
 		for (;;)
 		{
-			kill = pt->next;
+			kill = active_particle_effects;
 
-			if (kill && !kill->particles)
+			if (kill && kill->die < cl.time)
 			{
-				pt->next = kill->next;
-				kill->next = free_particle_types;
-				kill->numparticles = 0;
-				free_particle_types = kill;
+				// return to the free list
+				active_particle_effects = kill->next;
+				kill->next = free_particle_effects;
+				free_particle_effects = kill;
 
 				continue;
 			}
@@ -1382,13 +1037,83 @@ void D3D_AddParticesToAlphaList (void)
 			break;
 		}
 
-		// prepare this type for rendering
-		R_SetupParticleType (pt);
-
-		if (pt->numactiveparticles && !R_CullBox (pt->mins, pt->maxs, frustum))
+		for (pe = active_particle_effects; pe; pe = pe->next)
 		{
+			// remove from a mid-point in the list
+			for (;;)
+			{
+				kill = pe->next;
+
+				if (kill && kill->die < cl.time)
+				{
+					pe->next = kill->next;
+					kill->next = free_particle_effects;
+					free_particle_effects = kill;
+
+					continue;
+				}
+
+				break;
+			}
+
 			// add to the draw list (only if there's something to draw)
-			D3DAlpha_AddToList (pt);
+			D3DAlpha_AddToList (pe);
+		}
+	}
+
+	if (active_particle_emitters)
+	{
+		// removes expired particles from the active particles list
+		particle_emitter_t *pe;
+		particle_emitter_t *kill;
+
+		// remove from the head of the list
+		for (;;)
+		{
+			kill = active_particle_emitters;
+
+			if (kill && !kill->particles)
+			{
+				// return to the free list
+				active_particle_emitters = kill->next;
+				kill->next = free_particle_emitters;
+				kill->numparticles = 0;
+				free_particle_emitters = kill;
+
+				continue;
+			}
+
+			break;
+		}
+
+		for (pe = active_particle_emitters; pe; pe = pe->next)
+		{
+			// remove from a mid-point in the list
+			for (;;)
+			{
+				kill = pe->next;
+
+				if (kill && !kill->particles)
+				{
+					pe->next = kill->next;
+					kill->next = free_particle_emitters;
+					kill->numparticles = 0;
+					free_particle_emitters = kill;
+
+					continue;
+				}
+
+				break;
+			}
+
+			// prepare this type for rendering
+			R_SetupParticleEmitter (pe);
+
+			if (pe->numactiveparticles && !R_CullBox (pe->mins, pe->maxs, frustum))
+			{
+				// add to the draw list (only if there's something to draw)
+				D3DAlpha_AddToList (pe);
+			}
 		}
 	}
 }

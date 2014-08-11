@@ -39,60 +39,22 @@ CQuakeHunk *Pool_Edicts = NULL;
 
 void SV_AllocEdicts (int numedicts)
 {
-#if 0
-
-	// alloc the edicts pool on first use
-	if (!Pool_Edicts)
-	{
-		// init to correct max edict size
-		int edictsize = SVProgs->EdictSize * MAX_EDICTS + 0xfffff;
-		edictsize /= 0x100000;
-
-		// some day i'll change this to an edict_t ** and be able to get rid of this nonsense...
-		Pool_Edicts = new CQuakeHunk (edictsize);
-	}
-
-#endif
-
-	// edictpointers MUST be alloced first so that edicts are a linear array...!
-	if (!SVProgs->EdictPointers) SVProgs->EdictPointers = (edict_t **) ServerZone->Alloc (MAX_EDICTS * sizeof (edict_t *));
-
-#if 0
-	edict_t *edbuf = (edict_t *) Pool_Edicts->Alloc (numedicts * SVProgs->EdictSize);
-	edict_t *ed = edbuf;
-
-	if (!SVProgs->Edicts) SVProgs->Edicts = edbuf;
-
-	// link 'em in and set up the numbering for EDICT_TO_PROG and PROG_TO_EDICT
-	// can't do ed++ because the size of an edict_t differs.  lovely, isn't it?
-	// can't use edictpointers yet because they have not been set up
-	for (int i = 0; i < numedicts; i++, ed = ((edict_t *) ((byte *) ed + SVProgs->EdictSize)))
-	{
-		SVProgs->EdictPointers[SVProgs->MaxEdicts + i] = ed;
-
-		ed->ednum = SVProgs->MaxEdicts + i;
-		ed->Prog = ed->ednum * SVProgs->EdictSize;
-	}
-
-#else
 	// edicts are variable sized
-	byte *edbuf = (byte *) ServerZone->Alloc (numedicts * SVProgs->EdictSize);
+	byte *edbuf = (byte *) Pool_Edicts->Alloc (numedicts * SVProgs->EdictSize);
 
 	// can't use edictpointers yet because they have not been set up
-	for (int i = 0; i < numedicts; i++, edbuf += SVProgs->EdictSize)
+	for (int i = 0, j = SVProgs->MaxEdicts; i < numedicts; i++, j++, edbuf += SVProgs->EdictSize)
 	{
 		edict_t *ed = (edict_t *) edbuf;
-		SVProgs->EdictPointers[SVProgs->MaxEdicts + i] = ed;
+		SVProgs->EdictPointers[j] = ed;
 
-		ed->ednum = SVProgs->MaxEdicts + i;
+		ed->ednum = j;
 		ed->Prog = ed->ednum * SVProgs->EdictSize;
 
 		// this is just test code to ensure that the allocation is valid and that
 		// there is no remaining code assuming that the edicts are in consecutive memory
-		// ServerZone->Alloc ((rand () & 255) + 1);
+		// Pool_Edicts->Alloc ((rand () & 255) + 1);
 	}
-
-#endif
 
 	SVProgs->MaxEdicts += numedicts;
 
@@ -142,7 +104,7 @@ static void SV_SetProtocol_f (void)
 
 	char *newprotocol = Cmd_Argv (1);
 
-	for (int i = 0;; i++)
+	for (int i = 0; ; i++)
 	{
 		if (!protolist[i]) break;
 
@@ -154,11 +116,26 @@ static void SV_SetProtocol_f (void)
 				sv_protocol = 666;
 			else sv_protocol = 999;
 
+			if (com_rmq && sv_protocol != 999)
+			{
+				Con_Printf ("RMQ detected - forcing protocol 999\n");
+				sv_protocol = 999;
+			}
+
+			Con_Printf ("Change will take place on next map load\n");
 			return;
 		}
 	}
 
 	sv_protocol = atoi (newprotocol);
+
+	if (com_rmq && sv_protocol != 999)
+	{
+		Con_Printf ("RMQ detected - forcing protocol 999\n");
+		sv_protocol = 999;
+	}
+
+	Con_Printf ("Change will take place on next map load\n");
 }
 
 cmd_t SV_SetProtocol_Cmd ("sv_protocol", SV_SetProtocol_f);
@@ -289,7 +266,7 @@ void SV_StartSound (edict_t *entity, int channel, char *sample, int volume, floa
 
 	if (sound_num == MAX_SOUNDS || !sv.sound_precache[sound_num])
 	{
-		Con_Printf ("SV_StartSound: %s not precached\n", sample);
+		Con_DPrintf ("SV_StartSound: %s not precached\n", sample);
 		return;
 	}
 
@@ -619,6 +596,8 @@ byte *SV_FatPVS (vec3_t org)
 }
 
 
+void PR_WriteGibletsToClient (sizebuf_t *buf);
+
 /*
 =============
 SV_WriteEntitiesToClient
@@ -634,6 +613,8 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 	edict_t *clent;
 	int alpha;
 
+	PR_WriteGibletsToClient (msg);
+
 	// DP_SV_CLIENTCAMERA
 	clent = GetEdictForNumber (client->clientcamera);
 
@@ -648,6 +629,9 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 
 	for (e = 1; e < SVProgs->NumEdicts; e++, ent = NEXT_EDICT (ent))
 	{
+		// don't write free edicts
+		if (ent->free) continue;
+
 		// ignore if not touching a PV leaf
 		if (ent != clent)	// clent is ALLWAYS sent
 		{
@@ -720,10 +704,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 			origin[0] = ent->stepoldorigin[0] * moveilerp + ent->steporigin[0] * movelerp;
 			origin[1] = ent->stepoldorigin[1] * moveilerp + ent->steporigin[1] * movelerp;
 			origin[2] = ent->stepoldorigin[2] * moveilerp + ent->steporigin[2] * movelerp;
-#if 0
-			// this is more mathematically correct but it breaks under certain circumstances in Quake
-			NonEulerInterpolateAngles (ent->stepangles, ent->stepoldangles, movelerp, angles);
-#else
+
 			// choose shortest rotate (to avoid 'spin around' situations)
 			VectorSubtract (ent->stepangles, ent->stepoldangles, angles);
 
@@ -734,7 +715,6 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 			angles[0] = angles[0] * movelerp + ent->stepoldangles[0];
 			angles[1] = angles[1] * movelerp + ent->stepoldangles[1];
 			angles[2] = angles[2] * movelerp + ent->stepoldangles[2];
-#endif
 		}
 		else
 		{
@@ -1516,6 +1496,8 @@ void SV_SpawnServer (char *server)
 	int			i;
 
 	SAFE_DELETE (ServerZone);
+	SAFE_DELETE (Pool_Edicts);
+
 	ServerZone = new CQuakeZone ();
 
 	// let's not have any servers with no name
@@ -1574,15 +1556,18 @@ void SV_SpawnServer (char *server)
 	SVProgs->NumEdicts = 0;
 	SVProgs->MaxEdicts = 0;
 
-	// clear down in case the edict size has changed (e.g. if the game changed)
-	SAFE_DELETE (Pool_Edicts);
+	// alloc enough space
+	Pool_Edicts = new CQuakeHunk ((SVProgs->EdictSize * MAX_EDICTS + 0xfffff) >> 20);
+	SVProgs->EdictPointers = (edict_t **) Pool_Edicts->Alloc (MAX_EDICTS * sizeof (edict_t *));
 
 	// alloc an initial batch of 128 edicts
-	// SVProgs->Edicts = NULL;
-	SVProgs->EdictPointers = NULL;
 	SV_AllocEdicts (128);
 
-	sv.Protocol = sv_protocol;
+	// set the actual protocol that we're going to use (done this way because sv_protocol can be changed while a map is running)
+	// we need to force the RMQ protocol if running RMQ because bigcoord support is absolutely essential for the maps
+	if (com_rmq)
+		sv.Protocol = PROTOCOL_VERSION_RMQ;
+	else sv.Protocol = sv_protocol;
 
 	// set the correct protocol flags; these will always be 0 unless we're on PROTOCOL_VERSION_RMQ
 	// 24-bit gives the herky-jerkies on plats so just don't do it...

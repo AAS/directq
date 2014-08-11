@@ -22,10 +22,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-void D3DLight_CheckSurfaceForModification (msurface_t *surf);
-void D3DLight_UpdateLightmaps (void);
+cvar_t r_zfix ("r_zfix", 0.0f);
 
-void R_PushDlights (mnode_t *headnode);
+void D3DLight_CheckSurfaceForModification (msurface_t *surf);
+
+void R_PushDlights (entity_t *ent, mnode_t *headnode);
 void D3DWarp_DrawWaterSurfaces (brushhdr_t *hdr, msurface_t *chain, entity_t *ent);
 void D3DSky_DrawSkySurfaces (msurface_t *chain);
 
@@ -71,31 +72,25 @@ void D3DSurf_BuildWorldCache (void)
 
 void D3DSurf_EmitSurfToAlpha (msurface_t *surf, entity_t *ent)
 {
+	// check the surface for lightmap modification and also ensures that the correct lightmap tex is set
+	D3DLight_CheckSurfaceForModification (surf);
+
 	if (ent)
 	{
 		// copy out the midpoint for matrix transforms
-		float midpoint[3] =
-		{
-			surf->midpoint[0],
-			surf->midpoint[1],
-			surf->midpoint[2]
-		};
+		float midpoint[3];
 
 		// transform the surface midpoint by the modelsurf matrix so that it goes into the proper place
-		D3DMatrix_TransformPoint (&ent->matrix, midpoint, surf->midpoint);
+		// (we kept the entity matrix in local space so that we can do this correctly)
+		ent->matrix.TransformPoint (surf->midpoint, midpoint);
 
 		// now add it
-		D3DAlpha_AddToList (surf, ent);
-
-		// restore the original midpoint
-		surf->midpoint[0] = midpoint[0];
-		surf->midpoint[1] = midpoint[1];
-		surf->midpoint[2] = midpoint[2];
+		D3DAlpha_AddToList (surf, ent, midpoint);
 	}
 	else
 	{
 		// just add it
-		D3DAlpha_AddToList (surf, ent);
+		D3DAlpha_AddToList (surf, ent, surf->midpoint);
 	}
 }
 
@@ -114,7 +109,7 @@ texture_t *R_TextureAnimation (entity_t *ent, texture_t *base)
 	int relative;
 	texture_t *cached = base;
 
-	if (ent->frame)
+	if (ent && ent->frame)
 	{
 		if (base->alternate_anims)
 			base = base->alternate_anims;
@@ -171,11 +166,8 @@ void D3DSurf_DrawSolidSurfaces (model_t *mod, brushhdr_t *hdr, entity_t *ent, bo
 		if (surf->flags & SURF_DRAWSKY) continue;
 		if (surf->flags & SURF_DRAWTURB) continue;
 
-		// animate only one texture at a time
-		texture_t *anim = R_TextureAnimation (ent, tex);
-
-		if (anim->lumaimage && !fullbright) continue;
-		if (!anim->lumaimage && fullbright) continue;
+		if (tex->lumaimage && !fullbright) continue;
+		if (!tex->lumaimage && fullbright) continue;
 
 		// reorder by lightmap for cache coherence
 		for (; surf; surf = surf->texturechain)
@@ -190,7 +182,7 @@ void D3DSurf_DrawSolidSurfaces (model_t *mod, brushhdr_t *hdr, entity_t *ent, bo
 		{
 			// no entity used as this entity has already been transformed
 			for (surf = d3d_SurfLightmapChains[j]; surf; surf = surf->lightmapchain)
-				D3DBrush_EmitSurface (surf, anim, NULL, 255);
+				D3DBrush_EmitSurface (surf, tex, NULL, 255);
 
 			D3DBrush_FlushSurfaces ();
 			d3d_SurfLightmapChains[j] = NULL;
@@ -200,6 +192,8 @@ void D3DSurf_DrawSolidSurfaces (model_t *mod, brushhdr_t *hdr, entity_t *ent, bo
 	}
 }
 
+
+void D3DLight_UnlockLightmaps (void);
 
 void D3DSurf_DrawTextureChains (model_t *mod, brushhdr_t *hdr, entity_t *ent)
 {
@@ -226,7 +220,7 @@ void D3DSurf_DrawTextureChains (model_t *mod, brushhdr_t *hdr, entity_t *ent)
 }
 
 
-void D3DSurf_ChainSurface (msurface_t *surf)
+void D3DSurf_ChainSurface (msurface_t *surf, entity_t *ent)
 {
 	if (surf->flags & SURF_DRAWSKY)
 	{
@@ -240,8 +234,13 @@ void D3DSurf_ChainSurface (msurface_t *surf)
 	}
 	else
 	{
-		surf->texturechain = surf->texinfo->texture->texturechain;
-		surf->texinfo->texture->texturechain = surf;
+		texture_t *tex = R_TextureAnimation (ent, surf->texinfo->texture);
+
+		// check the surface for lightmap modification and also ensures that the correct lightmap tex is set
+		D3DLight_CheckSurfaceForModification (surf);
+
+		surf->texturechain = tex->texturechain;
+		tex->texturechain = surf;
 	}
 }
 
@@ -282,12 +281,14 @@ tail_recurse:;
 	{
 		for (int c = 0, side = 0; c < 4; c++)
 		{
-			// clipflags is a 4 bit mask, for each bit 0 = auto accept on this side, 1 = need to test on this side
-			// BOPS returns 0 (intersect), 1 (inside), or 2 (outside).  if a node is inside on any side then all
-			// of it's child nodes are also guaranteed to be inside on the same side (ditto outside, rejected by return)
+			// a parent is already fully inside the frustum on this side
 			if (!(clipflags & (1 << c))) continue;
-			if ((side = BOX_ON_PLANE_SIDE (node->mins, node->maxs, &frustum[c])) == 2) return;
-			if (side == 1) clipflags &= ~(1 << c);
+
+			// if the box is fully outside on any side then it is fully outside on all sides and there is no need to process children
+			if ((side = SphereOnPlaneSide (node->sphere, node->sphere[3], &frustum[c])) == BOX_OUTSIDE_PLANE) return;
+
+			// if the box is fully inside on this side then there is no need to test children on this side (it may be outside on another side)
+			if (side == BOX_INSIDE_PLANE) clipflags &= ~(1 << c);
 		}
 	}
 
@@ -334,6 +335,7 @@ tail_recurse:;
 		msurface_t *surf = node->surfaces;
 		int sidebit = (node->dot >= 0 ? 0 : SURF_PLANEBACK);
 		int nodesurfs = 0;
+		float dot;
 
 		// add stuff to the draw lists
 		for (int c = node->numsurfaces; c; c--, surf++)
@@ -345,16 +347,16 @@ tail_recurse:;
 
 			// only check for culling if both the node and leaf containing this surf intersect the frustum
 			if (clipflags && surf->clipflags)
-				if (R_CullBox (surf->mins, surf->maxs, frustum)) continue;
+				if (R_CullSphere (surf->sphere, surf->sphere[3], surf->clipflags)) continue;
 
 			// fixme - cache this dist for each plane (is this the same as the node's plane???)
-			float dot = R_PlaneDist (surf->plane, &d3d_RenderDef.worldentity);
+			dot = (surf->plane == node->plane) ? node->dot : R_PlaneDist (surf->plane, &d3d_RenderDef.worldentity);
 
 			if (dot > r_farclip) r_farclip = dot;
 			if (-dot > r_farclip) r_farclip = -dot;
 
 			// add to texture chains
-			D3DSurf_ChainSurface (surf);
+			D3DSurf_ChainSurface (surf, NULL);
 
 			// cache this surface for reuse
 			r_cachedworldsurfaces[r_numcachedworldsurfaces] = surf;
@@ -381,6 +383,10 @@ tail_recurse:;
 void D3DSurf_DrawBrushModel (entity_t *ent)
 {
 	model_t *mod = ent->model;
+
+	// catch null models
+	if (!mod->brushhdr) return;
+	if (!mod->brushhdr->numsurfaces) return;
 
 	// static entities already have the leafs they are in bbox culled
 	if (R_CullBox (ent->mins, ent->maxs, frustum))
@@ -411,16 +417,16 @@ void D3DSurf_DrawBrushModel (entity_t *ent)
 		ent->modelorg[2] = DotProduct (temp, av.up);
 	}
 
-	// calculate dynamic lighting for the inline bmodel
-	if (mod->name[0] == '*')
-		R_PushDlights (mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
+	ent->matrix.LoadIdentity ();
+	ent->matrix.Translate (ent->origin);
 
-	ent->angles[0] = -ent->angles[0];	// stupid quake bug
+	if (ent->angles[1]) ent->matrix.Rotate (0, 0, 1, ent->angles[1]);
+	if (ent->angles[0]) ent->matrix.Rotate (0, 1, 0, ent->angles[0]);	// stupid quake bug
+	if (ent->angles[2]) ent->matrix.Rotate (1, 0, 0, ent->angles[2]);
 
-	D3DMatrix_Identity (&ent->matrix);
-	D3D_RotateForEntity (ent, &ent->matrix, ent->origin, ent->angles);
-
-	ent->angles[0] = -ent->angles[0];	// stupid quake bug
+	// calculate dynamic lighting for the bmodel (we're lighting instanced as well now)
+	// this is done after the matrix is calced so that we can have the proper transform for lighting
+	R_PushDlights (ent, mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
 
 	int numsurfaces = 0;
 	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
@@ -435,24 +441,26 @@ void D3DSurf_DrawBrushModel (entity_t *ent)
 
 		if (((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) || (!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
 		{
-			if (ent->alphaval > 0 && ent->alphaval < 255)
+			if (surf->flags & SURF_DRAWFENCE)
+				D3DSurf_EmitSurfToAlpha (surf, ent);
+			else if (ent->alphaval > 0 && ent->alphaval < 255)
 				D3DSurf_EmitSurfToAlpha (surf, ent);
 			else
 			{
 				// regular surface
-				D3DSurf_ChainSurface (surf);
+				D3DSurf_ChainSurface (surf, ent);
 				numsurfaces++;
 			}
 		}
 	}
 
-	// and now multiply it out
-	D3DMatrix_Multiply (&ent->matrix, &d3d_ModelViewProjMatrix);
+	// update modified lightmaps always (in case a surf that was emitted to alpha modifies a lightmap but is not drawn here)
+	// this needs to be done per model so that dynamic light on instanced bmodels will be handled properly
+	D3DLight_UnlockLightmaps ();
 
 	if (numsurfaces)
 	{
-		// only if any surfs came through
-		D3DHLSL_SetWorldMatrix (&ent->matrix);
+		D3DHLSL_UpdateWorldMatrix (&d3d_ModelViewProjMatrix, &ent->matrix);
 		D3DSurf_DrawTextureChains (mod, mod->brushhdr, ent);
 	}
 }
@@ -460,7 +468,6 @@ void D3DSurf_DrawBrushModel (entity_t *ent)
 
 void D3D_SetupProjection (float fovx, float fovy, float zn, float zf);
 void R_ModParanoia (entity_t *ent);
-void D3DAlias_AddModelToList (entity_t *ent);
 
 void D3D_MergeInlineBModels (void)
 {
@@ -475,6 +482,10 @@ void D3D_MergeInlineBModels (void)
 		// this is only valid for inline bmodels as instanced models may have textures which are not in the world
 		if (mod->name[0] != '*') continue;
 
+		// catch null models
+		if (!mod->brushhdr) continue;
+		if (!mod->brushhdr->numsurfaces) continue;
+
 		// now we check for transforms
 		if (ent->angles[0]) continue;
 		if (ent->angles[1]) continue;
@@ -486,7 +497,6 @@ void D3D_MergeInlineBModels (void)
 
 		// add entities to the draw lists
 		if (!r_drawentities.integer) continue;
-		if (ent->alphaval > 0 && ent->alphaval < 255) continue;
 
 		// OK, we have a bmodel that doesn't move so merge it to the world list
 		R_ModParanoia (ent);
@@ -508,12 +518,15 @@ void D3D_MergeInlineBModels (void)
 		// this is now stored in the entity so we can read it back any time we want
 		VectorSubtract (r_refdef.vieworigin, ent->origin, ent->modelorg);
 
-		R_PushDlights (mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
-
 		msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
 
 		// ensure that there is a valid matrix in the entity for alpha sorting/distance
-		D3DMatrix_Identity (&ent->matrix);
+		// this model hasn't moved at all so it's local space matrix is identity
+		ent->matrix.LoadIdentity ();
+
+		// calculate dynamic lighting for the inline bmodel
+		// this is done after the matrix is calced so that we can have the proper transform for lighting
+		R_PushDlights (NULL, mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
 
 		// don't bother with ordering these for now; we'll sort them by texture later
 		for (int s = 0; s < mod->brushhdr->nummodelsurfaces; s++, surf++)
@@ -526,24 +539,22 @@ void D3D_MergeInlineBModels (void)
 
 			// we already checked for ent->alphaval above so we don't need to here
 			if (((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) || (!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
-				D3DSurf_ChainSurface (surf);
+			{
+				if (surf->flags & SURF_DRAWFENCE)
+					D3DSurf_EmitSurfToAlpha (surf, ent);
+				else if (ent->alphaval > 0 && ent->alphaval < 255)
+					D3DSurf_EmitSurfToAlpha (surf, ent);
+				else D3DSurf_ChainSurface (surf, ent);
+			}
 
 			// prevent surfs from being added more than once (some custom maps get this)
 			surf->visframe = d3d_RenderDef.framecount;
 		}
-
-		// and now multiply it by the world matrix for the final entity matrix
-		D3DMatrix_Multiply (&ent->matrix, &d3d_ModelViewProjMatrix);
 	}
 }
 
 
-void D3D_SetupBrushModel (entity_t *ent)
-{
-}
-
-
-void D3D_BuildWorld (void)
+void D3DSurf_DrawWorld (void)
 {
 	// Con_Printf ("\n");
 
@@ -559,8 +570,13 @@ void D3D_BuildWorld (void)
 	// (although it might not be depending on the scene...)
 	d3d_RenderDef.worldentity.visframe = d3d_RenderDef.framecount;
 
+	// the world entity needs a matrix set up correctly so that trans surfs will transform correctly
+	// the world model hasn't moved at all so it's local space matrix is identity
+	d3d_RenderDef.worldentity.matrix.LoadIdentity ();
+
 	// calculate dynamic lighting for the world
-	R_PushDlights (cl.worldmodel->brushhdr->nodes);
+	// this is done after the matrix is calced so that we can have the proper transform for lighting
+	R_PushDlights (NULL, cl.worldmodel->brushhdr->nodes);
 
 	d3d_RenderDef.numnode = 0;
 	d3d_RenderDef.numleaf = 0;
@@ -594,7 +610,7 @@ void D3D_BuildWorld (void)
 		{
 			msurface_t *surf = r_cachedworldsurfaces[i];
 
-			D3DSurf_ChainSurface (surf);
+			D3DSurf_ChainSurface (surf, NULL);
 			surf->visframe = d3d_RenderDef.framecount;
 		}
 	}
@@ -603,63 +619,28 @@ void D3D_BuildWorld (void)
 	d3d_RenderDef.numnode = r_numcachedworldnodes;
 	d3d_RenderDef.numleaf = r_numcachedworldleafs;
 
-	// set the final projection matrix that we'll actually use
-	D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip);
+	// set the final projection matrix that we'll actually use (this is good for most Quake scenes)
+	D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip + 100 * r_zfix.value);
 
 	// and re-evaluate our MVP
-	D3DMatrix_Multiply (&d3d_ModelViewProjMatrix, &d3d_ViewMatrix, &d3d_WorldMatrix);
-	D3DMatrix_Multiply (&d3d_ModelViewProjMatrix, &d3d_ProjMatrix);
+	QMATRIX::UpdateMVP (&d3d_ModelViewProjMatrix, &d3d_WorldMatrix, &d3d_ViewMatrix, &d3d_ProjMatrix);
 
-	// and send it to the shader; this is actually sent twice now; once after the initial rough estimate
-	// and once here.  one of these is strictly speaking unnecessary, but to be honest if we're worried
-	// about THAT causing performance problems we've got too much time on our hands.
+	// and send it to the shader
 	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
-
-	// the world entity needs a matrix set up correctly so that trans surfs will transform correctly
-	memcpy (&d3d_RenderDef.worldentity.matrix, &d3d_ModelViewProjMatrix, sizeof (D3DMATRIX));
-
-	// kurok needs alpha testing on all surfs to do leaves/etc (this is ugly)
-	if (kurok) D3DState_SetAlphaTest (TRUE, D3DCMP_GREATEREQUAL, (DWORD) 0x000000aa);
 
 	// bmodels which do not move may be merged to the world
-	D3D_MergeInlineBModels ();
+	if (!r_zfix.value) D3D_MergeInlineBModels ();
 
-	// update lightmaps as late as possible before using them
-	D3DLight_UpdateLightmaps ();
-
-	D3DBrush_Begin ();
+	D3DLight_UnlockLightmaps ();
 	D3DSurf_DrawTextureChains (cl.worldmodel, cl.worldmodel->brushhdr, &d3d_RenderDef.worldentity);
 
-	// deferred until after the world so that we get statics on the list too
-	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
+	if (r_zfix.value)
 	{
-		entity_t *ent = d3d_RenderDef.visedicts[i];
-
-		if (!ent->model) continue;
-
-		// this ent had it's model merged to the world
-		if (ent->mergeframe == d3d_RenderDef.framecount) continue;
-
-		// add entities to the draw lists
-		if (!r_drawentities.integer) continue;
-
-		R_ModParanoia (ent);
-		D3DMain_BBoxForEnt (ent);
-
-		// to save on extra passes through the list we setup alias and sprite models here too
-		if (ent->model->type == mod_alias)
-			D3DAlias_AddModelToList (ent);
-		else if (ent->model->type == mod_brush)
-			D3DSurf_DrawBrushModel (ent);
-		else if (ent->model->type == mod_sprite)
-			D3DAlpha_AddToList (ent);
-		else Con_Printf ("Unknown model type for entity: %i\n", ent->model->type);
+		// adjust projection matrix to combat z-fighting (this is good for most Quake scenes)
+		D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip);
+		QMATRIX::UpdateMVP (&d3d_ModelViewProjMatrix, &d3d_WorldMatrix, &d3d_ViewMatrix, &d3d_ProjMatrix);
+		D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
 	}
-
-	// reset to the original world matrix
-	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
-
-	if (kurok) D3DState_SetAlphaTest (FALSE);
 }
 
 

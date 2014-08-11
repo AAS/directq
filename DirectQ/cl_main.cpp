@@ -20,6 +20,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_model.h"
+#include "cl_fx.h"
+
 
 cvar_t	cl_web_download	("cl_web_download", "1");
 cvar_t	cl_web_download_url	("cl_web_download_url", "http://bigfoot.quake1.net/"); // the quakeone.com link is dead //"http://downloads.quakeone.com/");
@@ -34,7 +36,7 @@ cvar_t	cl_color ("_cl_color", "0", CVAR_ARCHIVE);
 cvar_t	cl_shownet ("cl_shownet", "0");	// can be 0, 1, or 2
 cvar_t	cl_nolerp ("cl_nolerp", "0");
 
-cvar_t	cl_autoaim ("cl_autoaim", "0");		// defaults to 1 in Kurok, but let's keep it 0 for general compat
+cvar_t	cl_autoaim ("cl_autoaim", "0");
 cvar_t	lookspring ("lookspring", "0", CVAR_ARCHIVE);
 cvar_t	lookstrafe ("lookstrafe", "0", CVAR_ARCHIVE);
 cvar_t	sensitivity ("sensitivity", "3", CVAR_ARCHIVE);
@@ -46,8 +48,6 @@ cvar_t	m_side ("m_side", "0.8", CVAR_ARCHIVE);
 
 // proquake nat fix
 cvar_t	cl_natfix ("cl_natfix", "1");
-
-extern cvar_t r_extradlight;
 
 client_static_t	cls;
 client_state_t	cl;
@@ -106,16 +106,13 @@ void CL_ClearState (void)
 	memset (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
 	memset (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
-	// for tracking entity numbers for occlusion query usage
-	cl_entityallocs = 0;
-
 	// allocate space for the first 512 entities - also clears the array
 	// the remainder are left at NULL and allocated on-demand if they are ever needed
 	for (i = 0; i < MAX_EDICTS; i++)
 	{
 		if (i < BASE_ENTITIES)
 		{
-			cl_entities[i] = CL_AllocEntity ();
+			cl_entities[i] = (entity_t *) ClientZone->Alloc (sizeof (entity_t));
 			cl_entities[i]->entnum = i;
 		}
 		else cl_entities[i] = NULL;
@@ -368,95 +365,6 @@ void SetPal (int i)
 
 
 /*
-===============
-CL_AllocDlight
-
-===============
-*/
-dlight_t *CL_FindDlight (int key)
-{
-	int		i;
-	dlight_t	*dl;
-
-	// first look for an exact key match
-	if (key)
-	{
-		dl = cl_dlights;
-
-		for (i = 0; i < MAX_DLIGHTS; i++, dl++)
-		{
-			if (dl->key == key)
-			{
-				memset (dl, 0, sizeof (*dl));
-				dl->key = key;
-				return dl;
-			}
-		}
-	}
-
-	// then look for anything else
-	dl = cl_dlights;
-
-	for (i = 0; i < MAX_DLIGHTS; i++, dl++)
-	{
-		if (dl->die < cl.time)
-		{
-			memset (dl, 0, sizeof (*dl));
-			dl->key = key;
-			return dl;
-		}
-	}
-
-	dl = &cl_dlights[0];
-	memset (dl, 0, sizeof (*dl));
-	dl->key = key;
-	return dl;
-}
-
-
-dlight_t *CL_AllocDlight (int key)
-{
-	// find a dlight to use
-	dlight_t *dl = CL_FindDlight (key);
-
-	// set default colour for any we don't colour ourselves
-	// NOTE - all dlight colour ops should go through R_ColourDLight (in d3d_rlight.cpp) rather than
-	// accessing the fields directly, so that those who don't want coloured light can switch it off.
-	dl->rgb[0] = dl->rgb[1] = dl->rgb[2] = 255;
-	dl->flags = 0;
-
-	// done
-	return dl;
-}
-
-
-/*
-===============
-CL_DecayLights
-
-===============
-*/
-void CL_DecayLights (void)
-{
-	dlight_t *dl = cl_dlights;
-
-	for (int i = 0; i < MAX_DLIGHTS; i++, dl++)
-	{
-		if (dl->die < cl.time || !dl->radius)
-			continue;
-
-		dl->radius -= cl.frametime * dl->decay;
-
-		if (dl->radius < 0 || (dl->flags & DLF_KILL))
-		{
-			dl->radius = 0;
-			dl->die = -1;
-		}
-	}
-}
-
-
-/*
 ========================================================================================================================
 
 		A NOTE ON INTERPOLATION
@@ -541,18 +449,18 @@ void CL_EntityInterpolateOrigins (entity_t *ent)
 	{
 		ent->translatestarttime = cl.time;
 
-		VectorCopy (ent->origin, ent->lerporigin[LERP_LAST]);
-		VectorCopy (ent->origin, ent->lerporigin[LERP_CURR]);
+		VectorCopy (ent->origin, ent->lastorigin);
+		VectorCopy (ent->origin, ent->currorigin);
 
 		return;
 	}
 
-	if (!VectorCompare (ent->origin, ent->lerporigin[LERP_CURR]))
+	if (!VectorCompare (ent->origin, ent->currorigin))
 	{
 		ent->translatestarttime = cl.time;
 
-		VectorCopy (ent->lerporigin[LERP_CURR], ent->lerporigin[LERP_LAST]);
-		VectorCopy (ent->origin,  ent->lerporigin[LERP_CURR]);
+		VectorCopy (ent->currorigin, ent->lastorigin);
+		VectorCopy (ent->origin,  ent->currorigin);
 
 		blend = 0;
 	}
@@ -563,11 +471,11 @@ void CL_EntityInterpolateOrigins (entity_t *ent)
 		if (cl.paused || blend > 1) blend = 1;
 	}
 
-	VectorSubtract (ent->lerporigin[LERP_CURR], ent->lerporigin[LERP_LAST], delta);
+	VectorSubtract (ent->currorigin, ent->lastorigin, delta);
 
-	ent->origin[0] = ent->lerporigin[LERP_LAST][0] + delta[0] * blend;
-	ent->origin[1] = ent->lerporigin[LERP_LAST][1] + delta[1] * blend;
-	ent->origin[2] = ent->lerporigin[LERP_LAST][2] + delta[2] * blend;
+	ent->origin[0] = ent->lastorigin[0] + delta[0] * blend;
+	ent->origin[1] = ent->lastorigin[1] + delta[1] * blend;
+	ent->origin[2] = ent->lastorigin[2] + delta[2] * blend;
 }
 
 
@@ -580,18 +488,18 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 	{
 		ent->rotatestarttime = cl.time;
 
-		VectorCopy (ent->angles, ent->lerpangles[LERP_LAST]);
-		VectorCopy (ent->angles, ent->lerpangles[LERP_CURR]);
+		VectorCopy (ent->angles, ent->lastangles);
+		VectorCopy (ent->angles, ent->currangles);
 
 		return;
 	}
 
-	if (!VectorCompare (ent->angles, ent->lerpangles[LERP_CURR]))
+	if (!VectorCompare (ent->angles, ent->currangles))
 	{
 		ent->rotatestarttime = cl.time;
 
-		VectorCopy (ent->lerpangles[LERP_CURR], ent->lerpangles[LERP_LAST]);
-		VectorCopy (ent->angles,  ent->lerpangles[LERP_CURR]);
+		VectorCopy (ent->currangles, ent->lastangles);
+		VectorCopy (ent->angles,  ent->currangles);
 
 		blend = 0;
 	}
@@ -602,13 +510,9 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 		if (cl.paused || blend > 1) blend = 1;
 	}
 
-#if 0
-	// this is more mathematically correct but it breaks under certain circumstances in Quake
-	NonEulerInterpolateAngles (ent->lerpangles[LERP_CURR], ent->lerpangles[LERP_LAST], blend, ent->angles);
-#else
 	for (int i = 0; i < 3; i++)
 	{
-		float delta = ent->lerpangles[LERP_CURR][i] - ent->lerpangles[LERP_LAST][i];
+		float delta = ent->currangles[i] - ent->lastangles[i];
 
 		// always interpolate along the shortest path
 		if (delta > 180)
@@ -616,13 +520,12 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 		else if (delta < -180)
 			delta += 360;
 
-		ent->angles[i] = ent->lerpangles[LERP_LAST][i] + delta * blend;
+		ent->angles[i] = ent->lastangles[i] + delta * blend;
 	}
-#endif
 }
 
 
-float CL_EntityLerpPoint (entity_t *ent)
+float CL_EntityLerpPoint (void)
 {
 	float	f;
 
@@ -667,15 +570,8 @@ void CL_RelinkEntities (void)
 	for (int i = 0; i < 3; i++)
 		cl.velocity[i] = cl.mvelocity[1][i] + frac * (cl.mvelocity[0][i] - cl.mvelocity[1][i]);
 
-	// keep random effects consistent with time
-	srand ((unsigned int) (cl.time * 1000.0f));
-
 	if (cls.demoplayback)
 	{
-#if 0
-		// this is more mathematically correct but it breaks under certain circumstances in Quake
-		NonEulerInterpolateAngles (cl.mviewangles[0], cl.mviewangles[1], frac, cl.viewangles);
-#else
 		// interpolate the angles
 		for (int j = 0; j < 3; j++)
 		{
@@ -685,11 +581,7 @@ void CL_RelinkEntities (void)
 
 			cl.viewangles[j] = cl.mviewangles[1][j] + frac * d;
 		}
-#endif
 	}
-
-	// reset visedicts count and structs
-	D3D_BeginVisedicts ();
 
 	for (int i = 1; i < cl.num_entities; i++)
 	{
@@ -698,15 +590,15 @@ void CL_RelinkEntities (void)
 
 		if (!ent) continue;
 
-		// doesn't have a model
-		if (!ent->model) continue;
-
 		// if the object wasn't included in the last packet, remove it
-		if (ent->msgtime != cl.mtime[0])
+		// (intentionally falls through to next condition)
+		if (ent->msgtime != cl.mtime[0]) ent->model = NULL;
+
+		// doesn't have a model
+		if (!ent->model)
 		{
 			// clear it's interpolation data too
 			CL_ClearInterpolation (ent, CLEAR_ALLLERP);
-			ent->model = NULL;
 			continue;
 		}
 
@@ -722,7 +614,7 @@ void CL_RelinkEntities (void)
 		else
 		{
 			float delta[3];
-			float f = CL_EntityLerpPoint (ent); //frac;
+			float f = CL_EntityLerpPoint (); //frac;
 
 			// if the delta is large, assume a teleport and don't lerp
 			for (int j = 0; j < 3; j++)
@@ -739,14 +631,6 @@ void CL_RelinkEntities (void)
 			// if we're interpolating position/angles don't interpolate them here
 			if (r_lerporient.integer && (ent->lerpflags & LERP_MOVESTEP) && !sv.active) f = 1;
 
-#if 0
-			// interpolate the origin and angles
-			for (int j = 0; j < 3; j++)
-				ent->origin[j] = ent->msg_origins[1][j] + f * delta[j];
-
-			// this is more mathematically correct but it breaks under certain circumstances in Quake
-			NonEulerInterpolateAngles (ent->msg_angles[0], ent->msg_angles[1], f, ent->angles);
-#else
 			for (int j = 0; j < 3; j++)
 			{
 				// interpolate the origin and angles
@@ -759,7 +643,6 @@ void CL_RelinkEntities (void)
 
 				ent->angles[j] = ent->msg_angles[1][j] + f * d;
 			}
-#endif
 		}
 
 		// now run the interpolation for rendering
@@ -776,240 +659,59 @@ void CL_RelinkEntities (void)
 			ent->translatestarttime = 0;
 			ent->rotatestarttime = 0;
 
-			VectorCopy (ent->origin, ent->lerporigin[LERP_LAST]);
-			VectorCopy (ent->origin, ent->lerporigin[LERP_CURR]);
+			VectorCopy (ent->origin, ent->lastorigin);
+			VectorCopy (ent->origin, ent->currorigin);
 
-			VectorCopy (ent->angles, ent->lerpangles[LERP_LAST]);
-			VectorCopy (ent->angles, ent->lerpangles[LERP_CURR]);
+			VectorCopy (ent->angles, ent->lastangles);
+			VectorCopy (ent->angles, ent->currangles);
 		}
 
-		if (ent->effects)
+		// rotate binary objects locally (this affects entity state rather than being an effect so it's done here)
+		if (ent->model->flags & EF_ROTATE)
 		{
-			// this needs to spawn from here as it's a per-frame dynamic effect
-			if (ent->effects & EF_BRIGHTFIELD)
-				R_EntityParticles (ent);
+			// allow bouncing items for those who like them
+			if (cl_itembobheight.value > 0.0f)
+				ent->origin[2] += (cos ((cl.time + ent->entnum) * cl_itembobspeed.value * (2.0f * D3DX_PI)) + 1.0f) * 0.5f * cl_itembobheight.value;
 
-			if (ent->effects & EF_MUZZLEFLASH)
-			{
-				avectors_t av;
-
-				dl = CL_AllocDlight (i);
-				dl->die = cl.time + 0.1f;
-				dl->flags |= DLF_NOCORONA;
-
-				// some entities have different attacks resulting in a different flash colour
-				if (kurok)
-					R_ColourDLight (dl, 300, 256, 200);
-				else
-				{
-					if (!strncmp (&ent->model->name[6], "wizard", 6))
-						R_ColourDLight (dl, 308, 351, 109);
-					else if (!strncmp (&ent->model->name[6], "shalrath", 8))
-						R_ColourDLight (dl, 399, 141, 228);
-					else if (!strncmp (&ent->model->name[6], "shambler", 8))
-						R_ColourDLight (dl, 65, 232, 470);
-					else R_ColourDLight (dl, 408, 242, 117);
-
-					if (i == cl.viewentity)
-					{
-						if (cl.stats[STAT_ACTIVEWEAPON] == IT_NAILGUN)
-						{
-							// rapid fire
-							dl->die = cl.time + 0.1f;
-						}
-						else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_LIGHTNING)
-						{
-							// rapid fire
-							dl->die = cl.time + 0.1f;
-
-							// switch the dlight colour
-							R_ColourDLight (dl, 65, 232, 470);
-						}
-						else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)
-						{
-							// rapid fire
-							dl->die = cl.time + 0.1f;
-
-							// switch the dlight colour
-							R_ColourDLight (dl, 65, 232, 470);
-						}
-						else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_NAILGUN)
-						{
-							// rapid fire
-							dl->die = cl.time + 0.1f;
-						}
-					}
-				}
-
-				VectorCopy2 (dl->origin, ent->origin);
-				dl->origin[2] += 16;
-				AngleVectors (ent->angles, &av);
-
-				VectorMad (dl->origin, 18, av.forward, dl->origin);
-				dl->radius = 200 + (rand () & 31);
-
-				// the server clears muzzleflashes after each frame, but as the client is now running faster, it won't get the message for several
-				// frames - potentially over 10.  therefore we should also clear the flash on the client too.  this also fixes demos ;)
-				ent->effects &= ~EF_MUZZLEFLASH;
-			}
-
-			if (ent->effects & EF_BRIGHTLIGHT)
-			{
-				// uncoloured
-				dl = CL_AllocDlight (i);
-				VectorCopy2 (dl->origin, ent->origin);
-				dl->origin[2] += 16;
-				dl->radius = 400 + (rand () & 31);
-				dl->die = cl.time + 0.001;
-				dl->flags |= DLF_NOCORONA;
-
-				if (kurok) R_ColourDLight (dl, 450, 256, 128);
-			}
-
-			if (ent->effects & EF_DIMLIGHT)
-			{
-				// note - by using the entity num as the key, this just updates the existing light rather than allocating a new one.
-				dl = CL_AllocDlight (i);
-				VectorCopy2 (dl->origin, ent->origin);
-				dl->radius = 200 + (rand () & 31);
-				dl->die = cl.time + 0.001;
-
-				// if it's a powerup coming from the viewent then we remove the corona
-				if (i == cl.viewentity) dl->flags |= DLF_NOCORONA;
-
-				// powerup dynamic lights
-				if (kurok)
-				{
-					dl->radius = 100 + (rand () & 31);
-					R_ColourDLight (dl, 128, 128, 128);
-				}
-				else if (i == cl.viewentity)
-				{
-					int AverageColour;
-					int rgb[3];
-
-					rgb[0] = 64;
-					rgb[1] = 64;
-					rgb[2] = 64;
-
-					if (cl.items & IT_QUAD) rgb[2] = 255;
-					if (cl.items & IT_INVULNERABILITY) rgb[0] = 255;
-
-					// re-balance the colours
-					AverageColour = (rgb[0] + rgb[1] + rgb[2]) / 3;
-
-					rgb[0] = rgb[0] * 255 / AverageColour;
-					rgb[1] = rgb[1] * 255 / AverageColour;
-					rgb[2] = rgb[2] * 255 / AverageColour;
-
-					R_ColourDLight (dl, rgb[0], rgb[1], rgb[2]);
-				}
-			}
-
-			if ((ent->effects & EF_REDLIGHT) && kurok)
-			{
-				dl = CL_AllocDlight (i);
-				VectorCopy (ent->origin,  dl->origin);
-				dl->radius = 150 + (rand () & 31);
-				dl->die = cl.time + 0.001;
-				dl->flags |= DLF_NOCORONA;
-				R_ColourDLight (dl, 512, 64, 64);
-			}
-
-			if ((ent->effects & EF_BLUELIGHT) && kurok)
-			{
-				dl = CL_AllocDlight (i);
-				VectorCopy (ent->origin,  dl->origin);
-				dl->radius = 150 + (rand () & 31);
-				dl->die = cl.time + 0.001;
-				dl->flags |= DLF_NOCORONA;
-				R_ColourDLight (dl, 64, 64, 512);
-			}
+			// bugfix - a rotating backpack spawned from a dead player gets the same angles as the player
+			// if it was spawned when the player is not upright (e.g. killed by a rocket or similar) and
+			// it inherits the players entity_t struct
+			ent->angles[0] = 0;
+			ent->angles[1] = bobjrotate;
+			ent->angles[2] = 0;
 		}
 
-		if (ent->model->flags)
+		// these need to spawn from here as they are per-frame dynamic effects
+		if (ent->effects & EF_MUZZLEFLASH) CL_MuzzleFlash (ent, i);
+		if (ent->effects & EF_BRIGHTLIGHT) CL_BrightLight (ent, i);
+		if (ent->effects & EF_DIMLIGHT) CL_DimLight (ent, i);
+
+		// this is now animated on the GPU so it needs to be emitted every frame
+		if (ent->effects & EF_BRIGHTFIELD) R_EntityParticles (ent);
+
+		// testing
+		// R_EntityParticles (ent);
+
+		// check for timed effects
+		if (cl.time >= cl.nexteffecttime)
 		{
-			// rotate binary objects locally (this affects entity state rather than being an effect so it's done here)
-			if (ent->model->flags & EF_ROTATE)
-			{
-				// allow bouncing items for those who like them
-				if (cl_itembobheight.value > 0.0f)
-					ent->origin[2] += (cos ((cl.time + ent->entnum) * cl_itembobspeed.value * (2.0f * D3DX_PI)) + 1.0f) * 0.5f * cl_itembobheight.value;
-
-				// bugfix - a rotating backpack spawned from a dead player gets the same angles as the player
-				// if it was spawned when the player is not upright (e.g. killed by a rocket or similar) and
-				// it inherits the players entity_t struct
-				ent->angles[0] = 0;
-				ent->angles[1] = bobjrotate;
-				ent->angles[2] = 0;
-			}
-
-			if (ent->model->flags & EF_TRACER)
-			{
-				if (r_extradlight.value)
-				{
-					dl = CL_AllocDlight (i);
-					VectorCopy2 (dl->origin, ent->origin);
-					dl->radius = 200;
-					dl->die = cl.time + 0.01f;
-
-					R_ColourDLight (dl, 308, 351, 109);
-				}
-			}
-			else if (ent->model->flags & EF_TRACER2)
-			{
-				if (r_extradlight.value)
-				{
-					dl = CL_AllocDlight (i);
-					VectorCopy2 (dl->origin, ent->origin);
-					dl->radius = 200;
-					dl->die = cl.time + 0.01f;
-
-					R_ColourDLight (dl, 408, 242, 117);
-				}
-			}
+			if (ent->model->flags & EF_WIZARDTRAIL)
+				CL_WizardTrail (ent, i);
+			else if (ent->model->flags & EF_KNIGHTTRAIL)
+				CL_KnightTrail (ent, i);
 			else if (ent->model->flags & EF_ROCKET)
-			{
-				dl = CL_AllocDlight (i);
-				VectorCopy2 (dl->origin, ent->origin);
-				dl->radius = 200;
-				dl->die = cl.time + 0.01f;
+				CL_RocketTrail (ent, i);
+			else if (ent->model->flags & EF_VORETRAIL)
+				CL_VoreTrail (ent, i);
+			else if (ent->model->flags & EF_GIB)
+				R_RocketTrail (ent->oldorg, ent->origin, RT_GIB);
+			else if (ent->model->flags & EF_ZOMGIB)
+				R_RocketTrail (ent->oldorg, ent->origin, RT_ZOMGIB);
+			else if (ent->model->flags & EF_GRENADE)
+				R_RocketTrail (ent->oldorg, ent->origin, RT_GRENADE);
 
-				R_ColourDLight (dl, 408, 242, 117);
-			}
-			else if (ent->model->flags & EF_TRACER3)
-			{
-				if (r_extradlight.value)
-				{
-					dl = CL_AllocDlight (i);
-					VectorCopy2 (dl->origin, ent->origin);
-					dl->radius = 200;
-					dl->die = cl.time + 0.01f;
-
-					R_ColourDLight (dl, 399, 141, 228);
-				}
-			}
-
-			if (cl.time > cl.nexteffecttime)
-			{
-				if (ent->model->flags & EF_GIB)
-					R_RocketTrail (ent->oldorg, ent->origin, 2);
-				else if (ent->model->flags & EF_ZOMGIB)
-					R_RocketTrail (ent->oldorg, ent->origin, 4);
-				else if (ent->model->flags & EF_TRACER)
-					R_RocketTrail (ent->oldorg, ent->origin, 3);
-				else if (ent->model->flags & EF_TRACER2)
-					R_RocketTrail (ent->oldorg, ent->origin, 5);
-				else if (ent->model->flags & EF_ROCKET)
-					R_RocketTrail (ent->oldorg, ent->origin, 0);
-				else if (ent->model->flags & EF_GRENADE)
-					R_RocketTrail (ent->oldorg, ent->origin, 1);
-				else if (ent->model->flags & EF_TRACER3)
-					R_RocketTrail (ent->oldorg, ent->origin, 6);
-
-				// and update the old origin
-				VectorCopy2 (ent->oldorg, ent->origin);
-			}
+			// and update the old origin
+			VectorCopy2 (ent->oldorg, ent->origin);
 		}
 
 		ent->forcelink = false;
@@ -1023,9 +725,6 @@ void CL_RelinkEntities (void)
 		// the entity is a visedict now
 		D3D_AddVisEdict (ent);
 	}
-
-	if (cl.time > cl.nexteffecttime)
-		cl.nexteffecttime = cl.time + (1.0 / 72.0);
 }
 
 
@@ -1069,9 +768,20 @@ void CL_PrepEntitiesForRendering (void)
 {
 	if (cls.state == ca_connected)
 	{
+		// reset visedicts count and structs
+		D3D_BeginVisedicts ();
+
 		// entity states are always brought up to date, even if not reading from the server
 		CL_RelinkEntities ();
 		CL_UpdateTEnts ();
+
+		// set time for the next set of effects to fire
+		if (cl.time >= cl.nexteffecttime)
+		{
+			if (cl_effectrate.value > 0)
+				cl.nexteffecttime = cl.time + (1.0 / cl_effectrate.value);
+			else cl.nexteffecttime = cl.time;
+		}
 	}
 }
 
@@ -1091,6 +801,8 @@ cmd_t CL_TimeDemo_f_Cmd ("timedemo", CL_TimeDemo_f);
 
 void CL_Init (void)
 {
+	CL_InitFX ();
+
 	SZ_Alloc (&cls.message, 1024);
 
 	// allocated here because (1) it's just a poxy array of pointers, so no big deal, and (2) it's

@@ -48,12 +48,12 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;GLQUAKE;D3D_DEBUG_INFO;_CRT_SECURE_NO_WARNINGS"
+				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;GLQUAKE;_CRT_SECURE_NO_WARNINGS"
 				RuntimeLibrary="1"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
 				WarnAsError="true"
-				DebugInformationFormat="3"
+				DebugInformationFormat="4"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -68,7 +68,7 @@
 				Name="VCLinkerTool"
 				AdditionalDependencies="dxguid.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
-				LinkIncremental="1"
+				LinkIncremental="2"
 				GenerateManifest="false"
 				EnableUAC="false"
 				UACExecutionLevel="2"
@@ -258,6 +258,10 @@
 					>
 				</File>
 				<File
+					RelativePath=".\d3d_iqm.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\d3d_light.cpp"
 					>
 				</File>
@@ -302,6 +306,10 @@
 					>
 				</File>
 				<File
+					RelativePath=".\d3d_sprite.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\d3d_state.cpp"
 					>
 				</File>
@@ -314,19 +322,27 @@
 					>
 				</File>
 				<File
-					RelativePath=".\d3d_vidnt.cpp"
-					>
-				</File>
-				<File
-					RelativePath=".\d3d_vidwindow.cpp"
-					>
-				</File>
-				<File
 					RelativePath=".\d3d_warp.cpp"
 					>
 				</File>
 				<File
 					RelativePath=".\imageloaders.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\vid_cmds.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\vid_d3d.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\vid_menu.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\vid_win32.cpp"
 					>
 				</File>
 				<File
@@ -350,6 +366,10 @@
 					>
 				</File>
 				<File
+					RelativePath=".\cl_fx.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\cl_input.cpp"
 					>
 				</File>
@@ -363,10 +383,6 @@
 				</File>
 				<File
 					RelativePath=".\cl_particles.cpp"
-					>
-				</File>
-				<File
-					RelativePath=".\cl_tent.cpp"
 					>
 				</File>
 				<File
@@ -395,6 +411,10 @@
 				</File>
 				<File
 					RelativePath=".\hud.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\in_360.cpp"
 					>
 				</File>
 				<File
@@ -429,10 +449,6 @@
 					RelativePath=".\menu_singleplayer.cpp"
 					>
 				</File>
-				<File
-					RelativePath=".\menu_video.cpp"
-					>
-				</File>
 			</Filter>
 			<Filter
 				Name="Net"
@@ -451,10 +467,6 @@
 				</File>
 				<File
 					RelativePath=".\net_main.cpp"
-					>
-				</File>
-				<File
-					RelativePath=".\net_win.cpp"
 					>
 				</File>
 				<File
@@ -522,10 +534,6 @@
 					>
 				</File>
 				<File
-					RelativePath=".\compat.cpp"
-					>
-				</File>
-				<File
 					RelativePath=".\crash.cpp"
 					>
 				</File>
@@ -573,15 +581,15 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
-				RelativePath=".\anorms.h"
-				>
-			</File>
-			<File
 				RelativePath=".\bspfile.h"
 				>
 			</File>
 			<File
 				RelativePath=".\cdaudio.h"
+				>
+			</File>
+			<File
+				RelativePath=".\cl_fx.h"
 				>
 			</File>
 			<File
@@ -653,6 +661,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\iqm.h"
+				>
+			</File>
+			<File
 				RelativePath=".\keys.h"
 				>
 			</File>
@@ -678,22 +690,6 @@
 			</File>
 			<File
 				RelativePath=".\net.h"
-				>
-			</File>
-			<File
-				RelativePath=".\net_dgrm.h"
-				>
-			</File>
-			<File
-				RelativePath=".\net_loop.h"
-				>
-			</File>
-			<File
-				RelativePath=".\net_ser.h"
-				>
-			</File>
-			<File
-				RelativePath=".\net_wins.h"
 				>
 			</File>
 			<File
@@ -803,19 +799,11 @@
 				>
 			</File>
 			<File
+				RelativePath=".\dqlogoint.bmp"
+				>
+			</File>
+			<File
 				RelativePath=".\fxMaster.fx"
-				>
-			</File>
-			<File
-				RelativePath=".\particledot.png"
-				>
-			</File>
-			<File
-				RelativePath=".\uwblur.png"
-				>
-			</File>
-			<File
-				RelativePath=".\YouAreHere.png"
 				>
 			</File>
 		</Filter>

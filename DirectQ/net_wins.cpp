@@ -37,7 +37,26 @@ static unsigned long myAddr;
 
 bool	winsock_lib_initialized;
 
-#include "net_wins.h"
+
+// net_wins.h prototypes
+int  WINS_Init (void);
+void WINS_Shutdown (void);
+void WINS_Listen (bool state);
+int  WINS_OpenSocket (int port);
+int  WINS_CloseSocket (int socket);
+int  WINS_Connect (int socket, struct qsockaddr *addr);
+int  WINS_CheckNewConnections (void);
+int  WINS_Read (int socket, byte *buf, int len, struct qsockaddr *addr);
+int  WINS_Write (int socket, byte *buf, int len, struct qsockaddr *addr);
+int  WINS_Broadcast (int socket, byte *buf, int len);
+char *WINS_AddrToString (struct qsockaddr *addr);
+int  WINS_StringToAddr (char *string, struct qsockaddr *addr);
+int  WINS_GetSocketAddr (int socket, struct qsockaddr *addr);
+int  WINS_GetNameFromAddr (struct qsockaddr *addr, char *name);
+int  WINS_GetAddrFromName (char *name, struct qsockaddr *addr);
+int  WINS_AddrCompare (struct qsockaddr *addr1, struct qsockaddr *addr2);
+int  WINS_GetSocketPort (struct qsockaddr *addr);
+int  WINS_SetSocketPort (struct qsockaddr *addr, int port);
 
 int winsock_initialized = 0;
 WSADATA		winsockdata;
@@ -72,7 +91,7 @@ BOOL PASCAL FAR BlockingHook (void)
 }
 
 
-void WINS_GetLocalAddress()
+void WINS_GetLocalAddress (void)
 {
 	struct hostent	*local = NULL;
 	char			buff[MAXHOSTNAMELEN];
@@ -223,7 +242,7 @@ void WINS_Listen (bool state)
 		if (net_acceptsocket != -1)
 			return;
 
-		WINS_GetLocalAddress();
+		WINS_GetLocalAddress ();
 
 		if ((net_acceptsocket = WINS_OpenSocket (net_hostport)) == -1)
 			Sys_Error ("WINS_Listen: Unable to open accept socket\n");
@@ -243,24 +262,44 @@ void WINS_Listen (bool state)
 
 int WINS_OpenSocket (int port)
 {
+	int i;
 	int newsocket;
 	struct sockaddr_in address;
 	u_long _true = 1;
 
 	if ((newsocket = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+	{
+		Con_Printf ("WINS_OpenSocket : socket failed\n");
 		return -1;
+	}
 
 	if (ioctlsocket (newsocket, FIONBIO, &_true) == -1)
+	{
+		Con_Printf ("WINS_OpenSocket : ioctlsocket failed\n");
 		goto ErrorReturn;
+	}
 
+	// all the other net_ versions bind to INADDR_ANY; only wins was specific, so reverted it back to the original behaviour
 	address.sin_family = AF_INET;
-	address.sin_addr.s_addr = myAddr;
+
+	//ZOID -- check for interface binding option
+	if ((i = COM_CheckParm ("-ip")) != 0 && i < com_argc)
+	{
+		address.sin_addr.s_addr = inet_addr (com_argv[i + 1]);
+		Con_Printf ("Binding to IP Interface Address of %s\n", inet_ntoa (address.sin_addr));
+	}
+	else address.sin_addr.s_addr = INADDR_ANY;
+
 	address.sin_port = htons ((unsigned short) port);
 
-	if (bind (newsocket, (sockaddr *) &address, sizeof (address)) == 0)
-		return newsocket;
+	if (bind (newsocket, (sockaddr *) &address, sizeof (address)) == -1)
+	{
+		Con_Printf ("WINS_OpenSocket : bind failed\n");
+		goto ErrorReturn;
+	}
 
-	Sys_Error ("Unable to bind to %s", WINS_AddrToString ((struct qsockaddr *) &address));
+	return newsocket;
+
 ErrorReturn:
 	closesocket (newsocket);
 	return -1;
@@ -410,7 +449,7 @@ int WINS_Broadcast (int socket, byte *buf, int len)
 		if (net_broadcastsocket != 0)
 			Sys_Error ("Attempted to use multiple broadcasts sockets\n");
 
-		WINS_GetLocalAddress();
+		WINS_GetLocalAddress ();
 		int ret = WINS_MakeSocketBroadcastCapable (socket);
 
 		if (ret == -1)
@@ -432,7 +471,7 @@ int WINS_Write (int socket, byte *buf, int len, struct qsockaddr *addr)
 	ret = sendto (socket, (char *) buf, len, 0, (struct sockaddr *) addr, sizeof (struct qsockaddr));
 
 	if (ret == -1)
-		if (WSAGetLastError() == WSAEWOULDBLOCK)
+		if (WSAGetLastError () == WSAEWOULDBLOCK)
 			return 0;
 
 	return ret;

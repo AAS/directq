@@ -28,8 +28,6 @@ cvar_t r_showbboxes ("r_showbboxes", "0");
 typedef struct r_bbvertex_s
 {
 	float xyz[3];
-	D3DCOLOR color;
-	float dummy[2];
 } r_bbvertex_t;
 
 
@@ -38,40 +36,13 @@ LPDIRECT3DINDEXBUFFER9 d3d_BBoxIBO = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_BBoxDecl = NULL;
 
 
-void D3DOQ_PopulateVBO (void)
-{
-	r_bbvertex_t *bboxverts = NULL;
-
-	hr = d3d_BBoxVBO->Lock (0, 0, (void **) &bboxverts, d3d_GlobalCaps.DefaultLock);
-	if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to lock vertex buffer");
-
-	// and fill it in properly
-	for (int i = 0; i < 8; i++)
-	{
-		bboxverts[i].xyz[0] = (i & 1) ? -1.0f : 1.0f;
-		bboxverts[i].xyz[1] = (i & 2) ? -1.0f : 1.0f;
-		bboxverts[i].xyz[2] = (i & 4) ? -1.0f : 1.0f;
-
-		if (r_showbboxes.integer > 1)
-			bboxverts[i].color = D3DCOLOR_ARGB (96, 96, 96, 96);
-		else bboxverts[i].color = D3DCOLOR_ARGB (255, 160, 160, 160);
-	}
-
-	hr = d3d_BBoxVBO->Unlock ();
-	d3d_RenderDef.numlock++;
-	if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to unlock vertex buffer");
-}
-
-
 void D3DOQ_CreateBuffers (void)
 {
 	if (!d3d_BBoxDecl)
 	{
 		D3DVERTEXELEMENT9 d3d_oqlayout[] =
 		{
-			{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
-			{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+			VDECL (0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0),
 			D3DDECL_END ()
 		};
 
@@ -82,12 +53,28 @@ void D3DOQ_CreateBuffers (void)
 	if (!d3d_BBoxVBO)
 	{
 		D3DMain_CreateVertexBuffer (8 * sizeof (r_bbvertex_t), D3DUSAGE_WRITEONLY, &d3d_BBoxVBO);
-		D3DOQ_PopulateVBO ();
+
+		r_bbvertex_t *bboxverts = NULL;
+
+		hr = d3d_BBoxVBO->Lock (0, 0, (void **) &bboxverts, d3d_GlobalCaps.DefaultLock);
+		if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to lock vertex buffer");
+
+		// and fill it in properly
+		for (int i = 0; i < 8; i++)
+		{
+			bboxverts[i].xyz[0] = (i & 1) ? -1.0f : 1.0f;
+			bboxverts[i].xyz[1] = (i & 2) ? -1.0f : 1.0f;
+			bboxverts[i].xyz[2] = (i & 4) ? -1.0f : 1.0f;
+		}
+
+		hr = d3d_BBoxVBO->Unlock ();
+		d3d_RenderDef.numlock++;
+		if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to unlock vertex buffer");
 	}
 
 	if (!d3d_BBoxIBO)
 	{
-		D3DMain_CreateIndexBuffer (36, D3DUSAGE_WRITEONLY, &d3d_BBoxIBO);
+		D3DMain_CreateIndexBuffer16 (36, D3DUSAGE_WRITEONLY, &d3d_BBoxIBO);
 
 		unsigned short *ndx = NULL;
 		unsigned short bboxindexes[36] =
@@ -144,13 +131,6 @@ void D3DOC_ShowBBoxes (void)
 	D3DOQ_CreateBuffers ();
 
 	bool stateset = false;
-	static int oldbboxes = r_showbboxes.integer;
-
-	if (oldbboxes != r_showbboxes.integer)
-	{
-		D3DOQ_PopulateVBO ();
-		oldbboxes = r_showbboxes.integer;
-	}
 
 	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
 	{
@@ -174,18 +154,27 @@ void D3DOC_ShowBBoxes (void)
 			D3D_SetVertexDeclaration (d3d_BBoxDecl);
 
 			if (r_showbboxes.integer > 1)
+			{
 				D3DState_SetAlphaBlend (TRUE);
-			else D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_WIREFRAME);
+				D3DHLSL_SetFloatArray ("bbcolor", D3DXVECTOR4 (0.375f, 0.375f, 0.375f, 0.375f), 4);
+			}
+			else
+			{
+				D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_WIREFRAME);
+				D3DHLSL_SetFloatArray ("bbcolor", D3DXVECTOR4 (0.625f, 0.625f, 0.625f, 1.0f), 4);
+			}
 
 			stateset = true;
 		}
 
 		// draw the bounding box
-		D3DMATRIX m;
-		D3DMatrix_Identity (&m);
-		D3DMatrix_Translate (&m, ent->trueorigin);
-		D3DMatrix_Scale (&m, ent->bboxscale);
-		D3DHLSL_SetEntMatrix (&m);
+		QMATRIX bbmatrix;
+
+		bbmatrix.LoadIdentity ();
+		bbmatrix.Translate (ent->trueorigin);
+		bbmatrix.Scale (ent->bboxscale);
+
+		D3DHLSL_SetEntMatrix (&bbmatrix);
 		D3D_DrawIndexedPrimitive (0, 8, 0, 12);
 	}
 

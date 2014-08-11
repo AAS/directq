@@ -137,9 +137,7 @@ void D3DHLSL_SetLerp (float curr, float last)
 {
 	if (curr != d3d_HLSLState.CurrLerp || last != d3d_HLSLState.LastLerp)
 	{
-		float lerpval[2] = {curr, last};
-
-		D3DHLSL_SetFloatArray ("aliaslerp", lerpval, 2);
+		D3DHLSL_SetFloatArray ("aliaslerp", D3DXVECTOR4 (curr, last, 0, 0), 2);
 		d3d_HLSLState.CurrLerp = curr;
 		d3d_HLSLState.LastLerp = last;
 	}
@@ -153,24 +151,38 @@ void D3DHLSL_SetTexture (UINT stage, LPDIRECT3DBASETEXTURE9 tex)
 }
 
 
-void D3DHLSL_SetMatrix (D3DXHANDLE h, D3DMATRIX *matrix)
+void D3DHLSL_SetMatrix (D3DXHANDLE h, QMATRIX *matrix)
 {
 	d3d_HLSLState.commitpending = true;
-	d3d_MasterFX->SetMatrix (h, D3DMatrix_ToD3DXMatrix (matrix));
+	d3d_MasterFX->SetMatrix (h, matrix);
 }
 
 
-void D3DHLSL_SetWorldMatrix (D3DMATRIX *worldmatrix)
+void D3DHLSL_SetWorldMatrix (QMATRIX *worldmatrix)
 {
 	d3d_HLSLState.commitpending = true;
-	d3d_MasterFX->SetMatrix ("WorldMatrix", D3DMatrix_ToD3DXMatrix (worldmatrix));
+	d3d_MasterFX->SetMatrix ("WorldMatrix", worldmatrix);
 }
 
 
-void D3DHLSL_SetEntMatrix (D3DMATRIX *entmatrix)
+void D3DHLSL_SetEntMatrix (QMATRIX *entmatrix)
 {
 	d3d_HLSLState.commitpending = true;
-	d3d_MasterFX->SetMatrix ("EntMatrix", D3DMatrix_ToD3DXMatrix (entmatrix));
+	d3d_MasterFX->SetMatrix ("EntMatrix", entmatrix);
+}
+
+
+void D3DHLSL_UpdateWorldMatrix (QMATRIX *worldmatrix, QMATRIX *entmatrix)
+{
+	// we kept the entity matrix in local space so that we can correctly alpha sort, so now
+	// we need to move it back to MVP space before we can draw it
+	QMATRIX localmatrix;
+
+	localmatrix.LoadMatrix (worldmatrix);
+	localmatrix.MultMatrix (entmatrix);
+
+	d3d_HLSLState.commitpending = true;
+	d3d_MasterFX->SetMatrix ("WorldMatrix", &localmatrix);
 }
 
 
@@ -187,6 +199,21 @@ void D3DHLSL_BeginFrame (void)
 		// build the shader with the new defines
 		D3DXMACRO *macros = (D3DXMACRO *) scratchbuf;
 		int nummacros = 0;
+
+		// let's make particle batch-sizes adapt properly to hardware capabilities
+		char NumBatchInstances[8];
+		char NumIQMJoints[8];
+
+		sprintf (NumBatchInstances, "%i", d3d_GlobalCaps.MaxParticleBatch);
+		macros[nummacros].Name = "NumBatchInstances";
+		macros[nummacros].Definition = NumBatchInstances;
+		nummacros++;
+
+		// each joint has 3 float4s
+		sprintf (NumIQMJoints, "%i", d3d_GlobalCaps.MaxIQMJoints);
+		macros[nummacros].Name = "NumIQMJoints";
+		macros[nummacros].Definition = NumIQMJoints;
+		nummacros++;
 
 		if (d3d_DesiredShader & HLSL_FOG)
 		{
@@ -417,7 +444,11 @@ void D3DHLSL_Init (void)
 	int len = Sys_LoadResourceData (IDR_MASTERFX, (void **) &EffectString);
 
 	// copy if off so that we can change it safely (is this even needed???)
-	d3d_EffectString = (char *) MainZone->Alloc (len + 1);
+	// (fixme - use scratchbuf)
+	d3d_EffectString = (char *) MainZone->Alloc (len + 8);
+
+	// clear to 0 before copying so that we can be certain that it's NULL terminated properly (this was a major crash bug)
+	memset (d3d_EffectString, 0, len + 4);
 	memcpy (d3d_EffectString, EffectString, len);
 
 	// upgrade to SM3 if possible

@@ -28,8 +28,7 @@ extern cvar_t freelook;
 extern bool mouselooking;
 
 void CL_BoundViewPitch (float *viewangles);
-void CL_ClearCmd (usercmd_t *cmd);
-void CL_RebalanceMove (usercmd_t *basecmd, usercmd_t *newcmd, double frametime);
+
 
 /*
 ========================================================================================================================
@@ -359,7 +358,26 @@ bool IN_ReadJoystick (void)
 IN_JoyMove
 ===========
 */
-void IN_JoyMove (usercmd_t *cmd, double movetime)
+usercmd_t in_joycommand = {0, 0, 0};
+
+
+void IN_JoyMove (usercmd_t *cmd)
+{
+	if (ActiveApp && !Minimized)
+	{
+		// for most players these will always be zero
+		cmd->forwardmove += in_joycommand.forwardmove;
+		cmd->sidemove += in_joycommand.sidemove;
+		cmd->upmove += in_joycommand.upmove;
+	}
+
+	in_joycommand.forwardmove = 0;
+	in_joycommand.sidemove = 0;
+	in_joycommand.upmove = 0;
+}
+
+
+void IN_ReadJoystickMessages (void)
 {
 	float	speed, aspeed;
 	float	fAxisValue, fTemp;
@@ -385,11 +403,7 @@ void IN_JoyMove (usercmd_t *cmd, double movetime)
 		speed = cl_movespeedkey.value;
 	else speed = 1;
 
-	aspeed = speed * movetime;
-	mouselooking = freelook.integer || (in_mlook.state & 1);
-
-	usercmd_t basecmd;
-	CL_ClearCmd (&basecmd);
+	aspeed = speed * cl.frametime;
 
 	// loop through the axes
 	for (i = 0; i < JOY_MAX_AXES; i++)
@@ -432,22 +446,22 @@ void IN_JoyMove (usercmd_t *cmd, double movetime)
 					// if mouse invert is on, invert the joystick pitch value
 					// only absolute control support here (joy_advanced is false)
 					if (m_pitch.value < 0.0)
-						cl.viewangles[PITCH] -= (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
-					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
+						cl.viewangles[0] -= (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
+					else cl.viewangles[0] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
 				}
 			}
 			else
 			{
 				// user wants forward control to be forward control
 				if (fabs (fAxisValue) > joy_forwardthreshold.value)
-					basecmd.forwardmove += (fAxisValue * joy_forwardsensitivity.value) * speed * cl_forwardspeed.value;
+					in_joycommand.forwardmove += (fAxisValue * joy_forwardsensitivity.value) * speed * cl_forwardspeed.value;
 			}
 
 			break;
 
 		case AxisSide:
 			if (fabs (fAxisValue) > joy_sidethreshold.value)
-				basecmd.sidemove += (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
+				in_joycommand.sidemove += (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
 
 			break;
 
@@ -456,7 +470,7 @@ void IN_JoyMove (usercmd_t *cmd, double movetime)
 			{
 				// user wants turn control to become side control
 				if (fabs (fAxisValue) > joy_sidethreshold.value)
-					basecmd.sidemove -= (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
+					in_joycommand.sidemove -= (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
 			}
 			else
 			{
@@ -464,8 +478,8 @@ void IN_JoyMove (usercmd_t *cmd, double movetime)
 				if (fabs (fAxisValue) > joy_yawthreshold.value)
 				{
 					if (dwControlMap[i] == JOY_ABSOLUTE_AXIS)
-						cl.viewangles[YAW] += (fAxisValue * joy_yawsensitivity.value) * aspeed * cl_yawspeed.value;
-					else cl.viewangles[YAW] += (fAxisValue * joy_yawsensitivity.value) * speed * 180.0;
+						cl.viewangles[1] += (fAxisValue * joy_yawsensitivity.value) * aspeed * cl_yawspeed.value;
+					else cl.viewangles[1] += (fAxisValue * joy_yawsensitivity.value) * speed * 180.0;
 				}
 			}
 
@@ -478,8 +492,8 @@ void IN_JoyMove (usercmd_t *cmd, double movetime)
 				{
 					// pitch movement detected and pitch movement desired by user
 					if (dwControlMap[i] == JOY_ABSOLUTE_AXIS)
-						cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
-					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * speed * 180.0;
+						cl.viewangles[0] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
+					else cl.viewangles[0] += (fAxisValue * joy_pitchsensitivity.value) * speed * 180.0;
 				}
 			}
 
@@ -489,8 +503,6 @@ void IN_JoyMove (usercmd_t *cmd, double movetime)
 			break;
 		}
 	}
-
-	CL_RebalanceMove (cmd, &basecmd, movetime);
 
 	// bounds check pitch
 	CL_BoundViewPitch (cl.viewangles);

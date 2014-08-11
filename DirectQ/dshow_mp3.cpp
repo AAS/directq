@@ -275,6 +275,7 @@ bool FindMediaFile (char *subdir, int track, bool looping)
 
 	// welcome to the world of char ***!  we want to be able to play all types of tracks here
 	// don't sort the result so that the tracks will appear in the order of the specified gamedirs
+	int hunkmark = MainHunk->GetLowMark ();
 	int listlen = COM_BuildContentList (&foundtracks, subdir, ".*", NO_PAK_CONTENT | PREPEND_PATH | NO_SORT_RESULT);
 
 	if (listlen)
@@ -290,11 +291,10 @@ bool FindMediaFile (char *subdir, int track, bool looping)
 				DSManager = new CDSClass (foundtracks[i], looping);
 				mediaplaying = true;
 			}
-
-			// it's our responsibility to free memory allocated by COM_BuildContentList
-			Zone_Free (foundtracks[i]);
 		}
 	}
+
+	MainHunk->FreeToLowMark (hunkmark);
 
 	// return if the media is playing
 	return mediaplaying;

@@ -52,9 +52,10 @@ void D3DQuads_OnRecover (void)
 	{
 		unsigned short *ndx = NULL;
 
-		D3DMain_CreateIndexBuffer (D3D_MAX_QUADS * 6, 0, &d3d_QuadIndexes);
+		D3DMain_CreateIndexBuffer16 (D3D_MAX_QUADS * 6, 0, &d3d_QuadIndexes);
 		d3d_QuadIndexes->Lock (0, 0, (void **) &ndx, d3d_GlobalCaps.DefaultLock);
 
+		// strips?  go hang yer bollocks on them.  with a 4-entry vertex cache this is just fine
 		for (int i = 0, v = 0; i < D3D_MAX_QUADS; i++, v += 4, ndx += 6)
 		{
 			ndx[0] = v + 0;
@@ -73,9 +74,9 @@ void D3DQuads_OnRecover (void)
 	{
 		D3DVERTEXELEMENT9 d3d_quadlayout[] =
 		{
-			{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
-			{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+			VDECL (0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0),
+			VDECL (0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0),
+			VDECL (0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0),
 			D3DDECL_END ()
 		};
 

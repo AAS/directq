@@ -35,14 +35,12 @@ extern HWND d3d_Window;
 
 void R_InitParticles (void);
 void R_ClearParticles (void);
-void D3DLight_BuildAllLightmaps (void);
 void D3DSky_LoadSkyBox (char *basename, bool feedback);
 
 LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[16] = {NULL};
 LPDIRECT3DTEXTURE9 r_notexture = NULL;
 
 extern LPDIRECT3DTEXTURE9 crosshairtexture;
-extern LPDIRECT3DTEXTURE9 particletexture;
 extern LPDIRECT3DTEXTURE9 shadetexture;
 
 
@@ -56,7 +54,7 @@ void D3DMisc_CreatePalette (void)
 		for (int j = 0, k = 15; j < 16; j++, k--)
 			palrow[j] = i * 16 + ((i > 7 && i < 14) ? k : j);
 
-		D3D_UploadTexture (&d3d_PaletteRowTextures[i], (byte *) palrow, 16, 1, 0);
+		d3d_PaletteRowTextures[i] = D3DTexture_Upload ((byte *) palrow, 16, 1, 0);
 	}
 }
 
@@ -73,21 +71,23 @@ void D3DMisc_ReleasePalette (void)
 R_InitTextures
 ==================
 */
+byte r_notexture_raw[sizeof (texture_t) + 32 * 32];
+
 void R_InitTextures (void)
 {
 	// create a simple checkerboard texture for the default
-	r_notexture_mip = (texture_t *) Zone_Alloc (sizeof (texture_t) + 4 * 4);
+	r_notexture_mip = (texture_t *) r_notexture_raw;
 
-	r_notexture_mip->size[0] = r_notexture_mip->size[1] = 4;
+	r_notexture_mip->size[0] = r_notexture_mip->size[1] = 32;
 	byte *dest = (byte *) (r_notexture_mip + 1);
 
-	for (int y = 0; y < 4; y++)
+	for (int y = 0; y < 32; y++)
 	{
-		for (int x = 0; x < 4; x++)
+		for (int x = 0; x < 32; x++)
 		{
-			if ((y < 2) ^ (x < 2))
-				*dest++ = 0;
-			else *dest++ = 0xf;
+			if ((y < 16) ^ (x < 16))
+				*dest++ = 192;
+			else *dest++ = 208;
 		}
 	}
 }
@@ -215,7 +215,6 @@ void D3DPart_OnRecover (void);
 void R_ReleaseResourceTextures (void)
 {
 	SAFE_RELEASE (crosshairtexture);
-	SAFE_RELEASE (particletexture);
 	SAFE_RELEASE (r_notexture);
 	SAFE_RELEASE (shadetexture);
 
@@ -246,13 +245,12 @@ void R_FlattenTexture (unsigned *data, int width, int height)
 }
 
 
-void D3D_MakeAlphaTexture (LPDIRECT3DTEXTURE9 tex);
+void D3DTexture_MakeAlpha (LPDIRECT3DTEXTURE9 tex);
 
 void R_InitResourceTextures (void)
 {
 	// load the notexture properly
-	// D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->size[0], r_notexture_mip->size[1], IMAGE_MIPMAP);
-	r_notexture_mip->teximage = D3D_LoadTexture ("notexture", r_notexture_mip->size[0], r_notexture_mip->size[1], (byte *) (r_notexture_mip + 1), IMAGE_MIPMAP);
+	r_notexture_mip->teximage = D3DTexture_Load ("notexture", r_notexture_mip->size[0], r_notexture_mip->size[1], (byte *) (r_notexture_mip + 1), IMAGE_MIPMAP);
 	r_notexture_mip->lumaimage = NULL;
 
 	D3DMisc_CreatePalette ();
@@ -260,12 +258,10 @@ void R_InitResourceTextures (void)
 	D3DWarp_WWTexOnRecover ();
 
 	// load any textures contained in exe resources
-	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, IMAGE_ALPHA);
-	D3D_LoadResourceTexture ("particles", &particletexture, IDR_PARTICLES, IMAGE_ALPHA);
+	crosshairtexture = D3DImage_LoadResourceTexture ("crosshairs", IDR_CROSSHAIR, IMAGE_ALPHA);
 
 	// convert them to alpha mask textures
-	D3D_MakeAlphaTexture (crosshairtexture);
-	D3D_MakeAlphaTexture (particletexture);
+	D3DTexture_MakeAlpha (crosshairtexture);
 
 	byte shade[256][4];
 
@@ -290,7 +286,7 @@ void R_InitResourceTextures (void)
 	}
 
 	// hmmm - this means using a fifth texture for MDLs - maybe branching would be OK after all????
-	D3D_UploadTexture (&shadetexture, shade, 256, 1, IMAGE_32BIT);
+	shadetexture = D3DTexture_Upload (shade, 256, 1, IMAGE_32BIT);
 }
 
 
@@ -410,10 +406,11 @@ void D3DSky_RevalidateSkybox (void);
 void Fog_ParseWorldspawn (void);
 void IN_ClearMouseState (void);
 void D3DAlias_CreateBuffers (void);
+void D3DIQM_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
 void Mod_InitForMap (model_t *mod);
 void D3DBrush_CreateVBOs (void);
-void D3DLight_EndBuildingLightmaps (void);
+void D3DLight_BuildAllLightmaps (void);
 void Host_ResetFixedTime (void);
 void D3DSurf_BuildWorldCache (void);
 void ClearAllStates (void);;
@@ -454,16 +451,17 @@ void R_NewMap (void)
 	// setup stuff
 	R_ClearParticles ();
 
-	// finish building lightmaps for this map
-	D3DLight_EndBuildingLightmaps ();
+	// build lightmaps for this map (must be done before VBOs as lightmap texcoords will go into the VBO cache)
+	D3DLight_BuildAllLightmaps ();
 	d3d_RenderDef.WorldModelLoaded = false;
 
-	D3D_FlushTextures ();
+	D3DTexture_Flush ();
 	R_SetLeafContents ();
 	D3DSky_ParseWorldSpawn ();
 	D3DAlpha_NewMap ();
 	Fog_ParseWorldspawn ();
 	D3DAlias_CreateBuffers ();
+	D3DIQM_CreateBuffers ();
 
 	// as sounds are now cleared between maps these sounds also need to be
 	// reloaded otherwise the known_sfx will go out of sequence for them

@@ -17,18 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-typedef struct particlest_s
-{
-	float stbase[2];
-	float stadd[2];
-} particlest_t;
-
-
 typedef struct particle_s
 {
 	// driver-usable fields
 	vec3_t		org;
-	float		color;
+	int			color;
 
 	// drivers never touch the following fields
 	struct particle_s	*next;
@@ -49,23 +42,35 @@ typedef struct particle_s
 	// render adjustable
 	float scale;
 	float alpha;
-	float fade;
-	float growth;
-	particlest_t *st;
 } particle_t;
 
 
 // this is needed outside of r_part now...
-typedef struct particle_type_s
+typedef struct particle_emitter_s
 {
 	struct particle_s *particles;
 	int numparticles;
 	int numactiveparticles;
 	vec3_t spawnorg;
+	float spawntime;
 	vec3_t mins;
 	vec3_t maxs;
-	struct particle_type_s *next;
-} particle_type_t;
+	float		sphere[4];
+	struct particle_emitter_s *next;
+} particle_emitter_t;
+
+
+#define peff_none			0
+#define peff_explosion		1
+
+typedef struct particle_effect_s
+{
+	float origin[3];
+	float die;
+	float starttime;
+	int type;
+	struct particle_effect_s *next;
+} particle_effect_t;
 
 
 // allows us to combine different behaviour types
@@ -85,12 +90,23 @@ typedef struct particle_type_s
 #define PARTICLE_EXTRA_SIZE      2048
 
 // we don't expect these to ever be exceeded but we allow it if required
-#define PARTICLE_TYPE_BATCH_SIZE	64
-#define PARTICLE_TYPE_EXTRA_SIZE	32
+#define PARTICLE_EMITTER_BATCH_SIZE	64
+#define PARTICLE_EMITTER_EXTRA_SIZE	32
+
+// we don't expect these to ever be exceeded but we allow it if required
+#define PARTICLE_EFFECT_BATCH_SIZE	64
+#define PARTICLE_EFFECT_EXTRA_SIZE	32
 
 extern particle_t	*free_particles;
-extern particle_type_t *active_particle_types;
-extern particle_type_t *free_particle_types;
+
+extern particle_emitter_t *active_particle_emitters;
+extern particle_emitter_t *free_particle_emitters;
+
+extern particle_effect_t *active_particle_effects;
+extern particle_effect_t *free_particle_effects;
 
 extern int r_numparticles;
+
+// these were never used in the alias render
+#define NUMVERTEXNORMALS	162
 

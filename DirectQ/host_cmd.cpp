@@ -425,11 +425,9 @@ void Host_Connect_f (void)
 		return;
 	}
 
-	char	name[MAX_QPATH];
+	char name[MAX_QPATH];
 
 	cls.demonum = -1;		// stop demo loop in case this fails
-
-	int iii = Cmd_Argc ();
 
 	if (cls.demoplayback)
 	{

@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 #include "d3d_Quads.h"
+#include "iqm.h"
 
 
 cvar_t gl_fullbrights ("gl_fullbrights", "1", CVAR_ARCHIVE);
@@ -40,7 +41,7 @@ void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFE
 }
 
 
-void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf)
+void D3DMain_CreateIndexBuffer16 (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf)
 {
 	UINT length = numindexes * sizeof (unsigned short);
 
@@ -50,7 +51,7 @@ void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUF
 	hr = d3d_Device->CreateIndexBuffer (length, usage, D3DFMT_INDEX16, D3DPOOL_DEFAULT, buf, NULL);
 	if (SUCCEEDED (hr)) return;
 
-	Sys_Error ("D3DMain_CreateIndexBuffer : IDirect3DDevice9::CreateIndexBuffer failed");
+	Sys_Error ("D3DMain_CreateIndexBuffer16 : IDirect3DDevice9::CreateIndexBuffer failed");
 }
 
 
@@ -133,15 +134,10 @@ void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib)
 }
 
 
-extern bool scr_drawmapshot;
-
-
-void RotatePointAroundVector (vec3_t dst, const vec3_t dir, const vec3_t point, float degrees);
 void R_AnimateLight (float time);
 void V_CalcBlend (void);
 
-void D3D_SetupBrushModel (entity_t *ent);
-void D3D_BuildWorld (void);
+void D3DSurf_DrawWorld (void);
 void D3D_AddWorldSurfacesToRender (void);
 
 void D3DWarp_InitializeTurb (void);
@@ -150,6 +146,7 @@ void D3D_DrawOpaqueWaterSurfaces (void);
 
 void D3DAlias_DrawViewModel (void);
 void D3DAlias_RenderAliasModels (void);
+void D3DIQM_DrawIQMs (void);
 void D3D_PrepareAliasModel (entity_t *e);
 void D3D_AddParticesToAlphaList (void);
 void D3D_AddParticesToAlphaList (void);
@@ -158,12 +155,12 @@ void D3DLight_SetCoronaState (void);
 void D3DLight_AddCoronas (void);
 
 void D3DOC_ShowBBoxes (void);
-void D3DLight_SetProperty (void);
+void R_CullDynamicLights (void);
 
-D3DMATRIX d3d_ViewMatrix;
-D3DMATRIX d3d_WorldMatrix;
-D3DMATRIX d3d_ModelViewProjMatrix;
-D3DMATRIX d3d_ProjMatrix;
+QMATRIX d3d_ViewMatrix;
+QMATRIX d3d_WorldMatrix;
+QMATRIX d3d_ModelViewProjMatrix;
+QMATRIX d3d_ProjMatrix;
 
 // render definition for this frame
 d3d_renderdef_t d3d_RenderDef;
@@ -178,17 +175,13 @@ refdef_t	r_refdef;
 
 texture_t	*r_notexture_mip;
 
-int		d_lightstylevalue[256];	// 8.8 fraction of base light value
-
 cvar_t	r_norefresh ("r_norefresh", "0");
 cvar_t	r_drawentities ("r_drawentities", "1");
 cvar_t	r_drawviewmodel ("r_drawviewmodel", "1");
 cvar_t	r_speeds ("r_speeds", "0");
-cvar_t	r_fullbright ("r_fullbright", "0");
 cvar_t	r_lightmap ("r_lightmap", "0");
 cvar_t	r_shadows ("r_shadows", "0", CVAR_ARCHIVE);
 cvar_t	r_wateralpha ("r_wateralpha", 1.0f);
-cvar_t	r_dynamic ("r_dynamic", "1");
 
 cvar_t	gl_cull ("gl_cull", "1");
 cvar_t	gl_smoothmodels ("gl_smoothmodels", "1");
@@ -225,35 +218,40 @@ void D3D_BeginVisedicts (void)
 }
 
 
-void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr);
+void D3DAlias_SetupFrame (entity_t *ent, aliashdr_t *hdr);
+void D3DAlias_LerpToFrame (entity_t *ent, int pose, float interval);
 
 void D3DMain_BBoxForEnt (entity_t *ent)
 {
 	if (!ent->model) return;
 
-	float mins[3];
-	float maxs[3];
-	vec3_t bbox[8];
+	D3DXVECTOR3 mins;
+	D3DXVECTOR3 maxs;
+	D3DXVECTOR3 bbox[8];
 	avectors_t av;
 	float angles[3];
 
 	if (ent->model->type == mod_alias)
 	{
 		// use per-frame bboxes for entities
-		int *poses = ent->lerppose;
-		float *blends = ent->aliasstate.blend;
 		aliasbbox_t *bboxes = ent->model->aliashdr->bboxes;
 
 		// set up interpolation here to ensure that we get all entities
 		// this also keeps interpolation frames valid even if the model has been culled away (bonus!)
-		D3DAlias_SetupAliasFrame (ent, ent->model->aliashdr);
+		D3DAlias_SetupFrame (ent, ent->model->aliashdr);
 
 		// use per-frame interpolated bboxes
-		for (int i = 0; i < 3; i++)
-		{
-			mins[i] = bboxes[poses[LERP_CURR]].mins[i] * blends[LERP_CURR] + bboxes[poses[LERP_LAST]].mins[i] * blends[LERP_LAST];
-			maxs[i] = bboxes[poses[LERP_CURR]].maxs[i] * blends[LERP_CURR] + bboxes[poses[LERP_LAST]].maxs[i] * blends[LERP_LAST];
-		}
+		D3DXVec3Lerp (&mins, &bboxes[ent->lastpose].mins, &bboxes[ent->currpose].mins, ent->poseblend);
+		D3DXVec3Lerp (&maxs, &bboxes[ent->lastpose].maxs, &bboxes[ent->currpose].maxs, ent->poseblend);
+	}
+	else if (ent->model->type == mod_iqm)
+	{
+		// lerp the frames
+		D3DAlias_LerpToFrame (ent, ent->frame, (ent->lerpflags & LERP_FINISH) ? ent->lerpinterval : 0.1f);
+
+		// use the real bboxes, not the physics bboxes
+		VectorCopy (ent->model->iqmheader->mins, mins);
+		VectorCopy (ent->model->iqmheader->maxs, maxs);
 	}
 	else if (ent->model->type == mod_brush)
 	{
@@ -296,26 +294,21 @@ void D3DMain_BBoxForEnt (entity_t *ent)
 	AngleVectors (angles, &av);
 
 	// compute the rotated bbox corners
-	mins[0] = mins[1] = mins[2] = 9999999;
-	maxs[0] = maxs[1] = maxs[2] = -9999999;
+	Mod_ClearBoundingBox (mins, maxs);
 
 	// and rotate the bounding box
 	for (int i = 0; i < 8; i++)
 	{
-		vec3_t tmp;
+		D3DXVECTOR3 tmp;
 
 		VectorCopy (bbox[i], tmp);
 
-		bbox[i][0] = DotProduct (av.forward, tmp);
-		bbox[i][1] = -DotProduct (av.right, tmp);
-		bbox[i][2] = DotProduct (av.up, tmp);
+		bbox[i][0] = D3DXVec3Dot (&av.forward, &tmp);
+		bbox[i][1] = -D3DXVec3Dot (&av.right, &tmp);
+		bbox[i][2] = D3DXVec3Dot (&av.up, &tmp);
 
 		// and convert them to mins and maxs
-		for (int j = 0; j < 3; j++)
-		{
-			if (bbox[i][j] < mins[j]) mins[j] = bbox[i][j];
-			if (bbox[i][j] > maxs[j]) maxs[j] = bbox[i][j];
-		}
+		Mod_AccumulateBox (mins, maxs, bbox[i]);
 	}
 
 	// compute scaling factors
@@ -345,7 +338,7 @@ void D3D_AddVisEdict (entity_t *ent)
 	if (ent->relinkframe == d3d_RenderDef.relinkframe) return;
 
 	// only add entities with supported model types
-	if (ent->model->type == mod_alias || ent->model->type == mod_brush || ent->model->type == mod_sprite)
+	if (ent->model->type == mod_alias || ent->model->type == mod_brush || ent->model->type == mod_sprite || ent->model->type == mod_iqm)
 	{
 		ent->nocullbox = false;
 
@@ -367,6 +360,21 @@ void D3D_AddVisEdict (entity_t *ent)
 }
 
 
+bool R_CullSphere (float *center, float radius, int clipflags)
+{
+	int		i;
+	mplane_t *p;
+
+	for (i = 0, p = frustum; i < 4; i++, p++)
+	{
+		if (!(clipflags & (1 << i))) continue;
+		if ((DotProduct (center, p->normal) - p->dist) <= -radius) return true;
+	}
+
+	return false;
+}
+
+
 /*
 =================
 R_CullBox
@@ -374,35 +382,62 @@ R_CullBox
 Returns true if the box is completely outside the frustum
 =================
 */
-bool R_CullBox (vec3_t emins, vec3_t emaxs, mplane_t *frustumplanes)
+bool R_CullBox (vec3_t emins, vec3_t emaxs, mplane_t *frustumplanes, int clipflags)
 {
+	// this can only handle identifying the fully outside case; a box that passes all tests may still be
+	// either fully inside or untersect one or more of the planes.  It is however one less DotProduct per plane
 	for (int i = 0; i < 4; i++)
-		if (BOX_ON_PLANE_SIDE (emins, emaxs, &frustumplanes[i]) == 2)
-			return true;
+	{
+		if (!(clipflags & (1 << i))) continue;
+
+		mplane_t *p = &frustumplanes[i];
+
+		switch (p->signbits)
+		{
+		default:
+		case 0:
+			if ((p->normal[0] * emaxs[0] + p->normal[1] * emaxs[1] + p->normal[2] * emaxs[2]) < p->dist)
+				return true;
+			break;
+
+		case 1:
+			if ((p->normal[0] * emins[0] + p->normal[1] * emaxs[1] + p->normal[2] * emaxs[2]) < p->dist)
+				return true;
+			break;
+
+		case 2:
+			if ((p->normal[0] * emaxs[0] + p->normal[1] * emins[1] + p->normal[2] * emaxs[2]) < p->dist)
+				return true;
+			break;
+
+		case 3:
+			if ((p->normal[0] * emins[0] + p->normal[1] * emins[1] + p->normal[2] * emaxs[2]) < p->dist)
+				return true;
+			break;
+
+		case 4:
+			if ((p->normal[0] * emaxs[0] + p->normal[1] * emaxs[1] + p->normal[2] * emins[2]) < p->dist)
+				return true;
+			break;
+
+		case 5:
+			if ((p->normal[0] * emins[0] + p->normal[1] * emaxs[1] + p->normal[2] * emins[2]) < p->dist)
+				return true;
+			break;
+
+		case 6:
+			if ((p->normal[0] * emaxs[0] + p->normal[1] * emins[1] + p->normal[2] * emins[2]) < p->dist)
+				return true;
+			break;
+
+		case 7:
+			if ((p->normal[0] * emins[0] + p->normal[1] * emins[1] + p->normal[2] * emins[2]) < p->dist)
+				return true;
+			break;
+		}
+	}
 
 	return false;
-}
-
-
-void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m, float *origin, float *angles)
-{
-	D3DMatrix_Translate (m, origin);
-
-	if (angles[1]) D3DMatrix_Rotate (m, 0, 0, 1, angles[1]);
-	if (angles[0]) D3DMatrix_Rotate (m, 0, 1, 0, -angles[0]);
-	if (angles[2]) D3DMatrix_Rotate (m, 1, 0, 0, angles[2]);
-}
-
-
-void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m)
-{
-	D3D_RotateForEntity (e, m, e->origin, e->angles);
-}
-
-
-void D3D_RotateForEntity (entity_t *e)
-{
-	D3D_RotateForEntity (e, &e->matrix, e->origin, e->angles);
 }
 
 
@@ -412,7 +447,7 @@ int SignbitsForPlane (mplane_t *out)
 {
 	int	bits, j;
 
-	// for fast box on planeside test
+	// for fast box on planeside test - identify which corner(s) of the box to text against the plane
 	bits = 0;
 
 	for (j = 0; j < 3; j++)
@@ -470,27 +505,8 @@ void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf)
 
 void D3D_SetupProjection (float fovx, float fovy, float zn, float zf)
 {
-	float Q = zf / (zf - zn);
-
-	d3d_ProjMatrix.m[0][0] = 1.0f / tan (fovx * D3DX_PI / 360.0f);	// equivalent to D3DXToRadian (fovx) / 2
-	d3d_ProjMatrix.m[0][1] = 0;
-	d3d_ProjMatrix.m[0][2] = 0;
-	d3d_ProjMatrix.m[0][3] = 0;
-
-	d3d_ProjMatrix.m[1][0] = 0;
-	d3d_ProjMatrix.m[1][1] = 1.0f / tan (fovy * D3DX_PI / 360.0f);	// equivalent to D3DXToRadian (fovy) / 2
-	d3d_ProjMatrix.m[1][2] = 0;
-	d3d_ProjMatrix.m[1][3] = 0;
-
-	d3d_ProjMatrix.m[2][0] = 0;
-	d3d_ProjMatrix.m[2][1] = 0;
-	d3d_ProjMatrix.m[2][2] = -Q;	// flip to RH
-	d3d_ProjMatrix.m[2][3] = -1;	// flip to RH
-
-	d3d_ProjMatrix.m[3][0] = 0;
-	d3d_ProjMatrix.m[3][1] = 0;
-	d3d_ProjMatrix.m[3][2] = -(Q * zn);
-	d3d_ProjMatrix.m[3][3] = 0;
+	d3d_ProjMatrix.LoadIdentity ();
+	d3d_ProjMatrix.Projection (fovx, fovy, zn, zf);
 
 	if (r_waterwarp.value > 1)
 	{
@@ -501,46 +517,8 @@ void D3D_SetupProjection (float fovx, float fovy, float zn, float zf)
 			d3d_ProjMatrix._21 = sin (cl.time * 1.125f) * 0.0666f;
 			d3d_ProjMatrix._12 = cos (cl.time * 1.125f) * 0.0666f;
 
-			D3DMatrix_Scale (&d3d_ProjMatrix, (cos (cl.time * 0.75f) + 20.0f) * 0.05f, (sin (cl.time * 0.75f) + 20.0f) * 0.05f, 1);
+			d3d_ProjMatrix.Scale ((cos (cl.time * 0.75f) + 20.0f) * 0.05f, (sin (cl.time * 0.75f) + 20.0f) * 0.05f, 1);
 		}
-	}
-}
-
-
-void D3D_ExtractFrustum (void)
-{
-	// retain the old frustum unless we're in the first few frames in which case we want one to be done
-	// as a baseline
-	if (!r_lockfrustum.integer || d3d_RenderDef.framecount < 5)
-	{
-		// frustum 0 (right plane)
-		frustum[0].normal[0] = d3d_ModelViewProjMatrix._14 - d3d_ModelViewProjMatrix._11;
-		frustum[0].normal[1] = d3d_ModelViewProjMatrix._24 - d3d_ModelViewProjMatrix._21;
-		frustum[0].normal[2] = d3d_ModelViewProjMatrix._34 - d3d_ModelViewProjMatrix._31;
-
-		// frustum 1 (left plane)
-		frustum[1].normal[0] = d3d_ModelViewProjMatrix._14 + d3d_ModelViewProjMatrix._11;
-		frustum[1].normal[1] = d3d_ModelViewProjMatrix._24 + d3d_ModelViewProjMatrix._21;
-		frustum[1].normal[2] = d3d_ModelViewProjMatrix._34 + d3d_ModelViewProjMatrix._31;
-
-		// frustum 2 (bottom plane)
-		frustum[2].normal[0] = d3d_ModelViewProjMatrix._14 + d3d_ModelViewProjMatrix._12;
-		frustum[2].normal[1] = d3d_ModelViewProjMatrix._24 + d3d_ModelViewProjMatrix._22;
-		frustum[2].normal[2] = d3d_ModelViewProjMatrix._34 + d3d_ModelViewProjMatrix._32;
-
-		// frustum 3 (top plane)
-		frustum[3].normal[0] = d3d_ModelViewProjMatrix._14 - d3d_ModelViewProjMatrix._12;
-		frustum[3].normal[1] = d3d_ModelViewProjMatrix._24 - d3d_ModelViewProjMatrix._22;
-		frustum[3].normal[2] = d3d_ModelViewProjMatrix._34 - d3d_ModelViewProjMatrix._32;
-	}
-
-	for (int i = 0; i < 4; i++)
-	{
-		VectorNormalize (frustum[i].normal);
-
-		frustum[i].type = PLANE_ANYZ;
-		frustum[i].dist = DotProduct (r_refdef.vieworigin, frustum[i].normal); //FIXME: shouldn't this always be zero?
-		frustum[i].signbits = SignbitsForPlane (&frustum[i]);
 	}
 }
 
@@ -605,9 +583,9 @@ void D3DMain_SetupD3D (void)
 
 	// keep an identity view matrix at all times; this simplifies the setup and also lets us
 	// skip a matrix multiplication per vertex in our vertex shaders. ;)
-	D3DMatrix_Identity (&d3d_ViewMatrix);
-	D3DMatrix_Identity (&d3d_WorldMatrix);
-	D3DMatrix_Identity (&d3d_ProjMatrix);
+	d3d_ViewMatrix.LoadIdentity ();
+	d3d_WorldMatrix.LoadIdentity ();
+	d3d_ProjMatrix.LoadIdentity ();
 
 	DWORD clearcolor = 0xff000000;
 
@@ -645,17 +623,12 @@ void D3DMain_SetupD3D (void)
 
 	extern float r_farclip;
 
-	// put z going up (this is done in the world matrix so that view is kept clean and we can derive the view vectors from it)
-	D3DMatrix_Rotate (&d3d_WorldMatrix, 1, 0, 0, -90);
-	D3DMatrix_Rotate (&d3d_WorldMatrix, 0, 0, 1, 90);
+	// put z going up (this is done in the view matrix so that world is kept clean and we can derive the view vectors from it)
+	d3d_ViewMatrix.YawPitchRoll (0, -90, 90);
 
-	// rotate camera by angles
-	D3DMatrix_Rotate (&d3d_ViewMatrix, 1, 0, 0, -r_refdef.viewangles[2]);
-	D3DMatrix_Rotate (&d3d_ViewMatrix, 0, 1, 0, -r_refdef.viewangles[0]);
-	D3DMatrix_Rotate (&d3d_ViewMatrix, 0, 0, 1, -r_refdef.viewangles[1]);
-
-	// translate camera by origin
-	D3DMatrix_Translate (&d3d_ViewMatrix, -r_refdef.vieworigin[0], -r_refdef.vieworigin[1], -r_refdef.vieworigin[2]);
+	// the world matrix takes the actual position transform
+	d3d_WorldMatrix.YawPitchRoll (-r_refdef.viewangles[0], -r_refdef.viewangles[2], -r_refdef.viewangles[1]);
+	d3d_WorldMatrix.Translate (-r_refdef.vieworigin[0], -r_refdef.vieworigin[1], -r_refdef.vieworigin[2]);
 
 	// create an initial projection matrix for deriving the frustum from; as Quake only culls against the top/bottom/left/right
 	// planes we don't need to worry about the far clipping distance yet; we'll just set it to what it was last frame so it has
@@ -664,25 +637,24 @@ void D3DMain_SetupD3D (void)
 	D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip);
 
 	// derive these properly
-	r_viewvectors.forward[0] = d3d_ViewMatrix._11;
-	r_viewvectors.forward[1] = d3d_ViewMatrix._21;
-	r_viewvectors.forward[2] = d3d_ViewMatrix._31;
-
-	r_viewvectors.right[0] = -d3d_ViewMatrix._12;	// stupid Quake bug
-	r_viewvectors.right[1] = -d3d_ViewMatrix._22;	// stupid Quake bug
-	r_viewvectors.right[2] = -d3d_ViewMatrix._32;	// stupid Quake bug
-
-	r_viewvectors.up[0] = d3d_ViewMatrix._13;
-	r_viewvectors.up[1] = d3d_ViewMatrix._23;
-	r_viewvectors.up[2] = d3d_ViewMatrix._33;
+	d3d_WorldMatrix.ToVectors (&r_viewvectors);
 
 	// calculate concatenated final matrix for use by shaders
 	// because it's only needed once per frame instead of once per vertex we can save some vs instructions
-	D3DMatrix_Multiply (&d3d_ModelViewProjMatrix, &d3d_ViewMatrix, &d3d_WorldMatrix);
-	D3DMatrix_Multiply (&d3d_ModelViewProjMatrix, &d3d_ProjMatrix);
+	QMATRIX::UpdateMVP (&d3d_ModelViewProjMatrix, &d3d_WorldMatrix, &d3d_ViewMatrix, &d3d_ProjMatrix);
 
 	// extract the frustum from it
-	D3D_ExtractFrustum ();
+	// retain the old frustum unless we're in the first few frames in which case we want one to be done
+	// as a baseline
+	if (!r_lockfrustum.integer || d3d_RenderDef.framecount < 5)
+		d3d_ModelViewProjMatrix.ExtractFrustum (frustum);
+
+	for (int i = 0; i < 4; i++)
+	{
+		frustum[i].type = PLANE_ANYZ;
+		frustum[i].dist = DotProduct (r_refdef.vieworigin, frustum[i].normal); //FIXME: shouldn't this always be zero?
+		frustum[i].signbits = SignbitsForPlane (&frustum[i]);
+	}
 
 	// we only need to clear if we're rendering 3D
 	// we clear *before* we set the viewport as clearing a subrect of the rendertarget is slower
@@ -886,8 +858,7 @@ void D3DRMain_HLSLSetup (void)
 	D3DHLSL_SelectShader (desiredshader);
 
 	// add basic params for drawing the world
-	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
-
+	// (the world matrix is deferred until after we find the correct max depth to use)
 	D3DHLSL_SetFloat ("Overbright", 1.0f);
 
 	D3DHLSL_SetFloatArray ("r_origin", r_refdef.vieworigin, 3);
@@ -988,8 +959,46 @@ void D3DMain_PolyBlend (void)
 }
 
 
+void D3DSurf_DrawBrushModel (entity_t *ent);
+void D3DAlias_AddModelToList (entity_t *ent);
+
+void D3DMain_SetupEntitiesOnList (void)
+{
+	// deferred until after the world so that we get statics on the list too
+	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
+	{
+		entity_t *ent = d3d_RenderDef.visedicts[i];
+
+		if (!ent->model) continue;
+
+		// this ent had it's model merged to the world
+		if (ent->mergeframe == d3d_RenderDef.framecount) continue;
+
+		// add entities to the draw lists
+		if (!r_drawentities.integer) continue;
+
+		R_ModParanoia (ent);
+		D3DMain_BBoxForEnt (ent);
+
+		// to save on extra passes through the list we setup alias and sprite models here too
+		if (ent->model->type == mod_alias)
+			D3DAlias_AddModelToList (ent);
+		else if (ent->model->type == mod_brush)
+			D3DSurf_DrawBrushModel (ent);
+		else if (ent->model->type == mod_sprite)
+			D3DAlpha_AddToList (ent);
+		else if (ent->model->type == mod_iqm)
+			;
+		else Con_Printf ("Unknown model type for entity: %i\n", ent->model->type);
+	}
+
+	// reset to the original world matrix
+	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
+}
+
+
 void V_AdjustContentCShift (int contents);
-void D3DLight_UpdateLightmaps (void);
+void D3DAlias_InitList (void);
 
 void R_RenderView (double frametime)
 {
@@ -1006,7 +1015,6 @@ void R_RenderView (double frametime)
 	if (r_speeds.value) dTime1 = Sys_FloatTime ();
 
 	// initialize stuff
-	D3DLight_SetProperty ();
 	D3DLight_SetCoronaState ();
 	R_SetupFrame ();
 	D3DWarp_InitializeTurb ();
@@ -1016,15 +1024,23 @@ void R_RenderView (double frametime)
 	// set up to render
 	D3DMain_SetupD3D ();
 	D3DRMain_HLSLSetup ();
+	D3DAlias_InitList ();
 
 	// enable simplistic colour filtering for night goggle/etc effects
 	if (r_colorfilter.integer != 7) D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 8 | (r_colorfilter.integer & 7));
 
+	// bbcull dynamic lights
+	R_CullDynamicLights ();
+
 	// build the world model
-	D3D_BuildWorld ();
+	D3DSurf_DrawWorld ();
+
+	// prep entities for drawing (and also draw any leftover bmodels)
+	D3DMain_SetupEntitiesOnList ();
 
 	// draw our alias models
 	D3DAlias_RenderAliasModels ();
+	D3DIQM_DrawIQMs ();
 
 	// add particles to alpha list always
 	D3D_AddParticesToAlphaList ();
@@ -1055,9 +1071,6 @@ void R_RenderView (double frametime)
 		r_speedstime = (int) ((dTime2 - dTime1) * 1000.0);
 	}
 	else r_speedstime = -1;
-
-	// update lightmaps after everything has been drawn
-	// D3DLight_UpdateLightmaps ();
 }
 
 

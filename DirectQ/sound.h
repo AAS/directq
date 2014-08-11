@@ -29,14 +29,14 @@ typedef enum {SIS_SUCCESS, SIS_FAILURE, SIS_NOTAVAIL} sndinitstat;
 
 
 // !!! if this is changed, it much be changed in asm_i386.h too !!!
-typedef struct
+typedef struct portable_samplepair_s
 {
 	int left;
 	int right;
 } portable_samplepair_t;
 
 // !!! if this is changed, it much be changed in asm_i386.h too !!!
-typedef struct
+typedef struct sfxcache_s
 {
 	int 	length;
 	int 	loopstart;
@@ -50,29 +50,26 @@ typedef struct
 typedef struct sfx_s
 {
 	char 	name[MAX_QPATH];
-	LPDIRECTSOUNDBUFFER8 Buffer;
 	sfxcache_t *sndcache;
 } sfx_t;
 
 extern CQuakeCache *SoundCache;
 extern CQuakeZone *SoundHeap;
 
-typedef struct
+typedef struct dms_s
 {
 	bool		gamealive;
 	bool		soundalive;
 	bool		splitbuffer;
-	int				channels;
 	int				samples;				// mono samples in buffer
 	int				submission_chunk;		// don't mix less than this #
 	int				samplepos;				// in mono samples
-	int				samplebits;
 	int				speed;
 	unsigned char	*buffer;
 } dma_t;
 
 // !!! if this is changed, it much be changed in asm_i386.h too !!!
-typedef struct
+typedef struct channel_s
 {
 	sfx_t	*sfx;			// sfx number
 	int		leftvol;		// 0-255 volume
@@ -87,7 +84,7 @@ typedef struct
 	int		master_vol;		// 0-255 master volume
 } channel_t;
 
-typedef struct
+typedef struct wavinfo_s
 {
 	int		rate;
 	int		width;

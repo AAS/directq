@@ -49,12 +49,7 @@ extern	int nanmask;
 #define VectorClear(vec) {(vec)[0] = (vec)[1] = (vec)[2] = 0.0f;}
 #define VectorSet(vec,x,y,z) {(vec)[0] = x; (vec)[1] = y; (vec)[2] = z;}
 
-void VectorMad (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
-
-vec_t _DotProduct (vec3_t v1, vec3_t v2);
-void _VectorSubtract (vec3_t veca, vec3_t vecb, vec3_t out);
-void _VectorAdd (vec3_t veca, vec3_t vecb, vec3_t out);
-void _VectorCopy (vec3_t in, vec3_t out);
+void VectorMad (vec3_t add, float scale, vec3_t mul, vec3_t out);
 
 int VectorCompare (vec3_t v1, vec3_t v2);
 vec_t Length (vec3_t v);
@@ -62,47 +57,26 @@ void CrossProduct (vec3_t v1, vec3_t v2, vec3_t cross);
 float VectorNormalize (vec3_t v);		// returns vector length
 void VectorInverse (vec3_t v);
 void VectorScale (vec3_t in, vec_t scale, vec3_t out);
-int Q_log2 (int val);
-
-void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3]);
-void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4]);
-
-void FloorDivMod (float numer, float denom, int *quotient, int *rem);
-int GreatestCommonDivisor (int i1, int i2);
 
 typedef struct avectors_s
 {
-	vec3_t forward;
-	vec3_t right;
-	vec3_t up;
+	D3DXVECTOR3 forward;
+	D3DXVECTOR3 right;
+	D3DXVECTOR3 up;
 } avectors_t;
 
 
+#define BOX_INSIDE_PLANE	1
+#define BOX_OUTSIDE_PLANE	2
+#define BOX_INTERSECT_PLANE	3
+
 void AngleVectors (vec3_t angles, avectors_t *av);
 void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up);
-int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, struct mplane_s *plane);
-float	anglemod (float a);
-
-#define BOX_ON_PLANE_SIDE(emins, emaxs, p)	\
-	(((p)->type < 3)?						\
-	(										\
-		((p)->dist <= (emins)[(p)->type])?	\
-			1								\
-		:									\
-		(									\
-			((p)->dist >= (emaxs)[(p)->type])?\
-				2							\
-			:								\
-				3							\
-		)									\
-	)										\
-	:										\
-		BoxOnPlaneSide((emins), (emaxs), (p)))
+void AngleVectors (vec3_t angles, QMATRIX *m);
+int SphereOnPlaneSide (float *center, float radius, struct mplane_s *p);
+float anglemod (float a);
 
 #define CLAMP(min, x, max) ((x) < (min) ? (min) : (x) > (max) ? (max) : (x))
-
 #define Q_rint(x) ((x) > 0 ? (int)((x) + 0.5) : (int)((x) - 0.5))
-
 #define Q_Random(MIN,MAX) ((rand () & 32767) * (((MAX) - (MIN)) * (1.0f / 32767.0f)) + (MIN))
 
-void NonEulerInterpolateAngles (float *currangles, float *lastangles, float lerp, float *outangles);

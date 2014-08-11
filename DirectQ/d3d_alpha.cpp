@@ -38,9 +38,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 typedef struct d3d_alphalist_s
 {
 	int Type;
-
-	// our qsort for dist is always going to return ints so we just store dist as an int
-	int Dist;
+	float Dist;
 
 	// added for brush surfaces so that they don't need to allocate a modelsurf (yuck)
 	entity_t *SurfEntity;
@@ -49,7 +47,8 @@ typedef struct d3d_alphalist_s
 	{
 		dlight_t *DLight;
 		entity_t *Entity;
-		particle_type_t *Particle;
+		particle_emitter_t *Particle;
+		particle_effect_t *Effect;
 		msurface_t *surf;
 		void *data;
 	};
@@ -64,6 +63,9 @@ typedef struct d3d_alphalist_s
 #define D3D_ALPHATYPE_ALIAS			7
 #define D3D_ALPHATYPE_BRUSH			8
 #define D3D_ALPHATYPE_SPRITE		9
+#define D3D_ALPHATYPE_IQM			10
+#define D3D_ALPHATYPE_BRIGHTFIELD	11
+#define D3D_ALPHATYPE_PARTEFFECT	12
 
 d3d_alphalist_t **d3d_AlphaList = NULL;
 int d3d_NumAlphaList = 0;
@@ -78,8 +80,7 @@ float D3DAlpha_GetDist (float *origin)
 {
 	// no need to sqrt these as all we're concerned about is relative distances
 	// (if x < y then sqrt (x) is also < sqrt (y))
-	// our qsort for dist is always going to return ints so we just store dist as an int
-	return (int)
+	return
 	(
 		(origin[0] - r_refdef.vieworigin[0]) * (origin[0] - r_refdef.vieworigin[0]) +
 		(origin[1] - r_refdef.vieworigin[1]) * (origin[1] - r_refdef.vieworigin[1]) +
@@ -105,6 +106,8 @@ void D3DAlpha_AddToList (entity_t *ent)
 {
 	if (ent->model->type == mod_alias)
 		D3DAlpha_AddToList (D3D_ALPHATYPE_ALIAS, ent, D3DAlpha_GetDist (ent->origin));
+	else if (ent->model->type == mod_iqm)
+		D3DAlpha_AddToList (D3D_ALPHATYPE_IQM, ent, D3DAlpha_GetDist (ent->origin));
 	else if (ent->model->type == mod_brush)
 		D3DAlpha_AddToList (D3D_ALPHATYPE_BRUSH, ent, D3DAlpha_GetDist (ent->origin));
 	else if (ent->model->type == mod_sprite)
@@ -113,23 +116,29 @@ void D3DAlpha_AddToList (entity_t *ent)
 }
 
 
-void D3DAlpha_AddToList (msurface_t *surf, entity_t *ent)
+void D3DAlpha_AddToList (msurface_t *surf, entity_t *ent, float *midpoint)
 {
 	// we only support turb surfaces for now
 	if (surf->flags & SURF_DRAWTURB)
-		D3DAlpha_AddToList (D3D_ALPHATYPE_WATERWARP, surf, D3DAlpha_GetDist (surf->midpoint));
+		D3DAlpha_AddToList (D3D_ALPHATYPE_WATERWARP, surf, D3DAlpha_GetDist (midpoint));
 	else if (surf->flags & SURF_DRAWFENCE)
-		D3DAlpha_AddToList (D3D_ALPHATYPE_FENCE, surf, D3DAlpha_GetDist (surf->midpoint));
-	else D3DAlpha_AddToList (D3D_ALPHATYPE_SURFACE, surf, D3DAlpha_GetDist (surf->midpoint));
+		D3DAlpha_AddToList (D3D_ALPHATYPE_FENCE, surf, D3DAlpha_GetDist (midpoint));
+	else D3DAlpha_AddToList (D3D_ALPHATYPE_SURFACE, surf, D3DAlpha_GetDist (midpoint));
 
 	// eeewwww
 	d3d_AlphaList[d3d_NumAlphaList - 1]->SurfEntity = ent;
 }
 
 
-void D3DAlpha_AddToList (particle_type_t *particle)
+void D3DAlpha_AddToList (particle_emitter_t *particle)
 {
 	D3DAlpha_AddToList (D3D_ALPHATYPE_PARTICLE, particle, D3DAlpha_GetDist (particle->spawnorg));
+}
+
+
+void D3DAlpha_AddToList (particle_effect_t *particle)
+{
+	D3DAlpha_AddToList (D3D_ALPHATYPE_PARTEFFECT, particle, D3DAlpha_GetDist (particle->origin));
 }
 
 
@@ -139,20 +148,31 @@ void D3DAlpha_AddToList (dlight_t *dl)
 }
 
 
+void D3DAlpha_AddToList (entity_t *ent, int effects)
+{
+	if (effects & EF_BRIGHTFIELD) D3DAlpha_AddToList (D3D_ALPHATYPE_BRIGHTFIELD, ent, D3DAlpha_GetDist (ent->origin));
+}
+
+
 int D3DAlpha_SortFunc (const void *a, const void *b)
 {
 	d3d_alphalist_t *al1 = *(d3d_alphalist_t **) a;
 	d3d_alphalist_t *al2 = *(d3d_alphalist_t **) b;
 
 	// back to front ordering
-	return (al2->Dist - al1->Dist);
+	// this is more correct as it will order surfs properly if less than 1 unit separated
+	if (al2->Dist > al1->Dist)
+		return 1;
+	else if (al2->Dist < al1->Dist)
+		return -1;
+	else return 0;
 }
 
 
 void D3DAlias_SetupAliasModel (entity_t *e);
 void D3DAlias_DrawAliasBatch (entity_t **ents, int numents);
 void D3D_SetupSpriteModel (entity_t *ent);
-void R_AddParticleTypeToRender (particle_type_t *pt);
+void R_AddParticleEmitterToRender (particle_emitter_t *pe);
 
 void D3DWarp_SetupTurbState (void);
 void D3DWarp_TakeDownTurbState (void);
@@ -168,6 +188,17 @@ void D3DLight_BeginCoronas (void);
 void D3DLight_EndCoronas (void);
 void D3DLight_DrawCorona (dlight_t *dl);
 texture_t *R_TextureAnimation (entity_t *ent, texture_t *base);
+
+void D3DIQM_SetCommonState (void);
+void D3DIQM_DrawIQM (entity_t *ent);
+
+void D3DPart_BeginBrightField (void);
+void D3DPart_EndBrightField (void);
+void D3DPart_DrawBrightField (float *origin);
+
+void D3DPart_BeginEffect (void);
+void D3DPart_EndEffect (void);
+void D3DPart_DrawEffect (particle_effect_t *effect);
 
 
 void D3DAlpha_Cull (void)
@@ -189,6 +220,14 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 	{
 		switch (oldone->Type)
 		{
+		case D3D_ALPHATYPE_PARTEFFECT:
+			D3DPart_EndEffect ();
+			break;
+
+		case D3D_ALPHATYPE_BRIGHTFIELD:
+			D3DPart_EndBrightField ();
+			break;
+
 		case D3D_ALPHATYPE_PARTICLE:
 			D3DPart_EndParticles ();
 			break;
@@ -196,6 +235,7 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 		case D3D_ALPHATYPE_SPRITE:
 			D3DSprite_End ();
 		case D3D_ALPHATYPE_ALIAS:
+		case D3D_ALPHATYPE_IQM:
 		case D3D_ALPHATYPE_BRUSH:
 			D3DState_SetZBuffer (D3DZB_TRUE, FALSE);
 			break;
@@ -232,6 +272,11 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 			D3DLight_BeginCoronas ();
 			break;
 
+		case D3D_ALPHATYPE_IQM:
+			D3DIQM_SetCommonState ();
+			D3DState_SetZBuffer (D3DZB_TRUE, TRUE);
+			break;
+
 		case D3D_ALPHATYPE_SPRITE:
 			D3DSprite_Begin ();
 		case D3D_ALPHATYPE_ALIAS:
@@ -257,6 +302,14 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 
 		case D3D_ALPHATYPE_SURFACE:
 			D3DBrush_Begin ();
+			break;
+
+		case D3D_ALPHATYPE_BRIGHTFIELD:
+			D3DPart_BeginBrightField ();
+			break;
+
+		case D3D_ALPHATYPE_PARTEFFECT:
+			D3DPart_BeginEffect ();
 			break;
 
 		default:
@@ -329,8 +382,20 @@ void D3DAlpha_RenderList (void)
 
 		switch (d3d_AlphaList[i]->Type)
 		{
+		case D3D_ALPHATYPE_PARTEFFECT:
+			D3DPart_DrawEffect (d3d_AlphaList[i]->Effect);
+			break;
+
+		case D3D_ALPHATYPE_BRIGHTFIELD:
+			D3DPart_DrawBrightField (d3d_AlphaList[i]->Entity->origin);
+			break;
+
 		case D3D_ALPHATYPE_ALIAS:
 			D3DAlias_DrawAliasBatch (&d3d_AlphaList[i]->Entity, 1);
+			break;
+
+		case D3D_ALPHATYPE_IQM:
+			D3DIQM_DrawIQM (d3d_AlphaList[i]->Entity);
 			break;
 
 		case D3D_ALPHATYPE_BRUSH:
@@ -342,7 +407,7 @@ void D3DAlpha_RenderList (void)
 			break;
 
 		case D3D_ALPHATYPE_PARTICLE:
-			R_AddParticleTypeToRender (d3d_AlphaList[i]->Particle);
+			R_AddParticleEmitterToRender (d3d_AlphaList[i]->Particle);
 			break;
 
 		case D3D_ALPHATYPE_WATERWARP:

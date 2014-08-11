@@ -248,11 +248,7 @@ void Host_FindMaxClients (void)
 
 	// if we request more than 1 client we set the appropriate game mode
 	if (svs.maxclients > 1)
-	{
-		if (deathmatch.value > 1 && kurok)
-			Cvar_Set ("deathmatch", deathmatch.value);
-		else Cvar_Set ("deathmatch", 1.0);
-	}
+		Cvar_Set ("deathmatch", 1.0);
 	else Cvar_Set ("deathmatch", 0.0);
 }
 
@@ -279,7 +275,6 @@ Writes key bindings and archived cvars
 void Cmd_WriteAlias (FILE *f);
 void D3DVid_SaveTextureMode (FILE *f);
 void Key_HistoryFlush (void);
-void D3DVid_UpdateDriver (void);
 
 void Host_WriteConfiguration (void)
 {
@@ -317,7 +312,6 @@ void Host_WriteConfiguration (void)
 			}
 		}
 
-		D3DVid_UpdateDriver ();
 		Key_WriteBindings (f);
 		Cvar_WriteVariables (f);
 		Cmd_WriteAlias (f);	// needed for the RMQ hook otherwise it gets wiped
@@ -613,7 +607,6 @@ cvar_alias_t pq_maxfps ("pq_maxfps", &host_maxfps);
 
 void CL_SendLagMove (void);
 void SCR_SetTimeout (float timeout);
-void CL_AccumulateCmd (void);
 void SCR_SetHostSpeeds (double frametime, int pass1, int pass2, int pass3);
 
 
@@ -641,7 +634,8 @@ void Host_ResetFixedTime (void)
 
 void VID_DefaultMonitorGamma_f (void);
 void IN_ReadDirectInputMessages (void);
-void CL_UpdateParticles (void);
+void IN_ReadJoystickMessages (void);
+void IN_CheckFreeLook (void);
 
 void Host_Frame (DWORD time)
 {
@@ -656,8 +650,11 @@ void Host_Frame (DWORD time)
 	// (unless we're in a demo - see srand call in cl_demo - in which case we keep random effects consistent across playbacks)
 	if (!cls.demoplayback) rand ();
 
-	// always read input and update keystates
+	// always read input and update keystates, moves, etc
+	IN_CheckFreeLook ();
 	IN_ReadDirectInputMessages ();
+	IN_ReadJoystickMessages ();
+	IN_Commands ();
 
 	// decide if we're going to run a frame
 	//if (!Host_FilterTime (time)) return;
@@ -673,21 +670,28 @@ void Host_Frame (DWORD time)
 		return;
 	}
 
-	if (cls.demorecording)
+	// this was done to enforce SDA compliance, but the SDA people will always just use JoeQuake anyway so
+	// it's not needed any more
+	/*if (cls.demorecording)
 		nextframetime += FRAME_DELTA;
-	else if (cls.download.web)
+	else*/ if (cls.download.web)
 		nextframetime = realtime;
 	else if (cls.timedemo)
 		nextframetime = realtime;
-	else if (cls.state != ca_connected && !cls.demoplayback)
+	else if (!cls.maprunning && !cls.demoplayback)
 		nextframetime += FRAME_DELTA;
 	else if (!cl.paused && (cl.maxclients > 1 || key_dest == key_game))
 	{
-		if (host_maxfps.value > 1000)
-			nextframetime = realtime;
-		else if (host_maxfps.value < 10)
-			nextframetime += 0.1;
-		else nextframetime += (1.0 / (double) host_maxfps.value);
+		// expected behaviour is that 0 is uncapped; precedent: Q3A
+		if (host_maxfps.value > 0)
+		{
+			if (host_maxfps.value > 1000)
+				nextframetime = realtime;
+			else if (host_maxfps.value < 10)
+				nextframetime += 0.1;
+			else nextframetime += (1.0 / (double) host_maxfps.value);
+		}
+		else nextframetime = realtime;
 	}
 	else nextframetime += FRAME_DELTA;
 
@@ -714,20 +718,16 @@ void Host_Frame (DWORD time)
 	}
 	else host_fixedtime = 0.0;
 
-	// always accumulate commands even if we're not sending to the server
-	CL_AccumulateCmd ();
-
 	Cbuf_Execute ();
-	IN_Commands ();
 	NET_Poll ();
 
 	if (sv.active && (host_fixedtime > 0))
 	{
-		CL_SendCmd ();
+		CL_SendCmd (host_fixedtime);
 		SV_UpdateServer (host_fixedtime);
 	}
 	else if (!sv.active && (host_fixedtime > 0))
-		CL_SendCmd ();
+		CL_SendCmd (host_fixedtime);
 
 	if (cls.state == ca_connected)
 	{
@@ -749,10 +749,7 @@ void Host_Frame (DWORD time)
 
 	// save conditiion as in SCR_UpdateScreen
 	if (cls.maprunning && cl.worldmodel && cls.signon == SIGNON_CONNECTED)
-	{
-		CL_UpdateParticles ();
 		V_UpdateCShifts ();
-	}
 
 	if (host_fixedtime > 0)
 	{
@@ -775,7 +772,7 @@ void Host_Frame (DWORD time)
 Host_Init
 ====================
 */
-void D3DVid_Init (void);
+void VIDD3D_Init (void);
 bool full_initialized = false;
 void Menu_CommonInit (void);
 void PR_InitBuiltIns (void);
@@ -783,8 +780,6 @@ void Menu_MapsPopulate (void);
 void Menu_DemoPopulate (void);
 void Menu_LoadAvailableSkyboxes (void);
 void SCR_QuakeIsLoading (int stage, int maxstage);
-void Cvar_MakeCompatLayer (void);
-void Cmd_MakeCompatLayer (void);
 
 
 void Host_Init (quakeparms_t *parms)
@@ -793,16 +788,10 @@ void Host_Init (quakeparms_t *parms)
 	full_initialized = false;
 
 	memcpy (&host_parms, parms, sizeof (quakeparms_t));
-	// host_parms = *parms;
 
 	com_argc = parms->argc;
 	com_argv = parms->argv;
 
-	// build the compatibility layers
-	Cvar_MakeCompatLayer ();
-	Cmd_MakeCompatLayer ();
-
-	//PR_InitBuiltIns ();
 	Cbuf_Init ();
 	Cmd_Init ();
 	V_Init ();
@@ -840,7 +829,7 @@ void Host_Init (quakeparms_t *parms)
 
 	if (!W_LoadPalette ()) Sys_Error ("Could not locate Quake on your computer");
 
-	D3DVid_Init ();
+	VIDD3D_Init ();
 
 	Draw_Init (); SCR_QuakeIsLoading (1, 9);
 	SCR_Init (); SCR_QuakeIsLoading (2, 9);

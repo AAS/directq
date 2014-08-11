@@ -454,6 +454,7 @@ char *PR_UglyValueString (etype_t type, eval_t *val)
 	return line;
 }
 
+
 /*
 ============
 PR_GlobalString
@@ -586,6 +587,7 @@ void ED_Write (FILE *f, edict_t *ed)
 	char	*name;
 	int		type;
 
+	// need to write free edicts so that numbers will match up
 	fprintf (f, "{\n");
 
 	if (ed->free)
@@ -599,7 +601,7 @@ void ED_Write (FILE *f, edict_t *ed)
 		d = &SVProgs->FieldDefs[i];
 		name = SVProgs->GetString (d->s_name);
 
-		if (name[strlen (name)-2] == '_')
+		if (name[strlen (name) - 2] == '_')
 			continue;	// skip _x, _y, _z vars
 
 		v = (int *) ((char *) &ed->v + d->ofs * 4);
@@ -620,6 +622,7 @@ void ED_Write (FILE *f, edict_t *ed)
 
 	fprintf (f, "}\n");
 }
+
 
 void ED_PrintNum (int ent)
 {

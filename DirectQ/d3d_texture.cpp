@@ -24,53 +24,162 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include <vector>
 
+typedef struct image_s
+{
+	char identifier[64];
+	int width;
+	int height;
+	byte *data;
+	byte hash[16];
+	int flags;
+	int LastUsage;
+	LPDIRECT3DTEXTURE9 d3d_Texture;
+} image_t;
+
+
+typedef struct d3d_filtermode_s
+{
+	char *name;
+	D3DTEXTUREFILTERTYPE texfilter;
+	D3DTEXTUREFILTERTYPE mipfilter;
+} d3d_filtermode_t;
+
+d3d_filtermode_t d3d_filtermodes[] =
+{
+	{"GL_NEAREST", D3DTEXF_POINT, D3DTEXF_NONE},
+	{"GL_LINEAR", D3DTEXF_LINEAR, D3DTEXF_NONE},
+	{"GL_NEAREST_MIPMAP_NEAREST", D3DTEXF_POINT, D3DTEXF_POINT},
+	{"GL_LINEAR_MIPMAP_NEAREST", D3DTEXF_LINEAR, D3DTEXF_POINT},
+	{"GL_NEAREST_MIPMAP_LINEAR", D3DTEXF_POINT, D3DTEXF_LINEAR},
+	{"GL_LINEAR_MIPMAP_LINEAR", D3DTEXF_LINEAR, D3DTEXF_LINEAR}
+};
+
+D3DTEXTUREFILTERTYPE d3d_TexFilter = D3DTEXF_LINEAR;
+D3DTEXTUREFILTERTYPE d3d_MipFilter = D3DTEXF_LINEAR;
+
+void D3DVid_TextureMode_f (void)
+{
+	if (Cmd_Argc () == 1)
+	{
+		D3DTEXTUREFILTERTYPE texfilter = d3d_TexFilter;
+		D3DTEXTUREFILTERTYPE mipfilter = d3d_MipFilter;
+
+		Con_Printf ("Available Filters:\n");
+
+		for (int i = 0; i < 6; i++)
+			Con_Printf ("%i: %s\n", i, d3d_filtermodes[i].name);
+
+		for (int i = 0; i < 6; i++)
+		{
+			if (texfilter == d3d_filtermodes[i].texfilter && mipfilter == d3d_filtermodes[i].mipfilter)
+			{
+				Con_Printf ("\nCurrent filter: %s\n", d3d_filtermodes[i].name);
+				return;
+			}
+		}
+
+		Con_Printf ("current filter is unknown???\n");
+		Con_Printf ("Texture filter: %s\n", D3DTypeToString (d3d_TexFilter));
+		Con_Printf ("Mipmap filter:  %s\n", D3DTypeToString (d3d_MipFilter));
+		return;
+	}
+
+	char *desiredmode = Cmd_Argv (1);
+	int modenum = desiredmode[0] - '0';
+
+	for (int i = 0; i < 6; i++)
+	{
+		if (!_stricmp (d3d_filtermodes[i].name, desiredmode) || i == modenum)
+		{
+			// reset filter
+			d3d_TexFilter = d3d_filtermodes[i].texfilter;
+			d3d_MipFilter = d3d_filtermodes[i].mipfilter;
+
+			Con_Printf ("Texture filter: %s\n", D3DTypeToString (d3d_TexFilter));
+			Con_Printf ("Mipmap filter:  %s\n", D3DTypeToString (d3d_MipFilter));
+			return;
+		}
+	}
+
+	Con_Printf ("bad filter name\n");
+}
+
+
+void D3DVid_SaveTextureMode (FILE *f)
+{
+	for (int i = 0; i < 6; i++)
+	{
+		if (d3d_TexFilter == d3d_filtermodes[i].texfilter && d3d_MipFilter == d3d_filtermodes[i].mipfilter)
+		{
+			fprintf (f, "gl_texturemode %s\n", d3d_filtermodes[i].name);
+			return;
+		}
+	}
+}
+
+
+void D3DVid_TexMem_f (void)
+{
+	Con_Printf ("Available Texture Memory: %i MB\n", (d3d_Device->GetAvailableTextureMem ()) / (1024 * 1024));
+}
+
+
+cmd_t D3DVid_TexMem_Cmd ("gl_videoram", D3DVid_TexMem_f);
+cmd_t D3DVid_TextureMode_Cmd ("gl_texturemode", D3DVid_TextureMode_f);
+
+void D3DVid_ValidateTextureSizes (void)
+{
+	LPDIRECT3DTEXTURE9 tex = NULL;
+
+	for (int s = d3d_DeviceCaps.MaxTextureWidth;; s >>= 1)
+	{
+		if (s < 256)
+		{
+			Sys_Error ("Could not create a 256x256 texture");
+			return;
+		}
+
+		hr = d3d_Device->CreateTexture (s, 256, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL);
+
+		if (FAILED (hr))
+		{
+			tex = NULL;
+			continue;
+		}
+
+		d3d_DeviceCaps.MaxTextureWidth = s;
+		SAFE_RELEASE (tex);
+		break;
+	}
+
+	for (int s = d3d_DeviceCaps.MaxTextureHeight;; s >>= 1)
+	{
+		if (s < 256)
+		{
+			Sys_Error ("Could not create a 256x256 texture");
+			return;
+		}
+
+		hr = d3d_Device->CreateTexture (256, s, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL);
+
+		if (FAILED (hr))
+		{
+			tex = NULL;
+			continue;
+		}
+
+		d3d_DeviceCaps.MaxTextureHeight = s;
+		SAFE_RELEASE (tex);
+		break;
+	}
+}
+
+
 extern LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[];
 
-void D3DTexture_MipChange (cvar_t *var);
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
-cvar_t gl_softwarequakemipmaps ("gl_softwarequakemipmaps", "0", 0, D3DTexture_MipChange);
-
-bool texturelist_dirty = false;
-char **d3d_TextureNames = NULL;
 
 std::vector<image_t *> d3d_TextureList;
-
-void D3DTexture_MipMap (byte *in, int width, int height)
-{
-	byte *out = in;
-
-	width <<= 2;
-	height >>= 1;
-
-	for (int i = 0; i < height; i++, in += width)
-	{
-		for (int j = 0; j < width; j += 8, out += 4, in += 8)
-		{
-			out[0] = (in[0] + in[4] + in[width + 0] + in[width + 4]) >> 2;
-			out[1] = (in[1] + in[5] + in[width + 1] + in[width + 5]) >> 2;
-			out[2] = (in[2] + in[6] + in[width + 2] + in[width + 6]) >> 2;
-			out[3] = (in[3] + in[7] + in[width + 3] + in[width + 7]) >> 2;
-		}
-	}
-}
-
-
-void D3DTexture_MipMap (byte *in, byte *out, int width, int height)
-{
-	width <<= 2;
-	height >>= 1;
-
-	for (int i = 0; i < height; i++, in += width)
-	{
-		for (int j = 0; j < width; j += 8, out += 4, in += 8)
-		{
-			out[0] = (in[0] + in[4] + in[width + 0] + in[width + 4]) >> 2;
-			out[1] = (in[1] + in[5] + in[width + 1] + in[width + 5]) >> 2;
-			out[2] = (in[2] + in[6] + in[width + 2] + in[width + 6]) >> 2;
-			out[3] = (in[3] + in[7] + in[width + 3] + in[width + 7]) >> 2;
-		}
-	}
-}
 
 
 void D3DTexture_GenerateMipLevels (unsigned *data, int width, int height, int flags, LPDIRECT3DTEXTURE9 tex)
@@ -81,66 +190,22 @@ void D3DTexture_GenerateMipLevels (unsigned *data, int width, int height, int fl
 	// copy in miplevel 0
 	if (SUCCEEDED (tex->LockRect (0, &lockrect, NULL, d3d_GlobalCaps.DynamicLock)))
 	{
-		memcpy (lockrect.pBits, data, width * height * 4);
+		// copy this in properly using pitch
+		unsigned *dst = (unsigned *) lockrect.pBits;
+
+		for (int h = 0; h < height; h++)
+		{
+			for (int w = 0; w < width; w++)
+				dst[w] = data[w];
+
+			data += width;
+			dst += (lockrect.Pitch >> 2);
+		}
+
 		tex->UnlockRect (0);
 
 		// filter the rest (needed for NP2 support)
 		if (mips > 1) D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX);
-	}
-}
-
-
-void D3DTexture_MipChange (cvar_t *var)
-{
-	if (!d3d_Device) return;
-
-	for (int i = 0; i < d3d_TextureList.size (); i++)
-	{
-		if (!d3d_TextureList[i]) continue; // is this now impossible???
-		if (!d3d_TextureList[i]->d3d_Texture) continue;
-		if (!(d3d_TextureList[i]->flags & IMAGE_MIPMAP)) continue;
-		if (!(d3d_TextureList[i]->flags & IMAGE_BSP)) continue;
-
-		D3DLOCKED_RECT lockrect;
-		D3DSURFACE_DESC surfdesc;
-		LPDIRECT3DTEXTURE9 newtex = NULL;
-		int miplevels = 0;
-
-		if (FAILED (d3d_TextureList[i]->d3d_Texture->GetLevelDesc (0, &surfdesc))) continue;
-		if (surfdesc.Format != D3DFMT_X8R8G8B8 && surfdesc.Format != D3DFMT_A8R8G8B8) continue;
-
-		if (!(d3d_TextureList[i]->flags & IMAGE_MIPMAP))
-			miplevels = 1;
-		else if (gl_softwarequakemipmaps.value)
-		{
-			if (d3d_TextureList[i]->flags & IMAGE_LIQUID)
-				miplevels = 1;
-			else if (surfdesc.Width > 8 && surfdesc.Height > 8)
-				miplevels = 4;
-			else miplevels = 0;
-		}
-
-		hr = d3d_Device->CreateTexture (surfdesc.Width,
-			surfdesc.Height,
-			miplevels,
-			0,
-			surfdesc.Format,
-			surfdesc.Pool,
-			&newtex,
-			NULL);
-
-		if (FAILED (hr)) continue;
-
-		if (SUCCEEDED (d3d_TextureList[i]->d3d_Texture->LockRect (0, &lockrect, NULL, d3d_GlobalCaps.DynamicLock)))
-		{
-			// gen mip levels
-			D3DTexture_GenerateMipLevels ((unsigned *) lockrect.pBits, surfdesc.Width, surfdesc.Height, d3d_TextureList[i]->flags, newtex);
-
-			d3d_TextureList[i]->d3d_Texture->UnlockRect (0);
-			d3d_TextureList[i]->d3d_Texture->Release ();
-			d3d_TextureList[i]->d3d_Texture = newtex;
-		}
-		else newtex->Release ();
 	}
 }
 
@@ -153,16 +218,15 @@ extern LPDIRECT3DTEXTURE9 char_textures[];
 palettedef_t d3d_QuakePalette;
 
 
-void D3D_MakeQuakePalettes (byte *palette)
+void D3DTexture_MakeQuakePalettes (byte *palette)
 {
 	int dark = 21024;
 	int darkindex = 0;
 
-	for (int i = 0; i < 256; i++)
+	for (int i = 0; i < 256; i++, palette += 3)
 	{
 		// on disk palette has 3 components
 		byte *rgb = palette;
-		palette += 3;
 
 		if (i < 255)
 		{
@@ -174,6 +238,7 @@ void D3D_MakeQuakePalettes (byte *palette)
 				darkindex = i;
 			}
 		}
+		else rgb[0] = rgb[1] = rgb[2] = 0;
 
 		// set correct alpha colour
 		byte alpha = (i < 255) ? 255 : 0;
@@ -185,44 +250,35 @@ void D3D_MakeQuakePalettes (byte *palette)
 		d3d_QuakePalette.standard[i].peBlue = rgb[2];
 		d3d_QuakePalette.standard[i].peFlags = alpha;
 
-		if (vid.fullbright[i])
+		if (i > 223)
 		{
 			d3d_QuakePalette.luma[i].peRed = rgb[0];
 			d3d_QuakePalette.luma[i].peGreen = rgb[1];
 			d3d_QuakePalette.luma[i].peBlue = rgb[2];
-			d3d_QuakePalette.luma[i].peFlags = 255;
+			d3d_QuakePalette.luma[i].peFlags = alpha;
 		}
 		else
 		{
 			d3d_QuakePalette.luma[i].peRed = 0;
 			d3d_QuakePalette.luma[i].peGreen = 0;
 			d3d_QuakePalette.luma[i].peBlue = 0;
-			d3d_QuakePalette.luma[i].peFlags = 255;
+			d3d_QuakePalette.luma[i].peFlags = alpha;
 		}
 
-		d3d_QuakePalette.standard32[i] = D3DCOLOR_XRGB (rgb[0], rgb[1], rgb[2]);
+		d3d_QuakePalette.standard32[i] = D3DCOLOR_ARGB (alpha, rgb[0], rgb[1], rgb[2]);
 
 		d3d_QuakePalette.colorfloat[i][0] = (float) rgb[0] / 255.0f;
 		d3d_QuakePalette.colorfloat[i][1] = (float) rgb[1] / 255.0f;
 		d3d_QuakePalette.colorfloat[i][2] = (float) rgb[2] / 255.0f;
 		d3d_QuakePalette.colorfloat[i][3] = (float) alpha / 255.0f;
-
-		int gs = ((int) d3d_QuakePalette.standard[i].peRed * 30 +
-			(int) d3d_QuakePalette.standard[i].peGreen * 59 + 
-			(int) d3d_QuakePalette.standard[i].peBlue * 11) / 100;
-
-		d3d_QuakePalette.greyscale[i] = BYTE_CLAMP (gs);
 	}
-
-	// correct alpha colour
-	d3d_QuakePalette.standard32[255] = 0;
 
 	// set index of darkest colour
 	d3d_QuakePalette.darkindex = darkindex;
 }
 
 
-int D3D_PowerOf2Size (int size)
+int D3DTexture_PowerOf2Size (int size)
 {
 	size--;
 	size |= size >> 1;
@@ -233,31 +289,12 @@ int D3D_PowerOf2Size (int size)
 	size++;
 
 	return size;
-	/*
-	int pow2;
-
-	// 2003 will let us declare pow2 in the loop and then return it but later versions are standards compliant
-	for (pow2 = 1; pow2 < size; pow2 *= 2);
-
-	return pow2;
-	*/
-}
-
-
-void D3D_HashTexture (byte *hash, int width, int height, void *data, int flags)
-{
-	int datalen = height * width;
-
-	if (flags & IMAGE_32BIT) datalen *= 4;
-
-	// call into here instead
-	COM_HashData (hash, data, datalen);
 }
 
 
 bool d3d_ImagePadded = false;
 
-void D3D_Transfer8BitTexture (byte *src, unsigned *dst, int size, unsigned *palette)
+void D3DTexture_Transfer8Bit (byte *src, unsigned *dst, int size, unsigned *palette)
 {
 	int n = (size + 7) >> 3;
 	size %= 8;
@@ -277,7 +314,7 @@ void D3D_Transfer8BitTexture (byte *src, unsigned *dst, int size, unsigned *pale
 }
 
 
-void D3D_Transfer32BitTexture (unsigned *src, unsigned *dst, int size)
+void D3DTexture_Transfer32Bit (unsigned *src, unsigned *dst, int size)
 {
 	int n = (size + 7) >> 3;
 	size %= 8;
@@ -297,7 +334,7 @@ void D3D_Transfer32BitTexture (unsigned *src, unsigned *dst, int size)
 }
 
 
-void D3D_Resample8BitTexture (byte *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight, unsigned *palette)
+void D3DTexture_Resample8Bit (byte *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight, unsigned *palette)
 {
 	int		i, j;
 	byte	*inrow, *inrow2;
@@ -347,7 +384,7 @@ void D3D_Resample8BitTexture (byte *in, int inwidth, int inheight, unsigned *out
 }
 
 
-void D3D_Resample32BitTexture (unsigned *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight)
+void D3DTexture_Resample32Bit (unsigned *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight)
 {
 	int		i, j;
 	unsigned	*inrow, *inrow2;
@@ -397,7 +434,7 @@ void D3D_Resample32BitTexture (unsigned *in, int inwidth, int inheight, unsigned
 }
 
 
-unsigned *D3D_GetTexturePalette (PALETTEENTRY *d_8to24table, int flags)
+unsigned *D3DTexture_GetPalette (PALETTEENTRY *d_8to24table, int flags)
 {
 	static unsigned texturepal[256];
 	static int lastflags = -1;
@@ -425,11 +462,11 @@ unsigned *D3D_GetTexturePalette (PALETTEENTRY *d_8to24table, int flags)
 }
 
 
-void D3D_Pad8BitTexture (byte *data, int width, int height, unsigned *padded, int scaled_width, int scaled_height, unsigned *palette)
+void D3DTexture_Pad8Bit (byte *data, int width, int height, unsigned *padded, int scaled_width, int scaled_height, unsigned *palette)
 {
 	for (int y = 0; y < height; y++)
 	{
-		D3D_Transfer8BitTexture (data, padded, width, palette);
+		D3DTexture_Transfer8Bit (data, padded, width, palette);
 
 		data += width;
 		padded += scaled_width;
@@ -437,11 +474,11 @@ void D3D_Pad8BitTexture (byte *data, int width, int height, unsigned *padded, in
 }
 
 
-void D3D_Pad32BitTexture (unsigned *data, int width, int height, unsigned *padded, int scaled_width, int scaled_height)
+void D3DTexture_Pad32Bit (unsigned *data, int width, int height, unsigned *padded, int scaled_width, int scaled_height)
 {
 	for (int y = 0; y < height; y++)
 	{
-		D3D_Transfer32BitTexture (data, padded, width);
+		D3DTexture_Transfer32Bit (data, padded, width);
 
 		data += width;
 		padded += scaled_width;
@@ -449,7 +486,7 @@ void D3D_Pad32BitTexture (unsigned *data, int width, int height, unsigned *padde
 }
 
 
-void TM_AlphaEdgeFix (byte *data, int width, int height)
+void D3DTexture_AlphaEdgeFix (byte *data, int width, int height)
 {
 	int i, j, n = 0, b, c[3] = {0, 0, 0}, lastrow, thisrow, nextrow, lastpix, thispix, nextpix;
 	byte *dest = data;
@@ -492,7 +529,7 @@ void TM_AlphaEdgeFix (byte *data, int width, int height)
 }
 
 
-void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int scaled_width, int scaled_height, int flags)
+void D3DTexture_LoadData (LPDIRECT3DTEXTURE9 texture, void *data, int width, int height, int scaled_width, int scaled_height, int flags)
 {
 	// for hunk usage
 	int hunkmark = MainHunk->GetLowMark ();
@@ -502,8 +539,8 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 
 	// sky has flags & IMAGE_32BIT so it doesn't get paletteized
 	// (not always - solid sky goes up as 8 bits.  it doesn't have IMAGE_BSP however so all is good
-	// nehahra assumes that fullbrights are not available in the engine (so does kurok)
-	if (nehahra || kurok)
+	// nehahra assumes that fullbrights are not available in the engine
+	if (nehahra)
 		activepal = d3d_QuakePalette.standard;
 	else if ((flags & IMAGE_BSP) || (flags & IMAGE_ALIAS))
 	{
@@ -516,7 +553,7 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 	else activepal = d3d_QuakePalette.standard;
 
 	// now get the final palette in a format we can transfer to the raw data
-	unsigned *palette = D3D_GetTexturePalette (activepal, flags);
+	unsigned *palette = D3DTexture_GetPalette (activepal, flags);
 	unsigned *trans = NULL;
 
 	// note - we don't check for np2 support here because we also need to account for clamping to max size
@@ -528,7 +565,7 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 		else
 		{
 			trans = (unsigned *) MainHunk->Alloc (scaled_width * scaled_height * 4);
-			D3D_Transfer8BitTexture ((byte *) data, trans, width * height, palette);
+			D3DTexture_Transfer8Bit ((byte *) data, trans, width * height, palette);
 		}
 	}
 	else
@@ -541,16 +578,16 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 			memset (trans, 0, scaled_width * scaled_height * 4);
 
 			if (flags & IMAGE_32BIT)
-				D3D_Pad32BitTexture ((unsigned *) data, width, height, trans, scaled_width, scaled_height);
-			else D3D_Pad8BitTexture ((byte *) data, width, height, trans, scaled_width, scaled_height, palette);
+				D3DTexture_Pad32Bit ((unsigned *) data, width, height, trans, scaled_width, scaled_height);
+			else D3DTexture_Pad8Bit ((byte *) data, width, height, trans, scaled_width, scaled_height, palette);
 
 			d3d_ImagePadded = true;
 		}
 		else
 		{
 			if (flags & IMAGE_32BIT)
-				D3D_Resample32BitTexture ((unsigned *) data, width, height, trans, scaled_width, scaled_height);
-			else D3D_Resample8BitTexture ((byte *) data, width, height, trans, scaled_width, scaled_height, palette);
+				D3DTexture_Resample32Bit ((unsigned *) data, width, height, trans, scaled_width, scaled_height);
+			else D3DTexture_Resample8Bit ((byte *) data, width, height, trans, scaled_width, scaled_height, palette);
 		}
 	}
 
@@ -559,26 +596,18 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 
 	// fix alpha edges on textures that need them
 	if ((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE))
-		TM_AlphaEdgeFix ((byte *) trans, scaled_width, scaled_height);
+		D3DTexture_AlphaEdgeFix ((byte *) trans, scaled_width, scaled_height);
 
-	D3DTexture_GenerateMipLevels (trans, scaled_width, scaled_height, flags, texture[0]);
+	D3DTexture_GenerateMipLevels (trans, scaled_width, scaled_height, flags, texture);
 
-	texture[0]->PreLoad ();
+	texture->PreLoad ();
 	MainHunk->FreeToLowMark (hunkmark);
 }
 
 
-void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags)
+LPDIRECT3DTEXTURE9 D3DTexture_Upload (void *data, int width, int height, int flags)
 {
-	if ((flags & IMAGE_SCRAP) && !(flags & IMAGE_32BIT)) // && width < 64 && height < 64)
-	{
-		// load little ones into the scrap
-		SAFE_RELEASE (texture[0]);
-		return;
-	}
-
-	// explicit release as we're completely respecifying the texture
-	SAFE_RELEASE (texture[0]);
+	LPDIRECT3DTEXTURE9 tex = NULL;
 
 	// the scaled sizes are initially equal to the original sizes (for np2 support)
 	int scaled_width = width;
@@ -587,8 +616,8 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	// check scaling here first
 	if (!d3d_GlobalCaps.supportNonPow2)
 	{
-		scaled_width = D3D_PowerOf2Size (width);
-		scaled_height = D3D_PowerOf2Size (height);
+		scaled_width = D3DTexture_PowerOf2Size (width);
+		scaled_height = D3DTexture_PowerOf2Size (height);
 	}
 	else
 	{
@@ -600,18 +629,7 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	if (scaled_width > d3d_DeviceCaps.MaxTextureWidth) {scaled_width = d3d_DeviceCaps.MaxTextureWidth; flags &= ~IMAGE_PADDABLE;}
 	if (scaled_height > d3d_DeviceCaps.MaxTextureHeight) {scaled_height = d3d_DeviceCaps.MaxTextureHeight; flags &= ~IMAGE_PADDABLE;}
 
-	int miplevels = 0;
-
-	if (!(flags & IMAGE_MIPMAP))
-		miplevels = 1;
-	else if (gl_softwarequakemipmaps.value)
-	{
-		if (flags & IMAGE_LIQUID)
-			miplevels = 1;
-		else if (scaled_width > 8 && scaled_height > 8)
-			miplevels = 4;
-		else miplevels = 0;
-	}
+	int miplevels = (flags & IMAGE_MIPMAP) ? 0 : 1;
 
 	// create the texture at the scaled size
 	hr = d3d_Device->CreateTexture
@@ -620,39 +638,180 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 		scaled_height,
 		miplevels,
 		0,
-		((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE) || kurok) ? D3DFMT_A8R8G8B8 : D3DFMT_X8R8G8B8,
+		((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE)) ? D3DFMT_A8R8G8B8 : D3DFMT_X8R8G8B8,
 		(flags & IMAGE_SYSMEM) ? D3DPOOL_SYSTEMMEM : D3DPOOL_MANAGED,
-		texture,
+		&tex,
 		NULL
 	);
 
 	switch (hr)
 	{
-	case D3DERR_INVALIDCALL: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with D3DERR_INVALIDCALL");
-	case D3DERR_OUTOFVIDEOMEMORY: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with D3DERR_OUTOFVIDEOMEMORY");
-	case E_OUTOFMEMORY: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed with E_OUTOFMEMORY");
+	case D3DERR_INVALIDCALL: Sys_Error ("D3DTexture_Upload: d3d_Device->CreateTexture failed with D3DERR_INVALIDCALL");
+	case D3DERR_OUTOFVIDEOMEMORY: Sys_Error ("D3DTexture_Upload: d3d_Device->CreateTexture failed with D3DERR_OUTOFVIDEOMEMORY");
+	case E_OUTOFMEMORY: Sys_Error ("D3DTexture_Upload: d3d_Device->CreateTexture failed with E_OUTOFMEMORY");
 	case D3D_OK: break;
-	default: Sys_Error ("D3D_UploadTexture: d3d_Device->CreateTexture failed (unknown error)");
+	default: Sys_Error ("D3DTexture_Upload: d3d_Device->CreateTexture failed (unknown error)");
 	}
 
-	D3D_LoadTextureData (texture, data, width, height, scaled_width, scaled_height, flags);
+	D3DTexture_LoadData (tex, data, width, height, scaled_width, scaled_height, flags);
+
+	return tex;
+}
+
+//							  0       1      2      3      4      5      6
+char *textureextensions[] = {"link", "dds", "tga", "bmp", "png", "jpg", "pcx", NULL};
+char *defaultpaths[] = {"textures/", "", NULL};
+
+byte *D3DImage_LoadTGA (byte *f, int *width, int *height);
+byte *D3DImage_LoadPCX (byte *f, int *width, int *height);
+
+static LPDIRECT3DTEXTURE9 D3DTexture_CreateExternal (byte *data, int type, int flags)
+{
+	LPDIRECT3DTEXTURE9 tex = NULL;
+	int width, height;
+
+	if (!data) return NULL;
+
+	switch (type)
+	{
+	case 0:	// link
+		// a .link file should never explicitly go through this codepath
+		return NULL;
+
+	case 2:	// tga
+		// d3dx can load tga but it fails on rle which some mods use (to reduce a 22.5mb download to 22.25mb or something...)
+		if ((data = D3DImage_LoadTGA (data, &width, &height)) != NULL)
+			tex = D3DTexture_Upload (data, width, height, flags | IMAGE_32BIT);
+
+		break;
+
+	case 6:	// pcx
+		if ((data = D3DImage_LoadPCX (data, &width, &height)) != NULL)
+			tex = D3DTexture_Upload (data, width, height, flags | IMAGE_32BIT);
+
+		break;
+
+	default:
+		// these types can go through D3DX Loaders
+		D3DXCreateTextureFromFileInMemoryEx (d3d_Device,
+			data, com_filesize,
+			D3DX_DEFAULT, D3DX_DEFAULT,
+			(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+			0, D3DFMT_FROM_FILE, D3DPOOL_MANAGED,
+			D3DX_FILTER_LINEAR, D3DX_FILTER_BOX,
+			0, NULL, NULL, &tex);
+
+		break;
+	}
+
+	return tex;
+}
+
+
+LPDIRECT3DTEXTURE9 D3DTexture_LoadExternal (char *filename, char **paths, int flags)
+{
+	// sanity check
+	if (!filename) return NULL;
+	if (!paths) return NULL;
+	if (!paths[0]) return NULL;
+
+	char namebuf[256];
+	int hunkmark = MainHunk->GetLowMark ();
+	byte *data = NULL;
+	LPDIRECT3DTEXTURE9 tex = NULL;
+
+	for (int i = 0; ; i++)
+	{
+		// no more extensions
+		if (!paths[i]) break;
+
+		// tested and confirmed to be an invalid path (doesn't exist in the filesystem)
+		if (!paths[i][0]) continue;
+
+		for (int j = 0; ; j++)
+		{
+			if (!textureextensions[j]) break;
+
+			if (flags & IMAGE_LUMA)
+				sprintf (namebuf, "%s%s_luma.%s", paths[i], filename, textureextensions[j]);
+			else sprintf (namebuf, "%s%s.%s", paths[i], filename, textureextensions[j]);
+
+			// identify liquid
+			for (int t = 0; ; t++)
+			{
+				if (!namebuf[t]) break;
+				if (namebuf[t] == '*') namebuf[t] = '#';
+			}
+
+			if ((data = COM_LoadFile (namebuf, MainHunk)) != NULL)
+			{
+				if (j == 0)
+				{
+					// got a link file so use it instead
+					char *linkname = (char *) data;
+					int type = 1;
+
+					// weenix loonies
+					_strlwr (linkname);
+
+					// COM_LoadFile will 0-termnate a string automatically for us
+					if (strstr (linkname, ".tga")) type = 2;
+					if (strstr (linkname, ".pcx")) type = 6;
+
+					// .link assumes the same path
+					sprintf (namebuf, "%s%s", paths[i], linkname);
+
+					if ((data = COM_LoadFile (namebuf, MainHunk)) != NULL)
+					{
+						Con_DPrintf ("got a file : %s\n", namebuf);
+						tex = D3DTexture_CreateExternal (data, type, flags);
+						goto done;
+					}
+				}
+				else
+				{
+					Con_DPrintf ("got a file : %s\n", namebuf);
+					tex = D3DTexture_CreateExternal (data, j, flags);
+					goto done;
+				}
+			}
+		}
+	}
+
+done:;
+	MainHunk->FreeToLowMark (hunkmark);
+
+	// may be NULL if it didn't load
+	return tex;
 }
 
 
 // checksums of textures that need hacking...
+typedef struct hashhacker_s
+{
+	byte hash[16];
+	char *idcat;
+	char *idcpy;
+} hashhacker_t;
+
+// hardcoded data about textures that got screwed up in id1
+hashhacker_t d3d_HashHacks[] =
+{
+	{{209, 191, 162, 164, 213, 63, 224, 73, 227, 251, 229, 137, 43, 60, 25, 138}, "_cable", NULL},
+	{{52, 114, 210, 88, 38, 70, 116, 171, 89, 227, 115, 137, 102, 79, 193, 35}, "_bolt", NULL},
+	{{35, 233, 88, 189, 135, 188, 152, 69, 221, 125, 104, 132, 51, 91, 22, 15}, "_arc", NULL},
+	{{207, 93, 199, 54, 82, 58, 152, 177, 67, 18, 185, 231, 214, 4, 164, 99}, "_x", NULL},
+	{{27, 95, 227, 196, 123, 235, 244, 145, 211, 222, 14, 190, 37, 255, 215, 107}, "_arc", NULL},
+	{{47, 119, 108, 18, 244, 34, 166, 42, 207, 217, 179, 201, 114, 166, 199, 35}, "_double", NULL},
+	{{199, 119, 111, 184, 133, 111, 68, 52, 169, 1, 239, 142, 2, 233, 192, 15}, "_back", NULL},
+	{{60, 183, 222, 11, 163, 158, 222, 195, 124, 161, 201, 158, 242, 30, 134, 28}, "_rune", NULL},
+	{{220, 67, 132, 212, 3, 131, 54, 160, 135, 4, 5, 86, 79, 146, 123, 89}, NULL, "sky4_solid"},
+	{{163, 123, 35, 117, 154, 146, 68, 92, 141, 70, 253, 212, 187, 18, 112, 149}, NULL, "sky4_alpha"},
+	{{196, 173, 196, 177, 19, 221, 134, 159, 208, 159, 158, 4, 108, 57, 10, 108}, NULL, "sky1_solid"},
+	{{143, 106, 19, 206, 242, 171, 137, 86, 161, 74, 156, 217, 85, 10, 120, 149}, NULL, "sky1_alpha"},
+};
+
 byte ShotgunShells[] = {202, 6, 69, 163, 17, 112, 190, 234, 102, 56, 225, 242, 212, 175, 27, 187};
-byte plat_top1_cable[] = {209, 191, 162, 164, 213, 63, 224, 73, 227, 251, 229, 137, 43, 60, 25, 138};
-byte plat_top1_bolt[] = {52, 114, 210, 88, 38, 70, 116, 171, 89, 227, 115, 137, 102, 79, 193, 35};
-byte metal5_2_arc[] = {35, 233, 88, 189, 135, 188, 152, 69, 221, 125, 104, 132, 51, 91, 22, 15};
-byte metal5_2_x[] = {207, 93, 199, 54, 82, 58, 152, 177, 67, 18, 185, 231, 214, 4, 164, 99};
-byte metal5_4_arc[] = {27, 95, 227, 196, 123, 235, 244, 145, 211, 222, 14, 190, 37, 255, 215, 107};
-byte metal5_4_double[] = {47, 119, 108, 18, 244, 34, 166, 42, 207, 217, 179, 201, 114, 166, 199, 35};
-byte metal5_8_back[] = {199, 119, 111, 184, 133, 111, 68, 52, 169, 1, 239, 142, 2, 233, 192, 15};
-byte metal5_8_rune[] = {60, 183, 222, 11, 163, 158, 222, 195, 124, 161, 201, 158, 242, 30, 134, 28};
-byte sky_blue_solid[] = {220, 67, 132, 212, 3, 131, 54, 160, 135, 4, 5, 86, 79, 146, 123, 89};
-byte sky_blue_alpha[] = {163, 123, 35, 117, 154, 146, 68, 92, 141, 70, 253, 212, 187, 18, 112, 149};
-byte sky_purp_solid[] = {196, 173, 196, 177, 19, 221, 134, 159, 208, 159, 158, 4, 108, 57, 10, 108};
-byte sky_purp_alpha[] = {143, 106, 19, 206, 242, 171, 137, 86, 161, 74, 156, 217, 85, 10, 120, 149};
 
 // this was generated from a word doc on my own PC
 // while MD5 collisions are possible, they are sufficiently unlikely in the context of
@@ -662,18 +821,21 @@ byte no_match_hash[] = {0x40, 0xB4, 0x54, 0x7D, 0x9D, 0xDA, 0x9D, 0x0B, 0xCF, 0x
 // nehahra sends some textures with 0 width and height (eeewww!  more hacks!)
 byte nulldata[] = {255, 255, 255, 255};
 
-image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, int flags)
+LPDIRECT3DTEXTURE9 D3DTexture_Load (char *identifier, int width, int height, byte *data, int flags, char **paths)
 {
+	// supply a path to load it from if none was given
+	if (!paths) paths = defaultpaths;
+
 	// nehahra sends some textures with 0 width and height (eeewww!  more hacks!)
-	if (!width || !height)
+	if (!width || !height || !data)
 	{
 		width = 2;
 		height = 2;
 		data = nulldata;
 	}
 
-	// nehahra assumes that fullbrights are not available in the engine (kurok too)
-	if ((flags & IMAGE_LUMA) && (nehahra || kurok)) return NULL;
+	// nehahra assumes that fullbrights are not available in the engine
+	if ((flags & IMAGE_LUMA) && nehahra) return NULL;
 
 	// detect water textures
 	if (identifier[0] == '*')
@@ -692,7 +854,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	{
 		for (int i = 0; i < width * height; i++)
 		{
-			if (vid.fullbright[data[i]])
+			if (data[i] > 223)
 			{
 				hasluma = true;
 				break;
@@ -702,10 +864,9 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 
 	// take a hash of the image data
 	byte texhash[16];
-	D3D_HashTexture (texhash, width, height, data, flags);
-
-	// stores a free texture slot
 	int slot = -1;
+
+	COM_HashData (texhash, data, width * height * ((flags & IMAGE_32BIT) ? 4 : 1));
 
 	// look for a match
 	for (int i = 0; i < d3d_TextureList.size (); i++)
@@ -726,16 +887,16 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 		if (COM_CheckHash (texhash, d3d_TextureList[i]->hash))
 		{
 			// check for luma match as the incoming luma will get the same hash as it's base
+			// we can't compare flags directly as incoming flags may be changed
 			if ((flags & IMAGE_LUMA) == (d3d_TextureList[i]->flags & IMAGE_LUMA))
 			{
 				// set last usage to 0
 				d3d_TextureList[i]->LastUsage = 0;
-				d3d_TextureList[i]->RegistrationSequence = d3d_RenderDef.RegistrationSequence;
 
-				// Con_Printf ("reused %s%s\n", identifier, (flags & IMAGE_LUMA) ? "_luma" : "");
+				Con_DPrintf ("reused %s%s\n", identifier, (flags & IMAGE_LUMA) ? "_luma" : "");
 
 				// return it
-				return d3d_TextureList[i];
+				return d3d_TextureList[i]->d3d_Texture;
 			}
 		}
 	}
@@ -750,6 +911,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	{
 		tex = (image_t *) Zone_Alloc (sizeof (image_t));
 		d3d_TextureList.push_back (tex);
+		tex = d3d_TextureList[d3d_TextureList.size () - 1];
 	}
 
 	// fill in the struct
@@ -765,68 +927,56 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	memcpy (tex->hash, texhash, 16);
 	strcpy (tex->identifier, identifier);
 
-	// change the identifier so that we can load an external texture properly
-	if (flags & IMAGE_LUMA) strcat (tex->identifier, "_luma");
-
-	// check for textures that have the same name but different data, and amend the name by the QRP standard
-	if (COM_CheckHash (texhash, plat_top1_cable))
-		strcat (tex->identifier, "_cable");
-	else if (COM_CheckHash (texhash, plat_top1_bolt))
-		strcat (tex->identifier, "_bolt");
-	else if (COM_CheckHash (texhash, metal5_2_arc))
-		strcat (tex->identifier, "_arc");
-	else if (COM_CheckHash (texhash, metal5_2_x))
-		strcat (tex->identifier, "_x");
-	else if (COM_CheckHash (texhash, metal5_4_arc))
-		strcat (tex->identifier, "_arc");
-	else if (COM_CheckHash (texhash, metal5_4_double))
-		strcat (tex->identifier, "_double");
-	else if (COM_CheckHash (texhash, metal5_8_back))
-		strcat (tex->identifier, "_back");
-	else if (COM_CheckHash (texhash, metal5_8_rune))
-		strcat (tex->identifier, "_rune");
-	else if (COM_CheckHash (texhash, sky_blue_solid))
-		strcpy (tex->identifier, "sky4_solid");
-	else if (COM_CheckHash (texhash, sky_blue_alpha))
-		strcpy (tex->identifier, "sky4_alpha");
-	else if (COM_CheckHash (texhash, sky_purp_solid))
-		strcpy (tex->identifier, "sky1_solid");
-	else if (COM_CheckHash (texhash, sky_purp_alpha))
-		strcpy (tex->identifier, "sky1_alpha");
-
 	// hack the colour for certain models
 	// fix white line at base of shotgun shells box
-	if (COM_CheckHash (texhash, ShotgunShells))
-		memcpy (tex->data, tex->data + 32 * 31, 32);
+	if (COM_CheckHash (texhash, ShotgunShells)) memcpy (tex->data, tex->data + 32 * 31, 32);
 
-	// try to load an external texture
-	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, tex->identifier, tex->flags);
-
-	if (!externalloaded)
+	// try to load an external texture using the base identifier
+	if ((tex->d3d_Texture = D3DTexture_LoadExternal (tex->identifier, paths, flags)) != NULL)
 	{
-		// test for a native luma texture
-		if ((flags & IMAGE_LUMA) && !hasluma)
+		// notify that we got an external texture
+		tex->flags |= IMAGE_EXTERNAL;
+	}
+	else
+	{
+		// it might yet have the QRP convention so try that
+		char qrpident[256] = {0};
+
+		// try the QRP names here
+		for (int i = 0; i < STRUCT_ARRAY_LENGTH (d3d_HashHacks); i++)
 		{
-			// if we got neither a native nor an external luma we must cancel it and return NULL
-			tex->LastUsage = 666;
-			SAFE_RELEASE (tex->d3d_Texture);
-			memcpy (tex->hash, no_match_hash, 16);
-			return NULL;
+			if (COM_CheckHash (texhash, d3d_HashHacks[i].hash))
+			{
+				// don't mess with the original tex->identifier as that's used for cache checks
+				strcpy (qrpident, tex->identifier);
+
+				if (d3d_HashHacks[i].idcat) strcat (qrpident, d3d_HashHacks[i].idcat);
+				if (d3d_HashHacks[i].idcpy) strcpy (qrpident, d3d_HashHacks[i].idcpy);
+
+				break;
+			}
 		}
 
-		// upload through direct 3d
-		D3D_UploadTexture
-		(
-			&tex->d3d_Texture,
-			tex->data,
-			tex->width,
-			tex->height,
-			tex->flags
-		);
-
-		if (!tex->d3d_Texture && (tex->flags & IMAGE_SCRAP))
+		// and now try load it (but only if we got a match for it)
+		if (qrpident[0] && (tex->d3d_Texture = D3DTexture_LoadExternal (qrpident, paths, flags)) != NULL)
 		{
-			return NULL;
+			// notify that we got an external texture
+			tex->flags |= IMAGE_EXTERNAL;
+		}
+		else
+		{
+			// test for a native luma texture
+			if ((flags & IMAGE_LUMA) && !hasluma)
+			{
+				// if we got neither a native nor an external luma we must cancel it and return NULL
+				tex->LastUsage = 666;
+				SAFE_RELEASE (tex->d3d_Texture);
+				memcpy (tex->hash, no_match_hash, 16);
+				return NULL;
+			}
+
+			// upload through direct 3d
+			tex->d3d_Texture = D3DTexture_Upload (tex->data, tex->width, tex->height, tex->flags);
 		}
 	}
 
@@ -835,40 +985,28 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	// notify that we padded the image
 	if (d3d_ImagePadded) tex->flags |= IMAGE_PADDED;
 
-	// notify that we got an external texture
-	if (externalloaded) tex->flags |= IMAGE_EXTERNAL;
-
-	texturelist_dirty = true;
-
-	tex->RegistrationSequence = d3d_RenderDef.RegistrationSequence;
-
 	// return the texture we got
-	return tex;
+	return tex->d3d_Texture;
 }
 
 
-unsigned int *D3D_MakeTexturePalette (miptex_t *mt)
+void D3DTexture_Register (LPDIRECT3DTEXTURE9 tex, char *loadname)
 {
-	static unsigned int hlPal[256];
+	image_t *img = (image_t *) Zone_Alloc (sizeof (image_t));
+	D3DSURFACE_DESC desc;
 
-	// the palette follows the data for the last miplevel
-	byte *pal = ((byte *) mt) + mt->offsets[0] + ((mt->width * mt->height * 85) >> 6) + 2;
+	d3d_TextureList.push_back (img);
+	img = d3d_TextureList[d3d_TextureList.size () - 1];
 
-	// now build a palette from the image data
-	// don't gamma-adjust this data
-	for (int i = 0; i < 256; i++)
-	{
-		((byte *) &hlPal[i])[0] = pal[0];
-		((byte *) &hlPal[i])[1] = pal[1];
-		((byte *) &hlPal[i])[2] = pal[2];
-		((byte *) &hlPal[i])[3] = 255;
-		pal += 3;
-	}
+	tex->GetLevelDesc (0, &desc);
 
-	// check special texture types
-	if (mt->name[0] == '{') hlPal[255] = 0;
-
-	return hlPal;
+	// ensure that it never gets a hash collision and that it's never flushed
+	Q_strncpy (img->identifier, loadname, 63);
+	memcpy (img->hash, no_match_hash, 16);
+	img->d3d_Texture = tex;
+	img->flags = IMAGE_PRESERVE;
+	img->height = desc.Height;
+	img->width = desc.Width;
 }
 
 
@@ -879,7 +1017,7 @@ void D3DLight_ReleaseLightmaps (void);
 void D3DSky_ReleaseTextures (void);
 
 // fixme - this needs to fully go through the correct shutdown paths so that aux data is also cleared
-void D3D_ReleaseTextures (void)
+void D3DTexture_Release (void)
 {
 	// some of these now go through the device onloss handlers
 	D3DLight_ReleaseLightmaps ();
@@ -917,7 +1055,7 @@ void D3D_ReleaseTextures (void)
 }
 
 
-void D3D_FlushTextures (void)
+void D3DTexture_Flush (void)
 {
 	int numflush = 0;
 
@@ -976,7 +1114,7 @@ void D3D_FlushTextures (void)
 }
 
 
-bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
+bool D3DTexture_CheckFormat (D3DFORMAT textureformat, BOOL mandatory)
 {
 	// test texture
 	LPDIRECT3DTEXTURE9 tex = NULL;
@@ -1016,500 +1154,14 @@ bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
 */
 
 
-typedef struct d3d_externaltexture_s
-{
-	char basename[256];
-	char texpath[256];
-} d3d_externaltexture_t;
-
-
-d3d_externaltexture_t **d3d_ExternalTextures = NULL;
-int d3d_MaxExternalTextures = 0;
-int d3d_NumExternalTextures = 0;
-
-// gotcha!
-int d3d_ExternalTextureTable[257] = { -1};
-
-// hmmm - can be used for both bsearch and qsort
-// clever boy, bill!
-int D3D_ExternalTextureCompareFunc (const void *a, const void *b)
-{
-	d3d_externaltexture_t *t1 = * (d3d_externaltexture_t **) a;
-	d3d_externaltexture_t *t2 = * (d3d_externaltexture_t **) b;
-
-	return _stricmp (t1->basename, t2->basename);
-}
-
-
 char *D3D_FindExternalTexture (char *basename)
 {
-	// find the first texture
-	int texnum = d3d_ExternalTextureTable[basename[0]];
-
-	// no textures
-	if (texnum == -1) return NULL;
-
-	for (int i = texnum; i < d3d_NumExternalTextures; i++)
-	{
-		// retrieve texture def
-		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
-
-		// first char changes
-		if (et->basename[0] != basename[0]) break;
-
-		// if it came from a screenshot we ignore it
-		if (strstr (et->texpath, "/screenshot/")) continue;
-
-		// if basenames match return the path at which it can be found
-		if (!_stricmp (et->basename, basename)) return et->texpath;
-	}
-
 	// not found
 	return NULL;
 }
 
 
-void D3D_RegisterExternalTexture (char *texname)
-{
-	char *texext = NULL;
-	bool goodext = false;
-
-	// find the extension
-	for (int i = strlen (texname); i; i--)
-	{
-		if (texname[i] == '/') break;
-		if (texname[i] == '\\') break;
-
-		if (texname[i] == '.')
-		{
-			texext = &texname[i + 1];
-			break;
-		}
-	}
-
-	// didn't find an extension
-	if (!texext) return;
-
-	// check for supported types
-	if (!_stricmp (texext, "link")) goodext = true;
-	if (!_stricmp (texext, "dds")) goodext = true;
-	if (!_stricmp (texext, "tga")) goodext = true;
-	if (!_stricmp (texext, "bmp")) goodext = true;
-	if (!_stricmp (texext, "png")) goodext = true;
-	if (!_stricmp (texext, "jpg")) goodext = true;
-	if (!_stricmp (texext, "jpeg")) goodext = true;
-	if (!_stricmp (texext, "pcx")) goodext = true;
-	if (!_stricmp (texext, "wal")) goodext = true;
-
-	// not a supported type
-	if (!goodext) return;
-
-	if (d3d_NumExternalTextures == d3d_MaxExternalTextures) return;
-
-	char *typefilter = NULL;
-	bool passedext = false;
-
-	for (int i = strlen (texname); i; i--)
-	{
-		if (texname[i] == '/') break;
-		if (texname[i] == '\\') break;
-		if (texname[i] == '.' && passedext) break;
-		if (texname[i] == '.' && !passedext) passedext = true;
-
-		if (texname[i] == '_' && passedext)
-		{
-			typefilter = &texname[i + 1];
-			break;
-		}
-	}
-
-	// filter out types unsupported by DirectQ so that the likes of Rygel's pack
-	// won't overflow the max textures allowed (will need to get the full list of types from DP)
-	// although with space for 65536 textures that should never happen...
-	if (typefilter)
-	{
-		if (!_strnicmp (typefilter, "gloss.", 6)) return;
-		if (!_strnicmp (typefilter, "norm.", 5)) return;
-		if (!_strnicmp (typefilter, "normal.", 7)) return;
-		if (!_strnicmp (typefilter, "bump.", 5)) return;
-	}
-
-	// register a new external texture
-	d3d_externaltexture_t *et = (d3d_externaltexture_t *) GameZone->Alloc (sizeof (d3d_externaltexture_t));
-	d3d_ExternalTextures[d3d_NumExternalTextures] = et;
-	d3d_NumExternalTextures++;
-
-	// fill in the path (also copy to basename in case the next stage doesn't get it)
-	Q_strncpy (et->texpath, texname, 255);
-	Q_strncpy (et->basename, texname, 255);
-	_strlwr (et->texpath);
-
-	// check for special handling of some types
-	char *checkstuff = strstr (et->texpath, "\\save\\");
-
-	if (!checkstuff) checkstuff = strstr (et->texpath, "\\maps\\");
-	if (!checkstuff) checkstuff = strstr (et->texpath, "\\screenshot\\");
-
-	// ignoring textures in maps, save and screenshot
-	if (!checkstuff)
-	{
-		// base name is the path without directories or extension; first remove directories.
-		// we leave extension alone for now so that we can sort on basename properly
-		for (int i = strlen (et->texpath); i; i--)
-		{
-			if (et->texpath[i] == '/' || et->texpath[i] == '\\')
-			{
-				Q_strncpy (et->basename, &et->texpath[i + 1], 255);
-				break;
-			}
-		}
-	}
-	else
-	{
-		for (checkstuff = checkstuff - 1;; checkstuff--)
-		{
-			if (checkstuff[0] == ':') break;
-
-			if (checkstuff[0] == '/' || checkstuff[0] == '\\')
-			{
-				Q_strncpy (et->basename, &checkstuff[1], 255);
-				break;
-			}
-		}
-	}
-
-	// switch basename to lower case
-	_strlwr (et->basename);
-
-	// make path seperators consistent
-	for (int i = 0;; i++)
-	{
-		if (!et->basename[i]) break;
-		if (et->basename[i] == '/') et->basename[i] = '\\';
-	}
-
-	// switch extension to a dummy to establish the preference sort order; this is for
-	// cases where a texture may be present more than once in different formats.
-	// we'll remove it after we've sorted
-	texext = NULL;
-
-	// find the extension
-	for (int i = strlen (et->basename); i; i--)
-	{
-		if (et->basename[i] == '/') break;
-		if (et->basename[i] == '\\') break;
-
-		if (et->basename[i] == '.')
-		{
-			texext = &et->basename[i + 1];
-			break;
-		}
-	}
-
-	// didn't find an extension (should never happen at this stage)
-	if (!texext) return;
-
-	// check for supported types and replace the extension to get the sort order
-	if (!_stricmp (texext, "link")) {strcpy (texext, "111"); return;}
-	if (!_stricmp (texext, "dds")) {strcpy (texext, "222"); return;}
-	if (!_stricmp (texext, "tga")) {strcpy (texext, "333"); return;}
-	if (!_stricmp (texext, "bmp")) {strcpy (texext, "444"); return;}
-	if (!_stricmp (texext, "png")) {strcpy (texext, "555"); return;}
-	if (!_stricmp (texext, "jpg")) {strcpy (texext, "666"); return;}
-	if (!_stricmp (texext, "jpeg")) {strcpy (texext, "777"); return;}
-	if (!_stricmp (texext, "pcx")) {strcpy (texext, "888"); return;}
-	if (!_stricmp (texext, "wal")) {strcpy (texext, "999"); return;}
-}
-
-
-void D3D_ExternalTextureDirectoryRecurse (char *dirname)
-{
-	WIN32_FIND_DATA FindFileData;
-	HANDLE hFind = INVALID_HANDLE_VALUE;
-	char find_filter[MAX_PATH];
-
-	_snprintf (find_filter, 260, "%s/*.*", dirname);
-
-	for (int i = 0;; i++)
-	{
-		if (find_filter[i] == 0) break;
-		if (find_filter[i] == '/') find_filter[i] = '\\';
-	}
-
-	hFind = FindFirstFile (find_filter, &FindFileData);
-
-	if (hFind == INVALID_HANDLE_VALUE)
-	{
-		// found no files
-		FindClose (hFind);
-		return;
-	}
-
-	do
-	{
-		// not interested
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
-
-		// never these
-		if (!strcmp (FindFileData.cFileName, ".")) continue;
-		if (!strcmp (FindFileData.cFileName, "..")) continue;
-
-		// make the new directory or texture name
-		char newname[256];
-
-		_snprintf (newname, 255, "%s\\%s", dirname, FindFileData.cFileName);
-
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-		{
-			// prefix dirs with _ to skip them
-			if (FindFileData.cFileName[0] != '_')
-				D3D_ExternalTextureDirectoryRecurse (newname);
-
-			continue;
-		}
-
-		// register the texture
-		D3D_RegisterExternalTexture (newname);
-	} while (FindNextFile (hFind, &FindFileData));
-
-	// done
-	FindClose (hFind);
-}
-
-
-void D3D_EnumExternalTextures (void)
-{
-	// explicitly none to start with
-	d3d_ExternalTextures = (d3d_externaltexture_t **) scratchbuf;
-	d3d_MaxExternalTextures = SCRATCHBUF_SIZE / sizeof (d3d_externaltexture_t *);
-	d3d_NumExternalTextures = 0;
-
-	// we need 256 of these because textures can - in theory - begin with any allowable byte value
-	// add the extra 1 to allow the list to be NULL terminated
-	// as for unicode - let's not even go there.
-	for (int i = 0; i < 257; i++) d3d_ExternalTextureTable[i] = -1;
-
-	for (searchpath_t *search = com_searchpaths; search; search = search->next)
-	{
-		if (search->pack)
-		{
-			pack_t *pak = search->pack;
-
-			for (int i = 0; i < pak->numfiles; i++)
-			{
-				D3D_RegisterExternalTexture (pak->files[i].name);
-			}
-		}
-		else if (search->pk3)
-		{
-			pk3_t *pak = search->pk3;
-
-			for (int i = 0; i < pak->numfiles; i++)
-			{
-				D3D_RegisterExternalTexture (pak->files[i].name);
-			}
-		}
-		else D3D_ExternalTextureDirectoryRecurse (search->filename);
-	}
-
-	// no external textures were found
-	if (!d3d_NumExternalTextures)
-	{
-		d3d_ExternalTextures = NULL;
-		return;
-	}
-
-	// alloc them for real
-	d3d_ExternalTextures = (d3d_externaltexture_t **) GameZone->Alloc (d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
-	memcpy (d3d_ExternalTextures, scratchbuf, d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
-
-	for (int i = 0; i < d3d_NumExternalTextures; i++)
-	{
-		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
-
-		for (int j = 0;; j++)
-		{
-			if (!et->texpath[j]) break;
-			if (et->texpath[j] == '\\') et->texpath[j] = '/';
-		}
-
-		// restore drive signifier
-		if (et->texpath[1] == ':' && et->texpath[2] == '/') et->texpath[2] = '\\';
-
-		_strlwr (et->texpath);
-	}
-
-	// sort the list
-	qsort (d3d_ExternalTextures, d3d_NumExternalTextures, sizeof (d3d_externaltexture_t *), D3D_ExternalTextureCompareFunc);
-
-	// set up byte pointers and remove dummy sort order extensions
-	for (int i = 0; i < d3d_NumExternalTextures; i++)
-	{
-		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
-
-		// swap non-printing chars
-		if (et->basename[0] == '#') et->basename[0] = '*';
-
-		// set up the table pointer
-		if (d3d_ExternalTextureTable[et->basename[0]] == -1)
-			d3d_ExternalTextureTable[et->basename[0]] = i;
-
-		// remove the extension
-		for (int e = strlen (et->basename); e; e--)
-		{
-			if (et->basename[e] == '.')
-			{
-				et->basename[e] = 0;
-				break;
-			}
-		}
-
-		// Con_SafePrintf ("registered %s\n", et->basename);
-	}
-}
-
-
-void D3D_GenerateTextureList (void)
-{
-	if (texturelist_dirty)
-	{
-		if (d3d_TextureNames)
-		{
-			for (int i = 0;; i++)
-			{
-				if (!d3d_TextureNames[i]) break;
-				MainZone->Free (d3d_TextureNames[i]);
-			}
-
-			MainZone->Free (d3d_TextureNames);
-			d3d_TextureNames = NULL;
-		}
-
-		// fixme - this is stupid since I moved it to an STL container...
-		int numtextures = 0;
-
-		for (int i = 0; i < d3d_TextureList.size (); i++)
-		{
-			if (!d3d_TextureList[i]->d3d_Texture) continue;
-			numtextures++;
-		}
-
-		// +1 for NULL termination
-		d3d_TextureNames = (char **) MainZone->Alloc ((numtextures + 1) * sizeof (char *));
-		numtextures = 0;
-
-		for (int i = 0; i < d3d_TextureList.size (); i++)
-		{
-			if (!d3d_TextureList[i]->d3d_Texture) continue;
-
-			d3d_TextureNames[numtextures] = (char *) MainZone->Alloc (strlen (d3d_TextureList[i]->identifier) + 1);
-			strcpy (d3d_TextureNames[numtextures], d3d_TextureList[i]->identifier);
-			d3d_TextureNames[numtextures + 1] = NULL;
-
-			numtextures++;
-		}
-
-		texturelist_dirty = false;
-	}
-}
-
-
-bool D3D_CopyTextureToClipboard (LPDIRECT3DTEXTURE9 tex)
-{
-	D3DLOCKED_RECT rect;
-	D3DSURFACE_DESC desc;
-	LPDIRECT3DSURFACE9 surf = NULL;
-	LPDIRECT3DSURFACE9 dest = NULL;
-	bool success = false;
-
-	// copy to a new surface in case it's in a different format
-	if (FAILED (tex->GetSurfaceLevel (0, &surf))) goto failed_1;
-	if (FAILED (surf->GetDesc (&desc))) goto failed_1;
-	if (FAILED (d3d_Device->CreateOffscreenPlainSurface (desc.Width, desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &dest, NULL))) goto failed_1;
-	if (FAILED (D3DXLoadSurfaceFromSurface (dest, NULL, NULL, surf, NULL, NULL, D3DX_FILTER_NONE, 0))) goto failed_1;
-	if (FAILED (dest->LockRect (&rect, NULL, d3d_GlobalCaps.DefaultLock))) goto failed_1;
-
-	if (OpenClipboard (NULL))
-	{
-		HANDLE hData = NULL;
-		HBITMAP hBitmap = CreateBitmap (desc.Width, desc.Height, 1, 32, rect.pBits);
-
-		if (hBitmap)
-		{
-			hData = SetClipboardData (CF_BITMAP, hBitmap);
-			DeleteObject (hBitmap);
-		}
-
-		if (!CloseClipboard ()) goto failed_2;
-		if (!hData) goto failed_2;
-
-		// phew!  made it!
-		success = true;
-	}
-
-	// clean up
-failed_2:;
-	dest->UnlockRect ();
-failed_1:;
-	if (dest) dest->Release ();
-	if (surf) surf->Release ();
-	return success;
-}
-
-
-void D3D_CopyTexture_f (void)
-{
-	if (Cmd_Argc () != 2)
-	{
-		Con_Printf ("copytexture <texturename> : copy the specified texture to the clipboard\n");
-		Con_Printf ("   if the texture has miplevels, only the first level will be copied\n");
-		return;
-	}
-
-	char *texturename = Cmd_Argv (1);
-
-	for (int i = 0; i < d3d_TextureList.size (); i++)
-	{
-		if (!d3d_TextureList[i]->d3d_Texture) continue;
-
-		if (!_stricmp (texturename, d3d_TextureList[i]->identifier))
-		{
-			if (D3D_CopyTextureToClipboard (d3d_TextureList[i]->d3d_Texture))
-				Con_Printf ("copytexture : copied %s OK\n", texturename);
-			else Con_Printf ("copytexture : failed to copy %s\n", texturename);
-
-			return;
-		}
-	}
-
-	Con_Printf ("copytexture : Could not find %s\n", texturename);
-}
-
-
-void D3D_TextureList_f (void)
-{
-	int numtextures = 0;
-
-	for (int i = 0; i < d3d_TextureList.size (); i++)
-	{
-		if (!d3d_TextureList[i]->d3d_Texture) continue;
-
-		Con_Printf ("%s\n", d3d_TextureList[i]->identifier);
-		numtextures++;
-	}
-
-	if (numtextures) Con_Printf ("\nListed %i textures\n", numtextures);
-}
-
-
-cmd_t d3d_TextureList_cmd ("texturelist", D3D_TextureList_f);
-cmd_t d3d_CopyTexture_cmd ("copytexture", D3D_CopyTexture_f);
-
-
-void D3D_MakeAlphaTexture (LPDIRECT3DTEXTURE9 tex)
+void D3DTexture_MakeAlpha (LPDIRECT3DTEXTURE9 tex)
 {
 	D3DSURFACE_DESC surfdesc;
 	D3DLOCKED_RECT lockrect;

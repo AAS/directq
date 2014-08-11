@@ -35,7 +35,8 @@ typedef struct drawrect_s
 
 typedef struct
 {
-	struct image_s *tex;
+	LPDIRECT3DTEXTURE9 Texture;
+	int flags;
 	drawrect_t picrect;
 	int texwidth;
 	int texheight;
@@ -56,7 +57,7 @@ typedef struct d3d_drawstate_s
 	D3DTEXTUREFILTERTYPE DrawFilter;
 	DWORD ClampMode;
 	DWORD color2D;
-	image_t *LastTexture;
+	LPDIRECT3DTEXTURE9 LastTexture;
 } d3d_drawstate_t;
 
 d3d_drawstate_t d3d_DrawState;
@@ -113,7 +114,7 @@ void D3DDraw_DrawBatch (void)
 
 
 void D3DDraw_SubmitQuad (float x, float y, float w, float h, D3DCOLOR c = 0xffffffff,
-						 image_t *tex = NULL, drawrect_t *texrect = NULL, bool clampmode = false)
+						 LPDIRECT3DTEXTURE9 Texture = NULL, drawrect_t *texrect = NULL, bool clampmode = false)
 {
 	bool switchpass = false;
 
@@ -133,26 +134,26 @@ void D3DDraw_SubmitQuad (float x, float y, float w, float h, D3DCOLOR c = 0xffff
 	}
 
 	// conditions for flushing/switching
-	if (tex != d3d_DrawState.LastTexture) switchpass = true;
-	if (tex && d3d_DrawState.ShaderPass != FX_PASS_DRAWTEXTURED) switchpass = true;
-	if (!tex && d3d_DrawState.ShaderPass != FX_PASS_DRAWCOLORED) switchpass = true;
+	if (Texture != d3d_DrawState.LastTexture) switchpass = true;
+	if (Texture && d3d_DrawState.ShaderPass != FX_PASS_DRAWTEXTURED) switchpass = true;
+	if (!Texture && d3d_DrawState.ShaderPass != FX_PASS_DRAWCOLORED) switchpass = true;
 
 	if (switchpass)
 	{
 		// switch texture
 		D3DDraw_DrawBatch ();
 
-		if (tex)
+		if (Texture)
 		{
 			D3DHLSL_SetPass (FX_PASS_DRAWTEXTURED);
-			D3DHLSL_SetTexture (0, tex->d3d_Texture);
+			D3DHLSL_SetTexture (0, Texture);
 			d3d_DrawState.ShaderPass = FX_PASS_DRAWTEXTURED;
 
 			// set the correct filtering mode depending on the type of texture
 			// the MP crew sometimes don't give a fuck for things looking right; it's all about advantage in MP for them
-			if (tex->d3d_Texture == ((glpic_t *) conback->data)->tex->d3d_Texture)
+			if (Texture == ((glpic_t *) conback->data)->Texture)
 				D3D_SetTextureMipmap (0, d3d_TexFilter);
-			else if (tex->d3d_Texture == char_texture && !r_smoothcharacters.integer)
+			else if (Texture == char_texture && !r_smoothcharacters.integer)
 				D3D_SetTextureMipmap (0, D3DTEXF_POINT);
 			else D3D_SetTextureMipmap (0, d3d_DrawState.DrawFilter);
 		}
@@ -162,7 +163,7 @@ void D3DDraw_SubmitQuad (float x, float y, float w, float h, D3DCOLOR c = 0xffff
 			d3d_DrawState.ShaderPass = FX_PASS_DRAWCOLORED;
 		}
 
-		d3d_DrawState.LastTexture = tex;
+		d3d_DrawState.LastTexture = Texture;
 	}
 
 	if (d3d_NumDrawSurfs >= D3D_MAX_QUADS) D3DDraw_DrawBatch ();
@@ -195,39 +196,32 @@ drawrect_t charrects[256];
 //  to crutch up stupid hardware / drivers
 
 // 512 x 256 is adequate for ID1; the extra space is for rogue/hipnotic extras
-#define	MAX_SCRAPS		1
+#define	MAX_SCRAPS		2
 #define	SCRAP_WIDTH		512
 #define	SCRAP_HEIGHT	512
 
 // fixme - move to a struct, or lock the texture
-int			scrap_allocated[SCRAP_WIDTH];
-byte		scrap_texels[SCRAP_WIDTH * SCRAP_HEIGHT];
-bool		scrap_dirty = false;
-image_t		scrap_textures;
+int scrap_allocated[MAX_SCRAPS][SCRAP_WIDTH];
+LPDIRECT3DTEXTURE9 scrap_textures[MAX_SCRAPS];
 
 
 void Scrap_Init (void)
 {
-	SAFE_RELEASE (scrap_textures.d3d_Texture);
-
-	// clear texels to correct alpha colour
-	memset (scrap_texels, 255, sizeof (scrap_texels));
-	memset (scrap_allocated, 0, sizeof (scrap_allocated));
-
-	scrap_dirty = false;
+	for (int i = 0; i < MAX_SCRAPS; i++)
+	{
+		memset (scrap_allocated[i], 0, sizeof (scrap_allocated[i]));
+	}
 }
 
 
 void Scrap_Destroy (void)
 {
-	// same as above
-	SAFE_RELEASE (scrap_textures.d3d_Texture);
-
-	// clear texels to correct alpha colour
-	memset (scrap_texels, 255, sizeof (scrap_texels));
-	memset (scrap_allocated, 0, sizeof (scrap_allocated));
-
-	scrap_dirty = false;
+	for (int i = 0; i < MAX_SCRAPS; i++)
+	{
+		// same as above
+		SAFE_RELEASE (scrap_textures[i]);
+		memset (scrap_allocated[i], 0, sizeof (scrap_allocated[i]));
+	}
 }
 
 
@@ -238,57 +232,46 @@ Scrap_AllocBlock
 returns an index into scrap_texnums[] and the position inside it
 ================
 */
-bool Scrap_AllocBlock (int w, int h, int *x, int *y)
+int Scrap_AllocBlock (int w, int h, int *x, int *y)
 {
 	int		i, j;
 	int		best, best2;
+	int		texnum;
 
-	best = SCRAP_HEIGHT;
-
-	for (i = 0; i < SCRAP_WIDTH - w; i++)
+	for (texnum = 0; texnum < MAX_SCRAPS; texnum++)
 	{
-		best2 = 0;
+		best = SCRAP_HEIGHT;
 
-		for (j = 0; j < w; j++)
+		for (i = 0; i < SCRAP_WIDTH - w; i++)
 		{
-			if (scrap_allocated[i + j] >= best) break;
-			if (scrap_allocated[i + j] > best2) best2 = scrap_allocated[i + j];
+			best2 = 0;
+
+			for (j = 0; j < w; j++)
+			{
+				if (scrap_allocated[texnum][i + j] >= best) break;
+				if (scrap_allocated[texnum][i + j] > best2) best2 = scrap_allocated[texnum][i + j];
+			}
+
+			if (j == w)
+			{
+				// this is a valid spot
+				*x = i;
+				*y = best = best2;
+			}
 		}
 
-		if (j == w)
-		{
-			// this is a valid spot
-			*x = i;
-			*y = best = best2;
-		}
+		if (best + h > SCRAP_HEIGHT)
+			continue;
+
+		for (i = 0; i < w; i++)
+			scrap_allocated[texnum][*x + i] = best + h;
+
+		return texnum;
 	}
 
-	if (best + h > SCRAP_HEIGHT) return false;
-
-	// done
-	for (i = 0; i < w; i++)
-		scrap_allocated[*x + i] = best + h;
-
-	return true;
+	return -1;
 }
 
-/*
-================
-Scrap_Upload
-================
-*/
-void Scrap_Upload (void)
-{
-	if (scrap_dirty)
-	{
-		SAFE_RELEASE (scrap_textures.d3d_Texture);
-		D3D_UploadTexture (&scrap_textures.d3d_Texture, scrap_texels,
-			SCRAP_WIDTH, SCRAP_HEIGHT, IMAGE_ALPHA);
-
-		// SCR_WriteDataToTGA ("scrap.tga", scrap_texels, SCRAP_WIDTH, SCRAP_HEIGHT, 8, 32);
-		scrap_dirty = false;
-	}
-}
 
 void SCR_RefdefCvarChange (cvar_t *blah);
 
@@ -334,7 +317,7 @@ qpic_t		*draw_backtile;
 
 int			translate_texture;
 
-LPDIRECT3DTEXTURE9 char_textures[MAX_CHAR_TEXTURES] = {NULL};	// if this array size is changed the release loop in D3D_ReleaseTextures must be changed also!!!
+LPDIRECT3DTEXTURE9 char_textures[MAX_CHAR_TEXTURES] = {NULL};	// if this array size is changed the release loop in D3DTexture_Release must be changed also!!!
 LPDIRECT3DTEXTURE9 crosshairtexture = NULL;
 
 typedef struct crosshair_s
@@ -370,7 +353,7 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 	{
 		// this occasionally gets hosed, dunno why yet...
 		// seems preferable to crashing
-		Con_Printf ("Draw_LoadPicData: pic->width < 1 || pic->height < 1 for %s\n(I fucked up - sorry)\n", name);
+		Con_Printf ("Draw_LoadPicData : pic->width < 1 || pic->height < 1 for %s\n(I fucked up - sorry)\n", name);
 		pic = draw_failsafe;
 
 #ifdef _DEBUG
@@ -379,9 +362,11 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 #endif
 	}
 
-	// HACK HACK HACK --- we need to keep the bytes for
-	// the translatable player picture just for the menu
-	// configuration dialog
+	glpic_t *gl = (glpic_t *) pic->data;
+	LPDIRECT3DTEXTURE9 tex = NULL;	// setting gl->Texture at this stage will stomp data so store it separately
+
+	// HACK HACK HACK --- we need to keep the bytes for the translatable player picture just for the menu configuration dialog
+	// this should NEVER be an external texture because the translation would break
 	if (!strcmp (name, "gfx/menuplyr.lmp"))
 	{
 		// this should only happen once
@@ -390,23 +375,40 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 		memcpy (menuplyr_pixels, pic->data, pic->width * pic->height);
 		memcpy (menuplyr_pixels_translated, pic->data, pic->width * pic->height);
 	}
-
-	glpic_t *gl = (glpic_t *) pic->data;
-	image_t *tex = NULL;
-
-	// we can't use gl->tex as the return as it would overwrite pic->data would would corrupt the texels
-	// backtile doesn't go in the scrap because it wraps
-	// the conback is unpadded as it has edge artefacts otherwise
-	if (!strcmp (name, "gfx/conback.lmp"))
-		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, 0);
-	else if (!strcmp (name, "gfx/backtile.blah") || !allowscrap)
-		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
-	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE | IMAGE_SCRAP);
-
-	if (!tex)
+	else
 	{
-		// this fails if the image is a scrap candidate
+		// try for an external texture (we can't put these into the scrap yet)
+		char loadname[128];
+		char *paths[] = {"textures/", "", NULL};
+
+		strcpy (loadname, name);
+
+		for (int i = strlen (loadname) - 1; i; i--)
+		{
+			if (loadname[i] == '.')
+			{
+				loadname[i] = 0;
+				break;
+			}
+		}
+
+		// try to get an external one (fixme - is this gonna leak?)
+		if ((tex = D3DTexture_LoadExternal (loadname, paths, IMAGE_ALPHA)) != NULL)
+		{
+			// these textures don't go through the regular loader so they will leak on exit and game change
+			// therefore we must register them separately.....
+			D3DTexture_Register (tex, loadname);
+			goto neverscrap;
+		}
+	}
+
+	if (allowscrap)
+	{
 		int		x, y;
+		int		texnum;
+		D3DLOCKED_RECT lockrect;
+		unsigned int *texels;
+		RECT scraprect;
 
 		// pad the allocation to prevent linear filtering from causing the edges of adjacent textures to bleed into each other
 		int scrapw = pic->width + 4;
@@ -416,37 +418,63 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 		if (scraph > SCRAP_HEIGHT) goto noscrap;
 
 		// find a padded block
-		if (!Scrap_AllocBlock (scrapw, scraph, &x, &y)) goto noscrap;
+		if ((texnum = Scrap_AllocBlock (scrapw, scraph, &x, &y)) == -1) goto noscrap;
+
+		scraprect.left = x;
+		scraprect.right = x + scrapw;
+		scraprect.top = y;
+		scraprect.bottom = y + scraph;
 
 		// center in the padded region
 		x += 2;
 		y += 2;
 
-		scrap_dirty = true;
+		if (!scrap_textures[texnum])
+		{
+			hr = d3d_Device->CreateTexture
+			(
+				SCRAP_WIDTH,
+				SCRAP_HEIGHT,
+				1,
+				0,
+				D3DFMT_A8R8G8B8,
+				D3DPOOL_MANAGED,
+				&scrap_textures[texnum],
+				NULL
+			);
+
+			if (FAILED (hr)) Sys_Error ("Draw_LoadPicData : Failed to allocate a texture");
+		}
+
+		scrap_textures[texnum]->LockRect (0, &lockrect, NULL, d3d_GlobalCaps.DynamicLock);
+		texels = (unsigned int *) lockrect.pBits;
 
 		// pad up/down/left/right so that the correct texels will be caught when filtering
 		for (int i = 0, k = 0; i < pic->height; i++)
 			for (int j = 0; j < pic->width; j++, k++)
-				scrap_texels[((y - 1) + i) * SCRAP_WIDTH + x + j] = pic->data[k];
+				texels[((y - 1) + i) * SCRAP_WIDTH + x + j] = d3d_QuakePalette.standard32[pic->data[k]];
 
 		for (int i = 0, k = 0; i < pic->height; i++)
 			for (int j = 0; j < pic->width; j++, k++)
-				scrap_texels[((y + 1) + i) * SCRAP_WIDTH + x + j] = pic->data[k];
+				texels[((y + 1) + i) * SCRAP_WIDTH + x + j] = d3d_QuakePalette.standard32[pic->data[k]];
 
 		for (int i = 0, k = 0; i < pic->height; i++)
 			for (int j = 0; j < pic->width; j++, k++)
-				scrap_texels[(y + i) * SCRAP_WIDTH + (x - 1) + j] = pic->data[k];
+				texels[(y + i) * SCRAP_WIDTH + (x - 1) + j] = d3d_QuakePalette.standard32[pic->data[k]];
 
 		for (int i = 0, k = 0; i < pic->height; i++)
 			for (int j = 0; j < pic->width; j++, k++)
-				scrap_texels[(y + i) * SCRAP_WIDTH + (x + 1) + j] = pic->data[k];
+				texels[(y + i) * SCRAP_WIDTH + (x + 1) + j] = d3d_QuakePalette.standard32[pic->data[k]];
 
 		// do the final centered image
 		for (int i = 0, k = 0; i < pic->height; i++)
 			for (int j = 0; j < pic->width; j++, k++)
-				scrap_texels[(y + i) * SCRAP_WIDTH + x + j] = pic->data[k];
+				texels[(y + i) * SCRAP_WIDTH + x + j] = d3d_QuakePalette.standard32[pic->data[k]];
 
-		gl->tex = &scrap_textures;
+		scrap_textures[texnum]->UnlockRect (0);
+		scrap_textures[texnum]->AddDirtyRect (&scraprect);
+
+		gl->Texture = scrap_textures[texnum];
 
 		// scrap textures just go at their default sizes
 		gl->picrect.sl = (float) x / (float) SCRAP_WIDTH;
@@ -456,52 +484,47 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 
 		gl->texwidth = SCRAP_WIDTH;
 		gl->texheight = SCRAP_HEIGHT;
+
+		// that's all we need
+		return pic;
+	}
+
+noscrap:;
+	// load with no scrap
+	if (!strcmp (name, "gfx/conback.lmp"))
+		tex = D3DTexture_Load (name, pic->width, pic->height, pic->data, 0);
+	else tex = D3DTexture_Load (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
+
+neverscrap:;
+	D3DSURFACE_DESC texdesc;
+
+	gl->Texture = tex;
+	tex->GetLevelDesc (0, &texdesc);
+
+	// rescale everything correctly
+	gl->picrect.sl = 0;
+	gl->picrect.tl = 0;
+
+	// different scale factors here
+	if (d3d_GlobalCaps.supportNonPow2)
+	{
+		gl->picrect.sh = 1;
+		gl->picrect.th = 1;
 	}
 	else
 	{
-noscrap_reload:;
-		gl->tex = tex;
-
-		LPDIRECT3DSURFACE9 texsurf;
-		D3DSURFACE_DESC texdesc;
-		tex->d3d_Texture->GetSurfaceLevel (0, &texsurf);
-		texsurf->GetDesc (&texdesc);
-
-		// rescale everything correctly
-		gl->picrect.sl = 0;
-		gl->picrect.tl = 0;
-
-		// different scale factors here
-		if (d3d_GlobalCaps.supportNonPow2)
-		{
-			gl->picrect.sh = 1;
-			gl->picrect.th = 1;
-		}
-		else
-		{
-			gl->picrect.sh = (float) pic->width / (float) texdesc.Width;
-			gl->picrect.th = (float) pic->height / (float) texdesc.Height;
-		}
-
-		gl->texwidth = texdesc.Width;
-		gl->texheight = texdesc.Height;
-
-		texsurf->Release ();
+		gl->picrect.sh = (float) pic->width / (float) texdesc.Width;
+		gl->picrect.th = (float) pic->height / (float) texdesc.Height;
 	}
 
+	gl->texwidth = texdesc.Width;
+	gl->texheight = texdesc.Height;
+
 	return pic;
-
-noscrap:;
-	// reload with no scrap
-	if (!strcmp (name, "gfx/conback.lmp"))
-		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, 0);
-	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
-
-	goto noscrap_reload;
 }
 
 
-qpic_t *Draw_LoadPic (char *name)
+qpic_t *Draw_LoadPic (char *name, bool allowscrap)
 {
 	qpic_t	*pic = NULL;
 	char loadname[256] = {0};
@@ -536,7 +559,7 @@ qpic_t *Draw_LoadPic (char *name)
 		usescrap = false;
 	}
 
-	return Draw_LoadPicData (loadname, pic, usescrap);
+	return Draw_LoadPicData (loadname, pic, usescrap && allowscrap);
 }
 
 
@@ -569,7 +592,7 @@ void Draw_FreeCrosshairs (void)
 }
 
 
-void D3D_MakeAlphaTexture (LPDIRECT3DTEXTURE9 tex);
+void D3DTexture_MakeAlpha (LPDIRECT3DTEXTURE9 tex);
 
 void Draw_LoadCrosshairs (void)
 {
@@ -612,6 +635,9 @@ void Draw_LoadCrosshairs (void)
 	// nothing here to begin with
 	d3d_NumCrosshairs = 0;
 
+	// conform to qrack (fixme - what does dp do?)
+	char *paths[] = {"crosshairs/", "gfx/", "textures/crosshairs/", "textures/gfx/", NULL};
+
 	// now attempt to load replacements
 	for (int i = 0;; i++)
 	{
@@ -619,7 +645,7 @@ void Draw_LoadCrosshairs (void)
 		LPDIRECT3DTEXTURE9 newcrosshair = NULL;
 
 		// standard loader; qrack crosshairs begin at 1 and so should we
-		if (!D3D_LoadExternalTexture (&newcrosshair, va ("crosshair%i", i + 1), IMAGE_ALPHA))
+		if ((newcrosshair = D3DTexture_LoadExternal (va ("crosshair%i", i + 1), paths, IMAGE_ALPHA)) == NULL)
 			break;
 
 		// fill it in
@@ -731,7 +757,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 			newchars[i] = 255;
 
 	// now turn them into textures
-	D3D_UploadTexture (&char_textures[0], newchars, 256, 256, IMAGE_ALPHA);
+	char_textures[0] = D3DTexture_Upload (newchars, 256, 256, IMAGE_ALPHA);
 }
 
 
@@ -771,6 +797,7 @@ void Menu_InitPics (void);
 
 void Draw_Init (void)
 {
+	// prevent double-calling; this was a crasher in ye olde dayes
 	if (draw_init) return;
 
 	draw_init = true;
@@ -789,7 +816,7 @@ void Draw_Init (void)
 		// we alloc enough memory for the glpic_t that draw_failsafe->data is casted to.
 		// this crazy-assed shit prevents an "ambiguous call to overloaded function" error.
 		// add 1 cos of integer round down.  do it this way in case we ever change the glpic_t struct
-		int failsafedatasize = D3D_PowerOf2Size ((int) sqrt ((float) (sizeof (glpic_t))) + 1);
+		int failsafedatasize = D3DTexture_PowerOf2Size ((int) sqrt ((float) (sizeof (glpic_t))) + 1);
 
 		// persist in memory
 		failsafedata = (byte *) Zone_Alloc (sizeof (int) * 2 + (failsafedatasize * failsafedatasize));
@@ -801,12 +828,12 @@ void Draw_Init (void)
 	draw_chars = (byte *) W_GetLumpName ("conchars");
 	Draw_SpaceOutCharSet (draw_chars, 128, 128);
 
-	conback = Draw_LoadPic ("gfx/conback.lmp");
+	conback = Draw_LoadPic ("gfx/conback.lmp", false);
 
 	// get the other pics we need
 	// draw_disc is also used on the sbar so we need to retain it
 	draw_disc = Draw_LoadPic ("disc");
-	draw_backtile = Draw_LoadPic ("backtile");
+	draw_backtile = Draw_LoadPic ("backtile", false);
 
 	box_ml = Draw_LoadPic ("gfx/box_ml.lmp");
 	box_mr = Draw_LoadPic ("gfx/box_mr.lmp");
@@ -843,6 +870,14 @@ __inline int Draw_PrepareCharacter (int x, int y, int num)
 		while (gl_consolefont.integer >= MAX_CHAR_TEXTURES) gl_consolefont.integer -= MAX_CHAR_TEXTURES;
 		while (gl_consolefont.integer < 0) gl_consolefont.integer += MAX_CHAR_TEXTURES;
 
+		char *paths[] =
+		{
+			"textures/charsets/",
+			"textures/gfx/",
+			"gfx/",
+			NULL
+		};
+
 		// load them dynamically so that we don't waste vram by having up to 49 big textures in memory at once!
 		// we guaranteed that char_textures[0] is always loaded so this will always terminate
 		for (;;)
@@ -851,12 +886,7 @@ __inline int Draw_PrepareCharacter (int x, int y, int num)
 			if (gl_consolefont.integer == 0) break;
 
 			// attempt to load it
-			bool loaded = D3D_LoadExternalTexture (&char_textures[gl_consolefont.integer], va ("charset-%i", gl_consolefont.integer), IMAGE_ALPHA);
-
-			if (char_textures[gl_consolefont.integer] && loaded) break;
-
-			// ensure
-			SAFE_RELEASE (char_textures[gl_consolefont.integer]);
+			if ((char_textures[gl_consolefont.integer] = D3DTexture_LoadExternal (va ("charset-%i", gl_consolefont.integer), paths, IMAGE_ALPHA)) != NULL) break;
 
 			// go to the next one
 			gl_consolefont.integer--;
@@ -922,11 +952,7 @@ void Draw_Character (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	// hack
-	image_t tex;
-	tex.d3d_Texture = char_texture;
-
-	D3DDraw_SubmitQuad (x, y, 8, 8, d3d_DrawState.color2D, &tex, &charrects[num], true);
+	D3DDraw_SubmitQuad (x, y, 8, 8, d3d_DrawState.color2D, char_texture, &charrects[num], true);
 }
 
 
@@ -934,11 +960,7 @@ void Draw_BackwardsCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	// hack
-	image_t tex;
-	tex.d3d_Texture = char_texture;
-
-	D3DDraw_SubmitQuad (x + 8, y, -8, 8, d3d_DrawState.color2D, &tex, &charrects[num], true);
+	D3DDraw_SubmitQuad (x + 8, y, -8, 8, d3d_DrawState.color2D, char_texture, &charrects[num], true);
 }
 
 
@@ -995,7 +1017,7 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 		gl->picrect.tl + (float) (srcy + height) / (float) gl->texheight
 	};
 
-	D3DDraw_SubmitQuad (x, y, width, height, d3d_DrawState.color2D, gl->tex, &rect, true);
+	D3DDraw_SubmitQuad (x, y, width, height, d3d_DrawState.color2D, gl->Texture, &rect, true);
 }
 
 
@@ -1008,18 +1030,15 @@ void Draw_Pic (int x, int y, qpic_t *pic, float alpha, bool clamp)
 		alphacolor = D3DCOLOR_ARGB (BYTE_CLAMPF (alpha), 255, 255, 255);
 	else alphacolor = d3d_DrawState.color2D;
 
-	D3DDraw_SubmitQuad (x, y, pic->width, pic->height, alphacolor, gl->tex, &gl->picrect, clamp);
+	D3DDraw_SubmitQuad (x, y, pic->width, pic->height, alphacolor, gl->Texture, &gl->picrect, clamp);
 }
 
 
 void Draw_Pic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic)
 {
-	image_t img;
-	img.d3d_Texture = texpic;
-
 	drawrect_t rect = {0, 0, 1, 1};
 
-	D3DDraw_SubmitQuad (x, y, w, h, d3d_DrawState.color2D, &img, &rect);
+	D3DDraw_SubmitQuad (x, y, w, h, d3d_DrawState.color2D, texpic, &rect);
 }
 
 
@@ -1036,39 +1055,6 @@ void Draw_Crosshair (int x, int y)
 	extern cvar_t crosshair;
 	extern cvar_t scr_crosshaircolor;
 	extern cvar_t scr_crosshairscale;
-
-	if (kurok && crosshair.integer >= 2)
-	{
-		qpic_t *pic = NULL;
-
-		if (cl.stats[STAT_ACTIVEWEAPON] == KIT_AXE)                  // Knife
-			pic = Draw_LoadPic ("gfx/ch_axe.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == KIT_TEKBOW)          // Tekbow
-			pic = Draw_LoadPic ("gfx/ch_tekbo.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SHOTGUN)         // Pistol
-			pic = Draw_LoadPic ("gfx/ch_sgun.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_SHOTGUN)   // Shotgun
-			pic = Draw_LoadPic ("gfx/ch_ssgun.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_NAILGUN)         // Assualt rifle
-			pic = Draw_LoadPic ("gfx/ch_ngun.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == KIT_UZI)          // Uzi
-			pic = Draw_LoadPic ("gfx/ch_uzi.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == KIT_M99)          // Sniper rifle
-			pic = Draw_LoadPic ("gfx/ch_snip.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_NAILGUN)   // Minigun
-			pic = Draw_LoadPic ("gfx/ch_sngun.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_GRENADE_LAUNCHER) // Grenade launcher
-			pic = Draw_LoadPic ("gfx/ch_gl.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_ROCKET_LAUNCHER) // Rocket launcher
-			pic = Draw_LoadPic ("gfx/ch_rl.lmp");
-		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)       // Remote Mines
-			pic = Draw_LoadPic ("gfx/ch_light.lmp");
-		else pic = Draw_LoadPic ("gfx/ch_sgun.lmp");
-
-		if (pic) Draw_Pic ((vid.currsize->width - pic->width) / 2, (vid.currsize->height - pic->height) / 2, pic);
-
-		return;
-	}
 
 	// no crosshair
 	if (!crosshair.integer) return;
@@ -1115,10 +1101,7 @@ void Draw_Crosshair (int x, int y)
 	x -= (crossscale / 2);
 	y -= (crossscale / 2);
 
-	image_t img;
-	img.d3d_Texture = d3d_Crosshairs[currcrosshair].texture;
-
-	D3DDraw_SubmitQuad (x, y, crossscale, crossscale, xhaircolor, &img, &d3d_Crosshairs[currcrosshair].rect, true);
+	D3DDraw_SubmitQuad (x, y, crossscale, crossscale, xhaircolor, d3d_Crosshairs[currcrosshair].texture, &d3d_Crosshairs[currcrosshair].rect, true);
 }
 
 
@@ -1152,7 +1135,7 @@ void Draw_TextBox (int x, int y, int width, int height)
 	};
 
 	// fill it
-	D3DDraw_SubmitQuad (x + 8, y + 8, width, height, 0xffffffff, gl->tex, &texrect);
+	D3DDraw_SubmitQuad (x + 8, y + 8, width, height, 0xffffffff, gl->Texture, &texrect);
 }
 
 
@@ -1185,7 +1168,7 @@ void Draw_Mapshot (char *name, int x, int y)
 
 		// the conback is unpadded so use regular texcoords
 		Draw_TextBox (x - 8, y - 8, 128, 128);
-		Draw_Pic (x, y, 128, 128, gl->tex->d3d_Texture);
+		Draw_Pic (x, y, 128, 128, gl->Texture);
 		return;
 	}
 
@@ -1197,28 +1180,25 @@ void Draw_Mapshot (char *name, int x, int y)
 		// texture has changed, release the existing one
 		SAFE_RELEASE (d3d_MapshotTexture);
 
-		for (int i = COM_MAXGAMES - 1;; i--)
-		{
-			// not registered
-			if (!com_games[i]) continue;
+		char *paths[] = {"", NULL};
 
-			// attempt to load it
-			if (D3D_LoadExternalTexture (&d3d_MapshotTexture, va ("%s\\%s", com_games[i], cached_name), IMAGE_KEEPPATH))
+		for (int j = strlen (cached_name) - 1; j; j--)
+		{
+			if (cached_name[j] == '.')
 			{
+				cached_name[j] = 0;
 				break;
 			}
+		}
 
-			if (!i)
-			{
-				// ensure release
-				SAFE_RELEASE (d3d_MapshotTexture);
+		// attempt to load it
+		if ((d3d_MapshotTexture = D3DTexture_LoadExternal (cached_name, paths, 0)) == NULL)
+		{
+			// if we didn't load it, call recursively to display the console
+			Draw_Mapshot (NULL, x, y);
 
-				// if we didn't load it, call recursively to display the console
-				Draw_Mapshot (NULL, x, y);
-
-				// done
-				return;
-			}
+			// done
+			return;
 		}
 	}
 
@@ -1275,10 +1255,10 @@ void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt,
 
 	// replace the texture fully
 	glpic_t *gl = (glpic_t *) pic->data;
-	SAFE_RELEASE (gl->tex->d3d_Texture);
+	SAFE_RELEASE (gl->Texture);
 
-	D3D_UploadTexture (&gl->tex->d3d_Texture, menuplyr_pixels_translated,
-		pic->width, pic->height, (gl->tex->flags & ~IMAGE_32BIT) | IMAGE_ALPHA);
+	gl->Texture = D3DTexture_Upload (menuplyr_pixels_translated,
+		pic->width, pic->height, IMAGE_ALPHA);
 
 	// and draw it normally
 	Draw_Pic (x, y, pic, 1, true);
@@ -1300,7 +1280,7 @@ void Draw_ConsoleBackground (int percent)
 	// the conback image is unpadded so use regular texcoords
 	drawrect_t rect = {0, 1.0f - ((float) percent / 100.0f), 1, 1};
 
-	D3DDraw_SubmitQuad (0, 0, vid.currsize->width, (float) vid.currsize->height * ((float) percent / 100.0f), consolecolor, gl->tex, &rect, true);
+	D3DDraw_SubmitQuad (0, 0, vid.currsize->width, (float) vid.currsize->height * ((float) percent / 100.0f), consolecolor, gl->Texture, &rect, true);
 }
 
 
@@ -1318,7 +1298,7 @@ void Draw_TileClear (float x, float y, float w, float h)
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
 	drawrect_t rect = {x / 64.0f, y / 64.0f, (x + w) / 64.0f, (y + h) / 64.0f};
 
-	D3DDraw_SubmitQuad (x, y, w, h, 0xffffffff, gl->tex, &rect, false);
+	D3DDraw_SubmitQuad (x, y, w, h, 0xffffffff, gl->Texture, &rect, false);
 }
 
 
@@ -1424,9 +1404,6 @@ void D3D_Set2DShade (float shadecolor)
 
 void D3DDraw_Begin2D (void)
 {
-	// enforce upload of any textures that went into the scrap
-	Scrap_Upload ();
-
 	// disable depth testing and writing
 	D3DState_SetZBuffer (D3DZB_FALSE, FALSE);
 
@@ -1474,10 +1451,9 @@ void D3DDraw_SetSize (sizedef_t *size)
 	D3DDraw_DrawBatch ();
 
 	// reset the size to that which we're going to use
-	D3DMATRIX m;
-	D3DMatrix_Identity (&m);
-	D3DMatrix_OrthoOffCenterRH (&m, 0, size->width, size->height, 0, 0, 1);
-	D3DHLSL_SetWorldMatrix (&m);
+	D3DHLSL_SetFloatArray ("drawmult", D3DXVECTOR4 (2.0f / size->width, -(2.0f / size->height), 0, 1.0f), 4);
+	D3DHLSL_SetFloatArray ("drawadd", D3DXVECTOR4 (-1, 1, 0, 0), 4);
+	D3DHLSL_SetFloatArray ("halfpixoffset", D3DXVECTOR4 (-0.5f, -0.5f, 0, 0), 4);
 
 	// and store it out
 	vid.currsize = size;

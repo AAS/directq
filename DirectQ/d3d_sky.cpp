@@ -82,8 +82,10 @@ void D3DSky_DrawSkySurfaces (msurface_t *chain)
 {
 	// instead of doing all this in the VS by hand we'll use a matrix instead; this lets us
 	// use the same VS for all 3 sky types
-	D3DMATRIX skymatrix;
-	D3DMatrix_Identity (&skymatrix);
+	QMATRIX skymatrix;
+	int ShaderPass = 0;
+
+	skymatrix.LoadIdentity ();
 
 	if (SkyboxValid || SkySphereValid)
 	{
@@ -98,7 +100,7 @@ void D3DSky_DrawSkySurfaces (msurface_t *chain)
 			};
 
 			VectorNormalize (rot);
-			D3DMatrix_Rotate (&skymatrix, rot[0], rot[1], rot[2], cl.time * r_skyrotate_speed.value);
+			skymatrix.Rotate (rot[0], rot[1], rot[2], cl.time * r_skyrotate_speed.value);
 		}
 
 		D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
@@ -107,6 +109,7 @@ void D3DSky_DrawSkySurfaces (msurface_t *chain)
 		{
 			D3DHLSL_SetTexture (0, skyboxcubemap);
 			D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
+			ShaderPass = FX_PASS_SKYBOX;
 			D3DHLSL_SetPass (FX_PASS_SKYBOX);
 		}
 		else
@@ -122,13 +125,14 @@ void D3DSky_DrawSkySurfaces (msurface_t *chain)
 			D3D_SetTextureMipmap (1, d3d_TexFilter, D3DTEXF_NONE);
 			D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
 
+			ShaderPass = FX_PASS_SKYSPHERE;
 			D3DHLSL_SetPass (FX_PASS_SKYSPHERE);
 		}
 	}
 	else
 	{
 		// flatten the sphere
-		D3DMatrix_Scale (&skymatrix, 1, 1, 3.0f);
+		skymatrix.Scale (1.0f, 1.0f, 3.0f);
 
 		// hlsl sky warp
 		float speedscale[] =
@@ -154,6 +158,7 @@ void D3DSky_DrawSkySurfaces (msurface_t *chain)
 		D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
 		D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 
+		ShaderPass = FX_PASS_SKYWARP;
 		D3DHLSL_SetPass (FX_PASS_SKYWARP);
 	}
 
@@ -162,7 +167,8 @@ void D3DSky_DrawSkySurfaces (msurface_t *chain)
 	if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
 
 	// move relative to view position only
-	D3DMatrix_Translate (&skymatrix, -r_refdef.vieworigin[0], -r_refdef.vieworigin[1], -r_refdef.vieworigin[2]);
+	skymatrix.Translate (-r_refdef.vieworigin[0], -r_refdef.vieworigin[1], -r_refdef.vieworigin[2]);
+
 	D3DHLSL_SetMatrix ("EntMatrix", &skymatrix);
 
 	for (; chain; chain = chain->texturechain)
@@ -194,11 +200,8 @@ D3DSky_InitTextures
 A sky texture is 256*128, with the right side being a masked overlay
 ==============
 */
-void D3DSky_InitTextures (miptex_t *mt)
+void D3DSky_InitTextures (miptex_t *mt, char **paths)
 {
-	static int lastwidth = -1;
-	static int lastheight = -1;
-
 	// sanity check
 	if ((mt->width % 4) || (mt->width < 4) || (mt->height % 2) || (mt->height < 2))
 	{
@@ -214,16 +217,10 @@ void D3DSky_InitTextures (miptex_t *mt)
 	int transwidth = mt->width / 2;
 	int transheight = mt->height;
 
-	// if the size changes we need to replace the textures fully, so release them first
-	// the textures may be NULL even if they are equal, in which case we'll catch it in the loader
-	if (transwidth != lastwidth || transheight != lastheight)
-	{
-		SAFE_RELEASE (solidskytexture);
-		SAFE_RELEASE (alphaskytexture);
-	}
-
-	lastwidth = transwidth;
-	lastheight = transheight;
+	// we don't really need to do this (we could just reuse the old textures) but that's kinda broke right now
+	// (the attempt to load an external will NULL them anyway........)
+	SAFE_RELEASE (solidskytexture);
+	SAFE_RELEASE (alphaskytexture);
 
 	unsigned int transpix, r = 0, g = 0, b = 0;
 
@@ -249,8 +246,8 @@ void D3DSky_InitTextures (miptex_t *mt)
 	((byte *) &transpix)[3] = 0;
 
 	// upload it - solid sky can go up as 8 bit
-	if (!D3D_LoadExternalTexture (&solidskytexture, va ("%s_solid", mt->name), 0))
-		D3D_UploadTexture (&solidskytexture, trans, transwidth, transheight, 0);
+	if ((solidskytexture = D3DTexture_LoadExternal (va ("%s_solid", mt->name), paths, 0)) == NULL)
+		solidskytexture = D3DTexture_Upload (trans, transwidth, transheight, 0);
 
 	// bottom layer
 	for (int i = 0; i < transheight; i++)
@@ -266,9 +263,8 @@ void D3DSky_InitTextures (miptex_t *mt)
 	}
 
 	// upload it - alpha sky needs to go up as 32 bit owing to averaging
-	// don't compress it so that we can lock it for alpha updating
-	if (!D3D_LoadExternalTexture (&alphaskytexture, va ("%s_alpha", mt->name), IMAGE_ALPHA))
-		D3D_UploadTexture (&alphaskytexture, trans, transwidth, transheight, IMAGE_32BIT | IMAGE_ALPHA);
+	if ((alphaskytexture = D3DTexture_LoadExternal (va ("%s_alpha", mt->name), paths, IMAGE_ALPHA)) == NULL)
+		alphaskytexture = D3DTexture_Upload (trans, transwidth, transheight, IMAGE_32BIT | IMAGE_ALPHA);
 
 	// prevent it happening first time during game play
 	MainHunk->FreeToLowMark (hunkmark);
@@ -329,14 +325,11 @@ void D3DSky_MakeSkyboxCubeMap (void)
 	}
 
 	// those wacky modders!!! ensure it's a power of 2...
-	maxsize = D3D_PowerOf2Size (maxsize);
+	maxsize = D3DTexture_PowerOf2Size (maxsize);
 
 	// clamp to max supported size
 	if (maxsize > d3d_DeviceCaps.MaxTextureWidth) maxsize = d3d_DeviceCaps.MaxTextureWidth;
 	if (maxsize > d3d_DeviceCaps.MaxTextureHeight) maxsize = d3d_DeviceCaps.MaxTextureWidth;
-
-	// prevent those wacky modders from choking our video ram and performance
-	if (maxsize > 1024) maxsize = 1024;
 
 	// now we can attempt to create the cubemap
 	for (;;)
@@ -397,7 +390,7 @@ void D3DSky_MakeSkyboxCubeMap (void)
 		if (noscale && texsurf && cubesurf)
 		{
 			// if the source is the same size as the dest we can just align and copy directly
-			D3D_AlignCubeMapFaceTexels (texsurf, faces[i]);
+			D3DImage_AlignCubeMapFaceTexels (texsurf, faces[i]);
 			D3DXLoadSurfaceFromSurface (cubesurf, NULL, NULL, texsurf, NULL, NULL, D3DX_DEFAULT, 0);
 		}
 		else
@@ -416,7 +409,7 @@ void D3DSky_MakeSkyboxCubeMap (void)
 				D3DXLoadSurfaceFromSurface (copysurf, NULL, NULL, texsurf, NULL, NULL, D3DX_DEFAULT, 0);
 
 				// realign the face texels to map from quake skybox to d3d cubemap
-				D3D_AlignCubeMapFaceTexels (copysurf, faces[i]);
+				D3DImage_AlignCubeMapFaceTexels (copysurf, faces[i]);
 
 				// copy it back from system memory to the cubemap
 				D3DXLoadSurfaceFromSurface (cubesurf, NULL, NULL, copysurf, NULL, NULL, D3DX_DEFAULT, 0);
@@ -439,109 +432,25 @@ void D3DSky_MakeSkyboxCubeMap (void)
 }
 
 
-typedef struct texlmp_s
-{
-	int width;
-	int height;
-	byte data[1];	// variable size
-} texlmp_t;
-
-void D3D_FlipTexels (unsigned int *texels, int width, int height);
-void D3D_Resample32BitTexture (unsigned *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight);
-
-bool D3DSky_LoadKurokSkyboxSide (LPDIRECT3DTEXTURE9 *tex, char *name, byte *palette)
-{
-	SAFE_RELEASE (tex[0]);
-
-	HANDLE fh = INVALID_HANDLE_VALUE;
-	int skysize = COM_FOpenFile (name, &fh);
-
-	if (fh != INVALID_HANDLE_VALUE)
-	{
-		byte *boxdata = (byte *) MainZone->Alloc (skysize);
-
-		COM_FReadFile (fh, boxdata, skysize);
-		CloseHandle (fh);
-
-		texlmp_t *boxlump = (texlmp_t *) boxdata;
-		unsigned int *image_rgba = (unsigned int *) MainZone->Alloc (boxlump->width * boxlump->height * 4);
-
-		if (palette)
-		{
-			byte *pbuf = (byte *) image_rgba;
-
-			for (int i = 0; i < boxlump->width * boxlump->height; i++, pbuf += 4)
-			{
-				int p = boxlump->data[i];
-
-				pbuf[2] = palette[p * 3 + 0];
-				pbuf[1] = palette[p * 3 + 1];
-				pbuf[0] = palette[p * 3 + 2];
-				pbuf[3] = 255;
-			}
-		}
-		else
-		{
-			for (int i = 0; i < boxlump->width * boxlump->height; i++)
-				image_rgba[i] = (unsigned int) d3d_QuakePalette.standard32[boxlump->data[i]];
-		}
-
-		D3D_FlipTexels (image_rgba, boxlump->width, boxlump->height);
-		D3D_UploadTexture (tex, image_rgba, boxlump->width, boxlump->height, IMAGE_32BIT | IMAGE_SYSMEM | IMAGE_SKYBOX);
-
-		MainZone->Free (boxdata);
-		MainZone->Free (image_rgba);
-
-		return true;
-	}
-
-	return false;
-}
-
-
 void D3DSky_LoadSkyBox (char *basename, bool feedback)
 {
 	// force an unload of the current skybox
 	D3DSky_UnloadSkybox ();
 
 	int numloaded = 0;
-	byte *kurokskypal = NULL;
-
-	if (kurok)
-	{
-		HANDLE fh = INVALID_HANDLE_VALUE;
-		int palsize = COM_FOpenFile (va ("gfx/env/%s_palette.lmp", basename), &fh);
-
-		if (fh != INVALID_HANDLE_VALUE)
-		{
-			kurokskypal = (byte *) MainZone->Alloc (palsize);
-			COM_FReadFile (fh, kurokskypal, palsize);
-			CloseHandle (fh);
-		}
-	}
+	int sbflags = IMAGE_32BIT | IMAGE_SYSMEM | IMAGE_SKYBOX;
+	char *sbpaths[] = {"gfx/env/", "env/gfx/", "env/", NULL};
 
 	for (int sb = 0; sb < 6; sb++)
 	{
-		if (kurok)
-		{
-			if (D3DSky_LoadKurokSkyboxSide (&skyboxtextures[sb], va ("gfx/env/%s_%s.lmp", basename, suf[sb]), kurokskypal))
-			{
-				numloaded++;
-				continue;
-			}
-		}
-
 		// attempt to load it (sometimes an underscore is expected)
-		// don't compress these because we're going to copy them later on
-		if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM | IMAGE_SKYBOX))
-			if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s_%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM | IMAGE_SKYBOX))
+		if ((skyboxtextures[sb] = D3DTexture_LoadExternal (va ("%s%s", basename, suf[sb]), sbpaths, sbflags)) == NULL)
+			if ((skyboxtextures[sb] = D3DTexture_LoadExternal (va ("%s_%s", basename, suf[sb]), sbpaths, sbflags)) == NULL)
 				continue;
 
 		// loaded OK
 		numloaded++;
 	}
-
-	if (kurokskypal) MainZone->Free (kurokskypal);
 
 	if (numloaded)
 	{
@@ -557,7 +466,7 @@ void D3DSky_LoadSkyBox (char *basename, bool feedback)
 	}
 
 	// not a skybox so try load a sphere texture
-	if (D3D_LoadExternalTexture (&skyspheretexture, basename, IMAGE_32BIT))
+	if ((skyspheretexture = D3DTexture_LoadExternal (basename, sbpaths, IMAGE_32BIT)) != NULL)
 	{
 		D3DSURFACE_DESC surfdesc;
 
@@ -605,7 +514,7 @@ void D3DSky_LoadSkyBox (char *basename, bool feedback)
 		skyatan2texture->UnlockRect (0);
 		SkySphereValid = true;
 
-		SCR_WriteTextureToTGA ("at2.tga", skyatan2texture, D3DFMT_X8R8G8B8);
+		// SCR_WriteTextureToTGA ("at2.tga", skyatan2texture, D3DFMT_X8R8G8B8);
 		return;
 	}
 

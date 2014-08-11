@@ -246,7 +246,7 @@ void Chase_Update (void)
 
 	if (dist < 1) dist = 1;
 
-	r_refdef.viewangles[PITCH] = -atan (stop[2] / dist) / D3DX_PI * 180;
+	r_refdef.viewangles[0] = -atan (stop[2] / dist) / D3DX_PI * 180;
 
 	// move towards destination
 	VectorCopy2 (r_refdef.vieworigin, chase_dest);

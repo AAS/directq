@@ -30,7 +30,7 @@ extern DWORD ds_SoundBufferSize;
 
 portable_samplepair_t *paintbuffer = NULL;
 
-int 	*snd_p, snd_linear_count, snd_vol;
+int 	*snd_p, snd_linear_count;
 short	*snd_out;
 
 
@@ -45,36 +45,23 @@ __inline void Snd_InitPaintBuffer (void)
 }
 
 
-void Snd_WriteLinearBlastStereo16 (void)
+void S_TransferPaintBuffer (int endtime)
 {
-	for (int l = 0, r = 1; l < snd_linear_count; l += 2, r += 2)
-	{
-		int val = (snd_p[l] * snd_vol) >> 8;
-		snd_out[l] = (val > 32767) ? 32767 : ( (val < -32768) ? -32768 : val);
-
-		val = (snd_p[r] * snd_vol) >> 8;
-		snd_out[r] = (val > 32767) ? 32767 : ( (val < -32768) ? -32768 : val);
-	}
-}
-
-
-void S_TransferStereo16 (int endtime)
-{
-	if (!ds_SecondaryBuffer8) return;
-
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
+	// only support 16-bit stereo sound
 	int		lpos;
 	int		lpaintedtime;
 	DWORD	*pbuf;
 	DWORD	dwSize, dwSize2;
 	DWORD	*pbuf2;
 
-	snd_vol = volume.value * 256;
-
 	snd_p = (int *) paintbuffer;
 	lpaintedtime = paintedtime;
+
+	int snd_vol = volume.value * 256;
+	int val[2];
 
 	// attempt to get a lock on the sound buffer
 	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, (LPVOID *) &pbuf2, &dwSize2, 0)) return;
@@ -82,7 +69,7 @@ void S_TransferStereo16 (int endtime)
 	while (lpaintedtime < endtime)
 	{
 		// handle recirculating buffer issues
-		lpos = lpaintedtime & ( (shm->samples >> 1) - 1);
+		lpos = lpaintedtime & ((shm->samples >> 1) - 1);
 
 		snd_out = (short *) pbuf + (lpos << 1);
 		snd_linear_count = (shm->samples >> 1) - lpos;
@@ -92,70 +79,16 @@ void S_TransferStereo16 (int endtime)
 		snd_linear_count <<= 1;
 
 		// write a linear blast of samples
-		Snd_WriteLinearBlastStereo16 ();
+		for (int l = 0; l < snd_linear_count; l += 2, snd_p += 2, snd_out += 2)
+		{
+			val[0] = (snd_p[0] * snd_vol) >> 8;
+			val[1] = (snd_p[1] * snd_vol) >> 8;
 
-		snd_p += snd_linear_count;
+			snd_out[0] = (val[0] > 32767) ? 32767 : ((val[0] < -32768) ? -32768 : val[0]);
+			snd_out[1] = (val[1] > 32767) ? 32767 : ((val[1] < -32768) ? -32768 : val[1]);
+		}
+
 		lpaintedtime += (snd_linear_count >> 1);
-	}
-
-	ds_SecondaryBuffer8->Unlock (pbuf, dwSize, NULL, 0);
-}
-
-
-void S_TransferPaintBuffer (int endtime)
-{
-	// init the paintbuffer if we need to
-	Snd_InitPaintBuffer ();
-
-	if (shm->samplebits == 16 && shm->channels == 2)
-	{
-		S_TransferStereo16 (endtime);
-		return;
-	}
-
-	DWORD	*pbuf;
-	DWORD	dwSize, dwSize2;
-	DWORD	*pbuf2;
-
-	int *p = (int *) paintbuffer;
-	int count = (endtime - paintedtime) * shm->channels;
-	int out_mask = shm->samples - 1;
-	int out_idx = paintedtime * shm->channels & (shm->samples - 1);
-	int step = 3 - shm->channels;
-	int snd_vol = volume.value * 256;
-
-	// attempt to get a lock on the sound buffer
-	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, (LPVOID *) &pbuf2, &dwSize2, 0)) return;
-
-	if (shm->samplebits == 16)
-	{
-		short *out = (short *) pbuf;
-
-		while (count--)
-		{
-			int val = ( (*p) * snd_vol) >> 8;
-			p += step;
-
-			if (val > 32767) val = 32767; else if (val < -32768) val = -32768;
-
-			out[out_idx] = val;
-			out_idx = (out_idx + 1) & out_mask;
-		}
-	}
-	else if (shm->samplebits == 8)
-	{
-		unsigned char *out = (unsigned char *) pbuf;
-
-		while (count--)
-		{
-			int val = ( (*p) * snd_vol) >> 8;
-			p += step;
-
-			if (val > 32767) val = 32767; else if (val < -32768) val = -32768;
-
-			out[out_idx] = (val >> 8) + 128;
-			out_idx = (out_idx + 1) & out_mask;
-		}
 	}
 
 	ds_SecondaryBuffer8->Unlock (pbuf, dwSize, NULL, 0);
@@ -175,23 +108,15 @@ void SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count)
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
-	int data;
-	int left, right;
-	int leftvol, rightvol;
-	signed short *sfx;
-	int	i;
+	int leftvol = ch->leftvol;
+	int rightvol = ch->rightvol;
 
-	leftvol = ch->leftvol;
-	rightvol = ch->rightvol;
-	sfx = (signed short *) sc->data + ch->pos;
+	signed short *sfx = (signed short *) sc->data + ch->pos;
 
-	for (i = 0; i < count; i++)
+	for (int i = 0; i < count; i++)
 	{
-		data = sfx[i];
-		left = (data * leftvol) >> 8;
-		right = (data * rightvol) >> 8;
-		paintbuffer[i].left += left;
-		paintbuffer[i].right += right;
+		paintbuffer[i].left += (sfx[i] * leftvol) >> 8;
+		paintbuffer[i].right += (sfx[i] * rightvol) >> 8;
 	}
 
 	ch->pos += count;

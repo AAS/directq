@@ -42,14 +42,12 @@ void IN_StartupJoystick (void);
 void Joy_AdvancedUpdate_f (void);
 void CL_BoundViewPitch (float *viewangles);
 void ClearAllStates (void);
+void IN_StartupXInput (void);
 
 cmd_t joyadvancedupdate ("joyadvancedupdate", Joy_AdvancedUpdate_f);
 
 int mstate_di = 0;
 int mouse_oldbuttonstate = 0;
-
-int in_mx = 0;
-int in_my = 0;
 
 int window_center_x;
 int window_center_y;
@@ -64,6 +62,17 @@ int window_center_y;
 
 LPDIRECTINPUT8 di_Object = NULL;
 LPDIRECTINPUTDEVICE8 di_Mouse = NULL;
+
+void V_StopPitchDrift (void);
+
+void IN_CheckFreeLook (void)
+{
+	if ((mouselooking = freelook.integer || (in_mlook.state & 1)) != false)
+	{
+		V_StopPitchDrift ();
+	}
+}
+
 
 /*
 ===================================================================
@@ -103,55 +112,26 @@ int IN_MapKey (int key)
 }
 
 
-void IN_MouseMove (usercmd_t *cmd, double movetime)
+usercmd_t in_mousecmd = {0, 0, 0};
+
+void IN_MouseMove (usercmd_t *cmd)
 {
-	if (ActiveApp && !Minimized && in_mouseacquired)
+	if (ActiveApp && !Minimized)
 	{
-		extern cvar_t scr_fov;
-
-		// this is just a rough scaling factor to bring directinput movement back up to the expected range
-		float mx = (float) in_mx * sensitivity.value * 1.5f;
-		float my = (float) in_my * sensitivity.value * 1.5f;
-
-		in_mx = in_my = 0;
-
-		if (scr_fov.value <= 75 && kurok)
-		{
-			float fovscale = ((100 - scr_fov.value) / 25.0f) + 1;
-
-			mx /= fovscale;
-			my /= fovscale;
-		}
-
-		if (mx || my)
-		{
-			mouselooking = freelook.integer || (in_mlook.state & 1);
-
-			if ((in_strafe.state & 1) || (lookstrafe.value && mouselooking))
-				cmd->sidemove += m_side.value * mx;
-			else cl.viewangles[YAW] -= m_yaw.value * mx;
-
-			if (mouselooking && !(in_strafe.state & 1))
-			{
-				cl.viewangles[PITCH] += m_pitch.value * my;
-				CL_BoundViewPitch (cl.viewangles);
-			}
-			else
-			{
-				if ((in_strafe.state & 1) && noclip_anglehack)
-					cmd->upmove -= m_forward.value * my;
-				else cmd->forwardmove -= m_forward.value * my;
-			}
-
-			SetCursorPos (window_center_x, window_center_y);
-		}
+		// for most players these will always be zero
+		cmd->forwardmove += in_mousecmd.forwardmove;
+		cmd->sidemove += in_mousecmd.sidemove;
+		cmd->upmove += in_mousecmd.upmove;
 	}
+
+	in_mousecmd.forwardmove = 0;
+	in_mousecmd.sidemove = 0;
+	in_mousecmd.upmove = 0;
 }
 
 
 void IN_ClearMouseState (void)
 {
-	in_mx = in_my = 0;
 	mouse_oldbuttonstate = 0;
 	mstate_di = 0;
 }
@@ -171,28 +151,14 @@ static DWORD di_MouseButtons[NUM_DI_MBUTTONS] =
 	DIMOFS_BUTTON7
 };
 
-void IN_MouseEvent (int mstate)
-{
-	if (in_mouseacquired)
-	{
-		// we support 5 mouse buttons and we check them all
-		for (int i = 0; i < NUM_DI_MBUTTONS; i++)
-		{
-			if ((mstate & (1 << i)) && !(mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, true);
-			if (!(mstate & (1 << i)) && (mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, false);
-		}
-
-		mouse_oldbuttonstate = mstate;
-	}
-}
-
 
 void IN_ReadDirectInputMessages (void)
 {
 	if (in_mouseacquired)
 	{
-		int mx = 0;
-		int my = 0;
+		// always read even if we're not the active app so that we can clear the buffers properly
+		float mx = 0;
+		float my = 0;
 		extern double last_inputtime;
 
 		for (int NumMouseEvents = 0; ; NumMouseEvents++)
@@ -216,11 +182,13 @@ void IN_ReadDirectInputMessages (void)
 			switch (di_MouseBuffer.dwOfs)
 			{
 			case DIMOFS_X:
-				mx += di_MouseBuffer.dwData;
+				// note - this is a dword so we need to cast to int for values < 0 to work
+				mx += (int) di_MouseBuffer.dwData;
 				break;
 
 			case DIMOFS_Y:
-				my += di_MouseBuffer.dwData;
+				// note - this is a dword so we need to cast to int for values < 0 to work
+				my += (int) di_MouseBuffer.dwData;
 				break;
 
 			case DIMOFS_Z:
@@ -261,12 +229,47 @@ void IN_ReadDirectInputMessages (void)
 			last_inputtime = realtime;
 		}
 
-		// fire any events that happened
-		IN_MouseEvent (mstate_di);
+		// only apply the move if active (if not active we still want to read it from dinput to clear the buffers)
+		if (ActiveApp && !Minimized)
+		{
+			// fire any events that happened
+			// we support 5 mouse buttons and we check them all
+			// (in theory we support 8 but > 5 needs driver support)
+			for (int i = 0; i < NUM_DI_MBUTTONS; i++)
+			{
+				if ((mstate_di & (1 << i)) && !(mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, true);
+				if (!(mstate_di & (1 << i)) && (mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, false);
+			}
 
-		// now store out the final movement for processing by the cmd
-		in_mx += mx;
-		in_my += my;
+			mouse_oldbuttonstate = mstate_di;
+
+			extern cvar_t scr_fov;
+
+			// this is just a rough scaling factor to bring directinput movement back up to the expected range
+			mx = mx * sensitivity.value * 1.5f;
+			my = my * sensitivity.value * 1.5f;
+
+			if (mx || my)
+			{
+				if ((in_strafe.state & 1) || (lookstrafe.value && mouselooking))
+					in_mousecmd.sidemove += m_side.value * mx;
+				else cl.viewangles[1] -= m_yaw.value * mx;
+
+				if (mouselooking && !(in_strafe.state & 1))
+				{
+					cl.viewangles[0] += m_pitch.value * my;
+					CL_BoundViewPitch (cl.viewangles);
+				}
+				else
+				{
+					if ((in_strafe.state & 1) && noclip_anglehack)
+						in_mousecmd.upmove -= m_forward.value * my;
+					else in_mousecmd.forwardmove -= m_forward.value * my;
+				}
+
+				SetCursorPos (window_center_x, window_center_y);
+			}
+		}
 	}
 }
 
@@ -354,7 +357,7 @@ Force_CenterView_f
 */
 void Force_CenterView_f (void)
 {
-	cl.viewangles[PITCH] = 0;
+	cl.viewangles[0] = 0;
 }
 
 
@@ -412,6 +415,7 @@ void IN_Init (void)
 
 	IN_UpdateClipCursor ();
 	IN_StartupJoystick ();
+	IN_StartupXInput ();
 }
 
 

@@ -34,11 +34,6 @@ typedef struct sizedef_s
 
 typedef struct viddef_s
 {
-	pixel_t			*colormap;		// 256 * VID_GRADES size
-	bool			fullbright[256];	// true if a colour at this index is fullbright
-	unsigned		rowbytes;	// may be > width if displayed in a window
-	float			aspect;		// width / height -- < 0 is taller than wide
-
 	sizedef_t		consize;	// further scaled by scr_conscale
 	sizedef_t		sbarsize;	// further scaled by scr_sbarscale
 	sizedef_t		menusize;	// further scaled by scr_menuscale

@@ -44,6 +44,8 @@ state bit 2 is edge triggered on the down to up transition
 ===============================================================================
 */
 
+void V_StopPitchDrift (void);
+
 cvar_t pq_moveup ("pq_moveup", 0.0f, CVAR_ARCHIVE);
 
 kbutton_t	in_mlook, in_klook;
@@ -141,7 +143,20 @@ void KeyUp (kbutton_t *b)
 void IN_KLookDown (void) {KeyDown (&in_klook);}
 void IN_KLookUp (void) {KeyUp (&in_klook);}
 void IN_MLookDown (void) {KeyDown (&in_mlook);}
-void IN_MLookUp (void) {KeyUp (&in_mlook);}
+
+void V_StartPitchDrift (void);
+
+void IN_MLookUp (void)
+{
+	extern bool mouselooking;
+
+	KeyUp (&in_mlook);
+
+	if (!mouselooking && lookspring.value)
+		V_StartPitchDrift ();
+}
+
+
 void IN_UpDown (void) {KeyDown (&in_up);}
 void IN_UpUp (void) {KeyUp (&in_up);}
 void IN_DownDown (void) {KeyDown (&in_down);}
@@ -325,14 +340,14 @@ void CL_BoundViewPitch (float *viewangles)
 {
 	if (cl_fullpitch.integer)
 	{
-		if (viewangles[PITCH] > 90) viewangles[PITCH] = 90;
-		if (viewangles[PITCH] < -90) viewangles[PITCH] = -90;
+		if (viewangles[0] > 90) viewangles[0] = 90;
+		if (viewangles[0] < -90) viewangles[0] = -90;
 	}
 	else
 	{
 		// cvarizing these was great, but it causes havoc on pq servers
-		if (viewangles[PITCH] > 80.0f) viewangles[PITCH] = 80.0f;
-		if (viewangles[PITCH] < -70.0f) viewangles[PITCH] = -70.0f;
+		if (viewangles[0] > 80.0f) viewangles[0] = 80.0f;
+		if (viewangles[0] < -70.0f) viewangles[0] = -70.0f;
 	}
 }
 
@@ -356,15 +371,16 @@ void CL_AdjustAngles (double frametime)
 
 	if (!(in_strafe.state & 1))
 	{
-		cl.viewangles[YAW] -= speed * cl_yawspeed.value * CL_KeyState (&in_right);
-		cl.viewangles[YAW] += speed * cl_yawspeed.value * CL_KeyState (&in_left);
-		cl.viewangles[YAW] = anglemod (cl.viewangles[YAW]);
+		cl.viewangles[1] -= speed * cl_yawspeed.value * CL_KeyState (&in_right);
+		cl.viewangles[1] += speed * cl_yawspeed.value * CL_KeyState (&in_left);
+		cl.viewangles[1] = anglemod (cl.viewangles[1]);
 	}
 
 	if (in_klook.state & 1)
 	{
-		cl.viewangles[PITCH] -= speed * cl_pitchspeed.value * CL_KeyState (&in_forward);
-		cl.viewangles[PITCH] += speed * cl_pitchspeed.value * CL_KeyState (&in_back);
+		V_StopPitchDrift ();
+		cl.viewangles[0] -= speed * cl_pitchspeed.value * CL_KeyState (&in_forward);
+		cl.viewangles[0] += speed * cl_pitchspeed.value * CL_KeyState (&in_back);
 	}
 
 	if (in_lookup.state & 1) up = CL_KeyState (&in_lookup); else up = 0;
@@ -372,14 +388,15 @@ void CL_AdjustAngles (double frametime)
 
 	if (up || down)
 	{
-		cl.viewangles[PITCH] -= speed * cl_pitchspeed.value * up;
-		cl.viewangles[PITCH] += speed * cl_pitchspeed.value * down;
+		V_StopPitchDrift ();
+		cl.viewangles[0] -= speed * cl_pitchspeed.value * up;
+		cl.viewangles[0] += speed * cl_pitchspeed.value * down;
 	}
 
 	CL_BoundViewPitch (cl.viewangles);
 
-	if (cl.viewangles[ROLL] > 50) cl.viewangles[ROLL] = 50;
-	if (cl.viewangles[ROLL] < -50) cl.viewangles[ROLL] = -50;
+	if (cl.viewangles[2] > 50) cl.viewangles[2] = 50;
+	if (cl.viewangles[2] < -50) cl.viewangles[2] = -50;
 }
 
 
@@ -447,6 +464,7 @@ void CL_SendMove (usercmd_t *cmd)
 	SZ_Init (buf, lag_data[lag_head & 31], sizeof (lag_data[lag_head & 31]));
 	lag_sendtime[(lag_head++) & 31] = realtime + (pq_lag.value / 1000.0f);
 
+	// this is just needed for pitch drifting
 	memcpy (&cl.cmd, cmd, sizeof (usercmd_t));
 
 	// send the movement message
@@ -552,15 +570,6 @@ void CL_InitInput (void)
 }
 
 
-void CL_ClearCmd (usercmd_t *cmd)
-{
-	cmd->forwardmove = 0;
-	cmd->sidemove = 0;
-	cmd->upmove = 0;
-	cmd->accumulated = false;
-}
-
-
 bool cl_pingqueued = false;
 bool cl_statusqueued = false;
 
@@ -585,19 +594,6 @@ void CL_CheckQueuedCommands (void)
 }
 
 
-cvar_t cl_moverebalance ("cl_moverebalance", 72.0f);
-
-void CL_RebalanceMove (usercmd_t *basecmd, usercmd_t *newcmd, double frametime)
-{
-	// rebalance movement to 72 FPS (fixme - make this user-configurable) (done)
-	double moveadjust = frametime * cl_moverebalance.value;
-
-	basecmd->forwardmove += newcmd->forwardmove * moveadjust;
-	basecmd->sidemove += newcmd->sidemove * moveadjust;
-	basecmd->upmove += newcmd->upmove * moveadjust;
-}
-
-
 /*
 ================
 CL_BaseMove
@@ -613,40 +609,32 @@ void CL_BaseMove (usercmd_t *cmd, double frametime)
 
 	CL_AdjustAngles (frametime);
 
-	// just accumulating to cmd causes differences in acceleration so instead we accumulate to 
-	// a new usercmd_t, adjust that for frametime, then add the adjusted move to the original move
-	usercmd_t basecmd;
-	CL_ClearCmd (&basecmd);
-
 	// fixme - adjust these speeds for frametime?
 	if (in_strafe.state & 1)
 	{
-		basecmd.sidemove += cl_sidespeed.value * CL_KeyState (&in_right);
-		basecmd.sidemove -= cl_sidespeed.value * CL_KeyState (&in_left);
+		cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_right);
+		cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_left);
 	}
 
-	basecmd.sidemove += cl_sidespeed.value * CL_KeyState (&in_moveright);
-	basecmd.sidemove -= cl_sidespeed.value * CL_KeyState (&in_moveleft);
+	cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_moveright);
+	cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_moveleft);
 
-	basecmd.upmove += cl_upspeed.value * CL_KeyState (&in_up);
-	basecmd.upmove -= cl_upspeed.value * CL_KeyState (&in_down);
+	cmd->upmove += cl_upspeed.value * CL_KeyState (&in_up);
+	cmd->upmove -= cl_upspeed.value * CL_KeyState (&in_down);
 
 	if (!(in_klook.state & 1))
 	{
-		basecmd.forwardmove += cl_forwardspeed.value * CL_KeyState (&in_forward);
-		basecmd.forwardmove -= cl_backspeed.value * CL_KeyState (&in_back);
+		cmd->forwardmove += cl_forwardspeed.value * CL_KeyState (&in_forward);
+		cmd->forwardmove -= cl_backspeed.value * CL_KeyState (&in_back);
 	}
 
 	// adjust for speed key
 	if (in_speed.state & 1)
 	{
-		basecmd.forwardmove *= cl_movespeedkey.value;
-		basecmd.sidemove *= cl_movespeedkey.value;
-		basecmd.upmove *= cl_movespeedkey.value;
+		cmd->forwardmove *= cl_movespeedkey.value;
+		cmd->sidemove *= cl_movespeedkey.value;
+		cmd->upmove *= cl_movespeedkey.value;
 	}
-
-	// rebalance the move to 72 FPS
-	CL_RebalanceMove (cmd, &basecmd, frametime);
 }
 
 
@@ -657,56 +645,38 @@ CL_SendCmd
 the functions called by this are misnamed as all that they do is send previously buffered commands
 =================
 */
-usercmd_t cl_usercommand;
+void IN_JoyMove (usercmd_t *cmd);
+void IN_MouseMove (usercmd_t *cmd);
+void IN_ControllerMove (usercmd_t *cmd);
 
-
-void CL_AccumulateCmd (void)
+// to be fixed - cl.viewangles needs to update every frame even if we don't send
+// the moves only need to go if we do send
+void CL_SendCmd (double frametime)
 {
-	// note - this uses the time from the previous frame because movements will be in respect of the previous frame
 	if (cls.state != ca_connected)
-	{
-		CL_ClearCmd (&cl_usercommand);
 		return;
-	}
 
 	if (cls.signon == SIGNON_CONNECTED)
 	{
-		// get basic movement from keyboard
-		CL_BaseMove (&cl_usercommand, cl.frametime);
+		usercmd_t cl_usercommand = {0, 0, 0};
+		extern cvar_t host_timescale;
 
-		// allow mice or other external controllers to add to the move
-		IN_MouseMove (&cl_usercommand, cl.frametime);
-		IN_JoyMove (&cl_usercommand, cl.frametime);
+		if (host_timescale.value > 0)
+			frametime *= host_timescale.value;
 
-		cl_usercommand.accumulated = true;
+		CL_BaseMove (&cl_usercommand, frametime);
+		IN_MouseMove (&cl_usercommand);
+		IN_JoyMove (&cl_usercommand);
+		IN_ControllerMove (&cl_usercommand);
+		CL_SendMove (&cl_usercommand);
 
-		return;
+		/*
+		if (key_dest == key_game)
+		Con_Printf ("%f %f %f\n",
+			cl.viewangles[0],
+			cl.viewangles[1], cl.viewangles[2]);
+			*/
 	}
-
-	CL_ClearCmd (&cl_usercommand);
-}
-
-
-void CL_SendCmd (void)
-{
-	if (cls.state != ca_connected)
-	{
-		CL_ClearCmd (&cl_usercommand);
-		return;
-	}
-
-	if (cls.signon == SIGNON_CONNECTED)
-	{
-		// send the unreliable message (only send if there was an actual move (sometimes there is none)
-		if (cl_usercommand.accumulated)
-		{
-			CL_SendMove (&cl_usercommand);
-			cl_usercommand.accumulated = false;
-		}
-	}
-
-	// clear the command after sending (or if we're not sending)
-	CL_ClearCmd (&cl_usercommand);
 
 	if (cls.demoplayback)
 	{

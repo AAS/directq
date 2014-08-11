@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void R_RenderView (double frametime);
 void Menu_PrintCenterWhite (int cy, char *str);
 void Menu_PrintWhite (int cx, int cy, char *str);
-void D3D_GenerateTextureList (void);
 
 /*
 
@@ -449,9 +448,6 @@ static void SCR_CalcRefdef (void)
 	// rebuild world surfaces
 	d3d_RenderDef.rebuildworld = true;
 
-	// yeah, and fuck you too
-	if (kurok) Cvar_Set (&scr_viewsize, scr_viewsize.value - 10);
-
 	// bound viewsize
 	if (scr_viewsize.value < 100) Cvar_Set ("viewsize", "100");
 	if (scr_viewsize.value > 120) Cvar_Set ("viewsize", "120");
@@ -471,15 +467,15 @@ static void SCR_CalcRefdef (void)
 	if (cl_sbar.integer) sb_lines = 0;
 
 	// bound console scale
-	if (gl_conscale.value < 0) Cvar_Set (&gl_conscale, "0");
-	if (gl_conscale.value > 1) Cvar_Set (&gl_conscale, "1");
-	if (scr_sbarscale.value < 1) Cvar_Set (&scr_sbarscale, "1");
-	if (scr_menuscale.value < 1) Cvar_Set (&scr_menuscale, "1");
-	if (scr_conscale.value < 1) Cvar_Set (&scr_conscale, "1");
+	if (gl_conscale.value < 0) Cvar_Set (&gl_conscale, 0.0f);
+	if (gl_conscale.value > 1) Cvar_Set (&gl_conscale, 1.0f);
+	if (scr_sbarscale.value < 1) Cvar_Set (&scr_sbarscale, 1.0f);
+	if (scr_menuscale.value < 1) Cvar_Set (&scr_menuscale, 1.0f);
+	if (scr_conscale.value < 1) Cvar_Set (&scr_conscale, 1.0f);
 
 	// adjust a basesize.width and basesize.height to match the mode aspect
 	// they should be the same aspect as the mode, with width never less than 640 and height never less than 480
-	sizedef_t basesize = {480 * d3d_CurrentMode.Width / d3d_CurrentMode.Height, 480};
+	sizedef_t basesize = {(480 * d3d_CurrentMode.Width) / d3d_CurrentMode.Height, 480};
 
 	// bring it up to 640
 	if (basesize.width < 640)
@@ -517,46 +513,7 @@ static void SCR_CalcRefdef (void)
 	vid.ref3dsize.width = d3d_CurrentMode.Width;
 	vid.ref3dsize.height = d3d_CurrentMode.Height - vid.sbar_lines;
 
-#if 1
 	SCR_SetFOV (&r_refdef.fov_x, &r_refdef.fov_y, scr_fov.value, vid.ref3dsize.width, vid.ref3dsize.height, false);
-	// Con_Printf ("aspect %ix%i  fovx %f  fovy %f\n", vid.ref3dsize.width, vid.ref3dsize.height, r_refdef.fov_x, r_refdef.fov_y);
-#else
-	// x fov is initially the selected value
-	r_refdef.fov_x = scr_fov.value;
-
-	if (scr_fov.integer == 90 || !scr_fovcompat.integer)
-	{
-		float aspect = (float) vid.ref3dsize.width / (float) vid.ref3dsize.height;
-
-		if (aspect > (4.0f / 3.0f))
-		{
-			// calculate y fov as if the screen was 640 x 432; this ensures that the top and bottom
-			// doesn't get clipped off if we have a widescreen display (also keeps the same amount of the viewmodel visible)
-			r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, 640, 432);
-
-			// now recalculate fov_x so that it's correctly proportioned for fov_y
-			r_refdef.fov_x = SCR_CalcFovX (r_refdef.fov_y, vid.ref3dsize.width, vid.ref3dsize.height);
-
-			// Con_Printf ("widescreen\n");
-		}
-		else
-		{
-			// readjust height so that it's correctly proportioned
-			float fovheight = (640.0f * aspect) / (4.0f / 3.0f);
-
-			// calculate y fov for the new height; x fov stays as is
-			r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, fovheight, 432);
-
-			// Con_Printf ("tallscreen\n");
-		}
-	}
-	else
-	{
-		// the user wants their own FOV.  this may not be correct in terms of yfov, but it's at least
-		// consistent with GLQuake and other engines
-		r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, vid.ref3dsize.width, vid.ref3dsize.height);
-	}
-#endif
 }
 
 
@@ -661,7 +618,6 @@ void SCR_DrawPause (void)
 	extern qpic_t *gfx_pause_lmp;
 
 	if (!scr_showpause.value) return;
-
 	if (!cl.paused) return;
 
 	D3DDraw_SetSize (&vid.sbarsize);
@@ -727,7 +683,7 @@ void SCR_DrawConsole (void)
 {
 	D3DDraw_SetSize (&vid.consize);
 
-	if (scr_con_current)
+	if (scr_con_current > 0)
 	{
 		Con_DrawConsole ((vid.consize.height * scr_con_current) / 100, true);
 		clearconsole = 0;
@@ -959,6 +915,9 @@ void SCR_WriteSurfaceToPCX (char *filename, LPDIRECT3DSURFACE9 rts)
 	}
 
 	// unpack to byte * for further compression
+	// this is needed because the above code will only RLE the 32-bit source data; after palettizing
+	// row blocks which may not (and most likely will not) RLE in the source may yet RLE in the 8-bit
+	// destination data (i.e. 2 different 32-bit colours may convert to the same 8-bit palette index)
 	byte *pbuf = (byte *) MainHunk->Alloc (surfdesc.Width * surfdesc.Height * 2);
 	byte *fin = (byte *) &pcx->data;
 	byte *enddata = pack;
@@ -1056,14 +1015,14 @@ void SCR_WriteSurfaceToDDS (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fm
 
 		if (FAILED (hr))
 		{
-			Con_Printf ("SCR_WriteSurfaceToDDS: Failed to get backbuffer description\n");
+			Con_Printf ("SCR_WriteSurfaceToDDS: Failed to get surface description\n");
 			return;
 		}
 
 		// create a surface to copy to (ensure the dest surface is the correct format!!!)
 		hr = d3d_Device->CreateOffscreenPlainSurface
 		(
-		// DXT formats don't work with pool_systemmem... ???
+			// DXT formats don't work with pool_systemmem... ???
 			surfdesc.Width,
 			surfdesc.Height,
 			fmt,
@@ -1083,7 +1042,7 @@ void SCR_WriteSurfaceToDDS (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fm
 
 		if (FAILED (hr))
 		{
-			Con_Printf ("SCR_WriteSurfaceToDDS: Failed to copy backbuffer data\n");
+			Con_Printf ("SCR_WriteSurfaceToDDS: Failed to copy surface\n");
 			surf->Release ();
 			return;
 		}
@@ -1227,6 +1186,7 @@ void SCR_ScreenShot_f (void)
 
 	char		checkname[MAX_PATH];
 	int			i;
+	extern bool vid_nopresent;
 
 	// try the screenshot format
 	if (scr_screenshotformat.string[0] == '.')
@@ -1312,93 +1272,101 @@ void SCR_ScreenShot_f (void)
 	}
 
 	// run a screen refresh
+	// suppress present to overdraw the current back buffer and prevent screen flicker while this is happening
+	vid_nopresent = true;
 	SCR_UpdateScreen (0);
 
 	// the surface we'll use
 	LPDIRECT3DSURFACE9 Surf = NULL;
 
 	// get the backbuffer (note - this might be a render to texture surf if it's underwater!!!)
-	d3d_Device->GetRenderTarget (0, &Surf);
-
-	if (scr_screenshot_gammaboost.value != 1.0f)
+	// the previous version round-tripped through way too many surfaces and was slow as hell; this one is fast
+	// (this code should really move to WriteSurfaceToTGA)
+	if (SUCCEEDED (d3d_Device->GetRenderTarget (0, &Surf)))
 	{
-		// copy off the surface, change gamma
-		byte gammatab[256];
-
-		// build a gamma table
-		for (int i = 0; i < 256; i++)
-		{
-			float f = pow ((i + 1) / 256.0f, scr_screenshot_gammaboost.value);
-			float inf = f * 255 + 0.5;
-
-			if (inf < 0) inf = 0;
-			if (inf > 255) inf = 255;
-
-			gammatab[i] = inf;
-		}
-
-		LPDIRECT3DSURFACE9 osps = NULL;
 		D3DSURFACE_DESC surfdesc;
-		D3DLOCKED_RECT lockrect;
+		LPDIRECT3DSURFACE9 Copy = NULL;
 
-		hr = Surf->GetDesc (&surfdesc);
-
-		if (SUCCEEDED (hr))
+		if (SUCCEEDED (Surf->GetDesc (&surfdesc)))
 		{
-			hr = d3d_Device->CreateOffscreenPlainSurface
-				(surfdesc.Width,
-				surfdesc.Height,
-				D3DFMT_X8R8G8B8,
-				D3DPOOL_SCRATCH,
-				&osps,
-				NULL);
-
-			if (SUCCEEDED (hr))
+			if (SUCCEEDED (d3d_Device->CreateOffscreenPlainSurface (surfdesc.Width, surfdesc.Height, surfdesc.Format, D3DPOOL_SYSTEMMEM, &Copy, NULL)))
 			{
-				// copy from the rendertarget to system memory
-				hr = D3DXLoadSurfaceFromSurface (osps, NULL, NULL, Surf, NULL, NULL, D3DX_FILTER_NONE, 0);
-
-				if (SUCCEEDED (hr))
+				if (SUCCEEDED (d3d_Device->GetRenderTargetData (Surf, Copy)))
 				{
-					hr = osps->LockRect (&lockrect, NULL, d3d_GlobalCaps.DefaultLock);
-
-					if (SUCCEEDED (hr))
+					if (ssfmt == D3DXIFF_TGA)
 					{
-						byte *data = (byte *) lockrect.pBits;
+						D3DLOCKED_RECT lockrect;
 
-						for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++, data += 4)
+						if (SUCCEEDED (Copy->LockRect (&lockrect, NULL, d3d_GlobalCaps.DynamicLock)))
 						{
-							data[0] = gammatab[data[0]];
-							data[1] = gammatab[data[1]];
-							data[2] = gammatab[data[2]];
+							byte *rgba = (byte *) lockrect.pBits;
+							FILE *f = fopen (checkname, "wb");
+
+							if (f)
+							{
+								byte buffer[18];
+
+								memset (buffer, 0, 18);
+								buffer[2] = 2;		// uncompressed type
+								buffer[12] = surfdesc.Width & 255;
+								buffer[13] = surfdesc.Width >> 8;
+								buffer[14] = surfdesc.Height & 255;
+								buffer[15] = surfdesc.Height >> 8;
+								buffer[16] = 24;	// pixel size
+								buffer[17] = 0x20;	// flip
+
+								fwrite (buffer, 18, 1, f);
+
+								// copy off the surface, change gamma
+								byte gammatab[256];
+
+								// build a gamma table
+								for (int i = 0; i < 256; i++)
+								{
+									float f = pow ((i + 1) / 256.0f, scr_screenshot_gammaboost.value);
+									float inf = f * 255 + 0.5;
+
+									if (inf < 0) inf = 0;
+									if (inf > 255) inf = 255;
+
+									gammatab[i] = inf;
+								}
+
+								for (int h = 0; h < surfdesc.Height; h++)
+								{
+									byte *out = rgba;
+
+									for (int w = 0; w < surfdesc.Width; w++, out += 4)
+									{
+										out[0] = gammatab[out[0]];
+										out[1] = gammatab[out[1]];
+										out[2] = gammatab[out[2]];
+
+										fwrite (out, 3, 1, f);
+									}
+
+									rgba += lockrect.Pitch;
+								}
+
+								fclose (f);
+							}
+
+							Copy->UnlockRect ();
 						}
-
-						osps->UnlockRect ();
 					}
+					else if (ssfmt == D3DXIFF_DDS)
+						SCR_WriteSurfaceToDDS (checkname, Copy, D3DFMT_DXT1);
+					else if (ssfmt == D3DXIFF_FORCE_DWORD)
+						SCR_WriteSurfaceToPCX (checkname, Copy);	// hack for PCX
+					else D3DXSaveSurfaceToFile (checkname, ssfmt, Copy, NULL, NULL);
+				}
 
-					Surf->Release ();
-					Surf = osps;
-				}
-				else
-				{
-					osps->Release ();
-				}
+				Copy->Release ();
 			}
 		}
+
+		Surf->Release ();
 	}
-
-	// write to file
-	// d3dx doesn't support tga writes (BASTARDS) so we made our own
-	if (ssfmt == D3DXIFF_TGA)
-		SCR_WriteSurfaceToTGA (checkname, Surf, D3DFMT_X8R8G8B8);
-	else if (ssfmt == D3DXIFF_DDS)
-		SCR_WriteSurfaceToDDS (checkname, Surf, D3DFMT_DXT1);
-	else if (ssfmt == D3DXIFF_FORCE_DWORD)
-		SCR_WriteSurfaceToPCX (checkname, Surf);	// hack for PCX
-	else D3DXSaveSurfaceToFile (checkname, ssfmt, Surf, NULL, NULL);
-
-	// not releasing is a memory leak!!!
-	Surf->Release ();
 
 	// report
 	Con_Printf ("Wrote %s\n", checkname);
@@ -1406,6 +1374,7 @@ void SCR_ScreenShot_f (void)
 
 
 void Draw_InvalidateMapshot (void);
+int D3DRTT_RescaleDimension (int dim);
 
 void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 {
@@ -1413,6 +1382,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	S_ClearBuffer ();
 
 	char workingname[256];
+	extern bool vid_nopresent;
 
 	// copy the name out so that we can safely modify it
 	Q_strncpy (workingname, shotname, 255);
@@ -1421,9 +1391,6 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	COM_DefaultExtension (workingname, ".blah");
 
 	// now put the correct extension on it
-	// note - D3DXSaveTextureToFile won't let us write a TGA so we'll write a BMP instead.  we'll still attempt to load TGAs though...
-	// update - TGAs work now.
-	// update 2 - went back to BMP - TGA went slightly iffy, can't be bothered fixing it right now
 	for (int c = strlen (workingname) - 1; c; c--)
 	{
 		if (workingname[c] == '.')
@@ -1446,160 +1413,70 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 		}
 	}
 
-	// new mapshot code - the previous was vile, and caused things to explode pretty dramatically when saving underwater.
-	// make viewsize go fullscreen
-	float vsv = scr_viewsize.value;
-	scr_viewsize.value = 120;
+	// go into mapshot mode and do a screen refresh to get rid of any UI/etc
+	// suppress present to overdraw the current back buffer and prevent screen flicker while this is happening
+	scr_drawmapshot = true;
+	vid_nopresent = true;
+	SCR_UpdateScreen (0);
+	scr_drawmapshot = false;
 
-	// the surfaces we'll use
-	LPDIRECT3DSURFACE9 d3d_CurrentRenderTarget;
-	LPDIRECT3DSURFACE9 d3d_MapshotRenderSurf;
-	LPDIRECT3DSURFACE9 d3d_MapshotFinalSurf;
+	LPDIRECT3DSURFACE9 d3d_CurrentRenderTarget = NULL;
+	LPDIRECT3DTEXTURE9 d3d_MapshotDestTexture = NULL;
+	LPDIRECT3DSURFACE9 d3d_MapshotDestSurface = NULL;
 
 	// store the current render target
-	hr = d3d_Device->GetRenderTarget (0, &d3d_CurrentRenderTarget);
-
-	if (FAILED (hr))
+	if (SUCCEEDED (d3d_Device->GetRenderTarget (0, &d3d_CurrentRenderTarget)))
 	{
-		Con_Printf ("SCR_Mapshot_f: failed to get current render target surface\n");
-		return;
-	}
+		D3DSURFACE_DESC desc;
 
-	extern D3DPRESENT_PARAMETERS d3d_PresentParams;
-
-	// create a surface for the mapshot to render to
-	hr = d3d_Device->CreateRenderTarget (d3d_CurrentMode.Width,
-		d3d_CurrentMode.Height,
-		D3DFMT_X8R8G8B8,
-		d3d_PresentParams.MultiSampleType,
-		d3d_PresentParams.MultiSampleQuality,
-		FALSE,
-		&d3d_MapshotRenderSurf,
-		NULL);
-
-	if (FAILED (hr))
-	{
-		SAFE_RELEASE (d3d_CurrentRenderTarget);
-		Con_Printf ("SCR_Mapshot_f: failed to create a render target surface\n");
-		return;
-	}
-
-	// create a surface for the final mapshot destination
-	d3d_Device->CreateRenderTarget (128,
-		128,
-		D3DFMT_X8R8G8B8,
-		d3d_PresentParams.MultiSampleType,
-		d3d_PresentParams.MultiSampleQuality,
-		FALSE,
-		&d3d_MapshotFinalSurf,
-		NULL);
-
-	if (FAILED (hr))
-	{
-		SAFE_RELEASE (d3d_CurrentRenderTarget);
-		SAFE_RELEASE (d3d_MapshotRenderSurf);
-		Con_Printf ("SCR_Mapshot_f: failed to create a render target surface\n");
-		return;
-	}
-
-	// set the render target for the mapshot
-	hr = d3d_Device->SetRenderTarget (0, d3d_MapshotRenderSurf);
-
-	if (FAILED (hr))
-	{
-		SAFE_RELEASE (d3d_CurrentRenderTarget);
-		SAFE_RELEASE (d3d_MapshotRenderSurf);
-		Con_Printf ("SCR_Mapshot_f: failed to set render target surface\n");
-		return;
-	}
-
-	// build the directory
-	for (int i = strlen (workingname) - 1; i; i--)
-	{
-		if (workingname[i] == '/' || workingname[i] == '\\')
+		if (SUCCEEDED (d3d_CurrentRenderTarget->GetDesc (&desc)))
 		{
-			char c = workingname[i];
-			workingname[i] = 0;
+			// stretchrect restrictions enforce us to create this as a rendertarget
+			if (SUCCEEDED (d3d_Device->CreateTexture (128, 128, 1, D3DUSAGE_RENDERTARGET, desc.Format, D3DPOOL_DEFAULT, &d3d_MapshotDestTexture, NULL)))
+			{
+				if (SUCCEEDED (d3d_MapshotDestTexture->GetSurfaceLevel (0, &d3d_MapshotDestSurface)))
+				{
+					int right = vid.ref3dsize.width, bottom = vid.ref3dsize.height;
 
-			Sys_mkdir (workingname);
-			workingname[i] = c;
-			break;
+					// depending on the mode our source rect may be different sized
+					if (d3d_RenderDef.RTT)
+					{
+						right = D3DRTT_RescaleDimension (vid.ref3dsize.width);
+						bottom = D3DRTT_RescaleDimension (vid.ref3dsize.height);
+					}
+
+					RECT src = {0, 0, right, bottom};
+					RECT dst = {0, 0, 128, 128};
+
+					// resize the src rect to square
+					if (right > bottom)
+					{
+						src.left = (right - bottom) >> 1;
+						src.right = src.left + bottom;
+					}
+					else if (bottom > right)
+					{
+						src.top = (bottom - right) >> 1;
+						src.right = src.top + right;
+					}
+
+					if (SUCCEEDED (d3d_Device->StretchRect (d3d_CurrentRenderTarget, &src, d3d_MapshotDestSurface, &dst, D3DTEXF_LINEAR)))
+					{
+						// fixme - this is the slow writer
+						SCR_WriteSurfaceToTGA (workingname, d3d_MapshotDestSurface, D3DFMT_X8R8G8B8);
+						if (report) Con_Printf ("Wrote mapshot \"%s\"\n", workingname);
+					}
+				}
+			}
 		}
 	}
 
-	// go into mapshot mode
-	scr_drawmapshot = true;
-
-	// do a screen refresh to get rid of any UI/etc
-	SCR_UpdateScreen (0);
-
-	// sample the rendered surf down to 128 * 128 for the correct mapshot sise
-	if (d3d_CurrentMode.Width > d3d_CurrentMode.Height)
-	{
-		// setup source rect
-		RECT srcrect;
-
-		// clip the rectangle
-		srcrect.top = 0;
-		srcrect.bottom = d3d_CurrentMode.Height;
-		srcrect.left = (d3d_CurrentMode.Width - d3d_CurrentMode.Height) / 2;
-		srcrect.right = srcrect.left + d3d_CurrentMode.Height;
-
-		// copy the clipped rect
-		d3d_Device->StretchRect (d3d_MapshotRenderSurf, &srcrect, d3d_MapshotFinalSurf, NULL, D3DTEXF_LINEAR);
-	}
-	else if (d3d_CurrentMode.Width == d3d_CurrentMode.Height)
-	{
-		// straight copy of full source rect
-		d3d_Device->StretchRect (d3d_MapshotRenderSurf, NULL, d3d_MapshotFinalSurf, NULL, D3DTEXF_LINEAR);
-	}
-	else
-	{
-		// setup source rect
-		RECT srcrect;
-
-		// clip the rectangle
-		srcrect.left = 0;
-		srcrect.right = d3d_CurrentMode.Width;
-		srcrect.top = (d3d_CurrentMode.Height - d3d_CurrentMode.Width) / 2;
-		srcrect.bottom = srcrect.top + d3d_CurrentMode.Width;
-
-		// copy the clipped rect
-		d3d_Device->StretchRect (d3d_MapshotRenderSurf, &srcrect, d3d_MapshotFinalSurf, NULL, D3DTEXF_LINEAR);
-	}
-
-	// save the surface out to file (use TGA)
-	SCR_WriteSurfaceToTGA (workingname, d3d_MapshotFinalSurf, D3DFMT_X8R8G8B8);
-
-	// reset to the original render target
-	hr = d3d_Device->SetRenderTarget (0, d3d_CurrentRenderTarget);
-
-	if (FAILED (hr))
-	{
-		// this is an error condition as we can't recover gracefully or just do nothing
-		SAFE_RELEASE (d3d_CurrentRenderTarget);
-		SAFE_RELEASE (d3d_MapshotFinalSurf);
-		SAFE_RELEASE (d3d_MapshotRenderSurf);
-		Sys_Error ("SCR_Mapshot_f: failed to restore render target surface\n");
-		return;
-	}
-
-	// not releasing is a memory leak!!!
-	d3d_CurrentRenderTarget->Release ();
-	d3d_MapshotFinalSurf->Release ();
-	d3d_MapshotRenderSurf->Release ();
-
-	// restore old viewsize
-	scr_viewsize.value = vsv;
-
-	// exit mapshot mode
-	scr_drawmapshot = false;
+	SAFE_RELEASE (d3d_MapshotDestSurface);
+	SAFE_RELEASE (d3d_MapshotDestTexture);
+	SAFE_RELEASE (d3d_CurrentRenderTarget);
 
 	// invalidate the cached mapshot
 	Draw_InvalidateMapshot ();
-
-	// done
-	if (report) Con_Printf ("Wrote mapshot \"%s\"\n", workingname);
 }
 
 
@@ -2062,8 +1939,6 @@ void SCR_UpdateScreen (double frametime)
 		// now take the mapshot; don't overwrite if one is already there
 		SCR_Mapshot_f (va ("%s/%s", com_gamedir, cl.worldmodel->name), false, false);
 	}
-
-	D3D_GenerateTextureList ();
 
 	if (cls.signon == SIGNON_CONNECTED)
 	{

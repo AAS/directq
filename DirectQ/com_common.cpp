@@ -21,7 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "unzip.h"
 
-
 // used for generating md5 hashes
 #include <wincrypt.h>
 
@@ -96,7 +95,7 @@ char	**com_argv;
 #define CMDLINE_LENGTH	256
 char	com_cmdline[CMDLINE_LENGTH];
 
-bool		standard_quake = true, rogue = false, hipnotic = false, quoth = false, nehahra = false, kurok = false;
+bool		standard_quake = true, rogue = false, hipnotic = false, quoth = false, nehahra = false;
 
 /*
 ============================================================================

@@ -19,7 +19,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // refresh.h -- public interface to refresh functions
 
-#define	MAXCLIPPLANES	11
+typedef struct efrag_s
+{
+	struct mleaf_s		*leaf;
+	struct efrag_s		*leafnext;
+	struct entity_s		*entity;
+	struct efrag_s		*entnext;
+} efrag_t;
+
 
 #define	TOP_RANGE		16			// soldier uniform colors
 #define	BOTTOM_RANGE	96
@@ -29,13 +36,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 typedef struct aliascache_s
 {
 	// all the info we need to draw the model is here
-	float blend[2];
-
-	struct image_s *teximage;
-	struct image_s *lumaimage;
-	struct image_s *cmapimage;
-	vec3_t lightspot;
-	struct mplane_s *lightplane;
+	LPDIRECT3DTEXTURE9 teximage;
+	LPDIRECT3DTEXTURE9 lumaimage;
+	LPDIRECT3DTEXTURE9 cmapimage;
 } aliasstate_t;
 
 
@@ -44,13 +47,12 @@ typedef struct aliascache_s
 #define LERP_RESETANIM2	(1 << 2) // set this and previous flag to disable anim lerping for two anim frames
 #define LERP_RESETMOVE	(1 << 3) // disable movement lerping until next origin/angles change
 #define LERP_FINISH		(1 << 4) // use lerpfinish time from server update instead of assuming interval of 0.1
-
-#define LERP_CURR	0
-#define LERP_LAST	1
+#define LERP_RESETLIGHT	(1 << 5) // begin accumulating light
 
 typedef struct entity_s
 {
 	vec3_t				mins, maxs;		// bounding box used to cull the entity
+	float		sphere[4];
 	vec3_t				trueorigin;
 	vec3_t				bboxscale;
 
@@ -73,16 +75,11 @@ typedef struct entity_s
 	struct efrag_s			*efrag;
 	int						frame;
 	float					syncbase;		// for client-side animations
-	float					skinbase;
-	float					posebase;
 	int						effects;		// light, particals, etc
 	int						skinnum;		// for Alias models
 	int						visframe;		// last frame this entity was found in an active leaf
 	int						relinkframe;	// static entities only; frame when added to the visedicts list
 	vec3_t					modelorg;		// relative to r_origin
-
-	// allocation sequence number in the current map
-	int						allocnum;
 
 	// player skins
 	int						playerskin;
@@ -99,21 +96,26 @@ typedef struct entity_s
 
 	// interpolation
 	float		framestarttime;
-	int			lerppose[2];
+	int			currpose;
+	int			lastpose;
+	float		poseblend;
 
 	float		translatestarttime;
-	vec3_t		lerporigin[2];
+	float		currorigin[3];
+	float		lastorigin[3];
 
 	float		rotatestarttime;
-	vec3_t		lerpangles[2];
+	float		currangles[3];
+	float		lastangles[3];
 
 	// allows an alpha value to be assigned to any entity
 	int			alphaval;
 	float		lerpinterval;
 	int			lerpflags;
 
-	// light averaging
+	// light for MDLs
 	float		shadelight[3];
+	float		shadevector[3];
 
 	// false if the entity is to be subjected to bbox culling
 	bool		nocullbox;
@@ -121,16 +123,14 @@ typedef struct entity_s
 	// distance from client (for depth sorting)
 	float		dist;
 
-	struct mnode_s *topnode;
-
-	// static entities only
 	bool isStatic;
+
 	struct msurface_s *lightsurf;
 	float lightspot[3];
+	struct mplane_s *lightplane;
 
 	// the matrix used for transforming this entity
-	// D3DXMATRIX in *incredibly* unhappy living in an entity_t struct...
-	D3DMATRIX		matrix;
+	QMATRIX			matrix;
 
 	// check transforms for all model types
 	bool			rotated;

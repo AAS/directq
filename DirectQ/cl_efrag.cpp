@@ -27,20 +27,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void D3D_AddVisEdict (entity_t *ent);
 
 
-typedef struct efrag_s
-{
-	struct entity_s		*entity;
-	struct efrag_s		*leafnext;
-} efrag_t;
-
-
 // let's get rid of some more globals...
 typedef struct r_efragdef_s
 {
+	efrag_t		**lastlink;
 	vec3_t		mins, maxs;
+	float		sphere[4];
 	entity_t	*addent;
-
-	mnode_t	*topnode;
 } r_efragdef_t;
 
 
@@ -51,31 +44,28 @@ void R_SplitEntityOnNode (mnode_t *node, r_efragdef_t *ed)
 	// add an efrag if the node is a leaf
 	if (node->contents < 0)
 	{
-		if (!ed->topnode)
-			ed->topnode = node;
-
 		mleaf_t *leaf = (mleaf_t *) node;
 
 		// efrags can be just allocated as required without needing to be pulled from a list (cleaner)
-		efrag_t *ef = (efrag_t *) ClientZone->Alloc (sizeof (efrag_t));
+		efrag_t *ef = (efrag_t *) RenderZone->Alloc (sizeof (efrag_t));
+
 		ef->entity = ed->addent;
 
+		// add the entity link
+		ed->lastlink[0] = ef;
+		ed->lastlink = &ef->entnext;
+		ef->entnext = NULL;
+
 		// set the leaf links
+		ef->leaf = leaf;
 		ef->leafnext = leaf->efrags;
 		leaf->efrags = ef;
 
 		return;
 	}
 
-	int sides = BOX_ON_PLANE_SIDE (ed->mins, ed->maxs, node->plane);
-
-	if (sides == 3)
-	{
-		// split on this plane
-		// if this is the first splitter of this model, remember it
-		if (!ed->topnode)
-			ed->topnode = node;
-	}
+	// split on this plane
+	int sides = SphereOnPlaneSide (ed->sphere, ed->sphere[3], node->plane);
 
 	// recurse down the contacted sides
 	if (sides & 1) R_SplitEntityOnNode (node->children[0], ed);
@@ -94,15 +84,14 @@ void R_AddEfrags (entity_t *ent)
 	r_efragdef_t ed;
 
 	// init the efrag definition struct so that we can avoid more ugly globals
-	ed.topnode = NULL;
 	ed.addent = ent;
+	ed.lastlink = &ent->efrag;
 
 	VectorAdd (ent->origin, ent->model->mins, ed.mins);
 	VectorAdd (ent->origin, ent->model->maxs, ed.maxs);
 
+	Mod_SphereFromBounds (ed.mins, ed.maxs, ed.sphere);
 	R_SplitEntityOnNode (cl.worldmodel->brushhdr->nodes, &ed);
-
-	ent->topnode = ed.topnode;
 }
 
 
@@ -125,6 +114,7 @@ void R_StoreEfrags (efrag_t **ppefrag)
 		case mod_alias:
 		case mod_brush:
 		case mod_sprite:
+		case mod_iqm:
 			// add it to the visible edicts list
 			D3D_AddVisEdict (pefrag->entity);
 			break;

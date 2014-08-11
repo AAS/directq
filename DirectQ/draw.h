@@ -37,7 +37,7 @@ void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alp
 void Draw_FadeScreen (int alpha);
 void Draw_String (int x, int y, char *str, int ofs = 0);
 void Draw_TextBox (int x, int y, int width, int height);
-qpic_t *Draw_LoadPic (char *name);
+qpic_t *Draw_LoadPic (char *name, bool allowscrap = true);
 void Draw_HalfPic (int x, int y, qpic_t *pic);
 void D3D_Set2DShade (float shadecolor);
 void Draw_Pic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic);

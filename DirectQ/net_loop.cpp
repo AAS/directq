@@ -19,7 +19,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // net_loop.c
 
 #include "quakedef.h"
-#include "net_loop.h"
+
+// net_loop.h
+int			Loop_Init (void);
+void		Loop_Listen (bool state);
+void		Loop_SearchForHosts (bool xmit);
+qsocket_t 	*Loop_Connect (char *host);
+qsocket_t 	*Loop_CheckNewConnections (void);
+int			Loop_GetMessage (qsocket_t *sock);
+int			Loop_SendMessage (qsocket_t *sock, sizebuf_t *data);
+int			Loop_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data);
+bool	Loop_CanSendMessage (qsocket_t *sock);
+bool	Loop_CanSendUnreliableMessage (qsocket_t *sock);
+void		Loop_Close (qsocket_t *sock);
+void		Loop_Shutdown (void);
+
 
 bool	localconnectpending = false;
 qsocket_t	*loop_client = NULL;

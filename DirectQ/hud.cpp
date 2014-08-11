@@ -227,8 +227,6 @@ void HUD_Init (void)
 		rsb_invbar[0] = Draw_LoadPic ("r_invbar1");
 		rsb_invbar[1] = Draw_LoadPic ("r_invbar2");
 	}
-
-	if (kurok) ksb_ammo[0] = Draw_LoadPic ("sb_50cal");
 }
 
 
@@ -374,7 +372,7 @@ void HUD_DrawNum (int x, int y, int num, int digits, int color = 0)
 	ptr = str;
 
 	if (l > digits) ptr += (l - digits);
-	if (l < digits) x += (digits - l) * (kurok ? 16 : 24);
+	if (l < digits) x += (digits - l) * 24;
 
 	while (*ptr)
 	{
@@ -383,7 +381,7 @@ void HUD_DrawNum (int x, int y, int num, int digits, int color = 0)
 		else frame = *ptr - '0';
 
 		Draw_Pic (x, y, sb_nums[color][frame], 1, true);
-		x += (kurok ? 16 : 24);
+		x += 24;
 		ptr++;
 	}
 }
@@ -996,16 +994,7 @@ void HUD_DrawArmor (int ActiveItems, int ArmorStat)
 	{
 		armorval = ArmorStat;
 
-		if (kurok)
-		{
-			if (ActiveItems & KIT_ARMOR3)
-				armorpic = sb_armor[2];
-			else if (ActiveItems & KIT_ARMOR2)
-				armorpic = sb_armor[1];
-			else if (ActiveItems & KIT_ARMOR1)
-				armorpic = sb_armor[0];
-		}
-		else if (rogue)
+		if (rogue)
 		{
 			// rogue hackery
 			if (ActiveItems & RIT_ARMOR3)
@@ -1068,20 +1057,7 @@ void HUD_DrawAmmo (int ActiveItems, int AmmoStat)
 	qpic_t *ammopic = NULL;
 
 	// ammo icon
-	if (kurok)
-	{
-		if (ActiveItems & KIT_SHELLS)
-			ammopic = sb_ammo[0];
-		else if (ActiveItems & KIT_NAILS)
-			ammopic = sb_ammo[1];
-		else if (ActiveItems & KIT_ROCKETS)
-			ammopic = sb_ammo[2];
-		else if (ActiveItems & KIT_CELLS)
-			ammopic = sb_ammo[3];
-		else if (ActiveItems & KIT_50CAL)
-			ammopic = ksb_ammo[0];
-	}
-	else if (rogue)
+	if (rogue)
 	{
 		// rogue hackery
 		if (ActiveItems & RIT_SHELLS)
@@ -1374,7 +1350,6 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 				switch (i)
 				{
 				case 2:
-
 					if (ActiveItems & HIT_PROXIMITY_GUN)
 					{
 						if (flashon)
@@ -1389,7 +1364,6 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 					break;
 
 				case 3:
-
 					if (ActiveItems & (IT_SHOTGUN << 4))
 					{
 						if (flashon && !grenadeflashing)
@@ -1496,9 +1470,7 @@ void HUD_DrawTeamColors (void)
 	if (top == 8)
 	{
 		if (num[0] != ' ') Draw_Character (x + 2, y + 2, 18 + num[0] - '0');
-
 		if (num[1] != ' ') Draw_Character (x + 9, y + 2, 18 + num[1] - '0');
-
 		if (num[2] != ' ') Draw_Character (x + 16, y + 2, 18 + num[2] - '0');
 	}
 	else
@@ -1672,9 +1644,18 @@ void HUD_DrawFPS (void)
 
 		// sometimes between level transitions we get a < 0 fps so don't let it happen
 		// (round FPS to the nearest int)
-		if (r_fps < 0)
-			_snprintf (str, 16, "0 fps");
-		else _snprintf (str, 16, "%i fps", (int) (r_fps + 0.5f));
+		if (scr_showfps.value > 1)
+		{
+			if (r_fps < 0)
+				_snprintf (str, 16, "0 ms");
+			else _snprintf (str, 16, "%0.3f ms", (1000.0f / r_fps));
+		}
+		else
+		{
+			if (r_fps < 0)
+				_snprintf (str, 16, "0 fps");
+			else _snprintf (str, 16, "%i fps", (int) (r_fps + 0.5f));
+		}
 
 		int x = vid.currsize->width - (strlen (str) * 8 + 4);
 
@@ -1761,9 +1742,9 @@ void HUD_DrawHUD (void)
 
 		// draw elements
 		// note - team colors must be drawn after the face as they overlap in the default layout
-		if (!kurok) HUD_DrawSBar ();
+		HUD_DrawSBar ();
 		HUD_DrawFace (cl.items, cl.stats[STAT_HEALTH]);
-		if (!kurok) HUD_DrawTeamColors ();
+		HUD_DrawTeamColors ();
 		HUD_DrawArmor (cl.items, cl.stats[STAT_ARMOR]);
 		HUD_DrawAmmo (cl.items, cl.stats[STAT_AMMO]);
 
@@ -1771,15 +1752,15 @@ void HUD_DrawHUD (void)
 		if (!(scr_viewsize.value > 101))
 		{
 			// inventory
-			if (!kurok) HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
-			if (!kurok) HUD_DrawSigils (cl.items);
+			HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
+			HUD_DrawSigils (cl.items);
 			HUD_DrawKeys (cl.items);
 			HUD_DrawItems (cl.items);
-			if (!kurok) HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
+			HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
 
 			// ammocounts are left till last because they don't batch with everything else
-			if (!kurok) HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
-			if (!kurok) HUD_DrawPowerUpTimers (cl.items);
+			HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
+			HUD_DrawPowerUpTimers (cl.items);
 
 			// deathmatch overlay
 			HUD_MiniDeathmatchOverlay ();

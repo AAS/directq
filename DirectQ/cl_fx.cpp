@@ -16,20 +16,307 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
-// cl_tent.c -- client side temporary entities
 
 #include "quakedef.h"
 #include "d3d_model.h"
+#include "cl_fx.h"
+
+// spawn extra dynamic lights
+cvar_t r_extradlight ("r_extradlight", "1", CVAR_ARCHIVE);
+
+// the rate at which dynamic client-side effects are updated
+cvar_t cl_effectrate ("cl_effectrate", 36.0f, CVAR_ARCHIVE);
+
+// flickering (muzzleflash, brightlight, dimlight) effect rates
+cvar_t cl_flickerrate ("cl_flickerrate", 10, CVAR_ARCHIVE);
+
+// prevent wild flickering when running fast; this also keeps random effects synced with time which means they won't flicker when paused
+#define FLICKERTABLE_SIZE	4096
+
+int flickertable[FLICKERTABLE_SIZE];
 
 
-typedef struct tempent_s
+void CL_InitFX (void)
 {
-	entity_t *ent;
-	struct tempent_s *next;
-} tempent_t;
+	for (int i = 0; i < FLICKERTABLE_SIZE; i++)
+		flickertable[i] = rand ();
+}
 
-tempent_t	*cl_temp_entities = NULL;
-tempent_t	*cl_free_tempents = NULL;
+
+dlight_t *CL_FindDlight (int key)
+{
+	dlight_t *dl = NULL;
+	float lowdie = 999999999;
+	int lownum = 0;
+
+	// first look for an exact key match
+	if (key)
+	{
+		dl = cl_dlights;
+
+		for (int i = 0; i < MAX_DLIGHTS; i++, dl++)
+		{
+			if (dl->key == key)
+			{
+				memset (dl, 0, sizeof (*dl));
+				dl->key = key;
+				return dl;
+			}
+		}
+	}
+
+	// then look for anything else
+	dl = cl_dlights;
+
+	for (int i = 0; i < MAX_DLIGHTS; i++, dl++)
+	{
+		if (dl->die < lowdie)
+		{
+			// mark the one that will die soonest
+			lowdie = dl->die;
+			lownum = i;
+		}
+
+		if (dl->die < cl.time)
+		{
+			// first one that's died can go
+			memset (dl, 0, sizeof (*dl));
+			dl->key = key;
+			return dl;
+		}
+	}
+
+	// replace the one that's going to die soonest
+	dl = &cl_dlights[lownum];
+	memset (dl, 0, sizeof (*dl));
+	dl->key = key;
+	return dl;
+}
+
+
+void CL_ColourDlight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b)
+{
+	dl->rgb[0] = r;
+	dl->rgb[1] = g;
+	dl->rgb[2] = b;
+}
+
+
+dlight_t *CL_AllocDlight (int key)
+{
+	// find a dlight to use
+	dlight_t *dl = CL_FindDlight (key);
+
+	// set default colour for any we don't colour ourselves
+	CL_ColourDlight (dl, DL_COLOR_WHITE);
+
+	// initial dirty state is dirty
+	dl->dirty = true;
+	dl->dirtytime = cl.time;
+
+	// other defaults
+	dl->die = cl.time + 0.1f;
+	dl->flags = 0;
+
+	// done
+	return dl;
+}
+
+
+void CL_DecayLights (void)
+{
+	dlight_t *dl = cl_dlights;
+	double dl_dirtytime = (cl_effectrate.value > 0) ? (1.0 / cl_effectrate.value) : 0;
+
+	for (int i = 0; i < MAX_DLIGHTS; i++, dl++)
+	{
+		// ensure that one frame flags get an update
+		if (dl->flags & DLF_KILL) dl->die = cl.time + 1;
+		if (dl->die < cl.time || (dl->radius <= 0)) continue;
+
+		if (cl.time >= (dl->dirtytime + dl_dirtytime))
+		{
+			dl->radius -= (cl.time - dl->dirtytime) * dl->decay;
+			dl->dirty = true;
+			dl->dirtytime = cl.time;
+
+			// DLF_KILL is handled here to ensure that the light lasts for at least one frame
+			if (dl->radius < 0 || (dl->flags & DLF_KILL))
+			{
+				dl->flags &= ~DLF_KILL;
+				dl->radius = 0;
+				dl->die = -1;
+			}
+
+			// testing
+			// Con_Printf ("light %i is dirty\n", i);
+		}
+		else
+		{
+			// testing
+			// Con_Printf ("clean %i\n", i);
+			dl->dirty = false;
+		}
+	}
+}
+
+
+void CL_MuzzleFlash (entity_t *ent, int entnum)
+{
+	avectors_t av;
+	dlight_t *dl;
+
+	dl = CL_AllocDlight (entnum);
+	dl->flags |= DLF_NOCORONA;
+
+	if (entnum == cl.viewentity)
+	{
+		// switch the flash colour for the current weapon
+		if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_LIGHTNING)
+			CL_ColourDlight (dl, DL_COLOR_BLUE);
+		else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)
+			CL_ColourDlight (dl, DL_COLOR_BLUE);
+		else CL_ColourDlight (dl, DL_COLOR_ORANGE);
+	}
+	else
+	{
+		// some entities have different attacks resulting in a different flash colour
+		if ((ent->model->flags & EF_WIZARDFLASH) || (ent->model->flags & EF_GREENFLASH))
+			CL_ColourDlight (dl, DL_COLOR_GREEN);
+		else if ((ent->model->flags & EF_SHALRATHFLASH) || (ent->model->flags & EF_PURPLEFLASH))
+			CL_ColourDlight (dl, DL_COLOR_PURPLE);
+		else if ((ent->model->flags & EF_SHAMBLERFLASH) || (ent->model->flags & EF_BLUEFLASH))
+			CL_ColourDlight (dl, DL_COLOR_BLUE);
+		else if (ent->model->flags & EF_ORANGEFLASH)
+			CL_ColourDlight (dl, DL_COLOR_ORANGE);
+		else if (ent->model->flags & EF_REDFLASH)
+			CL_ColourDlight (dl, DL_COLOR_RED);
+		else if (ent->model->flags & EF_YELLOWFLASH)
+			CL_ColourDlight (dl, DL_COLOR_YELLOW);
+		else CL_ColourDlight (dl, DL_COLOR_ORANGE);
+	}
+
+	VectorCopy2 (dl->origin, ent->origin);
+	dl->origin[2] += 16;
+	AngleVectors (ent->angles, &av);
+
+	dl->origin[0] = av.forward[0] * 18 + dl->origin[0];
+	dl->origin[1] = av.forward[1] * 18 + dl->origin[1];
+	dl->origin[2] = av.forward[2] * 18 + dl->origin[2];
+	dl->radius = 200 + (flickertable[(entnum + (int) (cl.time * cl_flickerrate.value)) & (FLICKERTABLE_SIZE - 1)] & 31);
+
+	// the server clears muzzleflashes after each frame, but as the client is now running faster, it won't get the message for several
+	// frames - potentially over 10.  therefore we should also clear the flash on the client too.  this also fixes demos ;)
+	ent->effects &= ~EF_MUZZLEFLASH;
+}
+
+
+void CL_BrightLight (entity_t *ent, int entnum)
+{
+	// uncoloured
+	dlight_t *dl = CL_AllocDlight (entnum);
+
+	VectorCopy2 (dl->origin, ent->origin);
+	dl->origin[2] += 16;
+	dl->radius = 400 + (flickertable[(entnum + (int) (cl.time * cl_flickerrate.value)) & (FLICKERTABLE_SIZE - 1)] & 31);
+	dl->flags = DLF_NOCORONA | DLF_KILL;
+}
+
+
+void CL_DimLight (entity_t *ent, int entnum)
+{
+	dlight_t *dl = CL_AllocDlight (entnum);
+
+	VectorCopy2 (dl->origin, ent->origin);
+	dl->radius = 200 + (flickertable[(entnum + (int) (cl.time * cl_flickerrate.value)) & (FLICKERTABLE_SIZE - 1)] & 31);
+	dl->flags = DLF_KILL;
+
+	// powerup dynamic lights
+	if (entnum == cl.viewentity)
+	{
+		// if it's a powerup coming from the viewent then we remove the corona
+		dl->flags |= DLF_NOCORONA;
+
+		// and set the appropriate colour depending on the current powerup(s)
+		if ((cl.items & IT_QUAD) && (cl.items & IT_INVULNERABILITY))
+			CL_ColourDlight (dl, DL_COLOR_PURPLE);
+		else if (cl.items & IT_QUAD)
+			CL_ColourDlight (dl, DL_COLOR_BLUE);
+		else if (cl.items & IT_INVULNERABILITY)
+			CL_ColourDlight (dl, DL_COLOR_RED);
+		else CL_ColourDlight (dl, DL_COLOR_WHITE);
+	}
+}
+
+
+void CL_WizardTrail (entity_t *ent, int entnum)
+{
+	if (r_extradlight.value)
+	{
+		dlight_t *dl = CL_AllocDlight (entnum);
+
+		VectorCopy2 (dl->origin, ent->origin);
+		dl->radius = 200;
+		dl->flags |= DLF_KILL;
+
+		CL_ColourDlight (dl, DL_COLOR_GREEN);
+	}
+
+	R_RocketTrail (ent->oldorg, ent->origin, RT_WIZARD);
+}
+
+
+void CL_KnightTrail (entity_t *ent, int entnum)
+{
+	if (r_extradlight.value)
+	{
+		dlight_t *dl = CL_AllocDlight (entnum);
+
+		VectorCopy2 (dl->origin, ent->origin);
+		dl->radius = 200;
+		dl->flags |= DLF_KILL;
+
+		CL_ColourDlight (dl, DL_COLOR_ORANGE);
+	}
+
+	R_RocketTrail (ent->oldorg, ent->origin, RT_KNIGHT);
+}
+
+
+void CL_RocketTrail (entity_t *ent, int entnum)
+{
+	dlight_t *dl = CL_AllocDlight (entnum);
+
+	VectorCopy2 (dl->origin, ent->origin);
+	dl->radius = 200;
+	dl->flags |= DLF_KILL;
+
+	CL_ColourDlight (dl, DL_COLOR_ORANGE);
+
+	R_RocketTrail (ent->oldorg, ent->origin, RT_ROCKET);
+}
+
+
+void CL_VoreTrail (entity_t *ent, int entnum)
+{
+	if (r_extradlight.value)
+	{
+		dlight_t *dl = CL_AllocDlight (entnum);
+
+		VectorCopy2 (dl->origin, ent->origin);
+		dl->radius = 200;
+		dl->flags |= DLF_KILL;
+
+		CL_ColourDlight (dl, DL_COLOR_PURPLE);
+	}
+
+	R_RocketTrail (ent->oldorg, ent->origin, RT_VORE);
+}
+
+
+// old cl_tent stuff; appropriate here
+
+#include <vector>
 
 typedef struct beam_s
 {
@@ -38,13 +325,11 @@ typedef struct beam_s
 	float	endtime;
 	vec3_t	start, end;
 	int		type;
-	struct beam_s *next;
 } beam_t;
 
-#define EXTRA_TEMPENTS 64
-
-beam_t		*cl_beams;
-beam_t		*cl_free_beams;
+std::vector<beam_t *> cl_beams;
+std::vector<entity_t *> cl_tempentities;
+int cl_numtempentities;
 
 sfx_t			*cl_sfx_wizhit;
 sfx_t			*cl_sfx_knighthit;
@@ -53,9 +338,6 @@ sfx_t			*cl_sfx_ric1;
 sfx_t			*cl_sfx_ric2;
 sfx_t			*cl_sfx_ric3;
 sfx_t			*cl_sfx_r_exp3;
-
-cvar_t r_extradlight ("r_extradlight", "1", CVAR_ARCHIVE);
-cvar_t cl_shaftspeed ("cl_shaftspeed", 20.0f, CVAR_ARCHIVE);
 
 void D3D_AddVisEdict (entity_t *ent);
 
@@ -101,10 +383,9 @@ void CL_InitTEnts (void)
 	cl_sfx_r_exp3 = S_PrecacheSound ("weapons/r_exp3.wav");
 
 	// ensure on each map load
-	cl_beams = NULL;
-	cl_free_beams = NULL;
-	cl_temp_entities = NULL;
-	cl_free_tempents = NULL;
+	cl_beams.clear ();
+	cl_tempentities.clear ();
+	cl_numtempentities = 0;
 }
 
 
@@ -118,11 +399,13 @@ void CL_ParseBeam (model_t *m, int ent, int type, vec3_t start, vec3_t end)
 	// if the model didn't load just ignore it
 	if (!m) return;
 
-	beam_t *b;
+	beam_t *b = NULL;
 
 	// override any beam with the same entity
-	for (b = cl_beams; b; b = b->next)
+	for (int i = 0; i < cl_beams.size (); i++)
 	{
+		b = cl_beams[i];
+
 		if (b->entity == ent)
 		{
 			b->entity = ent;
@@ -136,24 +419,26 @@ void CL_ParseBeam (model_t *m, int ent, int type, vec3_t start, vec3_t end)
 	}
 
 	// find a free beam
-	if (!cl_free_beams)
+	for (int i = 0; i < cl_beams.size (); i++)
 	{
-		cl_free_beams = (beam_t *) ClientZone->Alloc (EXTRA_TEMPENTS * sizeof (beam_t));
+		b = cl_beams[i];
 
-		for (int i = 1; i < EXTRA_TEMPENTS; i++)
+		if (!b->model || b->endtime < cl.time)
 		{
-			cl_free_beams[i - 1].next = &cl_free_beams[i];
-			cl_free_beams[i].next = NULL;
+			b->entity = ent;
+			b->model = m;
+			b->type = type;
+			b->endtime = cl.time + 0.2f;
+			VectorCopy (start, b->start);
+			VectorCopy (end, b->end);
+			return;
 		}
 	}
 
-	// take the first free beam
-	b = cl_free_beams;
-	cl_free_beams = b->next;
-
-	// link it in
-	b->next = cl_beams;
-	cl_beams = b;
+	// alloc a new beam
+	b = (beam_t *) ClientZone->Alloc (sizeof (beam_t));
+	cl_beams.push_back (b);
+	b = cl_beams[cl_beams.size () - 1];
 
 	// set it's properties
 	b->entity = ent;
@@ -206,7 +491,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.5f;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 308, 351, 109);
+			CL_ColourDlight (dl, DL_COLOR_GREEN);
 		}
 
 		R_WallHitParticles (pos, vec3_origin, 20, 30);
@@ -226,7 +511,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.5f;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 408, 242, 117);
+			CL_ColourDlight (dl, DL_COLOR_ORANGE);
 		}
 
 		R_WallHitParticles (pos, vec3_origin, 226, 20);
@@ -259,6 +544,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		R_WallHitParticles (pos, vec3_origin, 0, 20);
 
 		if (rand () % 5)
@@ -271,8 +557,7 @@ void CL_ParseTEnt (void)
 				S_StartSound (-1, 0, cl_sfx_ric1, pos, 1, 1);
 			else if (rnd == 2)
 				S_StartSound (-1, 0, cl_sfx_ric2, pos, 1, 1);
-			else
-				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
+			else S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
 
 		break;
@@ -281,13 +566,15 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-		if (!kurok) R_WallHitParticles (pos, vec3_origin, 0, 20);
+
+		R_WallHitParticles (pos, vec3_origin, 0, 20);
 		break;
 
 	case TE_EXPLOSION:			// rocket explosion
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		R_ParticleExplosion (pos);
 
 		dl = CL_AllocDlight (0);
@@ -295,19 +582,7 @@ void CL_ParseTEnt (void)
 		dl->radius = 350;
 		dl->die = cl.time + 0.5f;
 		dl->decay = 300;
-
-		if (kurok)
-		{
-			float tempcolor[3];
-
-        	tempcolor[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-			tempcolor[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-			tempcolor[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-
-			// directq scales dlights slightly different
-			R_ColourDLight (dl, tempcolor[0] * 384, tempcolor[1] * 384, tempcolor[2] * 384);
-		}
-		else R_ColourDLight (dl, 408, 242, 117);
+		CL_ColourDlight (dl, DL_COLOR_ORANGE);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
@@ -316,26 +591,10 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		R_BlobExplosion (pos);
 
-		if (kurok)
-		{
-			float tempcolor[3];
-
-			dl = CL_AllocDlight (0);
-			VectorCopy (pos, dl->origin);
-			dl->radius = 150;
-			dl->die = cl.time + 0.75;
-			dl->decay = 200;
-
-			tempcolor[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-			tempcolor[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-			tempcolor[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-
-			// directq scales dlights slightly different
-			R_ColourDLight (dl, tempcolor[0] * 384, tempcolor[1] * 384, tempcolor[2] * 384);
-		}
-		else if (r_extradlight.value)
+		if (r_extradlight.value)
 		{
 			dl = CL_AllocDlight (0);
 			VectorCopy (pos, dl->origin);
@@ -343,7 +602,7 @@ void CL_ParseTEnt (void)
 			dl->die = cl.time + 0.5f;
 			dl->decay = 300;
 
-			R_ColourDLight (dl, 399, 141, 228);
+			CL_ColourDlight (dl, DL_COLOR_PURPLE);
 		}
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
@@ -411,6 +670,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		R_LavaSplash (pos);
 		break;
 
@@ -418,6 +678,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		R_TeleportSplash (pos);
 		break;
 
@@ -425,14 +686,18 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
+
 		R_ParticleExplosion2 (pos, colorStart, colorLength);
+
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5f;
 		dl->decay = 300;
+
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
@@ -441,20 +706,24 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		MSG_ReadByte();
 
 	case TE_EXPLOSION3:
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5f;
 		dl->decay = 300;
+
 		dl->rgb[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags) * 255;
 		dl->rgb[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags) * 255;
 		dl->rgb[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags) * 255;
+
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
@@ -543,41 +812,19 @@ CL_NewTempEntity
 */
 entity_t *CL_NewTempEntity (void)
 {
-	tempent_t *tempent;
+	entity_t *ent = NULL;
 
-	if (!cl_free_tempents)
+	if (cl_numtempentities == cl_tempentities.size ())
 	{
-		// alloc a new batch of free temp entities if required
-		cl_free_tempents = (tempent_t *) ClientZone->Alloc (sizeof (tempent_t) * EXTRA_TEMPENTS);
-
-		for (int i = 2; i < EXTRA_TEMPENTS - 1; i++)
-			cl_free_tempents[i - 2].next = &cl_free_tempents[i - 1];
-
-		cl_free_tempents[EXTRA_TEMPENTS - 1].next = NULL;
+		ent = (entity_t *) ClientZone->Alloc (sizeof (entity_t));
+		cl_tempentities.push_back (ent);
 	}
 
-	// unlink from free
-	tempent = cl_free_tempents;
-	cl_free_tempents = tempent->next;
+	ent = cl_tempentities[cl_numtempentities];
+	memset (ent, 0, sizeof (entity_t));
+	cl_numtempentities++;
 
-	// link to active
-	tempent->next = cl_temp_entities;
-	cl_temp_entities = tempent;
-
-	if (!tempent->ent)
-	{
-		// alloc a new entity_t (tempents never get occlusion queries)
-		tempent->ent = CL_AllocEntity ();
-		tempent->ent->allocnum = 0;
-	}
-	else
-	{
-		// clear the entity (tempents never get occlusion queries)
-		memset (tempent->ent, 0, sizeof (entity_t));
-	}
-
-	// done
-	return tempent->ent;
+	return ent;
 }
 
 
@@ -602,61 +849,16 @@ void CL_UpdateTEnts (void)
 	// no beams while a server is paused (if running locally)
 	if (sv.active && sv.paused) return;
 
-	// move all tempents back to the free list
-	for (;;)
-	{
-		tempent_t *kill = cl_temp_entities;
+	// reset tempents for this frame
+	cl_numtempentities = 0;
 
-		if (kill)
-		{
-			cl_temp_entities = kill->next;
-
-			kill->next = cl_free_tempents;
-			cl_free_tempents = kill;
-			continue;
-		}
-
-		// no temp entities to begin with
-		cl_temp_entities = NULL;
-		break;
-	}
-
-	for (;;)
-	{
-		beam_t *kill = cl_beams;
-
-		if (kill && (!kill->model || kill->endtime < cl.time))
-		{
-			cl_beams = kill->next;
-			kill->next = cl_free_beams;
-			cl_free_beams = kill;
-			continue;
-		}
-
-		break;
-	}
-
-	if (!cl_beams) return;
+	if (!cl_beams.size ()) return;
 
 	// update lightning
-	for (beam_t *b = cl_beams; b; b = b->next)
+	for (int beamnum = 0; beamnum < cl_beams.size (); beamnum++)
 	{
-		for (;;)
-		{
-			beam_t *kill = b->next;
+		beam_t *b = cl_beams[beamnum];
 
-			if (kill && (!kill->model || kill->endtime < cl.time))
-			{
-				b->next = kill->next;
-				kill->next = cl_free_beams;
-				cl_free_beams = kill;
-				continue;
-			}
-
-			break;
-		}
-
-		// is this needed any more???
 		if (!b->model || b->endtime < cl.time) continue;
 
 		// if coming from the player, update the start position
@@ -695,14 +897,13 @@ void CL_UpdateTEnts (void)
 
 		while (d > 0)
 		{
-			if (!(ent = CL_NewTempEntity ()))
-				break;
+			ent = CL_NewTempEntity ();
 
 			ent->model = b->model;
 			ent->alphaval = 0;
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
-			ent->angles[2] = anglestable[(int) ((cl.time * cl_shaftspeed.value) + d) & 1023];
+			ent->angles[2] = anglestable[(int) ((cl.time * cl_effectrate.value) + d) & 1023];
 
 			// i is no longer on the outer loop
 			for (int i = 0; i < 3; i++)
@@ -711,7 +912,7 @@ void CL_UpdateTEnts (void)
 				ent->origin[i] = org[i];
 			}
 
-			if (r_extradlight.value && ((++dlstep) > 8))
+			if (r_extradlight.value && ((++dlstep) > 8) && cl.time >= cl.nexteffecttime)
 			{
 				switch (b->type)
 				{
@@ -722,12 +923,10 @@ void CL_UpdateTEnts (void)
 					dl = CL_AllocDlight (0);
 
 					VectorCopy (org, dl->origin);
-					dl->radius = 250;
-					dl->die = cl.time + 0.1f;
-					dl->decay = 300;
+					dl->radius = 250 + (flickertable[(int) (d + (cl.time * cl_flickerrate.value)) & (FLICKERTABLE_SIZE - 1)] & 31);
 					dl->flags |= (DLF_NOCORONA | DLF_KILL);
 
-					R_ColourDLight (dl, 64, 256, 512);
+					CL_ColourDlight (dl, DL_COLOR_BLUE);
 					break;
 
 				default: break;

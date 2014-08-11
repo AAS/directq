@@ -78,6 +78,93 @@ float	v_dmg_time, v_dmg_roll, v_dmg_pitch;
 extern	int			in_forward, in_forward2, in_back;
 
 
+cvar_t	v_centermove ("v_centermove", 0.15f);
+cvar_t	v_centerspeed ("v_centerspeed", 250.0f);
+
+
+void V_StartPitchDrift (void)
+{
+	if (cl.laststop >= cl.time)
+	{
+		// something else is keeping it from drifting
+		return;
+	}
+
+	if (cl.nodrift || !cl.pitchvel)
+	{
+		cl.pitchvel = v_centerspeed.value;
+		cl.nodrift = false;
+		cl.driftmove = 0;
+	}
+}
+
+
+void V_StopPitchDrift (void)
+{
+	// set above client time as CL_LerpPoint can change time before V_StartPitchDrift is called
+	cl.laststop = cl.time + 1;
+	cl.nodrift = true;
+	cl.pitchvel = 0;
+}
+
+
+void V_DriftPitch (void)
+{
+	if (noclip_anglehack || !cl.onground || cls.demoplayback)
+	{
+		cl.driftmove = 0;
+		cl.pitchvel = 0;
+		return;
+	}
+
+	// don't count small mouse motion
+	if (cl.nodrift)
+	{
+		if (fabs (cl.cmd.forwardmove) < cl_forwardspeed.value)
+			cl.driftmove = 0;
+		else cl.driftmove += (cl.time - cl.oldtime);	// fixme
+
+		if (cl.driftmove > v_centermove.value)
+			V_StartPitchDrift ();
+
+		return;
+	}
+
+	float delta = cl.idealpitch - cl.viewangles[0];
+
+	if (!delta)
+	{
+		cl.pitchvel = 0;
+		return;
+	}
+
+	float move = (cl.time - cl.oldtime) * cl.pitchvel;
+	cl.pitchvel += (cl.time - cl.oldtime) * v_centerspeed.value;
+
+	if (delta > 0)
+	{
+		if (move > delta)
+		{
+			cl.pitchvel = 0;
+			move = delta;
+		}
+
+		cl.viewangles[0] += move;
+	}
+	else if (delta < 0)
+	{
+		if (move > -delta)
+		{
+			cl.pitchvel = 0;
+			move = -delta;
+		}
+
+		cl.viewangles[0] -= move;
+	}
+}
+
+cmd_t v_centerview_cmd ("centerview", V_StartPitchDrift);
+
 /*
 ===============
 V_CalcRoll
@@ -248,10 +335,18 @@ V_cshift_f
 void V_cshift_f (void)
 {
 	// fixme - should this write to it's own cshift???
+	cl.cshifts[CSHIFT_VCSHIFT].destcolor[0] = atoi (Cmd_Argv (1));
+	cl.cshifts[CSHIFT_VCSHIFT].destcolor[1] = atoi (Cmd_Argv (2));
+	cl.cshifts[CSHIFT_VCSHIFT].destcolor[2] = atoi (Cmd_Argv (3));
+	cl.cshifts[CSHIFT_VCSHIFT].percent = atoi (Cmd_Argv (4));
+
+	// setting a contents shift is evil as it will fuck with fog and warping
+	/*
 	cshift_empty.destcolor[0] = atoi (Cmd_Argv (1));
 	cshift_empty.destcolor[1] = atoi (Cmd_Argv (2));
 	cshift_empty.destcolor[2] = atoi (Cmd_Argv (3));
 	cshift_empty.percent = atoi (Cmd_Argv (4));
+	*/
 }
 
 
@@ -329,7 +424,7 @@ cvar_t v_pentcshift ("v_pentcshift", 1.0f);
 void V_CalcPowerupCshift (void)
 {
 	// default is no shift for no powerups
-	float rgba[4]= {0, 0, 0, 0};
+	float rgba[4] = {0, 0, 0, 0};
 
 	// now let's see what we've got
 	if ((cl.items & IT_QUAD) && v_quadcshift.value >= 0) V_CalcIndividualBlend (rgba, 0, 0, 255, (int) (30.0f * v_quadcshift.value));
@@ -378,7 +473,7 @@ void V_AdjustContentCShift (int contents)
 
 void V_CalcBlend (void)
 {
-	float rgba[4]= {0, 0, 0, 0};
+	float rgba[4] = {0, 0, 0, 0};
 
 	for (int j = 0; j < NUM_CSHIFTS; j++)
 	{
@@ -421,6 +516,7 @@ void V_UpdateCShifts (void)
 		cl.cshifts[CSHIFT_DAMAGE].percent = 0;
 		cl.cshifts[CSHIFT_BONUS].percent = 0;
 		cl.cshifts[CSHIFT_POWERUP].percent = 0;
+		cl.cshifts[CSHIFT_VCSHIFT].percent = 0;
 	}
 	else
 	{
@@ -473,15 +569,15 @@ void CalcGunAngle (void)
 	static float oldyaw = 0;
 	static float oldpitch = 0;
 
-	yaw = r_refdef.viewangles[YAW];
-	pitch = -r_refdef.viewangles[PITCH];
+	yaw = r_refdef.viewangles[1];
+	pitch = -r_refdef.viewangles[0];
 
-	yaw = angledelta (yaw - r_refdef.viewangles[YAW]) * 0.4;
+	yaw = angledelta (yaw - r_refdef.viewangles[1]) * 0.4;
 
 	if (yaw > 10) yaw = 10;
 	if (yaw < -10) yaw = -10;
 
-	pitch = angledelta (-pitch - r_refdef.viewangles[PITCH]) * 0.4;
+	pitch = angledelta (-pitch - r_refdef.viewangles[0]) * 0.4;
 
 	if (pitch > 10) pitch = 10;
 	if (pitch < -10) pitch = -10;
@@ -513,14 +609,14 @@ void CalcGunAngle (void)
 	oldyaw = yaw;
 	oldpitch = pitch;
 
-	cl.viewent.angles[YAW] = r_refdef.viewangles[YAW] + yaw;
-	cl.viewent.angles[PITCH] = -(r_refdef.viewangles[PITCH] + pitch);
+	cl.viewent.angles[1] = r_refdef.viewangles[1] + yaw;
+	cl.viewent.angles[0] = -(r_refdef.viewangles[0] + pitch);
 
 	// WARNING - don't try anything sexy with time in here or you'll
 	// screw things up and make the engine appear to run jerky
-	cl.viewent.angles[ROLL] -= v_idlescale.value * sin (cl.time * v_iroll_cycle.value) * v_iroll_level.value;
-	cl.viewent.angles[PITCH] -= v_idlescale.value * sin (cl.time * v_ipitch_cycle.value) * v_ipitch_level.value;
-	cl.viewent.angles[YAW] -= v_idlescale.value * sin (cl.time * v_iyaw_cycle.value) * v_iyaw_level.value;
+	cl.viewent.angles[2] -= v_idlescale.value * sin (cl.time * v_iroll_cycle.value) * v_iroll_level.value;
+	cl.viewent.angles[0] -= v_idlescale.value * sin (cl.time * v_ipitch_cycle.value) * v_ipitch_level.value;
+	cl.viewent.angles[1] -= v_idlescale.value * sin (cl.time * v_iyaw_cycle.value) * v_iyaw_level.value;
 }
 
 /*
@@ -559,9 +655,9 @@ void V_AddIdle (void)
 {
 	// WARNING - don't try anything sexy with time in here or you'll
 	// screw things up and make the engine appear to run jerky
-	r_refdef.viewangles[ROLL] += v_idlescale.value * sin (cl.time * v_iroll_cycle.value) * v_iroll_level.value;
-	r_refdef.viewangles[PITCH] += v_idlescale.value * sin (cl.time * v_ipitch_cycle.value) * v_ipitch_level.value;
-	r_refdef.viewangles[YAW] += v_idlescale.value * sin (cl.time * v_iyaw_cycle.value) * v_iyaw_level.value;
+	r_refdef.viewangles[2] += v_idlescale.value * sin (cl.time * v_iroll_cycle.value) * v_iroll_level.value;
+	r_refdef.viewangles[0] += v_idlescale.value * sin (cl.time * v_ipitch_cycle.value) * v_ipitch_level.value;
+	r_refdef.viewangles[1] += v_idlescale.value * sin (cl.time * v_iyaw_cycle.value) * v_iyaw_level.value;
 }
 
 
@@ -577,12 +673,12 @@ void V_CalcViewRoll (void)
 	float side;
 
 	side = V_CalcRoll (cl_entities[cl.viewentity]->angles, cl.velocity);
-	r_refdef.viewangles[ROLL] += side;
+	r_refdef.viewangles[2] += side;
 
 	if (v_dmg_time > 0)
 	{
-		r_refdef.viewangles[ROLL] += v_dmg_time / v_kicktime.value * v_dmg_roll;
-		r_refdef.viewangles[PITCH] += v_dmg_time / v_kicktime.value * v_dmg_pitch;
+		r_refdef.viewangles[2] += v_dmg_time / v_kicktime.value * v_dmg_roll;
+		r_refdef.viewangles[0] += v_dmg_time / v_kicktime.value * v_dmg_pitch;
 		v_dmg_time -= cl.frametime;
 	}
 
@@ -642,6 +738,8 @@ void V_CalcRefdef (void)
 	float		bob = 0;
 	static float oldz = 0;
 
+	V_DriftPitch ();
+
 	// ent is the player model (visible when out of body)
 	ent = cl_entities[cl.viewentity];
 
@@ -650,8 +748,8 @@ void V_CalcRefdef (void)
 
 	// transform the view offset by the model's matrix to get the offset from
 	// model origin for the view.  the model should face the view dir.
-	ent->angles[YAW] = cl.viewangles[YAW];
-	ent->angles[PITCH] = -cl.viewangles[PITCH];
+	ent->angles[1] = cl.viewangles[1];
+	ent->angles[0] = -cl.viewangles[0];
 
 	bob = V_CalcBob ();
 
@@ -671,9 +769,9 @@ void V_CalcRefdef (void)
 	V_AddIdle ();
 
 	// offsets - because entity pitches are actually backward
-	angles[PITCH] = -ent->angles[PITCH];
-	angles[YAW] = ent->angles[YAW];
-	angles[ROLL] = ent->angles[ROLL];
+	angles[0] = -ent->angles[0];
+	angles[1] = ent->angles[1];
+	angles[2] = ent->angles[2];
 
 	AngleVectors (angles, &av);
 

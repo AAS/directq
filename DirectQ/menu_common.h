@@ -17,11 +17,6 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-
-// these need to be kept high enough so that they don't interfere with other options
-#define MENU_TAG_SIMPLE			(1 << 28)
-#define MENU_TAG_FULL			(1 << 29)
-
 #define	NUM_HELP_PAGES	6
 
 typedef enum
@@ -228,6 +223,7 @@ private:
 #define TBFLAG_ALLOWSPACE		8
 #define TBFLAG_FOLDERPATH		16
 #define TBFLAG_READONLY			32
+#define TBFLAG_FUNNAME			64
 
 // common combinations
 #define TBFLAGS_FILENAMEFLAGS	(TBFLAG_ALLOWNUMBERS | TBFLAG_ALLOWLETTERS | TBFLAG_FILENAMECHARS)

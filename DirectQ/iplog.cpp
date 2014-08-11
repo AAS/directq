@@ -25,9 +25,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 
 /*
-====================================================================================================
-WHAT THE HOLY BLUE FUCK?  DEAR SWEET JESUS CHRIST AND ALL HIS WEE GOBLINS!  THIS IS DISGUSTING CODE!
-====================================================================================================
+=======================
+WHAT THE HOLY BLUE FUCK
+=======================
 */
 
 #include "quakedef.h"

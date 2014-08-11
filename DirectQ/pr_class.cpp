@@ -647,7 +647,7 @@ int CProgsDat::LeaveFunction (void)
 
 void CProgsDat::PrintStatement (dstatement_t *s)
 {
-	if ((unsigned) s->op < sizeof (pr_opnames) / sizeof (pr_opnames[0]))
+	if ((unsigned) s->op < STRUCT_ARRAY_LENGTH (pr_opnames))
 		Con_SafePrintf ("%-10s ", pr_opnames[s->op]);
 
 	if (s->op == OP_IF || s->op == OP_IFNOT)

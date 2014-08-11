@@ -102,8 +102,6 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, void *data)
 S_LoadSound
 ==============
 */
-HRESULT CreateBasicBuffer (LPDIRECTSOUNDBUFFER8 *ppDsb8, wavinfo_t *info, void *data);
-
 sfxcache_t *S_LoadSound (sfx_t *s)
 {
 	char	namebuffer[256];
@@ -162,9 +160,6 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 		Zone_Free (data);
 		return NULL;
 	}
-
-	// comment this line out to revert back to the old system
-	// CreateBasicBuffer (&s->Buffer, &info, data + info.dataofs);
 
 	sc->length = info.samples;
 	sc->loopstart = info.loopstart;

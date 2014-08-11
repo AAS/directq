@@ -421,7 +421,7 @@ CQuakeZone *ModelZone = NULL;
 void Heap_Init (void)
 {
 	// init the pools we want to keep around all the time
-	if (!MainHunk) MainHunk = new CQuakeHunk (64);
+	if (!MainHunk) MainHunk = new CQuakeHunk (256);
 	if (!MainCache) MainCache = new CQuakeCache ();
 	if (!MainZone) MainZone = new CQuakeZone ();
 

@@ -23,12 +23,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BAN_TEST
 
 #include "quakedef.h"
-#include "net_dgrm.h"
 #include "pr_class.h"
 
-// these two macros are to make the code more readable
-#define sfunc	net_landrivers[sock->landriver]
-#define dfunc	net_landrivers[net_landriverlevel]
+// net_dgrm.h
+int			Datagram_Init (void);
+void		Datagram_Listen (bool state);
+void		Datagram_SearchForHosts (bool xmit);
+qsocket_t	*Datagram_Connect (char *host);
+qsocket_t 	*Datagram_CheckNewConnections (void);
+int			Datagram_GetMessage (qsocket_t *sock);
+int			Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data);
+int			Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data);
+bool	Datagram_CanSendMessage (qsocket_t *sock);
+bool	Datagram_CanSendUnreliableMessage (qsocket_t *sock);
+void		Datagram_Close (qsocket_t *sock);
+void		Datagram_Shutdown (void);
+
+cvar_t *Cvar_GetNextServerRuleVar (char *prevCvarName);
 
 static int net_landriverlevel;
 
@@ -170,7 +181,7 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 
 	sock->canSend = false;
 
-	if (sfunc.Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
+	if (net_landrivers[sock->landriver].Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
 
 	sock->lastSendTime = net_time;
@@ -202,7 +213,7 @@ int SendMessageNext (qsocket_t *sock)
 
 	sock->sendNext = false;
 
-	if (sfunc.Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
+	if (net_landrivers[sock->landriver].Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
 
 	sock->lastSendTime = net_time;
@@ -234,7 +245,7 @@ int ReSendMessage (qsocket_t *sock)
 
 	sock->sendNext = false;
 
-	if (sfunc.Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
+	if (net_landrivers[sock->landriver].Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
 
 	sock->lastSendTime = net_time;
@@ -276,7 +287,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	packetBuffer.sequence = BigLong (sock->unreliableSendSequence++);
 	memcpy (packetBuffer.data, data->data, data->cursize);
 
-	if (sfunc.Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
+	if (net_landrivers[sock->landriver].Write (sock->socket, (byte *) &packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
 
 	packetsSent++;
@@ -296,7 +307,7 @@ int Datagram_GetMessage (qsocket_t *sock)
 
 	while (1)
 	{
-		length = sfunc.Read (sock->socket, (byte *) &packetBuffer, NET_DATAGRAMSIZE, &readaddr);
+		length = net_landrivers[sock->landriver].Read (sock->socket, (byte *) &packetBuffer, NET_DATAGRAMSIZE, &readaddr);
 
 		//	if ((rand () & 255) > 220)
 		//		continue;
@@ -311,7 +322,7 @@ int Datagram_GetMessage (qsocket_t *sock)
 		}
 
 		// joe: added NAT fix from ProQuake
-		if (!sock->net_wait && sfunc.AddrCompare (&readaddr, &sock->addr) != 0)
+		if (!sock->net_wait && net_landrivers[sock->landriver].AddrCompare (&readaddr, &sock->addr) != 0)
 		{
 #if 0	// joe: removed DEBUG
 			Con_DPrintf ("Forged packet received\n");
@@ -348,7 +359,7 @@ int Datagram_GetMessage (qsocket_t *sock)
 		if (sock->net_wait)
 		{
 			sock->addr = readaddr;
-			strcpy (sock->address, sfunc.AddrToString (&readaddr));
+			strcpy (sock->address, net_landrivers[sock->landriver].AddrToString (&readaddr));
 			sock->net_wait = false;
 		}
 
@@ -420,7 +431,7 @@ int Datagram_GetMessage (qsocket_t *sock)
 		{
 			packetBuffer.length = BigLong (NET_HEADERSIZE | NETFLAG_ACK);
 			packetBuffer.sequence = BigLong (sequence);
-			sfunc.Write (sock->socket, (byte *) &packetBuffer, NET_HEADERSIZE, &readaddr);
+			net_landrivers[sock->landriver].Write (sock->socket, (byte *) &packetBuffer, NET_HEADERSIZE, &readaddr);
 
 			if (sequence != sock->receiveSequence)
 			{
@@ -543,7 +554,7 @@ static void Test_Poll (void *blah)
 
 	while (1)
 	{
-		len = dfunc.Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
+		len = net_landrivers[net_landriverlevel].Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
 
 		if (len < sizeof (int))
 			break;
@@ -590,7 +601,7 @@ static void Test_Poll (void *blah)
 	}
 	else
 	{
-		dfunc.CloseSocket (testSocket);
+		net_landrivers[net_landriverlevel].CloseSocket (testSocket);
 		testInProgress = false;
 	}
 }
@@ -641,7 +652,7 @@ static void Test_f (void)
 			continue;
 
 		// see if we can resolve the host name
-		if (dfunc.GetAddrFromName (host, &sendaddr) != -1)
+		if (net_landrivers[net_landriverlevel].GetAddrFromName (host, &sendaddr) != -1)
 			break;
 	}
 
@@ -653,7 +664,7 @@ static void Test_f (void)
 	}
 
 JustDoIt:
-	testSocket = dfunc.OpenSocket (0);
+	testSocket = net_landrivers[net_landriverlevel].OpenSocket (0);
 
 	if (testSocket == -1)
 	{
@@ -674,7 +685,7 @@ JustDoIt:
 		MSG_WriteByte (&net_message, CCREQ_PLAYER_INFO);
 		MSG_WriteByte (&net_message, n);
 		* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
+		net_landrivers[net_landriverlevel].Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
 	}
 
 	SZ_Clear (&net_message);
@@ -699,7 +710,7 @@ static void Test2_Poll (void *blah)
 	net_landriverlevel = testDriver;
 	name[0] = 0;
 
-	len = dfunc.Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
+	len = net_landrivers[net_landriverlevel].Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
 
 	if (len < sizeof (int))
 		goto Reschedule;
@@ -736,8 +747,8 @@ static void Test2_Poll (void *blah)
 	MSG_WriteLong (&net_message, 0);
 	MSG_WriteByte (&net_message, CCREQ_RULE_INFO);
 	MSG_WriteString (&net_message, name);
-	* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (testSocket, net_message.data, net_message.cursize, &clientaddr);
+	*((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+	net_landrivers[net_landriverlevel].Write (testSocket, net_message.data, net_message.cursize, &clientaddr);
 	SZ_Clear (&net_message);
 
 Reschedule:
@@ -756,7 +767,7 @@ Error:
 	Con_Printf ("Unexpected response to Rule Info request\n");
 
 Done:
-	dfunc.CloseSocket (testSocket);
+	net_landrivers[net_landriverlevel].CloseSocket (testSocket);
 	testInProgress = false;
 
 	return;
@@ -807,7 +818,7 @@ static void Test2_f (void)
 			continue;
 
 		// see if we can resolve the host name
-		if (dfunc.GetAddrFromName (host, &sendaddr) != -1)
+		if (net_landrivers[net_landriverlevel].GetAddrFromName (host, &sendaddr) != -1)
 			break;
 	}
 
@@ -819,7 +830,7 @@ static void Test2_f (void)
 	}
 
 JustDoIt:
-	testSocket = dfunc.OpenSocket (0);
+	testSocket = net_landrivers[net_landriverlevel].OpenSocket (0);
 
 	if (testSocket == -1)
 	{
@@ -837,8 +848,8 @@ JustDoIt:
 	MSG_WriteLong (&net_message, 0);
 	MSG_WriteByte (&net_message, CCREQ_RULE_INFO);
 	MSG_WriteString (&net_message, "");
-	* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
+	*((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+	net_landrivers[net_landriverlevel].Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
 	SZ_Clear (&net_message);
 	SchedulePollProcedure (&test2PollProcedure, 0.05);
 }
@@ -853,7 +864,7 @@ static void Rcon_Poll (void *blah)
 
 	net_landriverlevel = testDriver;
 
-	len = dfunc.Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
+	len = net_landrivers[net_landriverlevel].Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
 
 	if (len < sizeof (int))
 	{
@@ -895,7 +906,7 @@ Error:
 	Con_Printf ("Unexpected repsonse to rcon command\n");
 
 Done:
-	dfunc.CloseSocket (testSocket);
+	net_landrivers[net_landriverlevel].CloseSocket (testSocket);
 	testInProgress = false;
 	return;
 }
@@ -969,7 +980,7 @@ static void Rcon_f (void)
 			continue;
 
 		// see if we can resolve the host name
-		if (dfunc.GetAddrFromName (host, &sendaddr) != -1)
+		if (net_landrivers[net_landriverlevel].GetAddrFromName (host, &sendaddr) != -1)
 			break;
 	}
 
@@ -980,7 +991,7 @@ static void Rcon_f (void)
 	}
 
 JustDoIt:
-	testSocket = dfunc.OpenSocket (0);
+	testSocket = net_landrivers[net_landriverlevel].OpenSocket (0);
 
 	if (testSocket == -1)
 	{
@@ -999,7 +1010,7 @@ JustDoIt:
 	MSG_WriteString (&net_message, rcon_password.string);
 	MSG_WriteString (&net_message, Cmd_Args());
 	* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
+	net_landrivers[net_landriverlevel].Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
 	SZ_Clear (&net_message);
 	SchedulePollProcedure (&rconPollProcedure, 0.05);
 }
@@ -1055,7 +1066,7 @@ void Datagram_Shutdown (void)
 
 void Datagram_Close (qsocket_t *sock)
 {
-	sfunc.CloseSocket (sock->socket);
+	net_landrivers[sock->landriver].CloseSocket (sock->socket);
 }
 
 void Datagram_Listen (bool state)
@@ -1075,7 +1086,7 @@ qsocket_t *Datagram_Reject (char *message, int acceptsock, struct qsockaddr *add
 	MSG_WriteByte (&net_message, CCREP_REJECT);
 	MSG_WriteString (&net_message, message);
 	* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (acceptsock, net_message.data, net_message.cursize, addr);
+	net_landrivers[net_landriverlevel].Write (acceptsock, net_message.data, net_message.cursize, addr);
 	SZ_Clear (&net_message);
 
 	return NULL;
@@ -1092,14 +1103,14 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	struct qsockaddr clientaddr;
 	struct qsockaddr newaddr;
 
-	acceptsock = dfunc.CheckNewConnections();
+	acceptsock = net_landrivers[net_landriverlevel].CheckNewConnections();
 
 	if (acceptsock == -1)
 		return NULL;
 
 	SZ_Clear (&net_message);
 
-	len = dfunc.Read (acceptsock, net_message.data, net_message.maxsize, &clientaddr);
+	len = net_landrivers[net_landriverlevel].Read (acceptsock, net_message.data, net_message.maxsize, &clientaddr);
 
 	if (len < sizeof (int))
 		return NULL;
@@ -1110,14 +1121,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	control = BigLong (*((int *) net_message.data));
 	MSG_ReadLong ();
 
-	if (control == -1)
-		return NULL;
-
-	if ((control & (~NETFLAG_LENGTH_MASK)) != NETFLAG_CTL)
-		return NULL;
-
-	if ((control & NETFLAG_LENGTH_MASK) != len)
-		return NULL;
+	if (control == -1) return NULL;
+	if ((control & (~NETFLAG_LENGTH_MASK)) != NETFLAG_CTL) return NULL;
+	if ((control & NETFLAG_LENGTH_MASK) != len) return NULL;
 
 	command = MSG_ReadByte ();
 
@@ -1130,15 +1136,15 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		// save space for the header, filled in later
 		MSG_WriteLong (&net_message, 0);
 		MSG_WriteByte (&net_message, CCREP_SERVER_INFO);
-		dfunc.GetSocketAddr (acceptsock, &newaddr);
-		MSG_WriteString (&net_message, dfunc.AddrToString (&newaddr));
+		net_landrivers[net_landriverlevel].GetSocketAddr (acceptsock, &newaddr);
+		MSG_WriteString (&net_message, net_landrivers[net_landriverlevel].AddrToString (&newaddr));
 		MSG_WriteString (&net_message, hostname.string);
 		MSG_WriteString (&net_message, sv.name);
 		MSG_WriteByte (&net_message, net_activeconnections);
 		MSG_WriteByte (&net_message, svs.maxclients);
 		MSG_WriteByte (&net_message, NET_PROTOCOL_VERSION);
-		* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		*((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+		net_landrivers[net_landriverlevel].Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 		SZ_Clear (&net_message);
 
 		return NULL;
@@ -1176,8 +1182,8 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteLong (&net_message, (int) client->edict->v.frags);
 		MSG_WriteLong (&net_message, (int) (net_time - client->netconnection->connecttime));
 		MSG_WriteString (&net_message, client->netconnection->address);
-		* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		*((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+		net_landrivers[net_landriverlevel].Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 		SZ_Clear (&net_message);
 
 		return NULL;
@@ -1185,49 +1191,28 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 
 	if (command == CCREQ_RULE_INFO)
 	{
-		char	*prevCvarName;
-		cvar_t	*var;
+		char *prevCvarName = NULL;
+		cvar_t *var = NULL;
 
 		// find the search start location
-		prevCvarName = MSG_ReadString();
+		prevCvarName = MSG_ReadString ();
 
-		if (*prevCvarName)
+		if ((var = Cvar_GetNextServerRuleVar (prevCvarName)) != NULL)
 		{
-			var = Cvar_FindVar (prevCvarName);
+			// send the response
+			SZ_Clear (&net_message);
 
-			if (!var)
-				return NULL;
+			// save space for the header, filled in later
+			MSG_WriteLong (&net_message, 0);
+			MSG_WriteByte (&net_message, CCREP_RULE_INFO);
 
-			var = var->next;
-		}
-		else
-			var = cvar_vars;
-
-		// search for the next server cvar
-		while (var)
-		{
-			if (var->usage & CVAR_SERVER)
-				break;
-
-			var = var->next;
-		}
-
-		// send the response
-
-		SZ_Clear (&net_message);
-		// save space for the header, filled in later
-		MSG_WriteLong (&net_message, 0);
-		MSG_WriteByte (&net_message, CCREP_RULE_INFO);
-
-		if (var)
-		{
 			MSG_WriteString (&net_message, var->name);
 			MSG_WriteString (&net_message, var->string);
-		}
 
-		* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		SZ_Clear (&net_message);
+			*((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+			net_landrivers[net_landriverlevel].Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+			SZ_Clear (&net_message);
+		}
 
 		return NULL;
 	}
@@ -1238,8 +1223,8 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		// 2048 = largest possible return from MSG_ReadString
 		char	pass[2048], cmd[2048];
 
-		strcpy (pass, MSG_ReadString());
-		strcpy (cmd, MSG_ReadString());
+		strcpy (pass, MSG_ReadString ());
+		strcpy (cmd, MSG_ReadString ());
 
 		SZ_Clear (&rcon_message);
 		// save space for the header, filled in later
@@ -1262,24 +1247,18 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 			rcon_active = false;
 		}
 
-		* ((int *) rcon_message.data) = BigLong (NETFLAG_CTL | (rcon_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, rcon_message.data, rcon_message.cursize, &clientaddr);
+		*((int *) rcon_message.data) = BigLong (NETFLAG_CTL | (rcon_message.cursize & NETFLAG_LENGTH_MASK));
+		net_landrivers[net_landriverlevel].Write (acceptsock, rcon_message.data, rcon_message.cursize, &clientaddr);
 		SZ_Clear (&rcon_message);
 
 		return NULL;
 	}
 
-	if (command != CCREQ_CONNECT)
-		return NULL;
-
-	if (strcmp (MSG_ReadString(), "QUAKE"))
-		return NULL;
-
-	if (MSG_ReadByte() != NET_PROTOCOL_VERSION)
-		return Datagram_Reject ("Incompatible version.\n", acceptsock, &clientaddr);
+	if (command != CCREQ_CONNECT) return NULL;
+	if (strcmp (MSG_ReadString(), "QUAKE")) return NULL;
+	if (MSG_ReadByte() != NET_PROTOCOL_VERSION) return Datagram_Reject ("Incompatible version.\n", acceptsock, &clientaddr);
 
 #ifdef BAN_TEST
-
 	// check for a ban
 	if (clientaddr.sa_family == AF_INET)
 	{
@@ -1290,7 +1269,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		if ((testAddr & banMask) == banAddr)
 			return Datagram_Reject ("You have been banned.\n", acceptsock, &clientaddr);
 	}
-
 #endif
 
 	// see if this guy is already connected
@@ -1299,7 +1277,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		if (s->driver != net_driverlevel)
 			continue;
 
-		ret = dfunc.AddrCompare (&clientaddr, &s->addr);
+		ret = net_landrivers[net_landriverlevel].AddrCompare (&clientaddr, &s->addr);
 
 		if (ret >= 0)
 		{
@@ -1308,13 +1286,14 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 			{
 				// yes, so send a duplicate reply
 				SZ_Clear (&net_message);
+
 				// save space for the header, filled in later
 				MSG_WriteLong (&net_message, 0);
 				MSG_WriteByte (&net_message, CCREP_ACCEPT);
-				dfunc.GetSocketAddr (s->socket, &newaddr);
-				MSG_WriteLong (&net_message, dfunc.GetSocketPort (&newaddr));
-				* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-				dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+				net_landrivers[net_landriverlevel].GetSocketAddr (s->socket, &newaddr);
+				MSG_WriteLong (&net_message, net_landrivers[net_landriverlevel].GetSocketPort (&newaddr));
+				*((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+				net_landrivers[net_landriverlevel].Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 				SZ_Clear (&net_message);
 
 				return NULL;
@@ -1329,11 +1308,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 
 	if (len > 12)
 		mod = MSG_ReadByte ();
-
 #if 0
 	else if (!qsmackActive && clientaddr.sa_family == AF_INET && ((struct sockaddr_in *) &clientaddr)->sin_addr.s_addr == qsmackAddr)
 		mod = MOD_QSMACK;
-
 #endif
 	else mod = MOD_NONE;
 
@@ -1346,7 +1323,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	else mod_flags = 0;
 
 #if 0
-
 	if (mod != MOD_QSMACK)
 	{
 		if (cl_password.value && (len <= 18 || cl_password.value != MSG_ReadLong()))
@@ -1355,7 +1331,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		if (cl_cheatfree && (mod != MOD_PROQUAKE || mod_version < 32))
 			return Datagram_Reject (va ("Ôèéó éó á ãèåáô­æòåå óåòöåòŸ\nYou must use JoeQuake v%s (build %i) or above\n", JOEQUAKE_VERSION, build_number()), acceptsock, &clientaddr);
 	}
-
 #endif
 
 	// allocate a QSocket
@@ -1363,7 +1338,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		return Datagram_Reject ("Server is full.\n", acceptsock, &clientaddr);
 
 	// allocate a network socket
-	newsock = dfunc.OpenSocket (0);
+	newsock = net_landrivers[net_landriverlevel].OpenSocket (0);
 
 	if (newsock == -1)
 	{
@@ -1372,9 +1347,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	}
 
 	// connect to the client
-	if (dfunc.Connect (newsock, &clientaddr) == -1)
+	if (net_landrivers[net_landriverlevel].Connect (newsock, &clientaddr) == -1)
 	{
-		dfunc.CloseSocket (newsock);
+		net_landrivers[net_landriverlevel].CloseSocket (newsock);
 		NET_FreeQSocket (sock);
 		return NULL;
 	}
@@ -1392,15 +1367,15 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	sock->socket = newsock;
 	sock->landriver = net_landriverlevel;
 	sock->addr = clientaddr;
-	strcpy (sock->address, dfunc.AddrToString (&clientaddr));
+	strcpy (sock->address, net_landrivers[net_landriverlevel].AddrToString (&clientaddr));
 
 	// send him back the info about the server connection he has been allocated
 	SZ_Clear (&net_message);
 	// save space for the header, filled in later
 	MSG_WriteLong (&net_message, 0);
 	MSG_WriteByte (&net_message, CCREP_ACCEPT);
-	dfunc.GetSocketAddr (newsock, &newaddr);
-	sock->client_port = dfunc.GetSocketPort (&newaddr);
+	net_landrivers[net_landriverlevel].GetSocketAddr (newsock, &newaddr);
+	sock->client_port = net_landrivers[net_landriverlevel].GetSocketPort (&newaddr);
 	MSG_WriteLong (&net_message, sock->client_port);
 	MSG_WriteByte (&net_message, MOD_PROQUAKE);
 	MSG_WriteByte (&net_message, 10 * MOD_PROQUAKE_VERSION);
@@ -1417,8 +1392,8 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteByte (&net_message, 0);
 	}
 
-	* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+	*((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+	net_landrivers[net_landriverlevel].Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 	SZ_Clear (&net_message);
 
 	return sock;
@@ -1426,7 +1401,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 
 qsocket_t *Datagram_CheckNewConnections (void)
 {
-	qsocket_t	*ret = NULL;
+	qsocket_t *ret = NULL;
 
 	for (net_landriverlevel = 0; net_landriverlevel < net_numlandrivers; net_landriverlevel++)
 		if (net_landrivers[net_landriverlevel].initialized)
@@ -1442,7 +1417,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 	struct qsockaddr readaddr;
 	struct qsockaddr myaddr;
 
-	dfunc.GetSocketAddr (dfunc.controlSock, &myaddr);
+	net_landrivers[net_landriverlevel].GetSocketAddr (net_landrivers[net_landriverlevel].controlSock, &myaddr);
 
 	if (xmit)
 	{
@@ -1453,11 +1428,11 @@ static void _Datagram_SearchForHosts (bool xmit)
 		MSG_WriteString (&net_message, "QUAKE");
 		MSG_WriteByte (&net_message, NET_PROTOCOL_VERSION);
 		* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Broadcast (dfunc.controlSock, net_message.data, net_message.cursize);
+		net_landrivers[net_landriverlevel].Broadcast (net_landrivers[net_landriverlevel].controlSock, net_message.data, net_message.cursize);
 		SZ_Clear (&net_message);
 	}
 
-	while ((ret = dfunc.Read (dfunc.controlSock, net_message.data, net_message.maxsize, &readaddr)) > 0)
+	while ((ret = net_landrivers[net_landriverlevel].Read (net_landrivers[net_landriverlevel].controlSock, net_message.data, net_message.maxsize, &readaddr)) > 0)
 	{
 		if (ret < sizeof (int))
 			continue;
@@ -1465,7 +1440,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 		net_message.cursize = ret;
 
 		// don't answer our own query
-		if (dfunc.AddrCompare (&readaddr, &myaddr) >= 0)
+		if (net_landrivers[net_landriverlevel].AddrCompare (&readaddr, &myaddr) >= 0)
 			continue;
 
 		// is the cache full?
@@ -1488,11 +1463,11 @@ static void _Datagram_SearchForHosts (bool xmit)
 		if (MSG_ReadByte() != CCREP_SERVER_INFO)
 			continue;
 
-		dfunc.GetAddrFromName (MSG_ReadString(), &readaddr);
+		net_landrivers[net_landriverlevel].GetAddrFromName (MSG_ReadString(), &readaddr);
 
 		// search the cache for this server
 		for (n = 0; n < hostCacheCount; n++)
-			if (dfunc.AddrCompare (&readaddr, &hostcache[n].addr) == 0)
+			if (net_landrivers[net_landriverlevel].AddrCompare (&readaddr, &hostcache[n].addr) == 0)
 				break;
 
 		// is it already there?
@@ -1517,7 +1492,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 		memcpy (&hostcache[n].addr, &readaddr, sizeof (struct qsockaddr));
 		hostcache[n].driver = net_driverlevel;
 		hostcache[n].ldriver = net_landriverlevel;
-		strcpy (hostcache[n].cname, dfunc.AddrToString (&readaddr));
+		strcpy (hostcache[n].cname, net_landrivers[net_landriverlevel].AddrToString (&readaddr));
 
 		// check for a name conflict
 		for (i = 0; i < hostCacheCount; i++)
@@ -1569,14 +1544,14 @@ static qsocket_t *_Datagram_Connect (char *host)
 	int		ret = 0;
 
 	// see if we can resolve the host name
-	if (dfunc.GetAddrFromName (host, &sendaddr) == -1)
+	if (net_landrivers[net_landriverlevel].GetAddrFromName (host, &sendaddr) == -1)
 	{
 		// joe: added error message from ProQuake
 		Con_Printf ("Could not resolve %s\n", host);
 		return NULL;
 	}
 
-	newsock = dfunc.OpenSocket (0);
+	newsock = net_landrivers[net_landriverlevel].OpenSocket (0);
 
 	if (newsock == -1)
 		return NULL;
@@ -1588,7 +1563,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	sock->landriver = net_landriverlevel;
 
 	// connect to the host
-	if (dfunc.Connect (newsock, &sendaddr) == -1)
+	if (net_landrivers[net_landriverlevel].Connect (newsock, &sendaddr) == -1)
 		goto ErrorReturn;
 
 	// send the connection request
@@ -1609,18 +1584,18 @@ static qsocket_t *_Datagram_Connect (char *host)
 		MSG_WriteByte (&net_message, 0);
 		MSG_WriteLong (&net_message, cl_password.value);	// joe: password protected servers from ProQuake
 		* ((int *) net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (newsock, net_message.data, net_message.cursize, &sendaddr);
+		net_landrivers[net_landriverlevel].Write (newsock, net_message.data, net_message.cursize, &sendaddr);
 		SZ_Clear (&net_message);
 
 		do
 		{
-			ret = dfunc.Read (newsock, net_message.data, net_message.maxsize, &readaddr);
+			ret = net_landrivers[net_landriverlevel].Read (newsock, net_message.data, net_message.maxsize, &readaddr);
 
 			// if we got something, validate it
 			if (ret > 0)
 			{
 				// is it from the right place?
-				if (sfunc.AddrCompare (&readaddr, &sendaddr) != 0)
+				if (net_landrivers[sock->landriver].AddrCompare (&readaddr, &sendaddr) != 0)
 				{
 #if 0	// joe: removed DEBUG
 					Con_Printf ("wrong reply address\n");
@@ -1706,7 +1681,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	{
 		sock->client_port = MSG_ReadLong ();
 		memcpy (&sock->addr, &sendaddr, sizeof (struct qsockaddr));
-		dfunc.SetSocketPort (&sock->addr, sock->client_port);
+		net_landrivers[net_landriverlevel].SetSocketPort (&sock->addr, sock->client_port);
 
 		if (len > 9)
 			sock->mod = MSG_ReadByte ();
@@ -1755,7 +1730,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 		goto ErrorReturn;
 	}
 
-	dfunc.GetNameFromAddr (&sendaddr, sock->address);
+	net_landrivers[net_landriverlevel].GetNameFromAddr (&sendaddr, sock->address);
 
 	Con_Printf ("Connection accepted\n");
 	sock->lastMessageTime = SetNetTime ();
@@ -1763,12 +1738,12 @@ static qsocket_t *_Datagram_Connect (char *host)
 	// joe, from ProQuake: make NAT work by opening a new socket
 	if (sock->mod == MOD_PROQUAKE && sock->mod_version >= 34)
 	{
-		int clientsock = dfunc.OpenSocket (0);
+		int clientsock = net_landrivers[net_landriverlevel].OpenSocket (0);
 
 		if (clientsock == -1)
 			goto ErrorReturn;
 
-		dfunc.CloseSocket (newsock);
+		net_landrivers[net_landriverlevel].CloseSocket (newsock);
 		newsock = clientsock;
 		sock->socket = newsock;
 	}
@@ -1776,7 +1751,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	sock->encrypt = 2;
 
 	// switch the connection to the specified address
-	if (dfunc.Connect (newsock, &sock->addr) == -1)
+	if (net_landrivers[net_landriverlevel].Connect (newsock, &sock->addr) == -1)
 	{
 		reason = "Connect to Game failed";
 		Con_Printf ("%s\n", reason);
@@ -1791,7 +1766,7 @@ ErrorReturn:
 	NET_FreeQSocket (sock);
 
 ErrorReturn2:
-	dfunc.CloseSocket (newsock);
+	net_landrivers[net_landriverlevel].CloseSocket (newsock);
 	NET_MenuReturn ();
 
 	return NULL;

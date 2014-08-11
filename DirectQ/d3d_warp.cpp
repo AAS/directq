@@ -143,6 +143,7 @@ cvar_t r_slimealpha ("r_slimealpha", 1);
 cvar_t r_warpspeed ("r_warpspeed", 4, CVAR_ARCHIVE);
 cvar_t r_warpscale ("r_warpscale", 8, CVAR_ARCHIVE);
 cvar_t r_warpfactor ("r_warpfactor", 2, CVAR_ARCHIVE);
+cvar_t r_warptexturescale ("r_warptexturescale", 1, CVAR_ARCHIVE);
 
 // for nehahra and anyone who wants them...
 cvar_t r_waterripple ("r_waterripple", 0.0f, CVAR_ARCHIVE);
@@ -150,9 +151,6 @@ cvar_t r_nowaterripple ("r_nowaterripple", 1.0f, CVAR_ARCHIVE);
 
 // lock water/slime/tele/lava alpha sliders
 cvar_t r_lockalpha ("r_lockalpha", "1");
-
-float warptime = 10;
-float ripplefactors[2] = {0, 0};
 
 void D3DWarp_InitializeTurb (void)
 {
@@ -176,25 +174,23 @@ void D3DWarp_InitializeTurb (void)
 		d3d_TeleAlpha = BYTE_CLAMP (r_telealpha.value * 256);
 	}
 
-	// set the warp time and factor (moving this calculation out of a loop)
-	warptime = cl.time * 10.18591625f * r_warpspeed.value;
-
 	// all of these below are premultiplied by various factors to save on PS instructions
 	// some day I'll #define them properly so that we don't have scary magic numbers all over the place
-	D3DHLSL_SetFloat ("warptime", warptime * 0.0039215f);
-	D3DHLSL_SetFloat ("warpfactor", r_warpfactor.value * 64.0f * 0.0039215f);
-	D3DHLSL_SetFloat ("warpscale", r_warpscale.value * 2.0f * (1.0f / 64.0f));
+	D3DHLSL_SetFloat ("warptime", cl.time * r_warpspeed.value * (32.0 / D3DX_PI));
+	D3DHLSL_SetFloat ("warpfactor", r_warpfactor.value);
+	D3DHLSL_SetFloat ("warpscale", r_warpscale.value);
+
+	if (r_warptexturescale.value > 0)
+		D3DHLSL_SetFloat ("warptexturescale", 1.0f / (64.0f * r_warptexturescale.value));
+	else D3DHLSL_SetFloat ("warptexturescale", 1.0f / 64.0f);
+
+	float ripplefactors[2] = {0, 0};
 
 	// determine if we're rippling
 	if (r_waterripple.value && !r_nowaterripple.value)
 	{
 		ripplefactors[0] = r_waterripple.value;
 		ripplefactors[1] = cl.time * 3.0f;
-	}
-	else
-	{
-		ripplefactors[0] = 0;
-		ripplefactors[1] = 0;
 	}
 
 	D3DHLSL_SetFloatArray ("ripple", ripplefactors, 2);
@@ -256,11 +252,11 @@ void D3DWarp_DrawSurface (msurface_t *surf, entity_t *ent)
 
 	// check for a texture or alpha change
 	// (either of these will trigger the recommit above)
-	if (surf->texinfo->texture->teximage->d3d_Texture != previouswarptexture)
+	if (surf->texinfo->texture->teximage != previouswarptexture)
 	{
 		D3DBrush_FlushSurfaces ();
-		D3DHLSL_SetTexture (0, surf->texinfo->texture->teximage->d3d_Texture);
-		previouswarptexture = surf->texinfo->texture->teximage->d3d_Texture;
+		D3DHLSL_SetTexture (0, surf->texinfo->texture->teximage);
+		previouswarptexture = surf->texinfo->texture->teximage;
 	}
 
 	if (thisalpha != previouswarpalpha)
@@ -294,6 +290,10 @@ void D3DWarp_DrawWaterSurfaces (brushhdr_t *hdr, msurface_t *chain, entity_t *en
 
 		if (!(tex = hdr->textures[i])) continue;
 		if (!(chain = tex->texturechain)) continue;
+
+		// woops! forgot this.  there was an assumption here that D3DSurf_DrawSolidSurfaces would work properly
+		// if i screwed it up in future; well...
+		if (!(chain->flags & SURF_DRAWTURB)) continue;
 
 		for (; chain; chain = chain->texturechain)
 		{

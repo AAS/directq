@@ -24,6 +24,7 @@ typedef unsigned char 		byte;
 #define BYTE_DEFINED 1
 #endif
 
+extern bool com_rmq;
 char *Q_strncpy (char *dst, const char *src, int len);
 
 
@@ -170,7 +171,7 @@ byte *COM_LoadFile (char *path);
 
 void COM_ExecQuakeRC (void);
 
-extern bool		standard_quake, rogue, hipnotic, quoth, nehahra, kurok;
+extern bool		standard_quake, rogue, hipnotic, quoth, nehahra;
 
 void COM_HashData (byte *hash, const void *data, int size);
 #define COM_CheckHash(h1, h2) !(memcmp ((h1), (h2), 16))
@@ -238,5 +239,6 @@ extern searchpath_t    *com_searchpaths;
 
 bool COM_ValidateContentFolderCvar (class cvar_t *var);
 void COM_ValidateUserSettableDir (class cvar_t *var);
+void COM_ValidatePaths (char **paths);
 
 char *COM_ShiftTextColor (char *str);

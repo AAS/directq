@@ -21,6 +21,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "pr_class.h"
 
+#include <vector>
+
+
 edict_t *ED_Alloc (CProgsDat *Progs);
 
 
@@ -404,7 +407,11 @@ void PF_setmodel (void)
 	mod = sv.models[(int) e->v.modelindex];
 
 	if (mod)
-		SetMinMaxSize (e, mod->mins, mod->maxs, true);
+	{
+		if (mod->type == mod_brush)
+			SetMinMaxSize (e, mod->clipmins, mod->clipmaxs, true);
+		else SetMinMaxSize (e, mod->mins, mod->maxs, true);
+	}
 	else SetMinMaxSize (e, vec3_origin, vec3_origin, true);
 }
 
@@ -1141,7 +1148,75 @@ void PF_Spawn (void)
 	RETURN_EDICT (ed);
 }
 
-void MakeMeAStaticEntity (sizebuf_t *buf, edict_t *ent);
+int SV_ModelIndex (char *name);
+
+void PR_WriteStaticEntityFromEdict (sizebuf_t *buf, edict_t *ent)
+{
+	int		i;
+	int		bits = 0;
+
+	if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ)
+	{
+		// never send alpha
+		if (SV_ModelIndex (SVProgs->GetString (ent->v.model)) & 0xFF00) bits |= B_LARGEMODEL;
+		if ((int) (ent->v.frame) & 0xFF00) bits |= B_LARGEFRAME;
+		if (ent->alphaval < 255 && ent->alphaval > 0) bits |= B_ALPHA;
+	}
+	else
+	{
+		if (SV_ModelIndex (SVProgs->GetString (ent->v.model)) & 0xFF00 || (int) (ent->v.frame) & 0xFF00)
+		{
+			// can't display the correct model & frame, so don't show it at all
+			ED_Free (ent);
+			return;
+		}
+	}
+
+	if (bits)
+	{
+		MSG_WriteByte (buf, svc_spawnstatic2);
+		MSG_WriteByte (buf, bits);
+	}
+	else MSG_WriteByte (buf, svc_spawnstatic);
+
+	if (bits & B_LARGEMODEL)
+		MSG_WriteShort (buf, SV_ModelIndex (SVProgs->GetString (ent->v.model)));
+	else SV_WriteByteShort (buf, SV_ModelIndex (SVProgs->GetString (ent->v.model)));
+
+	if (bits & B_LARGEFRAME)
+		MSG_WriteShort (buf, ent->v.frame);
+	else MSG_WriteByte (buf, ent->v.frame);
+
+	MSG_WriteByte (buf, ent->v.colormap);
+	MSG_WriteByte (buf, ent->v.skin);
+
+	for (i = 0; i < 3; i++)
+	{
+		MSG_WriteCoord (buf, ent->v.origin[i], sv.Protocol, sv.PrototcolFlags);
+		MSG_WriteAngle (buf, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
+	}
+
+	if (bits & B_ALPHA) MSG_WriteByte (buf, ent->alphaval);
+
+	// throw the entity away now
+	ED_Free (ent);
+}
+
+
+std::vector<edict_t *> pr_gibletlist;
+
+void PR_WriteGibletsToClient (sizebuf_t *buf)
+{
+	if (pr_gibletlist.size ())
+	{
+		for (int i = 0; i < pr_gibletlist.size (); i++)
+			PR_WriteStaticEntityFromEdict (buf, pr_gibletlist[i]);
+
+		// Con_Printf ("Wrote %i gibs\n", pr_gibletlist.size ());
+		pr_gibletlist.clear ();
+	}
+}
+
 
 void PF_Remove (void)
 {
@@ -1154,17 +1229,13 @@ void PF_Remove (void)
 		// permanent gibs
 		model_t *mod = sv.models[(int) ed->v.modelindex];
 
-		if (mod)
+		if (mod && ((mod->flags & EF_GIB) || (mod->flags & EF_ZOMGIB)))
 		{
-			if (mod->type == mod_alias)
-			{
-				if (!_strnicmp (mod->name, "progs/gib", 9))
-				{
-					// Con_Printf ("wrote gib as new static entity to client\n");
-					// MakeMeAStaticEntity (&sv.datagram, ed);
-					return;
-				}
-			}
+			// we can't write these immediately so instead we save them out and write when doing the rest of the client message
+			// Con_Printf ("wrote gib as new static entity to client\n");
+			pr_gibletlist.push_back (ed);
+			// PR_WriteStaticEntityFromEdict (&sv.datagram, ed);
+			return;
 		}
 	}
 
@@ -1516,8 +1587,7 @@ void PF_aim (void)
 	VectorMad (start, 2048, dir, end);
 	tr = SV_Move (start, vec3_origin, vec3_origin, end, false, ent);
 
-	if (tr.ent && tr.ent->v.takedamage == DAMAGE_AIM
-			&& (!teamplay.value || ent->v.team <= 0 || ent->v.team != tr.ent->v.team))
+	if (tr.ent && tr.ent->v.takedamage == DAMAGE_AIM && (!teamplay.value || ent->v.team <= 0 || ent->v.team != tr.ent->v.team))
 	{
 		VectorCopy (SVProgs->GlobalStruct->v_forward, G_VECTOR (OFS_RETURN));
 		return;
@@ -1526,40 +1596,25 @@ void PF_aim (void)
 	// try all possible entities
 	VectorCopy (dir, bestdir);
 
-	if (kurok)
-	{
-		// match kurok default of 0.99
-		if (cl_autoaim.value)
-			bestdist = sv_aim.value * 1.064516;
-		else bestdist = 1;
-	}
-	else bestdist = sv_aim.value;
-
+	bestdist = sv_aim.value;
 	bestent = NULL;
 
 	check = NEXT_EDICT (SVProgs->EdictPointers[0]);
 
 	for (i = 1; i < SVProgs->NumEdicts; i++, check = NEXT_EDICT (check))
 	{
-		if (check->v.takedamage != DAMAGE_AIM)
-			continue;
-
-		if (check == ent)
-			continue;
-
-		if (teamplay.value && ent->v.team > 0 && ent->v.team == check->v.team)
-			continue;	// don't aim at teammate
+		if (check->v.takedamage != DAMAGE_AIM) continue;
+		if (check == ent) continue;
+		if (teamplay.value && ent->v.team > 0 && ent->v.team == check->v.team) continue;	// don't aim at teammate
 
 		for (j = 0; j < 3; j++)
-			end[j] = check->v.origin[j]
-					 + 0.5 * (check->v.mins[j] + check->v.maxs[j]);
+			end[j] = check->v.origin[j] + 0.5 * (check->v.mins[j] + check->v.maxs[j]);
 
 		VectorSubtract (end, start, dir);
 		VectorNormalize (dir);
 		dist = DotProduct (dir, SVProgs->GlobalStruct->v_forward);
 
-		if (dist < bestdist)
-			continue;	// to far to turn
+		if (dist < bestdist) continue;	// to far to turn
 
 		tr = SV_Move (start, vec3_origin, vec3_origin, end, false, ent);
 
@@ -1575,16 +1630,8 @@ void PF_aim (void)
 	{
 		VectorSubtract (bestent->v.origin, ent->v.origin, dir);
 
-		if (kurok)
-		{
-			end[0] = dir[0];
-			end[1] = dir[1];
-		}
-		else
-		{
-			dist = DotProduct (dir, SVProgs->GlobalStruct->v_forward);
-			VectorScale (SVProgs->GlobalStruct->v_forward, dist, end);
-		}
+		dist = DotProduct (dir, SVProgs->GlobalStruct->v_forward);
+		VectorScale (SVProgs->GlobalStruct->v_forward, dist, end);
 
 		end[2] = dir[2];
 		VectorNormalize (end);
@@ -1810,66 +1857,11 @@ void PF_WriteEntity (void)
 
 //=============================================================================
 
-int SV_ModelIndex (char *name);
-
-void MakeMeAStaticEntity (sizebuf_t *buf, edict_t *ent)
-{
-	int		i;
-	int		bits = 0;
-
-	if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ)
-	{
-		// never send alpha
-		if (SV_ModelIndex (SVProgs->GetString (ent->v.model)) & 0xFF00) bits |= B_LARGEMODEL;
-		if ((int) (ent->v.frame) & 0xFF00) bits |= B_LARGEFRAME;
-		if (ent->alphaval < 255 && ent->alphaval > 0) bits |= B_ALPHA;
-	}
-	else
-	{
-		if (SV_ModelIndex (SVProgs->GetString (ent->v.model)) & 0xFF00 || (int) (ent->v.frame) & 0xFF00)
-		{
-			// can't display the correct model & frame, so don't show it at all
-			ED_Free (ent);
-			return;
-		}
-	}
-
-	if (bits)
-	{
-		MSG_WriteByte (buf, svc_spawnstatic2);
-		MSG_WriteByte (buf, bits);
-	}
-	else MSG_WriteByte (buf, svc_spawnstatic);
-
-	if (bits & B_LARGEMODEL)
-		MSG_WriteShort (buf, SV_ModelIndex (SVProgs->GetString (ent->v.model)));
-	else SV_WriteByteShort (buf, SV_ModelIndex (SVProgs->GetString (ent->v.model)));
-
-	if (bits & B_LARGEFRAME)
-		MSG_WriteShort (buf, ent->v.frame);
-	else MSG_WriteByte (buf, ent->v.frame);
-
-	MSG_WriteByte (buf, ent->v.colormap);
-	MSG_WriteByte (buf, ent->v.skin);
-
-	for (i = 0; i < 3; i++)
-	{
-		MSG_WriteCoord (buf, ent->v.origin[i], sv.Protocol, sv.PrototcolFlags);
-		MSG_WriteAngle (buf, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
-	}
-
-	if (bits & B_ALPHA) MSG_WriteByte (buf, ent->alphaval);
-
-	// throw the entity away now
-	ED_Free (ent);
-}
-
-
 void PF_makestatic (void)
 {
 	edict_t	*ent = G_EDICT (OFS_PARM0);
 
-	MakeMeAStaticEntity (&sv.signon, ent);
+	PR_WriteStaticEntityFromEdict (&sv.signon, ent);
 }
 
 //=============================================================================
@@ -2610,7 +2602,7 @@ ebfs_builtin_t pr_ebfs_builtins[] =
 	// 2001-11-15 DarkPlaces general builtin functions by Lord Havoc  end
 };
 
-int pr_ebfs_numbuiltins = sizeof (pr_ebfs_builtins) / sizeof (pr_ebfs_builtins[0]);
+int pr_ebfs_numbuiltins = STRUCT_ARRAY_LENGTH (pr_ebfs_builtins);
 // 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes  end
 
 builtin_t *pr_builtins;

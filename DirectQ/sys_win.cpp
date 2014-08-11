@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include <shlobj.h>
 
+
 int profilestart;
 int profileend;
 
@@ -87,7 +88,7 @@ void Sys_mkdir (char *path)
 	char fullpath[256];
 
 	// if a full absolute path is given we just copy it out, otherwise we build from the gamedir
-	if (path[1] == ':')
+	if (path[1] == ':' || (path[0] == '\\' && path[1] == '\\'))
 		Q_strncpy (fullpath, path, 255);
 	else _snprintf (fullpath, 255, "%s/%s", com_gamedir, path);
 
@@ -127,12 +128,21 @@ void Sys_Init (void)
 
 void Sys_Error (char *error, ...)
 {
+	extern LPDIRECT3DDEVICE9 d3d_Device;
+	extern HWND d3d_Window;
+
 	va_list		argptr;
 	char		text[1024];
 	static int	in_sys_error0 = 0;
 	static int	in_sys_error1 = 0;
 	static int	in_sys_error2 = 0;
 	static int	in_sys_error3 = 0;
+
+	if (d3d_Device)
+	{
+		// we're going down so make sure that the user can see the error
+		d3d_Device->SetDialogBoxMode (TRUE);
+	}
 
 	if (!in_sys_error3)
 	{
@@ -145,19 +155,13 @@ void Sys_Error (char *error, ...)
 
 	QC_DebugOutput ("Sys_Error: %s", text);
 
-	// switch to windowed so the message box is visible, unless we already
-	// tried that and failed
+	// switch to windowed so the message box is visible, unless we already tried that and failed
 	if (!in_sys_error0)
 	{
 		in_sys_error0 = 1;
-		MessageBox (NULL, text, "Quake Error",
-					MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
+		MessageBox (d3d_Window, text, "Quake Error", MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
 	}
-	else
-	{
-		MessageBox (NULL, text, "Double Quake Error",
-					MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
-	}
+	else MessageBox (d3d_Window, text, "Double Quake Error", MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
 
 	if (!in_sys_error1)
 	{
@@ -600,8 +604,6 @@ void AppActivate (BOOL fActive, BOOL minimize)
 }
 
 
-void D3DVid_ResizeWindow (HWND hWnd);
-
 cvar_t sys_sleeptime ("sys_sleeptime", 0.0f, CVAR_ARCHIVE);
 double last_inputtime = 0;
 bool IN_ReadInputMessages (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
@@ -616,40 +618,10 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 	switch (Msg)
 	{
-	case WM_GETMINMAXINFO:
-		{
-			RECT windowrect;
-			RECT clientrect;
-			MINMAXINFO *mmi = (MINMAXINFO *) lParam;
-
-			GetWindowRect (hWnd, &windowrect);
-			GetClientRect (hWnd, &clientrect);
-
-			mmi->ptMinTrackSize.x = 640 + ((windowrect.right - windowrect.left) - (clientrect.right - clientrect.left));
-			mmi->ptMinTrackSize.y = 480 + ((windowrect.bottom - windowrect.top) - (clientrect.bottom - clientrect.top));
-		}
-
-		return 0;
-
-	case WM_SIZE:
-		D3DVid_ResizeWindow (hWnd);
-		return 0;
-
 		// events we want to discard
 	case WM_CREATE: return 0;
 	case WM_ERASEBKGND: return 1; // treachery!!! see your MSDN!
 	case WM_SYSCHAR: return 0;
-
-	case WM_PAINT:
-		// minimal WM_PAINT processing
-		// based on http://msdn.microsoft.com/en-us/library/dd369065%28v=VS.85%29.aspx
-		{
-			PAINTSTRUCT ps;
-			BeginPaint (hWnd, &ps);
-			EndPaint (hWnd, &ps);
-		}
-
-		return 0;
 
 	case WM_SYSCOMMAND:
 		switch (wParam & ~0x0F)
@@ -662,12 +634,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		default:
 			return DefWindowProc (hWnd, Msg, wParam, lParam);
 		}
-
-	case WM_KILLFOCUS:
-		if (D3DVid_IsFullscreen ())
-			ShowWindow (d3d_Window, SW_SHOWMINNOACTIVE);
-
-		return 0;
 
 	case WM_MOVE:
 		// update cursor clip region
@@ -768,9 +734,9 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		// only show the splash if we got the bitmap
 		if (SPLASHW && SPLASHH)
 		{
-			// center it in the work area
-			int x = ((DesktopRect.right - DesktopRect.left) - SPLASHW) >> 1;
-			int y = ((DesktopRect.bottom - DesktopRect.top) - SPLASHH) >> 1;
+			// center it in the work area (don't assume that top and left are both 0)
+			int x = DesktopRect.left + (((DesktopRect.right - DesktopRect.left) - SPLASHW) >> 1);
+			int y = DesktopRect.top + (((DesktopRect.bottom - DesktopRect.top) - SPLASHH) >> 1);
 
 			SetWindowPos (hwndSplash, NULL, x, y, SPLASHW, SPLASHH, SWP_NOZORDER);
 
@@ -941,7 +907,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	parms.argc = com_argc;
 	parms.argv = com_argv;
 
-	// Save the current sticky/toggle/filter key settings so they can be restored them later
+	// Save the current sticky/toggle/filter key settings so they can be restored later
 	SystemParametersInfo (SPI_GETSTICKYKEYS, sizeof (STICKYKEYS), &StartupStickyKeys, 0);
 	SystemParametersInfo (SPI_GETTOGGLEKEYS, sizeof (TOGGLEKEYS), &StartupToggleKeys, 0);
 	SystemParametersInfo (SPI_GETFILTERKEYS, sizeof (FILTERKEYS), &StartupFilterKeys, 0);

@@ -20,6 +20,54 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "unzip.h"
+#include <shlobj.h>
+
+#include <io.h>
+
+bool com_rmq = false;
+int com_numgames = 0;
+char *com_games[COM_MAXGAMES] = {NULL};
+
+char com_homedir[260];
+
+// alloc space to copy out the game dirs
+// can't send cmd_args in direct as we will be modifying it...
+// matches space allocated for cmd_argv in cmd.cpp
+// can't alloc this dynamically as it takes down the engine (ouch!) - 80K ain't too bad anyway
+static char mygamedirs[0x14050];
+
+// runtime toggleable com_multiuser can put the engine into an infinite loop if cfg settings
+// send it ping-ponging back and forth between on and off so we do it as a cmdline instead
+bool com_multiuser = false;
+
+void COM_CheckMultiUser (void)
+{
+	com_multiuser = COM_CheckParm ("-multiuser") ? true : false;
+}
+
+/*
+void COM_LoadGame (char *gamename);
+
+void COM_SetMultiUser (cvar_t *var)
+{
+	mygamedirs[0] = 0;
+
+	// store out our current games
+	// copy out delimiting with \n so that we can parse the string
+	for (int i = 0; i < com_numgames; i++)
+	{
+		strcat (mygamedirs, com_games[i]);
+		strcat (mygamedirs, "\n");
+	}
+
+	// reload the game
+	COM_LoadGame (mygamedirs);
+}
+
+
+// i'd like this to be 1 but it's 0 for consistency with the original game
+cvar_t com_multiuser ("com_multiuser", 0.0f, CVAR_ARCHIVE, COM_SetMultiUser);
+*/
 
 void UpdateTitlebarText (char *mapname)
 {
@@ -48,7 +96,6 @@ cvar_t com_quoth ("com_quoth", 0.0f);
 cvar_t com_nehahra ("com_nehahra", 0.0f);
 bool WasInGameMenu = false;
 
-void D3D_EnumExternalTextures (void);
 pack_t *COM_LoadPackFile (char *packfile);
 
 /*
@@ -66,7 +113,7 @@ void COM_ExecQuakeRC (void)
 
 
 // stuff we need to drop and reload
-void D3D_ReleaseTextures (void);
+void D3DTexture_Release (void);
 void Host_WriteConfiguration (void);
 void Draw_Init (void);
 void HUD_Init (void);
@@ -86,7 +133,6 @@ void D3DSky_UnloadSkybox (void);
 void CL_WipeParticles (void);
 void D3DVid_LoseDeviceResources (void);
 void D3DVid_RecoverDeviceResources (void);
-void D3DVid_ClearScreen (void);
 void Cmd_ClearAlias_f (void);
 void D3DMisc_CreatePalette (void);
 void D3DMisc_ReleasePalette (void);
@@ -103,7 +149,6 @@ void COM_UnloadAllStuff (void)
 
 	// disconnect from server and update the screen to keep things nice and clean
 	CL_Disconnect_f ();
-	D3DVid_ClearScreen ();
 	SCR_UpdateScreen (0);
 
 	// prevent screen updates while changing
@@ -127,7 +172,7 @@ void COM_UnloadAllStuff (void)
 
 	SHOWLMP_newgame ();
 	D3DSky_UnloadSkybox ();
-	D3D_ReleaseTextures ();
+	D3DTexture_Release ();
 	CL_WipeParticles ();
 
 	D3DVid_LoseDeviceResources ();
@@ -158,7 +203,6 @@ void COM_LoadAllStuff (void)
 	D3DMisc_CreatePalette ();
 
 	// now run a screen update to reassure the user that something did actually happen
-	D3DVid_ClearScreen ();
 	SCR_UpdateScreen (0);
 
 	// sprinkle some screen updates through here too to give a better sense of something happening
@@ -186,9 +230,6 @@ Sets com_gamedir, adds the directory to the head of the path,
 then loads and adds pak1.pak pak2.pak ...
 ================
 */
-int com_numgames = 0;
-char *com_games[COM_MAXGAMES] = {NULL};
-
 void COM_AddGameDirectory (char *dir)
 {
 	searchpath_t *search;
@@ -237,7 +278,7 @@ void COM_AddGameDirectory (char *dir)
 		else break;
 	}
 
-	// add any other pak files, zip files or PK3 files in strict alphabetical order
+	// add any other pak files or PK3 files in strict alphabetical order
 	WIN32_FIND_DATA FindFileData;
 	HANDLE hFind = INVALID_HANDLE_VALUE;
 
@@ -287,8 +328,9 @@ void COM_AddGameDirectory (char *dir)
 					com_searchpaths = search;
 				}
 			}
-			else if (COM_FindExtension (FindFileData.cFileName, ".zip") || COM_FindExtension (FindFileData.cFileName, ".pk3"))
+			else if (COM_FindExtension (FindFileData.cFileName, ".pk3"))
 			{
+				// removed .zip file handling - Spike doesn't like it and he's probably right
 				unzFile			uf;
 				int				err;
 				unz_global_info gi;
@@ -358,7 +400,7 @@ void COM_AddGameDirectory (char *dir)
 
 	// add the directory to the search path
 	// this is done last as using a linked list will search in the reverse order to which they
-	// are added, so we ensure that the filesystem overrides pak files
+	// are added, so we ensure that the filesystem overrides pak files, which is what we want
 	search = (searchpath_t *) GameZone->Alloc (sizeof (searchpath_t));
 	Q_strncpy (search->filename, dir, 127);
 	search->next = com_searchpaths;
@@ -395,6 +437,76 @@ bool COM_ValidateGamedir (char *basedir, char *gamename)
 	FindClose (hFind);
 
 	return isgamedir;
+}
+
+
+char *rmqmaps[] =
+{
+	"maps/e1m1rq.bsp", "maps/e1m2rq.bsp", "maps/e1m3rq.bsp", "maps/e1m4rq.bsp", "maps/e1m5rq.bsp", "maps/e1m6rq.bsp", "maps/e1m7rq.bsp", "maps/e1m8rq.bsp",
+	"maps/e2m1rq.bsp", "maps/e2m2rq.bsp", "maps/e2m3rq.bsp", "maps/e2m4rq.bsp", "maps/e2m5rq.bsp", "maps/e2m6rq.bsp", "maps/e2m7rq.bsp", "maps/e2m8rq.bsp",
+	"maps/e3m1rq.bsp", "maps/e3m2rq.bsp", "maps/e3m3rq.bsp", "maps/e3m4rq.bsp", "maps/e3m5rq.bsp", "maps/e3m6rq.bsp", "maps/e3m7rq.bsp", "maps/e3m8rq.bsp",
+	"maps/e4m1rq.bsp", "maps/e4m2rq.bsp", "maps/e4m3rq.bsp", "maps/e4m4rq.bsp", "maps/e4m5rq.bsp", "maps/e4m6rq.bsp", "maps/e4m7rq.bsp", "maps/e4m8rq.bsp",
+	NULL
+};
+
+
+bool COM_RMQMapInPack (packfile_t *files, int numfiles)
+{
+	for (int i = 0; i < numfiles; i++)
+	{
+		for (int m = 0; ; m++)
+		{
+			if (!rmqmaps[m]) break;
+			if (!_stricmp (files[i].name, rmqmaps[m])) return true;
+		}
+	}
+
+	return false;
+}
+
+
+void COM_DetectRMQ (void)
+{
+	com_rmq = false;
+
+	for (searchpath_t *search = com_searchpaths; search; search = search->next)
+	{
+		if (search->pack)
+		{
+			if (COM_RMQMapInPack (search->pack->files, search->pack->numfiles))
+			{
+				com_rmq = true;
+				return;
+			}
+		}
+		else if (search->pk3)
+		{
+			if (COM_RMQMapInPack (search->pk3->files, search->pk3->numfiles))
+			{
+				com_rmq = true;
+				return;
+			}
+		}
+		else
+		{
+			char netpath[MAX_PATH];
+
+			for (int m = 0; ; m++)
+			{
+				if (!rmqmaps[m]) break;
+
+				// check for a file in the directory tree
+				_snprintf (netpath, 256, "%s/%s", search->filename, rmqmaps[m]);
+
+				// quick check
+				if (_access (netpath, 04) != -1)
+				{
+					com_rmq = true;
+					return;
+				}
+			}
+		}
+	}
 }
 
 
@@ -443,7 +555,7 @@ void COM_LoadGame (char *gamename)
 	if (COM_StringContains (gamename, "nehahra")) Cvar_Set (&com_nehahra, 1);
 
 	// check status of add-ons; nothing yet...
-	rogue = hipnotic = quoth = nehahra = kurok = false;
+	rogue = hipnotic = quoth = nehahra = false;
 	standard_quake = true;
 
 	if (com_rogue.value)
@@ -478,14 +590,6 @@ void COM_LoadGame (char *gamename)
 	if (hipnotic) COM_AddGameDirectory (va ("%s/hipnotic", basedir));
 	if (quoth) COM_AddGameDirectory (va ("%s/quoth", basedir));
 	if (nehahra) COM_AddGameDirectory (va ("%s/nehahra", basedir));
-
-	// let's start moving away from the -gamename and com_gamename crap
-	if (COM_StringContains (gamename, "kurok"))
-	{
-		COM_AddGameDirectory (va ("%s/kurok", basedir));
-		standard_quake = false;
-		kurok = true;
-	}
 
 	// add any other games in the list (everything else gets highest priority)
 	char *thisgame = gamename;
@@ -524,7 +628,6 @@ void COM_LoadGame (char *gamename)
 		if (!_stricmp (thisgame, "hipnotic")) loadgame = false;
 		if (!_stricmp (thisgame, "quoth")) loadgame = false;
 		if (!_stricmp (thisgame, "nehahra")) loadgame = false;
-		if (!_stricmp (thisgame, "kurok")) loadgame = false;
 		if (!_stricmp (thisgame, GAMENAME)) loadgame = false;
 
 		// check is it actually a proper directory
@@ -546,13 +649,30 @@ void COM_LoadGame (char *gamename)
 	// hack to get the hipnotic sbar in quoth
 	if (quoth) hipnotic = true;
 
-	// to do - optionally link My Documents folder in for multiuser/non-admin/network support
+	if (com_multiuser)
+	{
+		// optionally link My Documents folder in for multiuser/non-admin/network support
+		SHGetFolderPath (NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, com_homedir);
+		strcat (com_homedir, "\\DirectQ");
 
-	// enum and register external textures
-	D3D_EnumExternalTextures ();
+		// com_gamedir needs to be loaded too so that settings for multiple games don't trample each other
+		for (int i = strlen (com_gamedir) - 1; i; i--)
+		{
+			if (com_gamedir[i] == '/' || com_gamedir[i] == '\\')
+			{
+				strcat (com_homedir, &com_gamedir[i]);
+				break;
+			}
+		}
+
+		Sys_mkdir (com_homedir);
+		COM_AddGameDirectory (com_homedir);
+	}
+
+	COM_DetectRMQ ();
 
 	// if the host isn't already up, don't bring anything up yet
-	// (fixme - bring the host loader through here as well)
+	// (bring the host loader through here as well)
 	if (!host_initialized) return;
 
 	// reload everything that needs to be reloaded
@@ -594,11 +714,6 @@ void COM_Game_f (void)
 		return;
 	}
 
-	// alloc space to copy out the game dirs
-	// can't send cmd_args in direct as we will be modifying it...
-	// matches space allocated for cmd_argv in cmd.cpp
-	// can't alloc this dynamically as it takes down the engine (ouch!) - 80K ain't too bad anyway
-	static char mygamedirs[81920];
 	mygamedirs[0] = 0;
 
 	// copy out delimiting with \n so that we can parse the string

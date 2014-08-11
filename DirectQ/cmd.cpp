@@ -31,6 +31,8 @@ typedef struct cmdalias_s
 
 cmdalias_t	*cmd_alias = NULL;
 
+extern cvar_t	*cvar_vars;
+extern cvar_alias_t *cvar_alias_vars;
 
 void Cmd_WriteAlias (FILE *f)
 {
@@ -78,7 +80,7 @@ void Cmd_Inc_f (void)
 cmd_t Cmd_Inc_Cmd ("inc", Cmd_Inc_f);
 
 // this dummy function exists so that no command will have a NULL function
-void Cmd_Compat (void) {}
+void Cmd_NullFunction (void) {}
 
 /*
 =============================================================================
@@ -157,10 +159,7 @@ void Cmd_BuildCompletionList (void)
 	{
 		// replace NULL function commands with a dummy that does nothing
 		if (!cmd->function)
-		{
-			cmd->usage = CMD_COMPAT;
-			cmd->function = Cmd_Compat;
-		}
+			cmd->function = Cmd_NullFunction;
 
 		complistcurrent->name = cmd->name;
 		complistcurrent->alias = NULL;
@@ -205,12 +204,6 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 	{
 		// skip nehahra if we're not running nehahra
 		if (cl->var && !nehahra && (cl->var->usage & CVAR_NEHAHRA)) continue;
-
-		// skip compatibility cvars
-		if (cl->var && (cl->var->usage & CVAR_COMPAT)) continue;
-
-		// skip compatibility commands
-		if (cl->cmd && (cl->cmd->usage == CMD_COMPAT)) continue;
 
 		assert (cl->name);
 		assert ((cl->alias || cl->cmd || cl->var));
@@ -969,11 +962,7 @@ void Cmd_Add (cmd_t *newcmd)
 	}
 
 	if (!newcmd->function)
-	{
-		newcmd->function = Cmd_Compat;
-		newcmd->usage = CMD_COMPAT;
-	}
-	else newcmd->usage = CMD_NORMAL;
+		newcmd->function = Cmd_NullFunction;
 
 	// link in
 	newcmd->next = cmd_functions;
@@ -1037,9 +1026,6 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 
 		if (cl->cmd)
 		{
-			// skip compatibility commands
-			if (cl->cmd->usage == CMD_COMPAT) return;
-
 			if (full_initialized)
 			{
 				// execute normally
@@ -1070,9 +1056,6 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 				Con_Printf ("Unknown command \"%s\"\n", cl->var->name);
 				return;
 			}
-
-			// silently ignore compatibility cvars
-			if (cl->var->usage & CVAR_COMPAT) return;
 
 			// perform a variable print or set
 			if (Cmd_Argc () == 1)
@@ -1106,30 +1089,6 @@ cvar_t	pq_noweapons ("pq_noweapons", "no weapons", CVAR_ARCHIVE);
 
 void Cmd_ForwardToServer (void)
 {
-#if 0
-	if (cls.state != ca_connected)
-	{
-		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));
-		return;
-	}
-	
-	if (cls.demoplayback)
-		return;		// not really connected
-
-	MSG_WriteByte (&cls.message, clc_stringcmd);
-
-	if (_stricmp(Cmd_Argv(0), "cmd") != 0)
-	{
-		SZ_Print (&cls.message, Cmd_Argv(0));
-		SZ_Print (&cls.message, " ");
-	}
-
-	if (Cmd_Argc() > 1)
-		SZ_Print (&cls.message, Cmd_Args());
-	else SZ_Print (&cls.message, "\n");
-#else
-	char *src, *dst, buff[128];			// JPG - used for say/say_team formatting
-
 	if (cls.state != ca_connected)
 	{
 		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv (0));
@@ -1141,168 +1100,174 @@ void Cmd_ForwardToServer (void)
 
 	MSG_WriteByte (&cls.message, clc_stringcmd);
 
-	// JPG - handle say separately for formatting
-	if ((!_stricmp (Cmd_Argv (0), "say") || !_stricmp (Cmd_Argv (0), "say_team")) && Cmd_Argc () > 1)
+	// bypass proquake messaging for SP games
+	if (cl.maxclients > 1)
 	{
-		SZ_Print (&cls.message, Cmd_Argv (0));
-		SZ_Print (&cls.message, " ");
+		char *src, *dst, buff[128];			// JPG - used for say/say_team formatting
 
-		src = Cmd_Args ();
-		dst = buff;
-
-		while (*src && dst - buff < 100)
+		// JPG - handle say separately for formatting
+		if ((!_stricmp (Cmd_Argv (0), "say") || !_stricmp (Cmd_Argv (0), "say_team")) && Cmd_Argc () > 1)
 		{
-			if (*src == '%')
+			SZ_Print (&cls.message, Cmd_Argv (0));
+			SZ_Print (&cls.message, " ");
+
+			src = Cmd_Args ();
+			dst = buff;
+
+			while (*src && dst - buff < 100)
 			{
-				// mh - made this case-insensitive
-				switch (*++src)
+				if (*src == '%')
 				{
-				case 'H':
-				case 'h':
-					dst += sprintf (dst, "%d", cl.stats[STAT_HEALTH]);
-					break;
-
-				case 'A':
-				case 'a':
-					dst += sprintf (dst, "%d", cl.stats[STAT_ARMOR]);
-					break;
-
-				case 'R':
-				case 'r':
-					if (cl.stats[STAT_HEALTH] > 0 && (cl.items & IT_ROCKET_LAUNCHER))
+					// mh - made this case-insensitive
+					switch (*++src)
 					{
-						if (cl.stats[STAT_ROCKETS] < 5)
-							dst += sprintf (dst, "%s", pq_needrox.string);
-						else dst += sprintf (dst, "%s", pq_haverl.string);
-					}
-					else dst += sprintf (dst, "%s", pq_needrl.string);
+					case 'H':
+					case 'h':
+						dst += sprintf (dst, "%d", cl.stats[STAT_HEALTH]);
+						break;
 
-					break;
+					case 'A':
+					case 'a':
+						dst += sprintf (dst, "%d", cl.stats[STAT_ARMOR]);
+						break;
 
-				case 'L':
-				case 'l':
-					dst += sprintf (dst, "%s", LOC_GetLocation (cl_entities[cl.viewentity]->origin));
-					break;
-
-				case 'D':
-				case 'd':
-					dst += sprintf (dst, "%s", LOC_GetLocation (cl.death_location));
-					break;
-
-				case 'C':
-				case 'c':
-					dst += sprintf (dst, "%d", cl.stats[STAT_CELLS]);
-					break;
-
-				case 'X':
-				case 'x':
-					dst += sprintf (dst, "%d", cl.stats[STAT_ROCKETS]);
-					break;
-
-				case 'P':
-				case 'p':
-					if (cl.stats[STAT_HEALTH] > 0)
-					{
-						if (cl.items & IT_QUAD)
+					case 'R':
+					case 'r':
+						if (cl.stats[STAT_HEALTH] > 0 && (cl.items & IT_ROCKET_LAUNCHER))
 						{
-							dst += sprintf (dst, "%s", pq_quad.string);
-
-							if (cl.items & (IT_INVULNERABILITY | IT_INVISIBILITY)) *dst++ = ',';
+							if (cl.stats[STAT_ROCKETS] < 5)
+								dst += sprintf (dst, "%s", pq_needrox.string);
+							else dst += sprintf (dst, "%s", pq_haverl.string);
 						}
+						else dst += sprintf (dst, "%s", pq_needrl.string);
 
-						if (cl.items & IT_INVULNERABILITY)
+						break;
+
+					case 'L':
+					case 'l':
+						dst += sprintf (dst, "%s", LOC_GetLocation (cl_entities[cl.viewentity]->origin));
+						break;
+
+					case 'D':
+					case 'd':
+						dst += sprintf (dst, "%s", LOC_GetLocation (cl.death_location));
+						break;
+
+					case 'C':
+					case 'c':
+						dst += sprintf (dst, "%d", cl.stats[STAT_CELLS]);
+						break;
+
+					case 'X':
+					case 'x':
+						dst += sprintf (dst, "%d", cl.stats[STAT_ROCKETS]);
+						break;
+
+					case 'P':
+					case 'p':
+						if (cl.stats[STAT_HEALTH] > 0)
 						{
-							dst += sprintf (dst, "%s", pq_pent.string);
-
-							if (cl.items & IT_INVISIBILITY) *dst++ = ',';
-						}
-
-						if (cl.items & IT_INVISIBILITY) dst += sprintf (dst, "%s", pq_ring.string);
-					}
-
-					break;
-
-				case 'W':
-				case 'w':	// JPG 3.00
-				{
-					int first = 1;
-					int item;
-					char *ch = pq_weapons.string;
-
-					if (cl.stats[STAT_HEALTH] > 0)
-					{
-						for (item = IT_SUPER_SHOTGUN; item <= IT_LIGHTNING; item *= 2)
-						{
-							if (*ch != ':' && (cl.items & item))
+							if (cl.items & IT_QUAD)
 							{
-								if (!first) *dst++ = ',';
+								dst += sprintf (dst, "%s", pq_quad.string);
 
-								first = 0;
-
-								while (*ch && *ch != ':')
-									*dst++ = *ch++;
+								if (cl.items & (IT_INVULNERABILITY | IT_INVISIBILITY)) *dst++ = ',';
 							}
 
-							while (*ch && *ch != ':') *ch++;
+							if (cl.items & IT_INVULNERABILITY)
+							{
+								dst += sprintf (dst, "%s", pq_pent.string);
 
-							if (*ch) *ch++;
-							if (!*ch) break;
+								if (cl.items & IT_INVISIBILITY) *dst++ = ',';
+							}
+
+							if (cl.items & IT_INVISIBILITY) dst += sprintf (dst, "%s", pq_ring.string);
 						}
-					}
 
-					if (first) dst += sprintf (dst, "%s", pq_noweapons.string);
-				}
+						break;
 
-				break;
-
-				case '%':
-					*dst++ = '%';
-					break;
-
-				case 'T':
-				case 't':
+					case 'W':
+					case 'w':	// JPG 3.00
 					{
-						int minutes, seconds;
+						int first = 1;
+						int item;
+						char *ch = pq_weapons.string;
 
-						if ((cl.minutes || cl.seconds) && cl.seconds < 128)
+						if (cl.stats[STAT_HEALTH] > 0)
 						{
-							int match_time;
+							for (item = IT_SUPER_SHOTGUN; item <= IT_LIGHTNING; item *= 2)
+							{
+								if (*ch != ':' && (cl.items & item))
+								{
+									if (!first) *dst++ = ',';
 
-							if (cl.match_pause_time)
-								match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.match_pause_time - cl.last_match_time));
-							else match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.time - cl.last_match_time));
+									first = 0;
 
-							minutes = match_time / 60;
-							seconds = match_time - 60 * minutes;
+									while (*ch && *ch != ':')
+										*dst++ = *ch++;
+								}
+
+								while (*ch && *ch != ':') *ch++;
+
+								if (*ch) *ch++;
+								if (!*ch) break;
+							}
 						}
-						else
-						{
-							seconds = (int) cl.time;
-							minutes = (int) (cl.time / 60);
-							seconds -= minutes * 60;
 
-							minutes &= 511;
-						}
-
-						dst += sprintf (dst, "%d:%02d", minutes, seconds);
+						if (first) dst += sprintf (dst, "%s", pq_noweapons.string);
 					}
 
 					break;
 
-				default:
-					*dst++ = '%';
-					*dst++ = *src;
-					break;
+					case '%':
+						*dst++ = '%';
+						break;
+
+					case 'T':
+					case 't':
+						{
+							int minutes, seconds;
+
+							if ((cl.minutes || cl.seconds) && cl.seconds < 128)
+							{
+								int match_time;
+
+								if (cl.match_pause_time)
+									match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.match_pause_time - cl.last_match_time));
+								else match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.time - cl.last_match_time));
+
+								minutes = match_time / 60;
+								seconds = match_time - 60 * minutes;
+							}
+							else
+							{
+								seconds = (int) cl.time;
+								minutes = (int) (cl.time / 60);
+								seconds -= minutes * 60;
+
+								minutes &= 511;
+							}
+
+							dst += sprintf (dst, "%d:%02d", minutes, seconds);
+						}
+
+						break;
+
+					default:
+						*dst++ = '%';
+						*dst++ = *src;
+						break;
+					}
+
+					if (*src) src++;
 				}
-
-				if (*src) src++;
+				else *dst++ = *src++;
 			}
-			else *dst++ = *src++;
-		}
 
-		*dst = 0;
-		SZ_Print (&cls.message, buff);
-		return;
+			*dst = 0;
+			SZ_Print (&cls.message, buff);
+			return;
+		}
 	}
 
 	if (_stricmp (Cmd_Argv (0), "cmd") != 0)
@@ -1314,7 +1279,6 @@ void Cmd_ForwardToServer (void)
 	if (Cmd_Argc () > 1)
 		SZ_Print (&cls.message, Cmd_Args ());
 	else SZ_Print (&cls.message, "\n");
-#endif
 }
 
 
@@ -1350,15 +1314,8 @@ cmd_t::cmd_t (char *cmdname, xcommand_t cmdcmd)
 	strcpy (this->name, cmdname);
 
 	if (cmdcmd)
-	{
 		this->function = cmdcmd;
-		this->usage = CMD_NORMAL;
-	}
-	else
-	{
-		this->function = Cmd_Compat;
-		this->usage = CMD_COMPAT;
-	}
+	else this->function = Cmd_NullFunction;
 
 	// just add it
 	Cmd_Add (this);

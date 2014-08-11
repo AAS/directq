@@ -27,11 +27,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[];
 LPDIRECT3DTEXTURE9 shadetexture;
 
-void D3DLight_LightPoint (entity_t *e, float *c);
+void D3DLight_LightPoint (entity_t *e);
 
 cvar_t r_aliaslightscale ("r_aliaslightscale", "1", CVAR_ARCHIVE);
-cvar_t r_optimizealiasmodels ("r_optimizealiasmodels", "1", CVAR_ARCHIVE | CVAR_RESTART);
-cvar_t r_cachealiasmodels ("r_cachealiasmodels", "0", CVAR_ARCHIVE | CVAR_RESTART);
 
 /*
 =================================================================
@@ -41,40 +39,6 @@ ALIAS MODEL DISPLAY LIST GENERATION
 =================================================================
 */
 
-#define AM_NOSHADOW			1
-#define AM_FULLBRIGHT		2
-#define AM_EYES				4
-#define AM_DRAWSHADOW		8
-#define AM_VIEWMODEL		16
-
-
-void D3D_CacheAliasMesh (char *name, byte *hash, aliashdr_t *hdr)
-{
-	char meshname[MAX_PATH] = {0};
-
-	Sys_mkdir ("mesh");
-	COM_StripExtension (name, meshname);
-	FILE *f = fopen (va ("%s/mesh/%s.ms3", com_gamedir, &meshname[6]), "wb");
-
-	if (f)
-	{
-		// write out a checksum for the model to ensure that the saved .ms3 is valid
-		fwrite (hash, 16, 1, f);
-
-		// write out the sizes
-		fwrite (&hdr->numindexes, sizeof (int), 1, f);
-		fwrite (&hdr->nummesh, sizeof (int), 1, f);
-		fwrite (&r_optimizealiasmodels.integer, sizeof (int), 1, f);
-
-		// write out the data
-		fwrite (hdr->indexes, sizeof (unsigned short), hdr->numindexes, f);
-		fwrite (hdr->meshverts, sizeof (aliasmesh_t), hdr->nummesh, f);
-
-		fclose (f);
-	}
-}
-
-
 /*
 ================
 D3DAlias_MakeAliasMesh
@@ -82,59 +46,8 @@ D3DAlias_MakeAliasMesh
 ================
 */
 
-void D3DAlias_MakeAliasMesh (char *name, byte *hash, aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles)
+void D3DAlias_MakeAliasMesh (char *name, aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles)
 {
-	if (r_cachealiasmodels.integer && d3d_GlobalCaps.supportHardwareTandL)
-	{
-		// look for a cached version
-		HANDLE h = INVALID_HANDLE_VALUE;
-		char meshname[MAX_PATH] = {0};
-		byte ms3hash[16];
-		int optimized = 0;
-
-		COM_StripExtension (name, meshname);
-		COM_FOpenFile (va ("mesh/%s.ms3", &meshname[6]), &h);
-
-		if (h == INVALID_HANDLE_VALUE) goto bad_mesh_1;
-
-		// read and validate all of the data
-		if (COM_FReadFile (h, ms3hash, 16) != 16) goto bad_mesh_2;
-		if (!COM_CheckHash (ms3hash, hash)) goto bad_mesh_2;
-		if (COM_FReadFile (h, &hdr->numindexes, sizeof (int)) != sizeof (int)) goto bad_mesh_2;
-		if (COM_FReadFile (h, &hdr->nummesh, sizeof (int)) != sizeof (int)) goto bad_mesh_2;
-		if (COM_FReadFile (h, &optimized, sizeof (int)) != sizeof (int)) goto bad_mesh_2;
-
-		// if the cached version is different from the current optimization level then recache it too
-		// (exception: if the cached version is optimized we prefer to use it)
-		if (optimized != r_optimizealiasmodels.integer && !optimized) goto bad_mesh_2;
-
-		// the scratchbuf is big enough for 65536 verts so set up temp storage for reading to
-		unsigned short *cacheindexes = (unsigned short *) scratchbuf;
-		aliasmesh_t *cachemesh = (aliasmesh_t *) (cacheindexes + hdr->numindexes);
-
-		// these will be cached even if invalid so they need to stay in temp storage until caching is complete
-		// (although by this stage it's unlikely, but still...)
-		if (COM_FReadFile (h, cacheindexes, sizeof (unsigned short) * hdr->numindexes) != sizeof (unsigned short) * hdr->numindexes) goto bad_mesh_2;
-		if (COM_FReadFile (h, cachemesh, sizeof (aliasmesh_t) * hdr->nummesh) != sizeof (aliasmesh_t) * hdr->nummesh) goto bad_mesh_2;
-
-		// cached OK
-		COM_FCloseFile (&h);
-
-		// and cache the mesh for real
-		hdr->indexes = (unsigned short *) MainCache->Alloc (cacheindexes, hdr->numindexes * sizeof (unsigned short));
-		hdr->meshverts = (aliasmesh_t *) MainCache->Alloc (cachemesh, hdr->nummesh * sizeof (aliasmesh_t));
-
-		// let's not miss this part
-		goto mesh_set_drawflags;
-
-bad_mesh_2:;
-		// we get here if the mesh file was successfully opened but was not valid for this MDL or had a read error
-		COM_FCloseFile (&h);
-bad_mesh_1:;
-		// we get here if the mesh file could not be opened
-		// Con_Printf ("meshing %s...\n", name);
-	}
-
 	// also reserve space for the index remap tables
 	int max_mesh = (SCRATCHBUF_SIZE / sizeof (aliasmesh_t));
 
@@ -201,7 +114,7 @@ bad_mesh_1:;
 	if (hdr->nummesh > d3d_DeviceCaps.MaxPrimitiveCount) Sys_Error ("D3DAlias_MakeAliasMesh: MDL %s too big", name);
 
 	// only optimize with hardware T&L as there have been reports of it being slower with software (no idea why - must check...)
-	if (r_optimizealiasmodels.integer && d3d_GlobalCaps.supportHardwareTandL)
+	if (d3d_GlobalCaps.supportHardwareTandL)
 	{
 		// optimize the mesh - we can pull temp storage off the hunk here because we're gonna free it anyway
 		// most of the following code was inspired by the example at http://psp.jim.sh/svn/comp.php?repname=ps3ware&compare[]=/@136&compare[]=/@137
@@ -249,11 +162,6 @@ bad_mesh_1:;
 	// free our hunk memory
 	MainHunk->FreeToLowMark (hunkmark);
 
-	// (optionally) save the data out to disk
-	if (r_cachealiasmodels.integer && d3d_GlobalCaps.supportHardwareTandL)
-		D3D_CacheAliasMesh (name, hash, hdr);
-
-mesh_set_drawflags:;
 	// alloc space for stream offsets - deferred to here because the vertex buffer size and layout will change from map to map
 	hdr->streamoffsets = (int *) MainCache->Alloc (hdr->nummeshframes * sizeof (int));
 
@@ -392,7 +300,7 @@ LPDIRECT3DVERTEXDECLARATION9 d3d_InstanceDecl = NULL;
 
 typedef struct aliasinstance_s
 {
-	D3DMATRIX matrix;
+	float matrix[16];
 	float lerps[2];
 	float svec[3];
 	float rgba[4];
@@ -471,7 +379,7 @@ void D3DAlias_CreateBuffers (void)
 
 	if (TotalVerts && TotalIndexes && TotalMesh)
 	{
-		if (!d3d_AliasIndexes) D3DMain_CreateIndexBuffer (TotalIndexes, D3DUSAGE_WRITEONLY, &d3d_AliasIndexes);
+		if (!d3d_AliasIndexes) D3DMain_CreateIndexBuffer16 (TotalIndexes, D3DUSAGE_WRITEONLY, &d3d_AliasIndexes);
 		if (!d3d_AliasVertexes) D3DMain_CreateVertexBuffer (TotalVerts * sizeof (aliasvertexstream_t), D3DUSAGE_WRITEONLY, &d3d_AliasVertexes);
 		if (!d3d_AliasTexCoords) D3DMain_CreateVertexBuffer (TotalMesh * sizeof (aliastexcoordstream_t), D3DUSAGE_WRITEONLY, &d3d_AliasTexCoords);
 
@@ -553,11 +461,11 @@ void D3DAlias_CreateBuffers (void)
 		{
 			// positions are sent as bytes to save on bandwidth and storage
 			// position 0 can't be d3dcolor as it fucks with fog (why???)
-			{0, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
-			{1, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
-			{1, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
-			{2, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
+			VDECL (0, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0),
+			VDECL (0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0),	// this is really a normal
+			VDECL (1, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1),
+			VDECL (1, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1),	// and so is this
+			VDECL (2, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2),
 			D3DDECL_END ()
 		};
 
@@ -581,18 +489,18 @@ void D3DAlias_CreateBuffers (void)
 		{
 			// positions are sent as bytes to save on bandwidth and storage
 			// position 0 can't be d3dcolor as it fucks with fog (why???)
-			{0,  0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0,  4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
-			{1,  0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
-			{1,  4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
-			{2,  0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
-			{3,  0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 3},	// matrix row 1
-			{3, 16, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 4},	// matrix row 2
-			{3, 32, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 5},	// matrix row 3
-			{3, 48, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 6},	// matrix row 4
-			{3, 64, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 7},	// blend[LERP_CURR] and blend[LERP_LAST] combined
-			{3, 72, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 8},	// shadevector
-			{3, 84, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 9},	// shadelight and alpha combined
+			VDECL (0,  0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0),
+			VDECL (0,  4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0),	// this is really a normal
+			VDECL (1,  0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1),
+			VDECL (1,  4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1),	// and so is this
+			VDECL (2,  0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2),
+			VDECL (3,  0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 3),	// matrix row 1
+			VDECL (3, 16, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 4),	// matrix row 2
+			VDECL (3, 32, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 5),	// matrix row 3
+			VDECL (3, 48, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 6),	// matrix row 4
+			VDECL (3, 64, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 7),	// blends combined
+			VDECL (3, 72, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 8),	// shadevector
+			VDECL (3, 84, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 9),	// shadelight and alpha combined
 			D3DDECL_END ()
 		};
 
@@ -606,10 +514,10 @@ void D3DAlias_CreateBuffers (void)
 		{
 			// positions are sent as bytes to save on bandwidth and storage
 			// position 0 can't be d3dcolor as it fucks with fog (why???)
-			{0, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
-			{1, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
-			{1, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
+			VDECL (0, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0),
+			VDECL (0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0),	// this is really a normal
+			VDECL (1, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1),
+			VDECL (1, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1),	// and so is this
 			D3DDECL_END ()
 		};
 
@@ -643,35 +551,40 @@ typedef struct d3d_aliasstate_s
 	LPDIRECT3DTEXTURE9 lastcmap;
 	LPDIRECT3DTEXTURE9 lastshirt;
 	LPDIRECT3DTEXTURE9 lastpants;
-	image_t *lasttexture;
-	image_t *lastluma;
+	LPDIRECT3DTEXTURE9 lasttexture;
+	LPDIRECT3DTEXTURE9 lastluma;
 	aliashdr_t *lastmodel;
 } d3d_aliasstate_t;
 
 d3d_aliasstate_t d3d_AliasState;
 
 
-void D3DAlias_SetupLighting (entity_t *ent, float *shadevector, float *shadelight)
+void D3DAlias_SetupLighting (entity_t *ent, aliasinstance_t *instance)
 {
-	float an = (ent->angles[1] + ent->angles[0]) / 180 * D3DX_PI;
-
-	shadevector[0] = cos (-an);
-	shadevector[1] = sin (-an);
-	shadevector[2] = 1;
-	VectorNormalize (shadevector);
-
-	// copy these out because we need to keep the originals in the entity for frame averaging
-	VectorCopy2 (shadelight, ent->shadelight);
-
-	// nehahra assumes that fullbrights are not available in the engine
-	if ((nehahra || !gl_fullbrights.integer) && (ent->model->aliashdr->drawflags & AM_FULLBRIGHT))
+	if (instance)
 	{
-		shadelight[0] = 256;
-		shadelight[1] = 256;
-		shadelight[2] = 256;
-	}
+		// copy in - NOTE - this is a vertex buffer destination and should NOT be read from!!!
+		instance->svec[0] = ent->shadevector[0];
+		instance->svec[1] = ent->shadevector[1];
+		instance->svec[2] = ent->shadevector[2];
 
-	VectorScale (shadelight, (r_aliaslightscale.value / 255.0f), shadelight);
+		instance->rgba[0] = ent->shadelight[0];
+		instance->rgba[1] = ent->shadelight[1];
+		instance->rgba[2] = ent->shadelight[2];
+
+		if (ent->alphaval > 0 && ent->alphaval < 255)
+			instance->rgba[3] = (float) ent->alphaval / 255.0f;
+		else instance->rgba[3] = 1.0f;
+	}
+	else
+	{
+		D3DHLSL_SetFloatArray ("ShadeVector", ent->shadevector, 3);
+		D3DHLSL_SetFloatArray ("ShadeLight", ent->shadelight, 3);
+
+		if (ent->alphaval > 0 && ent->alphaval < 255)
+			D3DHLSL_SetAlpha ((float) ent->alphaval / 255.0f);
+		else D3DHLSL_SetAlpha (1.0f);
+	}
 }
 
 
@@ -686,32 +599,32 @@ void D3DAlias_TransformFinal (entity_t *ent, aliashdr_t *hdr)
 		float sc = gl_doubleeyes.value + 1.0f;
 
 		// position the eyes consistently
-		D3DMatrix_Translate (&ent->matrix,
+		ent->matrix.Translate
+		(
 			hdr->scale_origin[0] * sc,
 			hdr->scale_origin[1] * sc,
-			hdr->scale_origin[2] * sc - (gl_doubleeyes.value * 25.0f));
+			hdr->scale_origin[2] * sc - (gl_doubleeyes.value * 25.0f)
+		);
 
-		D3DMatrix_Scale (&ent->matrix, hdr->scale[0] * sc, hdr->scale[1] * sc, hdr->scale[2] * sc);
+		ent->matrix.Scale (hdr->scale[0] * sc, hdr->scale[1] * sc, hdr->scale[2] * sc);
 	}
 	else
 	{
 		// the scaling needs to be included at this time
-		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin);
-		D3DMatrix_Scale (&ent->matrix, hdr->scale);
+		ent->matrix.Translate (hdr->scale_origin);
+		ent->matrix.Scale (hdr->scale);
 	}
 }
 
 
-void D3DAlias_TransformStandard (entity_t *ent, aliashdr_t *hdr)
+void D3DAlias_TransformStandard (entity_t *ent)
 {
-	// initialize entity matrix to identity
-	D3DMatrix_Identity (&ent->matrix);
+	ent->matrix.LoadMatrix (&d3d_ModelViewProjMatrix);
+	ent->matrix.Translate (ent->origin);
 
-	// build the transformation for this entity.  the full model gets a full rotation
-	D3D_RotateForEntity (ent, &ent->matrix, ent->origin, ent->angles);
-
-	// run the final transform for scaling
-	D3DAlias_TransformFinal (ent, hdr);
+	if (ent->angles[1]) ent->matrix.Rotate (0, 0, 1, ent->angles[1]);
+	if (ent->angles[0]) ent->matrix.Rotate (0, 1, 0, -ent->angles[0]);
+	if (ent->angles[2]) ent->matrix.Rotate (1, 0, 0, ent->angles[2]);
 }
 
 
@@ -720,31 +633,24 @@ void D3DAlias_TransformStandard (entity_t *ent, aliashdr_t *hdr)
 #define SHADOW_VSCALE	0		// 0 = completely flat
 #define SHADOW_HEIGHT	0.1		// how far above the floor to render the shadow
 
-D3DMATRIX r_shadowmatrix =
-{
+QMATRIX r_shadowmatrix (
 	1,				0,				0,				0,
 	0,				1,				0,				0,
 	SHADOW_SKEW_X,	SHADOW_SKEW_Y,	SHADOW_VSCALE,	0,
 	0,				0,				SHADOW_HEIGHT,	1
-};
+);
 
 
-void D3DAlias_TransformShadowed (entity_t *ent, aliashdr_t *hdr)
+void D3DAlias_TransformShadowed (entity_t *ent)
 {
-	// initialize entity matrix to identity
-	D3DMatrix_Identity (&ent->matrix);
+	ent->matrix.LoadMatrix (&d3d_ModelViewProjMatrix);
+	ent->matrix.Translate (ent->origin);
 
-	// build the transformation for this entity.  shadows only rotate around Z
-	D3DMatrix_Translate (&ent->matrix, ent->origin);
+	ent->matrix.Translate (0, 0, -(ent->origin[2] - ent->lightspot[2]));
+	ent->matrix.MultMatrix (&r_shadowmatrix);
+	ent->matrix.Translate (0, 0, (ent->origin[2] - ent->lightspot[2]));
 
-	D3DMatrix_Translate (&ent->matrix, 0, 0, -(ent->origin[2] - ent->aliasstate.lightspot[2]));
-	D3DMatrix_Multiply (&ent->matrix, &r_shadowmatrix, &ent->matrix);
-	D3DMatrix_Translate (&ent->matrix, 0, 0, (ent->origin[2] - ent->aliasstate.lightspot[2]));
-
-	D3DMatrix_Rotate (&ent->matrix, 0, 0, 1, ent->angles[1]);
-
-	// run the final transform for scaling
-	D3DAlias_TransformFinal (ent, hdr);
+	ent->matrix.Rotate (0, 0, 1, ent->angles[1]);
 }
 
 
@@ -754,8 +660,8 @@ void D3DAlias_SetVertexBuffers (entity_t *ent, aliashdr_t *hdr, int numinstances
 	{
 		UINT freq = D3DSTREAMSOURCE_INDEXEDDATA | numinstances;
 
-		D3D_SetStreamSource (0, d3d_AliasVertexes, hdr->streamoffsets[ent->lerppose[LERP_CURR]], sizeof (aliasvertexstream_t), freq);
-		D3D_SetStreamSource (1, d3d_AliasVertexes, hdr->streamoffsets[ent->lerppose[LERP_LAST]], sizeof (aliasvertexstream_t), freq);
+		D3D_SetStreamSource (0, d3d_AliasVertexes, hdr->streamoffsets[ent->currpose], sizeof (aliasvertexstream_t), freq);
+		D3D_SetStreamSource (1, d3d_AliasVertexes, hdr->streamoffsets[ent->lastpose], sizeof (aliasvertexstream_t), freq);
 		D3D_SetStreamSource (2, d3d_AliasTexCoords, hdr->meshoffset, sizeof (aliastexcoordstream_t), freq);
 
 		D3D_SetStreamSource (3, d3d_AliasInstances, d3d_NumAliasInstances * sizeof (aliasinstance_t), sizeof (aliasinstance_t), D3DSTREAMSOURCE_INSTANCEDATA | 1);
@@ -763,8 +669,8 @@ void D3DAlias_SetVertexBuffers (entity_t *ent, aliashdr_t *hdr, int numinstances
 	}
 	else
 	{
-		D3D_SetStreamSource (0, d3d_AliasVertexes, hdr->streamoffsets[ent->lerppose[LERP_CURR]], sizeof (aliasvertexstream_t));
-		D3D_SetStreamSource (1, d3d_AliasVertexes, hdr->streamoffsets[ent->lerppose[LERP_LAST]], sizeof (aliasvertexstream_t));
+		D3D_SetStreamSource (0, d3d_AliasVertexes, hdr->streamoffsets[ent->currpose], sizeof (aliasvertexstream_t));
+		D3D_SetStreamSource (1, d3d_AliasVertexes, hdr->streamoffsets[ent->lastpose], sizeof (aliasvertexstream_t));
 		D3D_SetStreamSource (2, d3d_AliasTexCoords, hdr->meshoffset, sizeof (aliastexcoordstream_t));
 
 		// stream 3 is never used outside of MDLs and needs nulling here in case the previous batch was instanced
@@ -783,30 +689,18 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, int flags = 0)
 	// set up vertx buffers for this entity
 	D3DAlias_SetVertexBuffers (ent, hdr);
 
-	// initialize entity matrix to identity; what happens with it next depends on whether it is a shadow or not
-	D3DMatrix_Identity (&ent->matrix);
-
 	if (flags & AM_DRAWSHADOW)
 	{
 		// build the transforms for the entity
-		D3DAlias_TransformShadowed (ent, hdr);
+		D3DAlias_TransformShadowed (ent);
+		D3DAlias_TransformFinal (ent, hdr);
 	}
 	else
 	{
 		// build the transforms for the entity
-		D3DAlias_TransformStandard (ent, hdr);
-
-		if (ent->alphaval > 0 && ent->alphaval < 255)
-			D3DHLSL_SetAlpha ((float) ent->alphaval / 255.0f);
-		else D3DHLSL_SetAlpha (1.0f);
-
-		float shadevector[3];
-		float shadelight[3];
-
-		D3DAlias_SetupLighting (ent, shadevector, shadelight);
-
-		D3DHLSL_SetFloatArray ("ShadeVector", shadevector, 3);
-		D3DHLSL_SetFloatArray ("ShadeLight", shadelight, 3);
+		D3DAlias_TransformStandard (ent);
+		D3DAlias_TransformFinal (ent, hdr);
+		D3DAlias_SetupLighting (ent, NULL);
 	}
 
 	// stream 3 is never used outside of MDLs and needs nulling here in case the previous batch was instanced
@@ -817,8 +711,8 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, int flags = 0)
 		// set up the blend factors; vmblends[0] is indexed if a vertex should interpolate, vmblends[1] is indexed if it should not
 		D3DXVECTOR4 vmblends[2];
 
-		vmblends[0].x = state->blend[LERP_CURR];
-		vmblends[0].y = state->blend[LERP_LAST];
+		vmblends[0].x = ent->poseblend;
+		vmblends[0].y = (1.0f - ent->poseblend);
 
 		vmblends[1].x = 1;
 		vmblends[1].y = 0;
@@ -827,7 +721,7 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, int flags = 0)
 	}
 	else
 	{
-		D3DHLSL_SetLerp (state->blend[LERP_CURR], state->blend[LERP_LAST]);
+		D3DHLSL_SetLerp (ent->poseblend, (1.0f - ent->poseblend));
 	}
 
 	D3DHLSL_SetEntMatrix (&ent->matrix);
@@ -859,19 +753,9 @@ float D3DAlias_MeshScaleVert (aliashdr_t *hdr, drawvertx_t *invert, int index)
 }
 
 
-extern vec3_t lightspot;
-extern mplane_t *lightplane;
-
 void D3DAlias_DrawAliasShadows (entity_t **ents, int numents)
 {
-	// this is a hack to get around a non-zero r_shadows being triggered by a combination of r_shadows 0 and
-	// low precision FP rounding errors, thereby causing unnecesary slowdowns.
-	byte shadealpha = BYTE_CLAMPF (r_shadows.value);
-
-	if (shadealpha < 1) return;
-
-	// only allow intermediate steps if we have a stencil buffer
-	if (d3d_GlobalCaps.DepthStencilFormat != D3DFMT_D24S8) shadealpha = 255;
+	if (!(r_shadows.value > 0)) return;
 
 	bool stateset = false;
 
@@ -887,7 +771,7 @@ void D3DAlias_DrawAliasShadows (entity_t **ents, int numents)
 		aliashdr_t *hdr = ent->model->aliashdr;
 
 		// don't crash
-		if (!state->lightplane) continue;
+		if (!ent->lightplane) continue;
 
 		// these entities don't have shadows
 		if (hdr->drawflags & AM_NOSHADOW) continue;
@@ -895,18 +779,8 @@ void D3DAlias_DrawAliasShadows (entity_t **ents, int numents)
 		if (!stateset)
 		{
 			// state for shadows
-			D3DState_SetAlphaBlend (TRUE);
-			D3DState_SetZBuffer (D3DZB_TRUE, FALSE);
-
-			// of course, we all know that Direct3D lacks Stencil Buffer and Polygon Offset support,
-			// so what you're looking at here doesn't really exist.  Those of you who froth at the mouth
-			// and like to think it's still the 1990s had probably better look away now.
-			if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
-				D3DState_SetStencil (TRUE);
-
+			D3DState_EnableShadows (true);
 			D3DHLSL_SetPass (FX_PASS_SHADOW);
-			D3DHLSL_SetAlpha (r_shadows.value);
-
 			D3D_SetVertexDeclaration (d3d_ShadowDecl);
 
 			stateset = true;
@@ -920,30 +794,57 @@ void D3DAlias_DrawAliasShadows (entity_t **ents, int numents)
 	if (stateset)
 	{
 		// back to normal
-		if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
-			D3DState_SetStencil (FALSE);
-
-		D3DState_SetAlphaBlend (FALSE);
-		D3DState_SetZBuffer (D3DZB_TRUE, TRUE);
+		D3DState_EnableShadows (false);
 	}
 }
 
 
 /*
 =================
-D3DAlias_SetupAliasFrame
+D3DAlias_SetupFrame
 
 =================
 */
 extern cvar_t r_lerpframe;
 
-void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
+// split out for use by IQMs too - should this move to a different module? (misc?  model?  main?)
+// pose needs to be separated from ent owing to alias framegroups
+void D3DAlias_LerpToFrame (entity_t *ent, int pose, float interval)
 {
-	// blend is on a coarser scale (0-10 integer instead of 0-1 float) so that we get better cache hits
-	// and can do better comparison/etc for cache checking; this still gives 10 x smoothing so it's OK
-	float lerpblend;
+	if (!r_lerpframe.value) ent->lerpflags |= LERP_RESETANIM;
+
+	// buncha hacks to fix up buggy Quake models
+	if (pose == 0 && ent == &cl.viewent) ent->lerpflags |= LERP_RESETANIM;
+	if (ent->currpose == ent->lastpose && ent->currpose == 0 && ent != &cl.viewent) ent->lerpflags |= LERP_RESETANIM;
+
+	if (ent->lerpflags & LERP_RESETANIM)
+	{
+		// kill any lerp in progress
+		ent->lastpose = ent->currpose = pose;
+		ent->framestarttime = cl.time;
+		ent->poseblend = 1;
+		ent->lerpflags &= ~LERP_RESETANIM;
+	}
+	else if (pose != ent->currpose)
+	{
+		// begin a lerp to a new frame
+		ent->lastpose = ent->currpose;
+		ent->currpose = pose;
+		ent->framestarttime = cl.time;
+		ent->poseblend = 0;
+	}
+	else ent->poseblend = (cl.time - ent->framestarttime) / interval;
+
+	// don't let blend pass 1
+	if (cl.paused) ent->poseblend = 0;
+	if (ent->poseblend > 1) ent->poseblend = 1;
+	if (ent->poseblend < 0) ent->poseblend = 0;
+}
+
+
+void D3DAlias_SetupFrame (entity_t *ent, aliashdr_t *hdr)
+{
 	float frame_interval;
-	aliasstate_t *state = &ent->aliasstate;
 
 	// silently revert to frame 0
 	if ((ent->frame >= hdr->numframes) || (ent->frame < 0)) ent->frame = 0;
@@ -953,100 +854,36 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 
 	if (numposes > 1)
 	{
-#if 0
+		// let's do this right
 		float fullinterval = hdr->frames[ent->frame].intervals[numposes - 1];
-		float time = cl.time + ent->posebase;
-		float targettime = time - ((int) (time / fullinterval)) * fullinterval;
-		int poseadd = 0;
 
-		for (poseadd = 0; poseadd < (numposes - 1); poseadd++)
-			if (hdr->frames[ent->frame].intervals[poseadd] > targettime)
-				break;
+		if (fullinterval > 0)
+		{
+			float time = cl.time + ent->syncbase;
+			float targettime = time - ((int) (time / fullinterval)) * fullinterval;
 
-		// we stored an extra interval so that we can do (intervals[pose + 1] - intervals[pose]) as a frame interval
-		frame_interval = hdr->frames[ent->frame].intervals[poseadd + 1] - hdr->frames[ent->frame].intervals[poseadd];
-		pose += poseadd;
-#else
-		// client-side animations
-		float interval = hdr->frames[ent->frame].intervals[0];
-
-		// software quake adds syncbase here so that animations using the same model aren't in lockstep
-		// trouble is that syncbase is always 0 for them so we provide new fields for it instead...
-		pose += (int) ((cl.time + ent->posebase) / interval) % numposes;
-
-		// not really needed for non-interpolated mdls, but does no harm
-		frame_interval = interval;
-#endif
+			if (hdr->frames[ent->frame].intervals[0] > targettime)
+				frame_interval = hdr->frames[ent->frame].intervals[0];
+			else
+			{
+				for (int i = 1; i < numposes; i++)
+				{
+					if (hdr->frames[ent->frame].intervals[i] > targettime)
+					{
+						pose += i;
+						frame_interval = hdr->frames[ent->frame].intervals[i] - hdr->frames[ent->frame].intervals[i - 1];
+						break;
+					}
+				}
+			}
+		}
+		else frame_interval = 0.1f;
 	}
 	else if (ent->lerpflags & LERP_FINISH)
 		frame_interval = ent->lerpinterval;
 	else frame_interval = 0.1;
 
-	bool lerpmdl = true;
-
-	// conditions for turning lerping off (the SNG bug is no longer an issue)
-	if (hdr->nummeshframes == 1) lerpmdl = false;			// only one pose
-	if (ent->lerppose[LERP_LAST] == ent->lerppose[LERP_CURR]) lerpmdl = false;		// both frames are identical
-	if (!r_lerpframe.value) lerpmdl = false;
-
-	// interpolation
-	if (ent->lerppose[LERP_CURR] == -1 || ent->lerppose[LERP_LAST] == -1)
-	{
-		// new entity so reset to no interpolation initially
-		ent->framestarttime = cl.time;
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = pose;
-		lerpblend = 0;
-	}
-	else if (ent->lerppose[LERP_LAST] == ent->lerppose[LERP_CURR] && ent->lerppose[LERP_CURR] == 0 && ent != &cl.viewent)
-	{
-		// "dying throes" interpolation bug - begin a new sequence with both poses the same
-		// this happens when an entity is spawned client-side
-		ent->framestarttime = cl.time;
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = pose;
-		lerpblend = 0;
-	}
-	else if (pose == 0 && ent == &cl.viewent)
-	{
-		// don't interpolate from previous pose on frame 0 of the viewent (frame 0 is the idle animation, not the shooting animation,
-		// so it's really part of a different animation frame sequence - this should be a fixme as a general rule for all MDLs)
-		ent->framestarttime = cl.time;
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = pose;
-		lerpblend = 0;
-	}
-	else if (ent->lerppose[LERP_CURR] != pose || !lerpmdl)
-	{
-		// begin a new interpolation sequence
-		ent->framestarttime = cl.time;
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR];
-		ent->lerppose[LERP_CURR] = pose;
-		lerpblend = 0;
-	}
-	else
-	{
-		// standard interpolation between two frames which already exist
-		lerpblend = (cl.time - ent->framestarttime) / frame_interval;
-	}
-
-	// if a viewmodel is switched and the previous had a current frame number higher than the number of frames
-	// in the new one, DirectQ will crash so we need to fix that.  this is also a general case sanity check.
-	if (ent->lerppose[LERP_LAST] >= hdr->nummeshframes)
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = 0;
-	else if (ent->lerppose[LERP_LAST] < 0)
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = hdr->nummeshframes - 1;
-
-	// more fixing here
-	if (ent->lerppose[LERP_CURR] >= hdr->nummeshframes)
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = 0;
-	else if (ent->lerppose[LERP_CURR] < 0)
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = hdr->nummeshframes - 1;
-
-	// don't let blend pass 1
-	if (cl.paused) lerpblend = 0;
-	if (lerpblend > 1) lerpblend = 1;
-
-	// and store out the factors
-	state->blend[LERP_LAST] = 1.0f - lerpblend;
-	state->blend[LERP_CURR] = lerpblend;
+	D3DAlias_LerpToFrame (ent, pose, frame_interval);
 }
 
 
@@ -1067,12 +904,16 @@ void D3DAlias_SetupAliasModel (entity_t *ent)
 	else
 	{
 		// and now check it for culling
-		if (R_CullBox (ent->mins, ent->maxs, frustum)) return;
+		if (R_CullBox (ent->mins, ent->maxs, frustum))
+		{
+			CL_ClearInterpolation (ent, CLEAR_ALLLERP);
+			return;
+		}
 	}
 
 	// the model has not been culled now
 	ent->visframe = d3d_RenderDef.framecount;
-	state->lightplane = NULL;
+	ent->lightplane = NULL;
 
 	if (ent == cl_entities[cl.viewentity] && chase_active.value)
 	{
@@ -1081,21 +922,11 @@ void D3DAlias_SetupAliasModel (entity_t *ent)
 	}
 
 	// get lighting information
-	vec3_t shadelight;
-	D3DLight_LightPoint (ent, shadelight);
-
-	// average light between frames
-	// we can't rescale shadelight to the final range here because it will mess with the averaging so instead we do it in the shader
-	for (int i = 0; i < 3; i++)
-		ent->shadelight[i] = (shadelight[i] + ent->shadelight[i]) / 2;
-
-	// store out for shadows
-	VectorCopy (lightspot, state->lightspot);
-	state->lightplane = lightplane;
+	D3DLight_LightPoint (ent);
 
 	// get texturing info
 	// software quake randomises the base animation and so should we
-	int anim = (int) ((cl.time + ent->skinbase) * 10) & 3;
+	int anim = (int) ((cl.time + ent->syncbase) * 10) & 3;
 
 	// select the proper skins (this can now work with any model, not just the player)
 	// (although in it's current incarnation the supporting infrastructure just works with the player)
@@ -1109,16 +940,8 @@ void D3DAlias_SetupAliasModel (entity_t *ent)
 
 	// build the sort order (which may be inverted for more optimal reuse)
 	// keeping the lowest first ensures that it's more likely to be reused, which works out well for quake anims
-	if (ent->lerppose[LERP_CURR] < ent->lerppose[LERP_LAST])
-	{
-		ent->sortpose[LERP_CURR] = ent->lerppose[LERP_LAST];
-		ent->sortpose[LERP_LAST] = ent->lerppose[LERP_CURR];
-	}
-	else
-	{
-		ent->sortpose[LERP_CURR] = ent->lerppose[LERP_CURR];
-		ent->sortpose[LERP_LAST] = ent->lerppose[LERP_LAST];
-	}
+	ent->sortpose[0] = ent->currpose < ent->lastpose ? ent->lastpose : ent->currpose;
+	ent->sortpose[1] = ent->currpose < ent->lastpose ? ent->currpose : ent->lastpose;
 }
 
 
@@ -1145,7 +968,7 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 
 		// prydon gets this
 		if (!state->teximage) continue;
-		if (!state->teximage->d3d_Texture) continue;
+		if (!state->teximage) continue;
 
 		if (!stateset)
 		{
@@ -1161,8 +984,8 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 		}
 
 		// interpolation clearing gets this
-		if (ent->lerppose[LERP_CURR] < 0) ent->lerppose[LERP_CURR] = 0;
-		if (ent->lerppose[LERP_LAST] < 0) ent->lerppose[LERP_LAST] = 0;
+		if (ent->currpose < 0) ent->currpose = 0;
+		if (ent->lastpose < 0) ent->lastpose = 0;
 
 		if ((ent->model->flags & EF_PLAYER) && state->cmapimage && !gl_nocolors.value)
 		{
@@ -1171,11 +994,11 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 			int shirt = (ent->playerskin & 0xf0) >> 4;
 			int pants = ent->playerskin & 15;
 
-			if (state->cmapimage->d3d_Texture != d3d_AliasState.lastcmap)
+			if (state->cmapimage != d3d_AliasState.lastcmap)
 			{
 				// the colormap must always go in tmu2
-				D3DHLSL_SetTexture (2, state->cmapimage->d3d_Texture);
-				d3d_AliasState.lastcmap = state->cmapimage->d3d_Texture;
+				D3DHLSL_SetTexture (2, state->cmapimage);
+				d3d_AliasState.lastcmap = state->cmapimage;
 			}
 
 			if (d3d_PaletteRowTextures[shirt] != d3d_AliasState.lastshirt)
@@ -1204,19 +1027,14 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 		// update textures if necessary
 		if ((state->teximage != d3d_AliasState.lasttexture) || (state->lumaimage != d3d_AliasState.lastluma))
 		{
-			if (kurok)
-			{
-				D3DHLSL_SetPass (FX_PASS_ALIAS_KUROK);
-				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
-			}
-			else if (state->lumaimage && gl_fullbrights.integer)
+			if (state->lumaimage && gl_fullbrights.integer)
 			{
 				if ((ent->model->flags & EF_PLAYER) && state->cmapimage && !gl_nocolors.value)
 					D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA);
 				else D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
 
-				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
-				D3DHLSL_SetTexture (1, state->lumaimage->d3d_Texture);
+				D3DHLSL_SetTexture (0, state->teximage);
+				D3DHLSL_SetTexture (1, state->lumaimage);
 			}
 			else
 			{
@@ -1224,7 +1042,7 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 					D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_NOLUMA);
 				else D3DHLSL_SetPass (FX_PASS_ALIAS_NOLUMA);
 
-				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
+				D3DHLSL_SetTexture (0, state->teximage);
 			}
 
 			d3d_AliasState.lasttexture = state->teximage;
@@ -1275,17 +1093,15 @@ void D3DAlias_DrawInstances (entity_t **ents, int numents, int firstent, int num
 		{
 			entity_t *ent = ents[firstent + i];
 
-			D3DAlias_TransformStandard (ent, ent->model->aliashdr);
-			memcpy (&instances->matrix, &ent->matrix, sizeof (D3DMATRIX));
+			D3DAlias_TransformStandard (ent);
+			D3DAlias_TransformFinal (ent, ent->model->aliashdr);
 
-			instances->lerps[0] = ent->aliasstate.blend[LERP_CURR];
-			instances->lerps[1] = ent->aliasstate.blend[LERP_LAST];
+			memcpy (instances->matrix, ent->matrix.m, sizeof (float) * 16);
 
-			D3DAlias_SetupLighting (ent, instances->svec, instances->rgba);
+			instances->lerps[0] = ent->poseblend;
+			instances->lerps[1] = (1.0f - ent->poseblend);
 
-			if (ent->alphaval > 0 && ent->alphaval < 255)
-				instances->rgba[3] = (float) ent->alphaval / 255.0f;
-			else instances->rgba[3] = 1.0f;
+			D3DAlias_SetupLighting (ent, instances);
 
 			// this count is even more irrelevant now...
 			d3d_RenderDef.alias_polys += ent->model->aliashdr->numtris;
@@ -1304,13 +1120,13 @@ void D3DAlias_DrawInstances (entity_t **ents, int numents, int firstent, int num
 		if (state->lumaimage && gl_fullbrights.integer)
 		{
 			D3DHLSL_SetPass (FX_PASS_ALIAS_INSTANCED_LUMA);
-			D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
-			D3DHLSL_SetTexture (1, state->lumaimage->d3d_Texture);
+			D3DHLSL_SetTexture (0, state->teximage);
+			D3DHLSL_SetTexture (1, state->lumaimage);
 		}
 		else
 		{
 			D3DHLSL_SetPass (FX_PASS_ALIAS_INSTANCED_NOLUMA);
-			D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
+			D3DHLSL_SetTexture (0, state->teximage);
 		}
 
 		// vertex buffers
@@ -1322,6 +1138,7 @@ void D3DAlias_DrawInstances (entity_t **ents, int numents, int firstent, int num
 		// draw (as if there were only one model)
 		D3D_DrawIndexedPrimitive (0, hdr->nummesh, hdr->firstindex, hdr->numindexes / 3);
 
+		// testing
 		// Con_Printf ("Drew %i instances\n", numinstances);
 	}
 	else if (numinstances == 1)
@@ -1357,11 +1174,11 @@ void D3DAlias_DrawInstanced (entity_t **ents, int numents)
 
 		if (lastent)
 		{
-			// check basic stuff; note that lerppose[LERP_CURR] and lerppose[LERP_LAST] could be the same but swapped around
+			// check basic stuff; note that currpose and lastpose could be the same but swapped around
 			// so we optimize for this when setting up the model for drawing... (done)
 			if (ent->model != lastent->model) breakbatch = true;
-			if (ent->lerppose[LERP_CURR] != lastent->lerppose[LERP_CURR]) breakbatch = true;
-			if (ent->lerppose[LERP_LAST] != lastent->lerppose[LERP_LAST]) breakbatch = true;
+			if (ent->currpose != lastent->currpose) breakbatch = true;
+			if (ent->lastpose != lastent->lastpose) breakbatch = true;
 
 			// check textures instead of skinnum as the texture can change for the player model
 			if (ent->aliasstate.lumaimage != lastent->aliasstate.lumaimage) breakbatch = true;
@@ -1404,14 +1221,10 @@ void D3DAlias_RenderAliasModels (void)
 	// (to do - chain these in a list instead to save memory, remove limits and run faster...)
 	qsort (d3d_AliasEdicts, d3d_NumAliasEdicts, sizeof (entity_t *), (sortfunc_t) D3DAlias_ModelSortFunc);
 
-	if (kurok) D3DState_SetAlphaTest (TRUE, D3DCMP_GREATEREQUAL, (DWORD) 0x000000aa);
-
 	// draw in two passes to prevent excessive shader switching
-	if (d3d_GlobalCaps.supportInstancing && d3d_usinginstancing.value && !kurok)
+	if (d3d_GlobalCaps.supportInstancing && d3d_usinginstancing.value)
 		D3DAlias_DrawInstanced (d3d_AliasEdicts, d3d_NumAliasEdicts);
 	else D3DAlias_DrawAliasBatch (d3d_AliasEdicts, d3d_NumAliasEdicts);
-
-	if (kurok) D3DState_SetAlphaTest (FALSE);
 
 	// don't bother instancing shadows for now; we might later on if it ever becomes a problem
 	D3DAlias_DrawAliasShadows (d3d_AliasEdicts, d3d_NumAliasEdicts);
@@ -1423,15 +1236,20 @@ void D3DAlias_RenderAliasModels (void)
 
 void D3DAlias_AddModelToList (entity_t *ent)
 {
-	if (!d3d_AliasEdicts) d3d_AliasEdicts = (entity_t **) Zone_Alloc (sizeof (entity_t *) * MAX_VISEDICTS);
-
 	D3DAlias_SetupAliasModel (ent);
 
 	if (ent->visframe != d3d_RenderDef.framecount) return;
 
-	if (ent->alphaval > 0 && ent->alphaval < 255 && !kurok)
+	if (ent->alphaval > 0 && ent->alphaval < 255)
 		D3DAlpha_AddToList (ent);
 	else d3d_AliasEdicts[d3d_NumAliasEdicts++] = ent;
+}
+
+
+void D3DAlias_InitList (void)
+{
+	if (!d3d_AliasEdicts) d3d_AliasEdicts = (entity_t **) Zone_Alloc (sizeof (entity_t *) * MAX_VISEDICTS);
+	d3d_NumAliasEdicts = 0;
 }
 
 
@@ -1439,6 +1257,8 @@ void D3D_SetupProjection (float fovx, float fovy, float zn, float zf);
 float SCR_CalcFovX (float fov_y, float width, float height);
 float SCR_CalcFovY (float fov_x, float width, float height);
 void SCR_SetFOV (float *fovx, float *fovy, float fovvar, int width, int height, bool guncalc);
+void D3DIQM_DrawIQM (entity_t *ent);
+void D3DIQM_SetCommonState (void);
 
 // fixme - shouldn't this be the first thing drawn in the frame so that a lot of geometry can get early-z???
 void D3DAlias_DrawViewModel (void)
@@ -1497,47 +1317,51 @@ void D3DAlias_DrawViewModel (void)
 
 		// calculate concatenated final matrix for use by shaders
 		// because it's only needed once per frame instead of once per vertex we can save some vs instructions
-		D3DMatrix_Multiply (&d3d_ModelViewProjMatrix, &d3d_ViewMatrix, &d3d_WorldMatrix);
-		D3DMatrix_Multiply (&d3d_ModelViewProjMatrix, &d3d_ProjMatrix);
+		QMATRIX::UpdateMVP (&d3d_ModelViewProjMatrix, &d3d_WorldMatrix, &d3d_ViewMatrix, &d3d_ProjMatrix);
 
 		// we don't need to extract the frustum as the gun is never frustum-culled
 		D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
 	}
 
-	// setup the frame for drawing and store the interpolation blend
-	D3DAlias_SetupAliasFrame (ent, hdr);
-
-	// add it to the list and draw it (there will only ever be one of these do don't even bother with instancing)
-	D3DAlias_SetupAliasModel (ent);
-
-	// draw directly as we may wish to change some stuff here...
-	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
-	D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
-
-	D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
-	D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
-
-	D3D_SetVertexDeclaration (d3d_AliasDecl);
-
-	// interpolation clearing gets this
-	if (ent->lerppose[LERP_CURR] < 0) ent->lerppose[LERP_CURR] = 0;
-	if (ent->lerppose[LERP_LAST] < 0) ent->lerppose[LERP_LAST] = 0;
-
-	// assume that the textures will always need to change
-	if (ent->aliasstate.lumaimage && gl_fullbrights.integer)
+	if (ent->model->type == mod_iqm)
 	{
-		D3DHLSL_SetPass (FX_PASS_ALIAS_VIEWMODEL_LUMA);
-		D3DHLSL_SetTexture (0, ent->aliasstate.teximage->d3d_Texture);
-		D3DHLSL_SetTexture (1, ent->aliasstate.lumaimage->d3d_Texture);
+		D3DIQM_SetCommonState ();
+		D3DAlias_LerpToFrame (ent, ent->frame, 0.1f);
+		D3DIQM_DrawIQM (ent);
 	}
 	else
 	{
-		D3DHLSL_SetPass (FX_PASS_ALIAS_VIEWMODEL_NOLUMA);
-		D3DHLSL_SetTexture (0, ent->aliasstate.teximage->d3d_Texture);
-	}
+		// setup the frame for drawing and store the interpolation blend
+		D3DAlias_SetupFrame (ent, hdr);
 
-	// and now we can send it through the standard draw func
-	D3DAlias_DrawModel (ent, hdr, AM_VIEWMODEL);
+		// add it to the list and draw it (there will only ever be one of these do don't even bother with instancing)
+		D3DAlias_SetupAliasModel (ent);
+
+		// draw directly as we may wish to change some stuff here...
+		D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
+		D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+
+		D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
+		D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
+
+		D3D_SetVertexDeclaration (d3d_AliasDecl);
+
+		// assume that the textures will always need to change
+		if (ent->aliasstate.lumaimage && gl_fullbrights.integer)
+		{
+			D3DHLSL_SetPass (FX_PASS_ALIAS_VIEWMODEL_LUMA);
+			D3DHLSL_SetTexture (0, ent->aliasstate.teximage);
+			D3DHLSL_SetTexture (1, ent->aliasstate.lumaimage);
+		}
+		else
+		{
+			D3DHLSL_SetPass (FX_PASS_ALIAS_VIEWMODEL_NOLUMA);
+			D3DHLSL_SetTexture (0, ent->aliasstate.teximage);
+		}
+
+		// and now we can send it through the standard draw func
+		D3DAlias_DrawModel (ent, hdr, AM_VIEWMODEL);
+	}
 
 	// restore alpha
 	ent->alphaval = 0;

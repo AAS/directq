@@ -246,12 +246,7 @@ static void MaxPlayers_f (void)
 
 	if (n == 1)
 		Cvar_Set ("deathmatch", "0");
-	else
-	{
-		if (kurok && deathmatch.value > 1)
-			Cvar_Set ("deathmatch", deathmatch.value);
-		else Cvar_Set ("deathmatch", "1");
-	}
+	else Cvar_Set ("deathmatch", "1");
 }
 
 
@@ -909,4 +904,122 @@ void SchedulePollProcedure (PollProcedure *proc, float timeOffset)
 	proc->next = pp;
 	prev->next = proc;
 }
+
+
+// net_loop.h
+int			Loop_Init (void);
+void		Loop_Listen (bool state);
+void		Loop_SearchForHosts (bool xmit);
+qsocket_t 	*Loop_Connect (char *host);
+qsocket_t 	*Loop_CheckNewConnections (void);
+int			Loop_GetMessage (qsocket_t *sock);
+int			Loop_SendMessage (qsocket_t *sock, sizebuf_t *data);
+int			Loop_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data);
+bool	Loop_CanSendMessage (qsocket_t *sock);
+bool	Loop_CanSendUnreliableMessage (qsocket_t *sock);
+void		Loop_Close (qsocket_t *sock);
+void		Loop_Shutdown (void);
+
+// net_dgrm.h
+int			Datagram_Init (void);
+void		Datagram_Listen (bool state);
+void		Datagram_SearchForHosts (bool xmit);
+qsocket_t	*Datagram_Connect (char *host);
+qsocket_t 	*Datagram_CheckNewConnections (void);
+int			Datagram_GetMessage (qsocket_t *sock);
+int			Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data);
+int			Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data);
+bool	Datagram_CanSendMessage (qsocket_t *sock);
+bool	Datagram_CanSendUnreliableMessage (qsocket_t *sock);
+void		Datagram_Close (qsocket_t *sock);
+void		Datagram_Shutdown (void);
+
+// net_wins.h
+int  WINS_Init (void);
+void WINS_Shutdown (void);
+void WINS_Listen (bool state);
+int  WINS_OpenSocket (int port);
+int  WINS_CloseSocket (int socket);
+int  WINS_Connect (int socket, struct qsockaddr *addr);
+int  WINS_CheckNewConnections (void);
+int  WINS_Read (int socket, byte *buf, int len, struct qsockaddr *addr);
+int  WINS_Write (int socket, byte *buf, int len, struct qsockaddr *addr);
+int  WINS_Broadcast (int socket, byte *buf, int len);
+char *WINS_AddrToString (struct qsockaddr *addr);
+int  WINS_StringToAddr (char *string, struct qsockaddr *addr);
+int  WINS_GetSocketAddr (int socket, struct qsockaddr *addr);
+int  WINS_GetNameFromAddr (struct qsockaddr *addr, char *name);
+int  WINS_GetAddrFromName (char *name, struct qsockaddr *addr);
+int  WINS_AddrCompare (struct qsockaddr *addr1, struct qsockaddr *addr2);
+int  WINS_GetSocketPort (struct qsockaddr *addr);
+int  WINS_SetSocketPort (struct qsockaddr *addr, int port);
+
+// net_win.cpp
+net_driver_t net_drivers[MAX_NET_DRIVERS] =
+{
+	{
+		"Loopback",
+		false,
+		Loop_Init,
+		Loop_Listen,
+		Loop_SearchForHosts,
+		Loop_Connect,
+		Loop_CheckNewConnections,
+		Loop_GetMessage,
+		Loop_SendMessage,
+		Loop_SendUnreliableMessage,
+		Loop_CanSendMessage,
+		Loop_CanSendUnreliableMessage,
+		Loop_Close,
+		Loop_Shutdown
+	}
+	,
+	{
+		"Datagram",
+		false,
+		Datagram_Init,
+		Datagram_Listen,
+		Datagram_SearchForHosts,
+		Datagram_Connect,
+		Datagram_CheckNewConnections,
+		Datagram_GetMessage,
+		Datagram_SendMessage,
+		Datagram_SendUnreliableMessage,
+		Datagram_CanSendMessage,
+		Datagram_CanSendUnreliableMessage,
+		Datagram_Close,
+		Datagram_Shutdown
+	}
+};
+
+
+net_landriver_t	net_landrivers[MAX_NET_DRIVERS] =
+{
+	{
+		"Winsock TCPIP",
+		false,
+		0,
+		WINS_Init,
+		WINS_Shutdown,
+		WINS_Listen,
+		WINS_OpenSocket,
+		WINS_CloseSocket,
+		WINS_Connect,
+		WINS_CheckNewConnections,
+		WINS_Read,
+		WINS_Write,
+		WINS_Broadcast,
+		WINS_AddrToString,
+		WINS_StringToAddr,
+		WINS_GetSocketAddr,
+		WINS_GetNameFromAddr,
+		WINS_GetAddrFromName,
+		WINS_AddrCompare,
+		WINS_GetSocketPort,
+		WINS_SetSocketPort
+	}
+};
+
+int net_numlandrivers = 1;
+int net_numdrivers = 2;
 

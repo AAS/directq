@@ -65,8 +65,6 @@ not apropriate.
 
 typedef void (*xcommand_t) (void);
 
-#define CMD_NORMAL		0
-#define CMD_COMPAT		1
 
 class cmd_t
 {
@@ -74,7 +72,6 @@ public:
 	cmd_t (char *cmdname, xcommand_t cmdcmd);
 
 	char			*name;
-	int				usage;
 	xcommand_t		function;
 	cmd_t *next;
 };
@@ -83,7 +80,7 @@ public:
 typedef enum
 {
 	src_client,		// came in over a net connection as a clc_stringcmd
-	// host_client will be valid during this state.
+					// host_client will be valid during this state.
 	src_command,		// from the command buffer
 	src_allowindirect	// for setting of CVAR_INDIRECT variables
 } cmd_source_t;

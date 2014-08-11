@@ -121,21 +121,6 @@ int CL_ReadByteShort (void)
 }
 
 
-int cl_entityallocs = 0;
-
-entity_t *CL_AllocEntity (void)
-{
-	entity_t *ent = (entity_t *) ClientZone->Alloc (sizeof (entity_t));
-
-	// set it's allocation number
-	// allocnumbers deliberately start at 1 as number 0 is used for signifying an entity that should not be occluded
-	cl_entityallocs++;
-	ent->allocnum = cl_entityallocs;
-
-	return ent;
-}
-
-
 /*
 ===============
 CL_EntityNum
@@ -155,12 +140,13 @@ entity_t *CL_EntityNum (int num)
 			if (!cl_entities[cl.num_entities])
 			{
 				// alloc a new entity and set it's number
-				cl_entities[cl.num_entities] = CL_AllocEntity ();
+				cl_entities[cl.num_entities] = (entity_t *) ClientZone->Alloc (sizeof (entity_t));
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
 				cl_entities[cl.num_entities]->alphaval = 0;
 			}
 
 			// force cl.numentities up until it exceeds the number we're looking for
+			CL_ClearInterpolation (cl_entities[cl.num_entities], CLEAR_ALLLERP);
 			cl.num_entities++;
 		}
 	}
@@ -282,6 +268,7 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	NET_SendMessage (cls.netcon, &cls.message);
 	SZ_Clear (&cls.message);
 }
+
 
 void Host_Frame (DWORD time);
 
@@ -408,6 +395,7 @@ void CL_DoWebDownload (char *filename)
 			{
 			case Q1_BSPVERSION:
 			case PR_BSPVERSION:
+			case BSPVERSIONRMQ:
 				break;
 
 			default:
@@ -452,6 +440,8 @@ void CL_DoWebDownload (char *filename)
 
 
 CQuakeZone *PrecacheHeap = NULL;
+
+model_t cl_nullmodel;
 
 void CL_ParseServerInfo (void)
 {
@@ -598,20 +588,45 @@ void CL_ParseServerInfo (void)
 
 		if (cl.model_precache[i] == NULL)
 		{
-			// no web download on a local server or in demos
-			if (sv.active || cls.demoplayback || !cl_web_download.value || !cl_web_download_url.string || !cl_web_download_url.string[0])
+			if (model_precache[i][0] == '*')
 			{
-				// if web download is not being used we don't bother with it
-				// (note - this is now a Host_Error because with a NULL worldmodel we'll crash hard elsewhere)
-				Host_Error ("Model %s not found\n", model_precache[i]);
-				return;
+				// if it was a missing brush model we just replace it with one that already exists
+				// this should only happen in demos and saves where the demo/save was made with a
+				// different version of the map to the one being run.
+				cl.model_precache[i] = &cl_nullmodel;
+				cl_nullmodel.type = mod_null;
+				Con_Printf ("Model %s not found - replacing with NULL model\n", model_precache[i]);
+				Con_Printf ("Perhaps this demo or save was made with a different version of the map to the one you are using?\n\n");
 			}
+			else
+			{
+				// no web download on a local server or in demos
+				if (sv.active || cls.demoplayback || !cl_web_download.value || !cl_web_download_url.string || !cl_web_download_url.string[0])
+				{
+					if (i == 1)
+					{
+						// if web download is not being used we don't bother with it
+						// (note - this is now a Host_Error because with a NULL worldmodel we'll crash hard elsewhere)
+						Host_Error ("Model %s not found\n", model_precache[i]);
+						return;
+					}
+					else
+					{
+						cl.model_precache[i] = &cl_nullmodel;
+						cl_nullmodel.type = mod_null;
+						Con_Printf ("Model %s not found - replacing with NULL model\n", model_precache[i]);
+						Con_Printf ("Perhaps this demo or save was made with a different version of the map to the one you are using?\n\n");
+					}
+				}
+				else
+				{
+					// attempt a web download
+					CL_DoWebDownload (model_precache[i]);
 
-			// attempt a web download
-			CL_DoWebDownload (model_precache[i]);
-
-			// always
-			return;
+					// always
+					return;
+				}
+			}
 		}
 
 		// send a keep-alive after each model
@@ -685,37 +700,28 @@ relinked.  Other attributes can change without relinking.
 void CL_ClearInterpolation (entity_t *ent, int clearflags)
 {
 	if (clearflags & CLEAR_POSES)
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = ent->lerppose[LERP_CURR];
-
-#if 0
-	if (clearflags & CLEAR_ORIGIN)
 	{
-		VectorCopy2 (ent->lerporigin[LERP_LAST], ent->origin);
-		VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
-		VectorCopy2 (ent->moveorigin, ent->origin);
+		ent->lerpflags |= LERP_RESETANIM;
+		ent->lastpose = ent->currpose = ent->currpose;
 	}
 
-	if (clearflags & CLEAR_ANGLES)
-	{
-		VectorCopy2 (ent->lerpangles[LERP_LAST], ent->angles);
-		VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
-		VectorCopy2 (ent->moveangles, ent->angles);
-	}
-#else
 	if (clearflags & CLEAR_ORIGIN)
 	{
+		ent->lerpflags |= LERP_RESETMOVE;
+		ent->lerpflags |= LERP_RESETLIGHT;
 		ent->translatestarttime = 0;
-		ent->lerporigin[LERP_LAST][0] = ent->lerporigin[LERP_LAST][1] = ent->lerporigin[LERP_LAST][2] = 0;
-		ent->lerporigin[LERP_CURR][0] = ent->lerporigin[LERP_CURR][1] = ent->lerporigin[LERP_CURR][2] = 0;
+		ent->lastorigin[0] = ent->lastorigin[1] = ent->lastorigin[2] = 0;
+		ent->currorigin[0] = ent->currorigin[1] = ent->currorigin[2] = 0;
 	}
 
 	if (clearflags & CLEAR_ANGLES)
 	{
+		ent->lerpflags |= LERP_RESETMOVE;
+		ent->lerpflags |= LERP_RESETLIGHT;
 		ent->rotatestarttime = 0;
-		ent->lerpangles[LERP_LAST][0] = ent->lerpangles[LERP_LAST][1] = ent->lerpangles[LERP_LAST][2] = 0;
-		ent->lerpangles[LERP_CURR][0] = ent->lerpangles[LERP_CURR][1] = ent->lerpangles[LERP_CURR][2] = 0;
+		ent->lastangles[0] = ent->lastangles[1] = ent->lastangles[2] = 0;
+		ent->currangles[0] = ent->currangles[1] = ent->currangles[2] = 0;
 	}
-#endif
 }
 
 
@@ -927,15 +933,11 @@ void CL_ParseUpdate (int bits)
 			if (model->synctype == ST_RAND)
 				ent->syncbase = (float) (rand () & 0x7fff) / 0x7fff;
 			else ent->syncbase = 0.0;
-
-			// ST_RAND is not always set on animations that should be out of lockstep
-			ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
-			ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
 		}
 		else forcelink = true;	// hack to make null model players work
 
 		// if the model has changed we must also reset the interpolation data
-		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical as they might be pointing to invalid frames in the new model!!!
+		// lastpose and currpose are critical as they might be pointing to invalid frames in the new model!!!
 		CL_ClearInterpolation (ent, CLEAR_POSES);
 
 		// reset frame and skin too...!
@@ -957,7 +959,7 @@ void CL_ParseUpdate (int bits)
 		ent->forcelink = true;
 
 		// fix "dying throes" interpolation bug - reset interpolation data if the entity wasn't updated
-		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical here; the rest is done for completeness sake.
+		// lastpose and currpose are critical here; the rest is done for completeness sake.
 		CL_ClearInterpolation (ent, CLEAR_ALLLERP);
 	}
 }
@@ -970,7 +972,6 @@ CL_ParseBaseline
 */
 void CL_ParseBaseline (entity_t *ent, int version)
 {
-	int i;
 	int bits = (version == 2) ? MSG_ReadByte () : 0;
 
 	if (bits & B_LARGEMODEL)
@@ -983,7 +984,7 @@ void CL_ParseBaseline (entity_t *ent, int version)
 	ent->baseline.colormap = MSG_ReadByte ();
 	ent->baseline.skin = MSG_ReadByte ();
 
-	for (i = 0; i < 3; i++)
+	for (int i = 0; i < 3; i++)
 	{
 		ent->baseline.origin[i] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		ent->baseline.angles[i] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
@@ -1021,8 +1022,9 @@ void CL_ParseClientdata (void)
 		cl.viewheight = MSG_ReadChar ();
 	else cl.viewheight = DEFAULT_VIEWHEIGHT;
 
-	// DirectQ no longer does pitch drifting so just swallow the message
-	if (bits & SU_IDEALPITCH) MSG_ReadChar ();
+	if (bits & SU_IDEALPITCH)
+		cl.idealpitch = MSG_ReadChar ();
+	else cl.idealpitch = 0;
 
 	VectorCopy2 (cl.mvelocity[1], cl.mvelocity[0]);
 
@@ -1042,8 +1044,10 @@ void CL_ParseClientdata (void)
 	{
 		// set flash times
 		for (j = 0; j < 32; j++)
+		{
 			if ((i & (1 << j)) && !(cl.items & (1 << j)))
 				cl.itemgettime[j] = cl.time;
+		}
 
 		cl.items = i;
 	}
@@ -1120,7 +1124,7 @@ void CL_ParseStatic (int version)
 	}
 
 	// just alloc in the map pool
-	entity_t *ent = CL_AllocEntity ();
+	entity_t *ent = (entity_t *) ClientZone->Alloc (sizeof (entity_t));
 
 	// read in baseline state
 	CL_ParseBaseline (ent, version);
@@ -1138,10 +1142,6 @@ void CL_ParseStatic (int version)
 
 	// clear the interpolation data to get a valid baseline
 	CL_ClearInterpolation (ent, CLEAR_ALLLERP);
-
-	// ST_RAND is not always set on animations that should be out of lockstep
-	ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
-	ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
 
 	// some static ents don't have models; that's OK as we only use this for rendering them!
 	if (ent->model)
