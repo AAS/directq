@@ -28,6 +28,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define IDR_QMBSPARK				260
 #define IDR_QMBTRAIL				270
 
+// shaders
+#define IDR_LIQUID					420
+
 // bitmaps and other images
 #define IDR_SPLASH					600
 #define IDR_CROSSHAIR				620

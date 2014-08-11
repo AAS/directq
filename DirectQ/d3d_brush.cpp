@@ -283,7 +283,7 @@ void R_SetBrushSurfaceStates (entity_t *e, int flag)
 	}
 	else if (e->alphaval < 255)
 	{
-		if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.value)
+		if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.value && cl.maxclients < 2)
 		{
 			R_SetInstancedStage0 (e);
 			D3D_SetTextureAlphaMode (0, D3DTOP_SELECTARG1, D3DTA_CONSTANT, D3DTA_DIFFUSE);
@@ -295,7 +295,7 @@ void R_SetBrushSurfaceStates (entity_t *e, int flag)
 			D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255));
 		}
 	}
-	else if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.value)
+	else if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.value && cl.maxclients < 2)
 	{
 		R_SetInstancedStage0 (e);
 		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);

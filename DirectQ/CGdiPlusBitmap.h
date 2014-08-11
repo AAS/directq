@@ -1,107 +1,159 @@
+// hungarian notation must burn in HELL!
 #pragma once
 
 class CGdiPlusBitmap
 {
 public:
-	Gdiplus::Bitmap* m_pBitmap;
+	Gdiplus::Bitmap *TheBitmap;
 
 public:
-	CGdiPlusBitmap()							{ m_pBitmap = NULL; }
-	CGdiPlusBitmap(LPCWSTR pFile)				{ m_pBitmap = NULL; Load(pFile); }
-	virtual ~CGdiPlusBitmap()					{ Empty(); }
-
-	void Empty()								{ delete m_pBitmap; m_pBitmap = NULL; }
-
-	bool Load(LPCWSTR pFile)
+	CGdiPlusBitmap (void)
 	{
-		Empty();
-		m_pBitmap = Gdiplus::Bitmap::FromFile(pFile);
-		return m_pBitmap->GetLastStatus() == Gdiplus::Ok;
+		this->TheBitmap = NULL;
 	}
 
-	operator Gdiplus::Bitmap*() const			{ return m_pBitmap; }
+	CGdiPlusBitmap (LPCWSTR TheFile)
+	{
+		this->TheBitmap = NULL;
+		this->Load (TheFile);
+	}
+
+	virtual ~CGdiPlusBitmap (void)
+	{
+		this->Empty ();
+	}
+
+	void Empty (void)
+	{
+		delete this->TheBitmap;
+		this->TheBitmap = NULL;
+	}
+
+	bool Load (LPCWSTR TheFile)
+	{
+		this->Empty ();
+		this->TheBitmap = Gdiplus::Bitmap::FromFile (TheFile);
+		return this->TheBitmap->GetLastStatus () == Gdiplus::Ok;
+	}
+
+	operator Gdiplus::Bitmap *() const
+	{
+		return this->TheBitmap;
+	}
 };
 
 
 class CGdiPlusBitmapResource : public CGdiPlusBitmap
 {
 protected:
-	HGLOBAL m_hBuffer;
+	HGLOBAL TheBuffer;
 
 public:
-	CGdiPlusBitmapResource()					{ m_hBuffer = NULL; }
-	CGdiPlusBitmapResource(LPCTSTR pName, LPCTSTR pType = RT_RCDATA, HMODULE hInst = NULL)
-												{ m_hBuffer = NULL; Load(pName, pType, hInst); }
-	CGdiPlusBitmapResource(UINT id, LPCTSTR pType = RT_RCDATA, HMODULE hInst = NULL)
-												{ m_hBuffer = NULL; Load(id, pType, hInst); }
-	CGdiPlusBitmapResource(UINT id, UINT type, HMODULE hInst = NULL)
-												{ m_hBuffer = NULL; Load(id, type, hInst); }
-	virtual ~CGdiPlusBitmapResource()			{ Empty(); }
+	CGdiPlusBitmapResource (void)
+	{
+		this->TheBuffer = NULL;
+	}
 
-	void Empty();
+	CGdiPlusBitmapResource (LPCTSTR Name, LPCTSTR Type = RT_RCDATA, HMODULE hInst = NULL)
+	{
+		this->TheBuffer = NULL;
+		this->Load (Name, Type, hInst);
+	}
 
-	bool Load(LPCTSTR pName, LPCTSTR pType = RT_RCDATA, HMODULE hInst = NULL);
-	bool Load(UINT id, LPCTSTR pType = RT_RCDATA, HMODULE hInst = NULL)
-												{ return Load(MAKEINTRESOURCE(id), pType, hInst); }
-	bool Load(UINT id, UINT type, HMODULE hInst = NULL)
-												{ return Load(MAKEINTRESOURCE(id), MAKEINTRESOURCE(type), hInst); }
+	CGdiPlusBitmapResource (UINT id, LPCTSTR Type = RT_RCDATA, HMODULE hInst = NULL)
+	{
+		this->TheBuffer = NULL;
+		this->Load (id, Type, hInst);
+	}
+
+	CGdiPlusBitmapResource (UINT id, UINT type, HMODULE hInst = NULL)
+	{
+		this->TheBuffer = NULL;
+		this->Load (id, type, hInst);
+	}
+
+	virtual ~CGdiPlusBitmapResource (void)
+	{
+		this->Empty ();
+	}
+
+	void Empty (void);
+
+	bool Load (LPCTSTR Name, LPCTSTR Type = RT_RCDATA, HMODULE hInst = NULL);
+
+	bool Load (UINT id, LPCTSTR Type = RT_RCDATA, HMODULE hInst = NULL)
+	{
+		return this->Load (MAKEINTRESOURCE (id), Type, hInst);
+	}
+
+	bool Load (UINT id, UINT type, HMODULE hInst = NULL)
+	{
+		return this->Load (MAKEINTRESOURCE (id), MAKEINTRESOURCE (type), hInst);
+	}
 };
 
-inline
-void CGdiPlusBitmapResource::Empty()
+
+inline void CGdiPlusBitmapResource::Empty (void)
 {
-	CGdiPlusBitmap::Empty();
-	if (m_hBuffer)
+	CGdiPlusBitmap::Empty ();
+
+	if (this->TheBuffer)
 	{
-		::GlobalUnlock(m_hBuffer);
-		::GlobalFree(m_hBuffer);
-		m_hBuffer = NULL;
+		::GlobalUnlock (this->TheBuffer);
+		::GlobalFree (this->TheBuffer);
+		this->TheBuffer = NULL;
 	} 
 }
 
-inline
-bool CGdiPlusBitmapResource::Load(LPCTSTR pName, LPCTSTR pType, HMODULE hInst)
+inline bool CGdiPlusBitmapResource::Load (LPCTSTR Name, LPCTSTR Type, HMODULE hInst)
 {
-	Empty();
+	this->Empty ();
 
-	HRSRC hResource = ::FindResource(hInst, pName, pType);
-	if (!hResource)
-		return false;
-	
-	DWORD imageSize = ::SizeofResource(hInst, hResource);
-	if (!imageSize)
-		return false;
+	HRSRC hResource = ::FindResource (hInst, Name, Type);
 
-	const void* pResourceData = ::LockResource(::LoadResource(hInst, hResource));
-	if (!pResourceData)
-		return false;
+	if (!hResource) return false;
 
-	m_hBuffer  = ::GlobalAlloc(GMEM_MOVEABLE, imageSize);
-	if (m_hBuffer)
+	DWORD imageSize = ::SizeofResource (hInst, hResource);
+
+	if (!imageSize) return false;
+
+	const void *ResourceData = ::LockResource (::LoadResource (hInst, hResource));
+
+	if (!ResourceData) return false;
+
+	this->TheBuffer = ::GlobalAlloc (GMEM_MOVEABLE, imageSize);
+
+	if (this->TheBuffer)
 	{
-		void* pBuffer = ::GlobalLock(m_hBuffer);
-		if (pBuffer)
-		{
-			CopyMemory(pBuffer, pResourceData, imageSize);
+		void *TempBuffer = ::GlobalLock (this->TheBuffer);
 
-			IStream* pStream = NULL;
-			if (::CreateStreamOnHGlobal(m_hBuffer, FALSE, &pStream) == S_OK)
+		if (TempBuffer)
+		{
+			CopyMemory (TempBuffer, ResourceData, imageSize);
+
+			IStream *TheStream = NULL;
+
+			if (::CreateStreamOnHGlobal (this->TheBuffer, FALSE, &TheStream) == S_OK)
 			{
-				m_pBitmap = Gdiplus::Bitmap::FromStream(pStream);
-				pStream->Release();
-				if (m_pBitmap)
+				this->TheBitmap = Gdiplus::Bitmap::FromStream (TheStream);
+				TheStream->Release ();
+
+				if (this->TheBitmap)
 				{ 
-					if (m_pBitmap->GetLastStatus() == Gdiplus::Ok)
+					if (this->TheBitmap->GetLastStatus () == Gdiplus::Ok)
 						return true;
 
-					delete m_pBitmap;
-					m_pBitmap = NULL;
+					delete this->TheBitmap;
+					this->TheBitmap = NULL;
 				}
 			}
-			::GlobalUnlock(m_hBuffer);
+
+			::GlobalUnlock (this->TheBuffer);
 		}
-		::GlobalFree(m_hBuffer);
-		m_hBuffer = NULL;
+
+		::GlobalFree (this->TheBuffer);
+		this->TheBuffer = NULL;
 	}
+
 	return false;
 }

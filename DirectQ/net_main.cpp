@@ -132,13 +132,15 @@ void NET_FreeQSocket(qsocket_t *sock)
 	else
 	{
 		for (s = net_activeSockets; s; s = s->next)
+		{
 			if (s->next == sock)
 			{
 				s->next = sock->next;
 				break;
 			}
-		if (!s)
-			Sys_Error ("NET_FreeQSocket: not active\n");
+		}
+
+		if (!s) Sys_Error ("NET_FreeQSocket: not active\n");
 	}
 
 	// add it to free list
@@ -184,25 +186,23 @@ static void MaxPlayers_f (void)
 	}
 
 	n = atoi(Cmd_Argv(1));
-	if (n < 1)
-		n = 1;
+
+	if (n < 1) n = 1;
+
 	if (n > svs.maxclientslimit)
 	{
 		n = svs.maxclientslimit;
 		Con_Printf ("\"maxplayers\" set to \"%u\"\n", n);
 	}
 
-	if ((n == 1) && listening)
-		Cbuf_AddText ("listen 0\n");
-
-	if ((n > 1) && (!listening))
-		Cbuf_AddText ("listen 1\n");
+	if ((n == 1) && listening) Cbuf_AddText ("listen 0\n");
+	if ((n > 1) && (!listening)) Cbuf_AddText ("listen 1\n");
 
 	svs.maxclients = n;
+
 	if (n == 1)
 		Cvar_Set ("deathmatch", "0");
-	else
-		Cvar_Set ("deathmatch", "1");
+	else Cvar_Set ("deathmatch", "1");
 }
 
 
@@ -217,6 +217,7 @@ static void NET_Port_f (void)
 	}
 
 	n = atoi(Cmd_Argv(1));
+
 	if (n < 1 || n > 65534)
 	{
 		Con_Printf ("Bad value, must be between 1 and 65534\n");

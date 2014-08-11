@@ -599,6 +599,11 @@ void R_LightPoint (entity_t *e, float *c)
 	// get lighting
 	R_RecursiveLightPoint (c, cl.worldbrush->nodes, start, end);
 
+	// rescale to ~classic Q1 range for multiplayer
+	// done before dynamic lights so that they don't overbright the model too much
+	// also before minimum values to retain them as a true minimum (not double the minimum)
+	if (cl.maxclients > 1) VectorScale (c, 2.0f, c);
+
 	// minimum light values
 	if (e == &cl.viewent) R_MinimumLight (c, 72);
 	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, 24);

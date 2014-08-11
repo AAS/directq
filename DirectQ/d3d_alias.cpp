@@ -47,7 +47,7 @@ int maxaliasverts = 0;
 void R_LightPoint (entity_t *e, float *c);
 
 // up to 16 color translated skins
-LPDIRECT3DTEXTURE9 playertextures[16] = {NULL};
+LPDIRECT3DTEXTURE9 d3d_PlayerSkins[256] = {NULL};
 
 void D3D_RotateForEntity (entity_t *e);
 extern DWORD D3D_OVERBRIGHT_MODULATE;
@@ -926,10 +926,10 @@ bool D3D_PrepareAliasModel (entity_t *e, aliascache_t *c)
 	// base texture
 	c->d3d_Texture = (LPDIRECT3DTEXTURE9) e->model->ah->texture[d3d_RenderDef.currententity->skinnum][anim];
 
-	// switch player skin
+	// switch player skin (entnum - 1 is the same playernum as is used for calling into D3D_TranslatePlayerSkin so it's valid)
 	if (d3d_RenderDef.currententity->colormap != vid.colormap && !gl_nocolors.value)
 		if (d3d_RenderDef.currententity->entnum >= 1 && d3d_RenderDef.currententity->entnum <= cl.maxclients)
-			c->d3d_Texture = playertextures[d3d_RenderDef.currententity->entnum - 1];
+			c->d3d_Texture = d3d_PlayerSkins[cl.scores[d3d_RenderDef.currententity->entnum - 1].colors];
 
 	// alias models should be affected by r_lightmap 1 too...
 	if (r_lightmap.integer) c->d3d_Texture = r_greytexture;

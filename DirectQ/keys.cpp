@@ -338,52 +338,52 @@ void Key_Console (int key)
 	if (key == K_TAB)
 	{
 		// see are we matching content to a command or matching a command
-		if (!strnicmp (&key_lines[edit_line][1], "map ", 4))
+		if (!strnicmp (&key_lines[edit_line][1], "map ", 4) && spinbox_bsps[0])
 		{
 			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "changelevel ", 12))
+		else if (!strnicmp (&key_lines[edit_line][1], "changelevel ", 12) && spinbox_bsps[0])
 		{
 			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "loadsky ", 8))
+		else if (!strnicmp (&key_lines[edit_line][1], "loadsky ", 8) && skybox_menulist[0])
 		{
 			if (skybox_menulist) Key_ContentMatch (skybox_menulist, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "playdemo ", 9))
+		else if (!strnicmp (&key_lines[edit_line][1], "playdemo ", 9) && demolist[0])
 		{
 			if (demolist) Key_ContentMatch (demolist, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "timedemo ", 9))
+		else if (!strnicmp (&key_lines[edit_line][1], "timedemo ", 9) && demolist[0])
 		{
 			if (demolist) Key_ContentMatch (demolist, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "save ", 5))
+		else if (!strnicmp (&key_lines[edit_line][1], "save ", 5) && saveloadlist[0])
 		{
 			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "load ", 5))
+		else if (!strnicmp (&key_lines[edit_line][1], "load ", 5) && saveloadlist[0])
 		{
 			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "game ", 5))
+		else if (!strnicmp (&key_lines[edit_line][1], "game ", 5) && gamedirs[0])
 		{
 			if (gamedirs[0]) Key_ContentMatch (gamedirs, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "sv_protocol ", 12))
+		else if (!strnicmp (&key_lines[edit_line][1], "sv_protocol ", 12) && protolist[0])
 		{
 			Key_ContentMatch (protolist, &contentcycle);
 			return;
 		}
-		else if (!strnicmp (&key_lines[edit_line][1], "gl_texturemode ", 15))
+		else if (!strnicmp (&key_lines[edit_line][1], "gl_texturemode ", 15) && d3d_filtermodelist[0])
 		{
 			Key_ContentMatch (d3d_filtermodelist, &contentcycle);
 			return;
@@ -990,8 +990,7 @@ void Key_Event (int key, bool down)
 
 	keydown[key] = down;
 
-	if (!down)
-		key_repeats[key] = 0;
+	if (!down) key_repeats[key] = 0;
 
 	key_lastpress = key;
 	key_count++;
@@ -1006,9 +1005,9 @@ void Key_Event (int key, bool down)
 	{
 		key_repeats[key]++;
 
-		if (key != K_BACKSPACE && key != K_PAUSE && key_repeats[key] > 1)
+		if (key != K_BACKSPACE && key != K_PAUSE && key_repeats[key] > 1 && key_dest == key_game)
 		{
-			// ignore most autorepeats
+			// ignore most autorepeats in-game
 			return;
 		}
 
@@ -1050,13 +1049,11 @@ void Key_Event (int key, bool down)
 		return;
 	}
 
-//
-// key up events only generate commands if the game key binding is
-// a button command (leading + sign).  These will occur even in console mode,
-// to keep the character from continuing an action started before a console
-// switch.  Button commands include the kenum as a parameter, so multiple
-// downs can be matched with ups
-//
+	// key up events only generate commands if the game key binding is
+	// a button command (leading + sign).  These will occur even in console mode,
+	// to keep the character from continuing an action started before a console
+	// switch.  Button commands include the kenum as a parameter, so multiple
+	// downs can be matched with ups
 	if (!down)
 	{
 		kb = keybindings[key];
@@ -1077,9 +1074,7 @@ void Key_Event (int key, bool down)
 		return;
 	}
 
-//
-// during demo playback, most keys bring up the main menu
-//
+	// during demo playback, most keys bring up the main menu
 	if (cls.demoplayback && down && consolekeys[key] && key_dest == key_game)
 	{
 		if (key == K_TAB)
@@ -1089,18 +1084,18 @@ void Key_Event (int key, bool down)
 		return;
 	}
 
-//
-// if not a consolekey, send to the interpreter no matter what mode is
-//
-	if ( (key_dest == key_menu && menubound[key])
-	|| (key_dest == key_console && !consolekeys[key])
-	|| (key_dest == key_game && ( !con_forcedup || !consolekeys[key] ) ) )
+	// if not a consolekey, send to the interpreter no matter what mode is
+	if ((key_dest == key_menu && menubound[key]) ||
+		(key_dest == key_console && !consolekeys[key]) ||
+		(key_dest == key_game && (!con_forcedup || !consolekeys[key])))
 	{
 		kb = keybindings[key];
+
 		if (kb)
 		{
 			if (kb[0] == '+')
-			{	// button commands add keynum as a parm
+			{
+				// button commands add keynum as a parm
 				_snprintf (cmd, 1024, "%s %i\n", kb, key);
 				Cbuf_AddText (cmd);
 			}

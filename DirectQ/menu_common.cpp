@@ -44,7 +44,15 @@ void Menu_StackPop (void)
 	menu_StackDepth--;
 	Con_DPrintf ("Stack level %i\n", menu_StackDepth);
 
-	if (menu_StackDepth < 0) menu_StackDepth = 0;
+	if (menu_StackDepth <= 0)
+	{
+		// exit the menus entirely
+		menu_StackDepth = 0;
+		key_dest = key_game;
+		m_state = m_none;
+		return;
+	}
+
 	if (menu_Stack[menu_StackDepth]) menu_Stack[menu_StackDepth]->EnterMenu ();
 }
 
@@ -2107,6 +2115,15 @@ void Menu_HighlightBar (int y)
 */
 
 
+void Menu_RemoveMenu (void)
+{
+	// begin a new stack
+	menu_StackDepth = 0;
+	m_state = m_none;
+	key_dest = key_game;
+}
+
+
 /*
 ================
 Menu_ToggleMenu
@@ -2155,9 +2172,11 @@ cmd_t Menu_MainExitQuake_Cmd ("menu_quit", Menu_MainExitQuake);
 void M_Draw (void)
 {
 	// don't run a draw func if not in the menus or if we don't have a current menu set
-	if (m_state == m_none || key_dest != key_menu || !menu_Current)
+	if (m_state == m_none || key_dest != key_menu || !menu_Current || menu_StackDepth <= 0)
 	{
-		// reset the stack depth
+		// reset the stack depth and exit the menus entirely
+		// we can't reset key_dest here as doing so breaks the console entirely
+		m_state = m_none;
 		menu_StackDepth = 0;
 		return;
 	}

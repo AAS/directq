@@ -87,7 +87,7 @@ float		scr_conlines;		// lines of console to display
 #define SCR_DEFTIMEOUT 60
 float		scr_timeout;
 
-float		oldscreensize, oldfov, oldconscale, oldhudbgfill;
+float		oldscreensize, oldfov, oldconscale, oldhudbgfill, oldsbaralpha;
 extern cvar_t		gl_conscale;
 cvar_t		scr_viewsize ("viewsize", 100, CVAR_ARCHIVE);
 cvar_t		scr_fov ("fov", 90);	// 10 - 170
@@ -352,12 +352,13 @@ Internal use only
 =================
 */
 extern cvar_t hud_overlay;
+extern cvar_t hud_sbaralpha;
 
 static void SCR_CalcRefdef (void)
 {
-	float		size;
-	int		h;
-	bool		full = false;
+	int h;
+	float size;
+	bool full = false;
 
 	vid.recalc_refdef = 0;
 
@@ -372,15 +373,13 @@ static void SCR_CalcRefdef (void)
 	// intermission is always full screen
 	if (cl.intermission)
 		size = 120;
-	else
-		size = scr_viewsize.value;
+	else size = scr_viewsize.value;
 
 	if (size >= 120)
 		sb_lines = 0;		// no status bar at all
 	else if (size >= 110)
 		sb_lines = 24;		// no inventory
-	else
-		sb_lines = 24 + 16 + 8;
+	else sb_lines = 24 + 16 + 8;
 
 	if (scr_viewsize.value >= 100.0)
 	{
@@ -397,7 +396,7 @@ static void SCR_CalcRefdef (void)
 	}
 
 	// draw HUD as an overlay rather than as a separate component
-	if (hud_overlay.value) sb_lines = 0;
+	if (hud_overlay.value || hud_sbaralpha.value < 1) sb_lines = 0;
 
 	size /= 100.0;
 
@@ -420,6 +419,7 @@ static void SCR_CalcRefdef (void)
 	}
 
 	r_refdef.vrect.height = vid.height * size;
+
 	if (r_refdef.vrect.height > vid.height - sb_lines) r_refdef.vrect.height = vid.height - sb_lines;
 	if (r_refdef.vrect.height > vid.height) r_refdef.vrect.height = vid.height;
 
@@ -427,8 +427,7 @@ static void SCR_CalcRefdef (void)
 
 	if (full)
 		r_refdef.vrect.y = 0;
-	else 
-		r_refdef.vrect.y = (h - r_refdef.vrect.height) / 2;
+	else r_refdef.vrect.y = (h - r_refdef.vrect.height) / 2;
 
 	// x fov is initially the selected value
 	r_refdef.fov_x = scr_fov.value;
@@ -1515,6 +1514,12 @@ void SCR_UpdateScreen (void)
 		vid.recalc_refdef = true;
 	}
 
+	if (oldsbaralpha != hud_sbaralpha.value)
+	{
+		oldsbaralpha = hud_sbaralpha.value;
+		vid.recalc_refdef = true;
+	}
+
 	if (vid.recalc_refdef) SCR_CalcRefdef ();
 
 	// do 3D refresh drawing, and then update the screen
@@ -1572,16 +1577,5 @@ void SCR_UpdateScreen (void)
 	}
 
 	V_UpdatePalette ();
-}
-
-
-void SCR_BlackScreen (void)
-{
-	// this is called during startup when we don't have a device (or even a window!) yet
-	if (!d3d_Device) return;
-
-	// clears the screen to black immediately
-	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-	d3d_Device->Present (NULL, NULL, NULL, NULL);
 }
 

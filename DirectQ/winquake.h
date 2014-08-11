@@ -24,8 +24,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma warning( disable : 4229 )  // mgraph gets this
 
 #include <windows.h>
-#define WM_MOUSEWHEEL                   0x020A
 
+#ifndef WM_MOUSEWHEEL
+#define WM_MOUSEWHEEL                   0x020A
+#endif
+
+// this will be needed all over the place so we just keep one copy of it
 extern HRESULT hr;
 
 #include <ddraw.h>
@@ -34,9 +38,6 @@ extern HRESULT hr;
 extern	int			global_nCmdShow;
 
 #ifndef SERVERONLY
-
-extern LPDIRECTDRAW		lpDD;
-extern bool			DDActive;
 
 //#define SNDBUFSIZE 65536
 
@@ -53,13 +54,10 @@ extern bool		ActiveApp, Minimized;
 
 extern bool	WinNT;
 
-void IN_ShowMouse (void);
+void IN_ShowMouse (BOOL mshow);
 void IN_DeactivateMouse (void);
-void IN_HideMouse (void);
 void IN_ActivateMouse (void);
-void IN_RestoreOriginalMouseState (void);
-void IN_SetQuakeMouseState (void);
-void IN_MouseEvent (int mstate);
+void IN_MouseEvent (int mstate, int numbuttons, bool dinput);
 
 extern bool	winsock_lib_initialized;
 

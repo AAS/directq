@@ -1375,10 +1375,16 @@ This is called at the start of each level
 */
 extern float		scr_centertime_off;
 
+void IN_ActivateMouse (void);
+void IN_DeactivateMouse (void);
+
 void SV_SpawnServer (char *server)
 {
 	edict_t		*ent;
 	int			i;
+
+	// deactivate the mouse so that nothing gets buffered while loading
+	IN_DeactivateMouse ();
 
 	// let's not have any servers with no name
 	if (hostname.string[0] == 0) Cvar_Set ("hostname", "UNNAMED");
@@ -1393,7 +1399,9 @@ void SV_SpawnServer (char *server)
 
 	// make cvars consistant
 	if (coop.value) Cvar_Set ("deathmatch", 0.0f);
+
 	current_skill = (int) (skill.value + 0.5);
+
 	if (current_skill < 0) current_skill = 0;
 	if (current_skill > 3) current_skill = 3;
 

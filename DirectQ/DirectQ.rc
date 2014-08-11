@@ -17,6 +17,9 @@ IDR_QMBTRAIL			RCDATA		"qmbtrail.png"
 IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
 IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
 
+// shaders
+IDR_LIQUID				RCDATA		"fxLiquid.fx"
+
 // icons
 IDI_APPICON				ICON			"dq.ico"
 

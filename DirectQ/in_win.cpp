@@ -56,7 +56,6 @@ cvar_t m_accellevel ("m_accellevel", "0", CVAR_ARCHIVE);
 cvar_t m_accelthreshold1 ("m_accelthreshold1", "0", CVAR_ARCHIVE);
 cvar_t m_accelthreshold2 ("m_accelthreshold2", "0", CVAR_ARCHIVE);
 
-int			mouse_buttons;
 int			mouse_oldbuttonstate;
 POINT		current_pos;
 int			mouse_x, mouse_y, old_mouse_x, old_mouse_y, mx_accum, my_accum;
@@ -64,11 +63,26 @@ int			mouse_x, mouse_y, old_mouse_x, old_mouse_y, mx_accum, my_accum;
 unsigned int uiWheelMessage;
 bool	mouseactive;
 bool		mouseinitialized;
-static bool	mouseparmsvalid, mouseactivatetoggle;
+static bool	mouseparmsvalid;
 static bool	mouseshowtoggle = 1;
 static bool	dinput_acquired;
 
-static unsigned int		mstate_di;
+#define NUM_DI_MBUTTONS		8
+
+static DWORD di_MouseButtons[NUM_DI_MBUTTONS] =
+{
+	DIMOFS_BUTTON0,
+	DIMOFS_BUTTON1,
+	DIMOFS_BUTTON2,
+	DIMOFS_BUTTON3,
+	DIMOFS_BUTTON4,
+	DIMOFS_BUTTON5,
+	DIMOFS_BUTTON6,
+	DIMOFS_BUTTON7
+};
+
+
+static unsigned int		mstate_di = 0;
 
 // joystick defines and variables
 // where should defines be moved?
@@ -133,8 +147,6 @@ static LPDIRECTINPUTDEVICE	di_Mouse;
 
 static JOYINFOEX	ji;
 
-static bool	dinput;
-
 // forward-referenced functions
 void IN_StartupJoystick (void);
 void IN_StartupXInput (void);
@@ -167,32 +179,46 @@ void IN_UpdateClipCursor (void)
 }
 
 
-/*
-===========
-IN_ShowMouse
-===========
-*/
-void IN_ShowMouse (void)
+void IN_ShowMouse (BOOL mshow)
 {
-	if (!mouseshowtoggle)
+	static BOOL mouseshowtoggle = TRUE;
+
+	if (mshow)
 	{
-		ShowCursor (TRUE);
-		mouseshowtoggle = 1;
+		if (!mouseshowtoggle)
+		{
+			ShowCursor (TRUE);
+			mouseshowtoggle = 1;
+		}
+	}
+	else
+	{
+		if (mouseshowtoggle)
+		{
+			ShowCursor (FALSE);
+			mouseshowtoggle = FALSE;
+		}
 	}
 }
 
 
-/*
-===========
-IN_HideMouse
-===========
-*/
-void IN_HideMouse (void)
+void IN_FlushDInput (void)
 {
-	if (mouseshowtoggle)
+	if (di_Mouse)
 	{
-		ShowCursor (FALSE);
-		mouseshowtoggle = 0;
+		// only necessary if it's acquired as otherwise it's not buffering
+		if (dinput_acquired)
+		{
+			DWORD dwItems = INFINITE;
+			di_Mouse->GetDeviceData (sizeof (DIDEVICEOBJECTDATA), NULL, &dwItems, 0);
+		}
+
+		// switch off input state
+		mouse_oldbuttonstate = mstate_di;
+		mstate_di = 0;
+
+		// send key up events for all mouse buttons that were down
+		IN_MouseEvent (mstate_di, 8, true);
 	}
 }
 
@@ -204,8 +230,6 @@ IN_ActivateMouse
 */
 void IN_ActivateMouse (void)
 {
-	mouseactivatetoggle = true;
-
 	if (xiActiveController >= 0)
 	{
 		// toggle xinput on
@@ -224,6 +248,7 @@ void IN_ActivateMouse (void)
 				{
 					di_Mouse->Acquire ();
 					dinput_acquired = true;
+					IN_FlushDInput ();
 				}
 			}
 			else
@@ -248,25 +273,11 @@ void IN_ActivateMouse (void)
 
 /*
 ===========
-IN_SetQuakeMouseState
-===========
-*/
-void IN_SetQuakeMouseState (void)
-{
-	if (mouseactivatetoggle)
-		IN_ActivateMouse ();
-}
-
-
-/*
-===========
 IN_DeactivateMouse
 ===========
 */
 void IN_DeactivateMouse (void)
 {
-	mouseactivatetoggle = false;
-
 	if (xiActiveController >= 0)
 	{
 		// toggle xinput off
@@ -282,6 +293,7 @@ void IN_DeactivateMouse (void)
 			{
 				if (dinput_acquired)
 				{
+					IN_FlushDInput ();
 					di_Mouse->Unacquire ();
 					dinput_acquired = false;
 				}
@@ -303,48 +315,24 @@ void IN_DeactivateMouse (void)
 
 /*
 ===========
-IN_RestoreOriginalMouseState
-===========
-*/
-void IN_RestoreOriginalMouseState (void)
-{
-	if (mouseactivatetoggle)
-	{
-		IN_DeactivateMouse ();
-		mouseactivatetoggle = true;
-	}
-
-	// try to redraw the cursor so it gets reinitialized, because sometimes it
-	// has garbage after the mode switch
-	ShowCursor (TRUE);
-	ShowCursor (FALSE);
-}
-
-
-/*
-===========
 IN_InitDInput
 ===========
 */
-bool IN_InitDInput (void)
+void IN_InitDInputMouse (void)
 {
-	if (COM_CheckParm ("-nodinput")) return false;
+	// clear to NULL
+	SAFE_RELEASE (di_Mouse);
 
-	// register with DirectInput and get an IDirectInput to play with.
-	hr = DirectInput8Create (GetModuleHandle (NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (LPVOID *) &di_Object, NULL);
-
-	if (FAILED (hr))
-	{
-		return false;
-	}
+	if (COM_CheckParm ("-nodinput")) return;
 
 	// obtain an interface to the system mouse device.
 	hr = di_Object->CreateDevice (GUID_SysMouse, &di_Mouse, NULL);
 
 	if (FAILED (hr))
 	{
+		SAFE_RELEASE (di_Mouse);
 		Con_SafePrintf ("Couldn't open DI mouse device\n");
-		return false;
+		return;
 	}
 
 	// set the data format to "mouse format".
@@ -353,8 +341,31 @@ bool IN_InitDInput (void)
 
 	if (FAILED (hr))
 	{
+		SAFE_RELEASE (di_Mouse);
 		Con_SafePrintf ("Couldn't set DI mouse format\n");
-		return false;
+		return;
+	}
+
+	// we don't know how big a buffer we can create so keep trying until we get to 0
+	for (int i = 1024; i; i >>= 1)
+	{
+		if (!i)
+		{
+			SAFE_RELEASE (di_Mouse);
+			Con_SafePrintf ("Couldn't set DI mouse buffer\n");
+			return;
+		}
+
+		// set up the mouse buffer with 256 elements (should be more than enough)
+		DIPROPDWORD dipdw;
+		dipdw.diph.dwSize = sizeof (DIPROPDWORD);
+		dipdw.diph.dwHeaderSize = sizeof (DIPROPHEADER);
+		dipdw.diph.dwObj = 0;
+		dipdw.diph.dwHow = DIPH_DEVICE;
+		dipdw.dwData = i;
+		hr = di_Mouse->SetProperty (DIPROP_BUFFERSIZE, &dipdw.diph);
+
+		if (SUCCEEDED (hr)) break;
 	}
 
 	// set the cooperative level.
@@ -362,11 +373,12 @@ bool IN_InitDInput (void)
 
 	if (FAILED (hr))
 	{
+		SAFE_RELEASE (di_Mouse);
 		Con_SafePrintf ("Couldn't set DI coop level\n");
-		return false;
 	}
 
-	return true;
+	// done
+	Con_SafePrintf ("DirectInput mouse initialized\n");
 }
 
 
@@ -392,19 +404,21 @@ void IN_StartupMouse (void)
 		Cvar_Set (&m_accelthreshold2, originalmouseparms[1]);
 	}
 
-	// we don't expect this to fail in 2009 when we have a mature API, mature drivers and a mature OS
-	dinput = IN_InitDInput ();
+	// always create the direct input interface
+	SAFE_RELEASE (di_Object);
+	hr = DirectInput8Create (GetModuleHandle (NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (LPVOID *) &di_Object, NULL);
 
-	if (dinput)
-		Con_SafePrintf ("DirectInput initialized\n");
-	else Con_SafePrintf ("DirectInput not initialized\n");
+	if (SUCCEEDED (hr))
+	{
+		// now create any and all directinput devices we use
+		IN_InitDInputMouse ();
+	}
 
-	// software only - DI automatically handles up to 5 (8 with manufacturers drivers)
-	mouse_buttons = 3;
+	// if we didn't create any directinput devices we release the interface
+	if (!di_Mouse) SAFE_RELEASE (di_Object);
 
-	// if a fullscreen video mode was set before the mouse was initialized,
-	// set the mouse state appropriately
-	if (mouseactivatetoggle) IN_ActivateMouse ();
+	// now deactivate the mouse so that nothing is buffered while loading
+	IN_DeactivateMouse ();
 }
 
 
@@ -420,7 +434,7 @@ void IN_Init (void)
 {
 	uiWheelMessage = RegisterWindowMessage ("MSWHEEL_ROLLMSG");
 
-	// IN_StartupMouse needs to be last so that it can also activate XInput
+	// IN_StartupMouse needs to be last so that it can also deactivate XInput
 	IN_StartupXInput ();
 	IN_StartupJoystick ();
 	IN_StartupMouse ();
@@ -438,19 +452,10 @@ IN_Shutdown
 void IN_Shutdown (void)
 {
 	IN_DeactivateMouse ();
-	IN_ShowMouse ();
+	IN_ShowMouse (TRUE);
 
-    if (di_Mouse)
-	{
-		di_Mouse->Release ();
-		di_Mouse = NULL;
-	}
-
-    if (di_Object)
-	{
-		di_Object->Release ();
-		di_Object = NULL;
-	}
+	SAFE_RELEASE (di_Mouse);
+	SAFE_RELEASE (di_Object);
 }
 
 
@@ -459,14 +464,12 @@ void IN_Shutdown (void)
 IN_MouseEvent
 ===========
 */
-void IN_MouseEvent (int mstate)
+void IN_MouseEvent (int mstate, int numbuttons, bool dinput)
 {
-	int	i;
-
-	if (mouseactive && !m_directinput.integer)
+	if (mouseactive && !m_directinput.integer || dinput)
 	{
 		// perform button actions
-		for (i = 0; i < mouse_buttons; i++)
+		for (int i = 0; i < numbuttons; i++)
 		{
 			if ((mstate & (1 << i)) && !(mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, true);
 			if (!(mstate & (1 << i)) && (mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, false);
@@ -484,71 +487,126 @@ IN_MouseMove
 */
 void IN_MouseMove (usercmd_t *cmd)
 {
-	int					mx, my;
-	int					i;
+	int i;
+	int mx = 0;
+	int my = 0;
 
 	if (!mouseactive) return;
 
-	if (m_directinput.integer)
+	// ensure that we have a device and it's actually acquired!!!
+	if (m_directinput.integer && di_Mouse && dinput_acquired)
 	{
-		// read the mouse in immediate mode
-		DIMOUSESTATE2 MouseState;
-
-		hr = di_Mouse->GetDeviceState (sizeof (DIMOUSESTATE2), &MouseState);
-
-		if ((hr == DIERR_INPUTLOST) || (hr == DIERR_NOTACQUIRED))
+		if (cls.demoplayback || cls.timedemo || key_dest != key_game)
 		{
-			// if we lose the device or if it's not acquired, we just acquire it for the next frame
-			dinput_acquired = true;
-			di_Mouse->Acquire ();
+			// in a demo, the menu or the console we just flush the buffers and reset state always
+			IN_FlushDInput ();
 			return;
 		}
 
-		if (FAILED (hr))
+		// read one element at a time
+		DIDEVICEOBJECTDATA di_MouseBuffer;
+		int NumMouseEvents;
+
+		for (NumMouseEvents = 0; ; NumMouseEvents++)
 		{
-			// something else bad happened
+			DWORD dwElements = 1;
+
+			hr = di_Mouse->GetDeviceData (sizeof (DIDEVICEOBJECTDATA), &di_MouseBuffer, &dwElements, 0);
+
+			if ((hr == DIERR_INPUTLOST) || (hr == DIERR_NOTACQUIRED))
+			{
+				// if we lose the device or if it's not acquired, we just acquire it for the next frame
+				// (the sdk cautions against reacquiring after DIERR_NOTACQUIRED but those circumstances don't apply here)
+				dinput_acquired = true;
+				di_Mouse->Acquire ();
+				IN_FlushDInput ();
+
+				// if we lost the device we try to process any events we did get
+				// flushing above will cause us to lose button events but at least we'll get the movement
+				break;
+			}
+
+			// if we otherwise failed to read it or if we ran out of elements we just do nothing
+			if (FAILED (hr) || dwElements == 0) break;
+
+			// look at what we got and see what happened
+			switch (di_MouseBuffer.dwOfs)
+			{
+			case DIMOFS_X:
+				mx += di_MouseBuffer.dwData;
+				break;
+
+			case DIMOFS_Y:
+				my += di_MouseBuffer.dwData;
+				break;
+
+			case DIMOFS_Z:
+				// interpret mousewheel
+				// note - this is a dword so we need to cast to int for < 0 comparison to work
+				if ((int) di_MouseBuffer.dwData < 0)
+				{
+					// mwheeldown
+					Key_Event (K_MWHEELDOWN, true);
+					Key_Event (K_MWHEELDOWN, false);
+				}
+				else if ((int) di_MouseBuffer.dwData > 0)
+				{
+					// mwheelup
+					Key_Event (K_MWHEELUP, true);
+					Key_Event (K_MWHEELUP, false);
+				}
+
+				break;
+
+			default:
+				for (i = 0; i < NUM_DI_MBUTTONS; i++)
+				{
+					if (di_MouseBuffer.dwOfs == di_MouseButtons[i])
+					{
+						if (di_MouseBuffer.dwData & 0x80)
+							mstate_di |= (1 << i);
+						else mstate_di &= ~(1 << i);
+
+						// one is all it can be
+						break;
+					}
+				}
+
+				break;
+			}
+		}
+
+		// if we didn't read any events we don't bother updating the command or processing any keys
+		if (!NumMouseEvents)
+		{
+			// this is needed to prevent freelook from recentering
+			if ((in_mlook.state & 1) || m_look.value) V_StopPitchDrift ();
+
+			// done
 			return;
 		}
 
-		// set mouse positions
-		mx = MouseState.lX * m_boost.value;
-		my = MouseState.lY * m_boost.value;
-
-		// interpret mousewheel
-		// note - this is a dword so we need to cast to int for < 0 comparison to work
-		if ((int) MouseState.lZ < 0)
-		{
-			// mwheeldown
-			Key_Event (K_MWHEELDOWN, true);
-			Key_Event (K_MWHEELDOWN, false);
-		}
-		else if ((int) MouseState.lZ > 0)
-		{
-			// mwheelup
-			Key_Event (K_MWHEELUP, true);
-			Key_Event (K_MWHEELUP, false);
-		}
-
-		// perform button actions
-		mstate_di = 0;
+		// adjust movement by boost factor
+		// deferred to here so that calcs on DWORDs (above) won't send it all screwy
+		mx *= m_boost.value;
+		my *= m_boost.value;
 
 		// do up to 8 buttons; most folks won't have this many (and Windows won't support this many without
 		// 3rd party drivers) but it does no harm...
-		for (i = 0; i < 8; i++)
-		{
-			// store state
-			if (MouseState.rgbButtons[i] & 0x80) mstate_di |= (1 << i);
-
-			// perform up/down actions
-			if ((mstate_di & (1 << i)) && !(mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, true);
-			if (!(mstate_di & (1 << i)) && (mouse_oldbuttonstate & (1 << i))) Key_Event (K_MOUSE1 + i, false);
-		}
-
-		// store back
-		mouse_oldbuttonstate = mstate_di;
+		IN_MouseEvent (mstate_di, 8, true);
 	}
 	else
 	{
+		// also flush if acquired
+		if (di_Mouse && dinput_acquired)
+		{
+			IN_FlushDInput ();
+
+			// unacquire so this doesn't happen every frame
+			di_Mouse->Unacquire ();
+			dinput_acquired = false;
+		}
+
 		GetCursorPos (&current_pos);
 		mx = current_pos.x - window_center_x + mx_accum;
 		my = current_pos.y - window_center_y + my_accum;
@@ -635,7 +693,7 @@ void IN_ToggleDirectInput (void)
 		Con_Printf ("Switching DirectInput %s\n", m_directinput.integer ? "On" : "Off");
 
 	// ensure that dinput came up OK
-	if (m_directinput.integer && dinput)
+	if (m_directinput.integer && di_Mouse)
 	{
 		// deactivate software
 		m_directinput.integer = 0;
@@ -668,17 +726,19 @@ void IN_Move (usercmd_t *cmd)
 	static int old_m_directinput = -1; //m_directinput.value;
 
 	// if for some wacky reason direct input failed to initialize we force it to off always
-	if (!dinput) m_directinput.integer = 0;
+	if (!di_Mouse) m_directinput.integer = 0;
 
 	// called every frame so seems as good a place as any...
 	// ensure that it's really toggled...
 	if ((m_directinput.integer && !old_m_directinput) || (!m_directinput.integer && old_m_directinput))
 	{
+		// toggle
+		IN_ToggleDirectInput ();
+
 		// keep consistent for toggle
 		Cvar_Set (&m_directinput, !!m_directinput.integer);
 
-		// toggle
-		IN_ToggleDirectInput ();
+		// store back
 		old_m_directinput = m_directinput.integer;
 	}
 
@@ -725,8 +785,7 @@ void IN_ClearStates (void)
 	{
 		mx_accum = 0;
 		my_accum = 0;
-		mouse_oldbuttonstate = 0;
-		mstate_di = 0;
+		IN_FlushDInput ();
 	}
 }
 

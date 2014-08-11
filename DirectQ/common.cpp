@@ -1858,8 +1858,9 @@ void S_ClearSounds (void);
 void Menu_MapsPopulate (void);
 void Menu_DemoPopulate (void);
 void Menu_LoadAvailableSkyboxes (void);
-void D3D_SetDefaultStates (void);
 void SHOWLMP_newgame (void);
+void D3D_VidRestart_f (void);
+void D3D_InitHLSL (void);
 
 bool COM_StringContains (char *str1, char *str2)
 {
@@ -1883,6 +1884,10 @@ void COM_UnloadAllStuff (void)
 {
 	extern bool scr_initialized;
 
+	// prevent screen updates while changing
+	scr_disabled_for_loading = true;
+	scr_initialized = false;
+
 	// start with a clean filesystem
 	com_searchpaths = NULL;
 
@@ -1892,10 +1897,6 @@ void COM_UnloadAllStuff (void)
 	SHOWLMP_newgame ();
 	CL_Disconnect_f ();
 	D3D_ReleaseTextures ();
-
-	// prevent screen updates while changing
-	scr_disabled_for_loading = true;
-	scr_initialized = false;
 
 	// clear everything else
 	S_StopAllSounds (true);
@@ -1917,19 +1918,20 @@ void COM_LoadAllStuff (void)
 	SCR_Init ();
 	R_InitResourceTextures ();
 	D3D_InitUnderwaterTexture ();
+	D3D_InitHLSL ();
 	Draw_InvalidateMapshot ();
 	Menu_SaveLoadInvalidate ();
 	Menu_MapsPopulate ();
 	Menu_DemoPopulate ();
 	Menu_LoadAvailableSkyboxes ();
+
+	// restart video
+	D3D_VidRestart_f ();
 }
 
 
 void COM_LoadGame (char *gamename)
 {
-	// clear the screen to black so as to prevent graphical garbage
-	SCR_BlackScreen ();
-
 	if (host_initialized)
 	{
 		// store out our configuration before we go to the new game
@@ -1983,8 +1985,6 @@ void COM_LoadGame (char *gamename)
 
 	if (com_quoth.value)
 	{
-		// quoth needs this for it's hud layout.
-		// hipnotic = true;
 		quoth = true;
 		standard_quake = false;
 	}

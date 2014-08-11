@@ -1024,6 +1024,7 @@ void Menu_InitOptionsMenu (void)
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuTitle ("Configure Game Options"));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configuration Management"));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Customize Controls", &menu_Keybindings));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Change Game Directory", &menu_Game));
 	menu_Options.AddOption (new CQMenuCommand ("Go to Console", Menu_OptionsGoToConsole));
 	menu_Options.AddOption (new CQMenuCommand ("Reset to Defaults", Menu_OptionsResetToDefaults));
 	menu_Options.AddOption (new CQMenuCommand ("Save Current Configuration", Host_WriteConfiguration));

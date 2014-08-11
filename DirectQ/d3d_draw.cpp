@@ -24,10 +24,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_quake.h"
 
-#define	DIRECTQ_VERSION		1.6.4
-
 PALETTEENTRY texturepal[256];
 PALETTEENTRY lumapal[256];
+
 extern unsigned int lumatable[];
 
 cvar_t		gl_nobind ("gl_nobind", "0");
@@ -44,7 +43,7 @@ LPDIRECT3DTEXTURE9 R_PaletteTexture = NULL;
 LPDIRECT3DTEXTURE9 crosshairtexture = NULL;
 
 // faster lookup for char and palette coords
-typedef struct quadcood_s
+typedef struct quadcoord_s
 {
 	float s;
 	float t;
@@ -94,8 +93,6 @@ typedef struct cachepic_s
 
 	struct cachepic_s *next;
 } cachepic_t;
-
-#define	MAX_CACHED_PICS		256
 
 cachepic_t *menu_cachepics = NULL;
 
@@ -156,6 +153,8 @@ qpic_t *Draw_CachePic (char *path)
 	int			i;
 	qpic_t		*dat;
 	glpic_t		*gl;
+
+	if (!path) return NULL;
 
 	// these can't go into normal cached memory because of on-demand cache clearing
 	for (pic = menu_cachepics, freepic = NULL; pic; pic = pic->next)
@@ -330,6 +329,7 @@ Draw_Init
 */
 extern cvar_t gl_texturedir;
 int D3D_PowerOf2Size (int size);
+int COM_BuildContentList (char ***FileList, char *basedir, char *filetype);
 
 void Draw_Init (void)
 {
@@ -413,6 +413,63 @@ void Draw_Init (void)
 	// draw_disc is also used on the sbar so we need to retain it
 	draw_disc = Draw_PicFromWad ("disc");
 	draw_backtile = Draw_PicFromWad ("backtile");
+
+	// do a screen update now as the other cache pics might need some time
+	SCR_UpdateScreen ();
+
+	// precache all other pics
+	Draw_CachePic ("gfx/bigbox.lmp");
+	Draw_CachePic ("gfx/box_bl.lmp");
+	Draw_CachePic ("gfx/box_bm.lmp");
+	Draw_CachePic ("gfx/box_br.lmp");
+	Draw_CachePic ("gfx/box_ml.lmp");
+	Draw_CachePic ("gfx/box_mm.lmp");
+	Draw_CachePic ("gfx/box_mm2.lmp");
+	Draw_CachePic ("gfx/box_mr.lmp");
+	Draw_CachePic ("gfx/box_tl.lmp");
+	Draw_CachePic ("gfx/box_tm.lmp");
+	Draw_CachePic ("gfx/box_tr.lmp");
+	Draw_CachePic ("gfx/complete.lmp");
+	Draw_CachePic ("gfx/dim_drct.lmp");
+	Draw_CachePic ("gfx/dim_ipx.lmp");
+	Draw_CachePic ("gfx/dim_modm.lmp");
+	Draw_CachePic ("gfx/dim_mult.lmp");
+	Draw_CachePic ("gfx/dim_tcp.lmp");
+	Draw_CachePic ("gfx/finale.lmp");
+	Draw_CachePic ("gfx/help0.lmp");
+	Draw_CachePic ("gfx/help1.lmp");
+	Draw_CachePic ("gfx/help2.lmp");
+	Draw_CachePic ("gfx/help3.lmp");
+	Draw_CachePic ("gfx/help4.lmp");
+	Draw_CachePic ("gfx/help5.lmp");
+	Draw_CachePic ("gfx/inter.lmp");
+	Draw_CachePic ("gfx/loading.lmp");
+	Draw_CachePic ("gfx/mainmenu.lmp");
+	Draw_CachePic ("gfx/menudot1.lmp");
+	Draw_CachePic ("gfx/menudot2.lmp");
+	Draw_CachePic ("gfx/menudot3.lmp");
+	Draw_CachePic ("gfx/menudot4.lmp");
+	Draw_CachePic ("gfx/menudot5.lmp");
+	Draw_CachePic ("gfx/menudot6.lmp");
+	Draw_CachePic ("gfx/menuplyr.lmp");
+	Draw_CachePic ("gfx/mp_menu.lmp");
+	Draw_CachePic ("gfx/netmen1.lmp");
+	Draw_CachePic ("gfx/netmen2.lmp");
+	Draw_CachePic ("gfx/netmen3.lmp");
+	Draw_CachePic ("gfx/netmen4.lmp");
+	Draw_CachePic ("gfx/netmen5.lmp");
+	Draw_CachePic ("gfx/p_load.lmp");
+	Draw_CachePic ("gfx/p_multi.lmp");
+	Draw_CachePic ("gfx/p_option.lmp");
+	Draw_CachePic ("gfx/p_save.lmp");
+	Draw_CachePic ("gfx/pause.lmp");
+	Draw_CachePic ("gfx/qplaque.lmp");
+	Draw_CachePic ("gfx/ranking.lmp");
+	Draw_CachePic ("gfx/sp_menu.lmp");
+	Draw_CachePic ("gfx/ttl_cstm.lmp");
+	Draw_CachePic ("gfx/ttl_main.lmp");
+	Draw_CachePic ("gfx/ttl_sgl.lmp");
+	Draw_CachePic ("gfx/vidmodes.lmp");
 }
 
 
@@ -1022,7 +1079,7 @@ void Draw_ConsoleBackground (int lines)
 	else Draw_Pic (0, lines - vid.height, conback);
 
 	Draw_StringOrange (vid.width - 84, (lines - vid.height) + vid.height - 30, "DirectQ");
-	Draw_StringOrange (vid.width - 84, (lines - vid.height) + vid.height - 22, "1.7.666");
+	Draw_StringOrange (vid.width - 88, (lines - vid.height) + vid.height - 22, "1.7.666b");
 }
 
 

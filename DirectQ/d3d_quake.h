@@ -203,9 +203,15 @@ typedef struct d3d_global_caps_s
 	bool supportDXT1;
 	bool supportDXT3;
 	bool supportDXT5;
+	bool supportPixelShaders;
+	bool usingPixelShaders;
+	int supportFullscreenMultisample[5];
+	int supportWindowedMultisample[5];
 } d3d_global_caps_t;
 
 extern d3d_global_caps_t d3d_GlobalCaps;
+
+extern cvar_t r_hlsl;
 
 // renderflags for global updates
 #define R_RENDERABOVEWATER			(1 << 0)

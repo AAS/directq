@@ -76,7 +76,7 @@ LPDIRECT3DTEXTURE9 qmbparticleblood = NULL;
 LPDIRECT3DTEXTURE9 qmbparticlebubble = NULL;
 LPDIRECT3DTEXTURE9 qmbparticlelightning = NULL;
 LPDIRECT3DTEXTURE9 qmbparticlelightningold = NULL;
-LPDIRECT3DTEXTURE9 qmbparticlesmoke = NULL;
+LPDIRECT3DTEXTURE9 particlesmoketexture = NULL;
 LPDIRECT3DTEXTURE9 qmbparticlespark = NULL;
 LPDIRECT3DTEXTURE9 qmbparticletrail = NULL;
 
@@ -720,9 +720,11 @@ void R_TeleportSplash (vec3_t org)
 	float		vel;
 	vec3_t		dir;
 
-	for (i=-16 ; i<16 ; i+=4)
-		for (j=-16 ; j<16 ; j+=4)
-			for (k=-24 ; k<32 ; k+=4)
+	for (i = -16; i < 16; i += 4)
+	{
+		for (j = -16; j < 16; j += 4)
+		{
+			for (k = -24; k < 32; k += 4)
 			{
 				p = R_NewParticle ();
 		
@@ -742,6 +744,8 @@ void R_TeleportSplash (vec3_t org)
 				vel = 50 + (rand()&63);
 				VectorScale (dir, vel, p->vel);
 			}
+		}
+	}
 }
 
 
@@ -798,10 +802,10 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 			{
 				p->tex = particlesmoketexture;
 				p->scale = 2;
-				p->alpha = 128;
+				p->alpha = 192;
 				p->growth = 6;
-				p->fade = 128;
-				len -= 24;
+				p->fade = 192;
+				len -= 16;
 			}
 			*/
 

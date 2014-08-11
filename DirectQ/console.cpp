@@ -72,6 +72,17 @@ extern void M_Menu_Main_f (void);
 Con_ToggleConsole_f
 ================
 */
+void Con_RemoveConsole (void)
+{
+	key_dest = key_game;
+	key_lines[edit_line][1] = 0;	// clear any typing
+	key_linepos = 1;
+	
+	SCR_EndLoadingPlaque ();
+	memset (con_times, 0, sizeof(con_times));
+}
+
+
 void Con_ToggleConsole_f (void)
 {
 	if (key_dest == key_console)

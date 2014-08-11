@@ -13,6 +13,9 @@
 		/>
 	</Platforms>
 	<ToolFiles>
+		<DefaultToolFile
+			FileName="masm.rules"
+		/>
 	</ToolFiles>
 	<Configurations>
 		<Configuration
@@ -28,6 +31,9 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="MASM"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -114,6 +120,9 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="MASM"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -222,6 +231,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\cl_view.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\cmd.cpp"
 				>
 			</File>
@@ -259,6 +272,10 @@
 			</File>
 			<File
 				RelativePath=".\d3d_enum.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\d3d_hlsl.cpp"
 				>
 			</File>
 			<File
@@ -446,10 +463,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\view.cpp"
-				>
-			</File>
-			<File
 				RelativePath=".\wad.cpp"
 				>
 			</File>
@@ -505,6 +518,10 @@
 			</File>
 			<File
 				RelativePath=".\cvar.h"
+				>
+			</File>
+			<File
+				RelativePath=".\d3d_hlsl.h"
 				>
 			</File>
 			<File
@@ -660,6 +677,17 @@
 			<File
 				RelativePath=".\DirectQ.rc"
 				>
+			</File>
+			<File
+				RelativePath=".\fxLiquid.fx"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCustomBuildTool"
+					/>
+				</FileConfiguration>
 			</File>
 		</Filter>
 	</Files>

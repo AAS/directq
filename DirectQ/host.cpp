@@ -53,6 +53,7 @@ cvar_t	host_savedir ("host_savedir", "save", CVAR_ARCHIVE);
 
 cvar_t	host_framerate ("host_framerate","0");	// set for slow motion
 cvar_t	host_speeds ("host_speeds","0");			// set for running times
+cvar_t	sv_speed ("sv_speed", "1", CVAR_SERVER);
 
 cvar_t	sys_ticrate ("sys_ticrate","0.05");
 cvar_t	serverprofile ("serverprofile","0");
@@ -704,6 +705,12 @@ void Host_Frame (float time)
 	static float	timetotal;
 	static int		timecount;
 	int		i, c, m;
+
+	// don't go too slow
+	if (sv_speed.value < 0.1) Cvar_Set (&sv_speed, 0.1f);
+
+	// allow to adjust the speed of the server for slowmo/fast forward effects and stuff
+	time *= sv_speed.value;
 
 	if (!serverprofile.value)
 	{

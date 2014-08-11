@@ -21,7 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
-
+#include "d3d_hlsl.h"
 
 // used in the surface refresh
 extern D3DXMATRIX *CachedMatrix;
@@ -304,7 +304,8 @@ void D3D_InitSurfMinMaxs (msurface_t *surf);
 void D3D_CheckSurfMinMaxs (msurface_t *surf, float *v);
 
 
-#define D3D_SUBDIVIDE_SIZE 24.0f
+cvar_t gl_subdivide_size ("gl_subdivide_size", 128, CVAR_ARCHIVE);
+float d3d_subdivide_size = 128.0f;
 
 void SubdividePolygon (msurface_t *warpface, int numverts, float *verts)
 {
@@ -319,7 +320,7 @@ void SubdividePolygon (msurface_t *warpface, int numverts, float *verts)
 	for (int i = 0; i < 3; i++)
 	{
 		float m = (mins[i] + maxs[i]) * 0.5;
-		m = D3D_SUBDIVIDE_SIZE * floor (m / D3D_SUBDIVIDE_SIZE + 0.5);
+		m = d3d_subdivide_size * floor (m / d3d_subdivide_size + 0.5);
 
 		if (maxs[i] - m < 8) continue;
 		if (m - mins[i] < 8) continue;
@@ -405,6 +406,10 @@ void GL_SubdivideWater (msurface_t *surf, model_t *mod)
 	vec3_t verts[64];
 	float *vec;
 
+	// eval subdivide size - sanity check and store to global for keeping things consistent
+	if (gl_subdivide_size.value < 1) Cvar_Set (&gl_subdivide_size, 1.0f);
+	d3d_subdivide_size = gl_subdivide_size.value;
+
 	// convert edges back to a normal polygon
 	int numverts = 0;
 
@@ -425,6 +430,37 @@ void GL_SubdivideWater (msurface_t *surf, model_t *mod)
 
 	// now subdivide it
 	SubdividePolygon (surf, numverts, verts[0]);
+
+	// the first poly is the undivided one for hlsl rendering so now we need to rebuild that
+	glpoly_t *poly = (glpoly_t *) Pool_Alloc (POOL_MAP, sizeof (glpoly_t));
+	glwarpvert_t *warpverts = (glwarpvert_t *) Pool_Alloc (POOL_MAP, numverts * sizeof (glwarpvert_t));
+
+	poly->verts = (glpolyvert_t *) warpverts;
+	poly->numverts = numverts;
+	poly->next = surf->polys;
+	surf->polys = poly;
+
+	for (int i = 0; i < surf->numedges; i++, warpverts++)
+	{
+		int lindex = mod->bh->surfedges[surf->firstedge + i];
+
+		if (lindex > 0)
+			vec = mod->bh->vertexes[mod->bh->edges[lindex].v[0]].position;
+		else vec = mod->bh->vertexes[mod->bh->edges[-lindex].v[1]].position;
+
+		VectorCopy (vec, warpverts->xyz);
+		VectorCopy (vec, warpverts->xyz2);
+
+		// check these too
+		D3D_CheckSurfMinMaxs (surf, vec);
+
+		float s = DotProduct (vec, surf->texinfo->vecs[0]);
+		float t = DotProduct (vec, surf->texinfo->vecs[1]);
+
+		// cache the texcoords in both st and lm
+		warpverts->st[0] = warpverts->st2[0] = s;
+		warpverts->st[1] = warpverts->st2[1] = t;
+	}
 }
 
 
@@ -432,8 +468,6 @@ void GL_SubdivideWater (msurface_t *surf, model_t *mod)
 ==============================================================================================================================
 
 		WATER WARP RENDERING
-
-	Surface subdivision and warpsin updates are removed, water uses a dynamically updating warp texture.
 
 ==============================================================================================================================
 */
@@ -457,28 +491,19 @@ cvar_t r_lockalpha ("r_lockalpha", "1", CVAR_ARCHIVE);
 // water ripple
 cvar_t r_waterripple ("r_waterripple", "0", CVAR_ARCHIVE);
 
-// fixme - this doesn't quite work for values other than 256... the t multiplier will also need to be changed to get it right
-#define SIN256			40.743665f
-#define NUM_WARP_SIN	256
-#define SINDIV			((SIN256 / 256.0f) * NUM_WARP_SIN)
-
 float *warpsin = NULL;
 float warptime = 10;
-
-// correct warp for subdivide sizes < 32 ripped from fitzquake
-// this has been cvar-ized to allow user control of the warps; the defaults mimic software quake
-#define WARPCALC(s,t) ((s + warpsin[(int) ((t * r_warpfactor.value) + warptime) & (NUM_WARP_SIN - 1)] * r_warpscale.value) * 0.015625f)
-
+float warpfactor = 1;
 
 void R_InitWarp (void)
 {
 	int i;
 
-	warpsin = (float *) Pool_Alloc (POOL_PERMANENT, NUM_WARP_SIN * sizeof (float));
+	warpsin = (float *) Pool_Alloc (POOL_PERMANENT, 256 * sizeof (float));
 
-	for (i = 0; i < NUM_WARP_SIN; i++)
+	for (i = 0; i < 256; i++)
 	{
-		float f = (float) i / SINDIV;
+		float f = (float) i / 40.743665f;
 
 		// just take the sin so that we can multiply it by a variable warp factor
 		warpsin[i] = sin (f);
@@ -486,17 +511,19 @@ void R_InitWarp (void)
 }
 
 
+// this has been cvar-ized to allow user control of the warps; the defaults mimic software quake
+#define WARPCALC(s,t) ((s + warpsin[(int) ((t * warpfactor) + warptime) & 255] * r_warpscale.value) * 0.015625f)
+
 void D3D_WarpSurfacePolygon (glpoly_t *p)
 {
 	glwarpvert_t *v = (glwarpvert_t *) p->verts;
 
+	// this has been set up so that the same warpcalc def can be used for both size ranges
 	for (int i = 0; i < p->numverts; i++, v++)
 	{
 		// fixme - put in a lookup!!!
-		if (r_waterripple.value)
-		{
-			v->xyz[2] = v->xyz[2] + r_waterripple.value * sin (v->xyz[0] * 0.05 + cl.time * 3) * sin (v->xyz[2] * 0.05 + cl.time * 3);
-		}
+		// this is not currently supported with hlsl owing to the fact that we don't tesselate the surf so much
+		if (r_waterripple.value) v->xyz[2] = v->xyz[2] + r_waterripple.value * sin (v->xyz[0] * 0.05 + cl.time * 3) * sin (v->xyz[1] * 0.05 + cl.time * 3);
 
 		// we cached a copy of the texcoords in st2 so that we can do this live
 		v->st[0] = WARPCALC (v->st2[0], v->st2[1]);
@@ -522,8 +549,10 @@ void D3D_TransformWaterSurface (msurface_t *surf)
 {
 	D3DXMATRIX *m = (D3DXMATRIX *) surf->matrix;
 
-	for (glpoly_t *p = surf->polys; p; p = p->next)
+	if (d3d_GlobalCaps.usingPixelShaders)
 	{
+		// one poly only
+		glpoly_t *p = surf->polys;
 		glwarpvert_t *v = (glwarpvert_t *) p->verts;
 
 		for (int i = 0; i < p->numverts; i++, v++)
@@ -532,6 +561,22 @@ void D3D_TransformWaterSurface (msurface_t *surf)
 			v->xyz[0] = v->xyz2[0] * m->_11 + v->xyz2[1] * m->_21 + v->xyz2[2] * m->_31 + m->_41;
 			v->xyz[1] = v->xyz2[0] * m->_12 + v->xyz2[1] * m->_22 + v->xyz2[2] * m->_32 + m->_42;
 			v->xyz[2] = v->xyz2[0] * m->_13 + v->xyz2[1] * m->_23 + v->xyz2[2] * m->_33 + m->_43;
+		}
+	}
+	else
+	{
+		// start at the poly after the first
+		for (glpoly_t *p = surf->polys->next; p; p = p->next)
+		{
+			glwarpvert_t *v = (glwarpvert_t *) p->verts;
+
+			for (int i = 0; i < p->numverts; i++, v++)
+			{
+				// transform them and copy out
+				v->xyz[0] = v->xyz2[0] * m->_11 + v->xyz2[1] * m->_21 + v->xyz2[2] * m->_31 + m->_41;
+				v->xyz[1] = v->xyz2[0] * m->_12 + v->xyz2[1] * m->_22 + v->xyz2[2] * m->_32 + m->_42;
+				v->xyz[2] = v->xyz2[0] * m->_13 + v->xyz2[1] * m->_23 + v->xyz2[2] * m->_33 + m->_43;
+			}
 		}
 	}
 }
@@ -587,28 +632,53 @@ void D3D_PrepareWaterSurfaces (void)
 	if (r_warpspeed.value < 1) Cvar_Set (&r_warpspeed, 1);
 	if (r_warpspeed.value > 32) Cvar_Set (&r_warpspeed, 32);
 
-	// set the warp time (moving this calculation out of a loop)
+	// set the warp time and factor (moving this calculation out of a loop)
 	warptime = cl.time * 10.18591625f * r_warpspeed.value;
+
+	// warpfactor is only variable for fixed, hlsl always uses r_warpfactor.value
+	if (d3d_subdivide_size > 48)
+		warpfactor = r_warpfactor.value * 2.546479f;
+	else warpfactor = r_warpfactor.value;
 }
 
 
 void R_DrawWaterChain (texture_t *t)
 {
-	// liquids should be affected by r_lightmap 1
-	if (r_lightmap.integer)
-		D3D_SetTexture (0, r_greytexture);
-	else D3D_SetTexture (0, (LPDIRECT3DTEXTURE9) t->d3d_Texture);
-
-	// draw all the surfaces
-	for (msurface_t *surf = t->texturechain; surf; surf = surf->texturechain)
+	if (d3d_GlobalCaps.usingPixelShaders)
 	{
-		for (glpoly_t *p = surf->polys; p; p = p->next)
-		{
-			D3D_WarpSurfacePolygon (p);
-			D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, p->numverts - 2, p->verts, sizeof (glwarpvert_t));
-			D3D_RestoreWarpVerts (p);
+		// liquids should be affected by r_lightmap 1
+		if (r_lightmap.integer)
+			d3d_LiquidFX.SetTexture ("baseTexture", r_greytexture);
+		else d3d_LiquidFX.SetTexture ("baseTexture", (LPDIRECT3DTEXTURE9) t->d3d_Texture);
 
+		// draw all the surfaces
+		for (msurface_t *surf = t->texturechain; surf; surf = surf->texturechain)
+		{
+			// one poly only
+			glpoly_t *p = surf->polys;
+			d3d_LiquidFX.Draw (D3DPT_TRIANGLEFAN, p->numverts - 2, p->verts, sizeof (glwarpvert_t));
 			d3d_RenderDef.brush_polys++;
+		}
+	}
+	else
+	{
+		// liquids should be affected by r_lightmap 1
+		if (r_lightmap.integer)
+			D3D_SetTexture (0, r_greytexture);
+		else D3D_SetTexture (0, (LPDIRECT3DTEXTURE9) t->d3d_Texture);
+
+		// draw all the surfaces
+		for (msurface_t *surf = t->texturechain; surf; surf = surf->texturechain)
+		{
+			// start at the poly after the first
+			for (glpoly_t *p = surf->polys->next; p; p = p->next)
+			{
+				D3D_WarpSurfacePolygon (p);
+				D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, p->numverts - 2, p->verts, sizeof (glwarpvert_t));
+				D3D_RestoreWarpVerts (p);
+
+				d3d_RenderDef.brush_polys++;
+			}
 		}
 	}
 }
@@ -633,17 +703,34 @@ void D3D_DrawOpaqueWaterSurfaces (void)
 	// prevent state changes if opaque water ain't being drawn
 	if (!(d3d_RenderDef.renderflags & R_RENDEROPAQUEWATER)) return;
 
-	// set up for warping
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
-
 	msurface_t *surf;
 	texture_t *t;
+
+	// always do these even with hlsl so that the internal state tracking will update properly
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
+
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
 
 	D3D_WaterCommonState ();
 	D3D_DisableAlphaBlend ();
 
-	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		d3d_Device->SetVertexDeclaration (d3d_LiquidDeclaration);
+		d3d_LiquidFX.BeginRender ();
+
+		d3d_LiquidFX.SetMatrix ("WorldMatrix", d3d_WorldMatrixStack->GetTop ());
+		d3d_LiquidFX.SetMatrix ("ViewMatrix", d3d_ViewMatrixStack->GetTop ());
+		d3d_LiquidFX.SetMatrix ("ProjMatrix", d3d_ProjMatrixStack->GetTop ());
+
+		d3d_LiquidFX.SetFloat ("warptime", warptime);
+		d3d_LiquidFX.SetFloat ("warpfactor", r_warpfactor.value);
+		d3d_LiquidFX.SetFloat ("warpscale", r_warpscale.value);
+		d3d_LiquidFX.SetFloat ("Alpha", 1.0f);
+
+		d3d_LiquidFX.SwitchToPass (0);
+	}
 
 	for (int i = 0; i < cl.worldbrush->numtextures; i++)
 	{
@@ -665,6 +752,9 @@ void D3D_DrawOpaqueWaterSurfaces (void)
 		// draw it
 		R_DrawWaterChain (t);
 	}
+
+	// finish up the hlsl render if using it
+	if (d3d_GlobalCaps.usingPixelShaders) d3d_LiquidFX.EndRender ();
 }
 
 
@@ -674,6 +764,7 @@ void D3D_DrawAlphaWaterSurfaces (void)
 	if (!(d3d_RenderDef.renderflags & R_RENDERALPHAWATER)) return;
 
 	// set up for warping
+	// always do these even with hlsl so that the internal state tracking will update properly
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
 
 	msurface_t *surf;
@@ -685,6 +776,22 @@ void D3D_DrawAlphaWaterSurfaces (void)
 	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_CONSTANT);
 
 	D3D_WaterCommonState ();
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		d3d_Device->SetVertexDeclaration (d3d_LiquidDeclaration);
+		d3d_LiquidFX.BeginRender ();
+
+		d3d_LiquidFX.SetMatrix ("WorldMatrix", d3d_WorldMatrixStack->GetTop ());
+		d3d_LiquidFX.SetMatrix ("ViewMatrix", d3d_ViewMatrixStack->GetTop ());
+		d3d_LiquidFX.SetMatrix ("ProjMatrix", d3d_ProjMatrixStack->GetTop ());
+
+		d3d_LiquidFX.SetFloat ("warptime", warptime);
+		d3d_LiquidFX.SetFloat ("warpfactor", r_warpfactor.value);
+		d3d_LiquidFX.SetFloat ("warpscale", r_warpscale.value);
+
+		d3d_LiquidFX.SwitchToPass (0);
+	}
 
 	for (int i = 0; i < cl.worldbrush->numtextures; i++)
 	{
@@ -703,21 +810,38 @@ void D3D_DrawAlphaWaterSurfaces (void)
 		if ((surf->flags & SURF_DRAWSLIME) && d3d_SlimeAlpha == 255) continue;
 		if ((surf->flags & SURF_DRAWWATER) && d3d_WaterAlpha == 255) continue;
 
-		if (surf->flags & SURF_DRAWLAVA)
-			D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_LavaAlpha, 255, 255, 255));
-		else if (surf->flags & SURF_DRAWTELE)
-			D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_TeleAlpha, 255, 255, 255));
-		else if (surf->flags & SURF_DRAWSLIME)
-			D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_SlimeAlpha, 255, 255, 255));
-		else D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_WaterAlpha, 255, 255, 255));
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			if (surf->flags & SURF_DRAWLAVA)
+				d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_LavaAlpha / 255.0f);
+			else if (surf->flags & SURF_DRAWTELE)
+				d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_TeleAlpha / 255.0f);
+			else if (surf->flags & SURF_DRAWSLIME)
+				d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_SlimeAlpha / 255.0f);
+			else d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_WaterAlpha / 255.0f);
+		}
+		else
+		{
+			if (surf->flags & SURF_DRAWLAVA)
+				D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_LavaAlpha, 255, 255, 255));
+			else if (surf->flags & SURF_DRAWTELE)
+				D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_TeleAlpha, 255, 255, 255));
+			else if (surf->flags & SURF_DRAWSLIME)
+				D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_SlimeAlpha, 255, 255, 255));
+			else D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_WaterAlpha, 255, 255, 255));
+		}
 
 		// draw it
 		R_DrawWaterChain (t);
 	}
 
 	// take down
+	// always do these even with hlsl so that the internal state tracking will update properly
 	D3D_SetTextureStageState (0, D3DTSS_CONSTANT, 0xffffffff);
 	D3D_DisableAlphaBlend ();
+
+	// finish up the hlsl render if using it
+	if (d3d_GlobalCaps.usingPixelShaders) d3d_LiquidFX.EndRender ();
 }
 
 
@@ -738,7 +862,7 @@ void D3D_DrawAlphaWaterSurfaces (void)
 
 	This gives us a skysphere that is drawn at a distance but still clips world geometry.
 
-	Note: you meed either an infinite projection matrix or a very large Z-far for this to work right!
+	Note: you need either an infinite projection matrix or a very large Z-far for this to work right!
 
 ==============================================================================================================================
 */
@@ -1105,9 +1229,12 @@ void D3D_DrawSkyChain (void)
 	d3d_WorldMatrixStack->Push ();
 	d3d_WorldMatrixStack->Translate (r_origin[0], r_origin[1], r_origin[2]);
 
-	// double the far clip plane for the actual sky brushes because we're going to draw it farther away
+	// hack for sky where mappers do weird and wonderful non-standard things
+	float skyclipdist = r_clipdist * 2;
+
+	// increase the far clip plane for the actual sky brushes because we're going to draw it farther away
 	d3d_ProjMatrixStack->LoadIdentity ();
-	d3d_ProjMatrixStack->Frustum3D (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_clipdist * 2);
+	d3d_ProjMatrixStack->Frustum3D (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, skyclipdist);
 
 	if (SkyboxValid)
 	{

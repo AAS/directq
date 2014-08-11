@@ -38,7 +38,6 @@ void R_LoadSkyBox (char *basename, bool feedback);
 LPDIRECT3DTEXTURE9 r_notexture = NULL;
 extern LPDIRECT3DTEXTURE9 crosshairtexture;
 extern LPDIRECT3DTEXTURE9 yahtexture;
-extern LPDIRECT3DTEXTURE9 playertextures[];
 
 
 /*
@@ -83,7 +82,7 @@ extern LPDIRECT3DTEXTURE9 qmbparticleblood;
 extern LPDIRECT3DTEXTURE9 qmbparticlebubble;
 extern LPDIRECT3DTEXTURE9 qmbparticlelightning;
 extern LPDIRECT3DTEXTURE9 qmbparticlelightningold;
-extern LPDIRECT3DTEXTURE9 qmbparticlesmoke;
+extern LPDIRECT3DTEXTURE9 particlesmoketexture;
 extern LPDIRECT3DTEXTURE9 qmbparticlespark;
 extern LPDIRECT3DTEXTURE9 qmbparticletrail;
 
@@ -99,7 +98,7 @@ void R_ReleaseResourceTextures (void)
 	SAFE_RELEASE (qmbparticlebubble);
 	SAFE_RELEASE (qmbparticlelightning);
 	SAFE_RELEASE (qmbparticlelightningold);
-	SAFE_RELEASE (qmbparticlesmoke);
+	SAFE_RELEASE (particlesmoketexture);
 	SAFE_RELEASE (qmbparticlespark);
 	SAFE_RELEASE (qmbparticletrail);
 
@@ -119,7 +118,7 @@ void R_InitResourceTextures (void)
 	D3D_LoadResourceTexture (&qmbparticlebubble, IDR_QMBBUBBLE, IMAGE_MIPMAP);
 	D3D_LoadResourceTexture (&qmbparticlelightning, IDR_QMBLIGHTNING, IMAGE_MIPMAP);
 	D3D_LoadResourceTexture (&qmbparticlelightningold, IDR_QMBLIGHTNING_OLD, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&qmbparticlesmoke, IDR_QMBSMOKE, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particlesmoketexture, IDR_QMBSMOKE, IMAGE_MIPMAP);
 	D3D_LoadResourceTexture (&qmbparticlespark, IDR_QMBSPARK, IMAGE_MIPMAP);
 	D3D_LoadResourceTexture (&qmbparticletrail, IDR_QMBTRAIL, IMAGE_MIPMAP);
 
@@ -184,6 +183,8 @@ void D3D_InitTextures (void);
 
 cmd_t R_ReadPointFile_f_Cmd ("pointfile", R_ReadPointFile_f);
 
+extern LPDIRECT3DTEXTURE9 d3d_PlayerSkins[];
+
 void R_Init (void)
 {	
 	D3D_InitTextures ();
@@ -191,8 +192,7 @@ void R_Init (void)
 	R_InitParticles ();
 	R_InitResourceTextures ();
 
-	for (int i = 0; i < 16; i++)
-		SAFE_RELEASE (playertextures[i]);
+	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i]);
 }
 
 
@@ -205,33 +205,22 @@ Translates a skin texture by the per-player color lookup
 */
 void D3D_TranslatePlayerSkin (int playernum)
 {
-	int		top, bottom;
 	byte	translate[256];
 	int		i, j, s;
 	model_t	*model;
 	aliashdr_t *paliashdr;
 	byte	*original;
-
-	// cache to check for changing skins
-	static int skincache[256] = {-1};
 	static int skinsize = -1;
 	static byte *translated = NULL;
 
-	// init the cache to invalid values to force a change first time
-	if (skincache[0] == -1)
-	{
-		for (i = 0; i < 256; i++)
-			skincache[i] = -1;
-	}
+	// sanity
+	cl.scores[playernum].colors &= 255;
 
-	// skin hasn't changed yet (note the check here for the skin having been created)
-	if (skincache[playernum] == cl.scores[playernum].colors && playertextures[playernum]) return;
+	// already built a skin for this colour
+	if (d3d_PlayerSkins[cl.scores[playernum].colors]) return;
 
-	// cache it
-	skincache[playernum] = cl.scores[playernum].colors;
-
-	top = cl.scores[playernum].colors & 0xf0;
-	bottom = (cl.scores[playernum].colors & 15) << 4;
+	int top = cl.scores[playernum].colors & 0xf0;
+	int bottom = (cl.scores[playernum].colors & 15) << 4;
 
 	// baseline has no palette translation
 	for (i = 0; i < 256; i++) translate[i] = i;
@@ -273,7 +262,7 @@ void D3D_TranslatePlayerSkin (int playernum)
 	if (s & 3) Sys_Error ("R_TranslateSkin: s&3");
 
 	// recreate the texture
-	SAFE_RELEASE (playertextures[playernum]);
+	SAFE_RELEASE (d3d_PlayerSkins[cl.scores[playernum].colors]);
 
 	// check for size change
 	if (skinsize != s)
@@ -305,7 +294,31 @@ void D3D_TranslatePlayerSkin (int playernum)
 	image.height = paliashdr->skinheight;
 	image.width = paliashdr->skinwidth;
 	image.palette = (unsigned int *) d_8to24table;
-	D3D_LoadTexture (&playertextures[playernum], &image);
+	D3D_LoadTexture (&d3d_PlayerSkins[cl.scores[playernum].colors], &image);
+}
+
+
+/*
+===============
+D3D_DeleteTranslation
+
+Keeps vram usage down by deleting a skin texture when colour changes and if the old colour is unused
+by any other player.
+===============
+*/
+void D3D_DeleteTranslation (int playernum)
+{
+	for (int i = 0; i < 16; i++)
+	{
+		// current player
+		if (i == playernum) continue;
+
+		// in use
+		if (cl.scores[playernum].colors == cl.scores[i].colors) return;
+	}
+
+	// release it
+	SAFE_RELEASE (d3d_PlayerSkins[cl.scores[playernum].colors]);
 }
 
 
@@ -474,6 +487,11 @@ void LOC_LoadLocations (void);
 extern byte *fatpvs;
 extern float r_clipdist;
 
+void Con_RemoveConsole (void);
+void Menu_RemoveMenu (void);
+void IN_FlushDInput (void);
+void IN_ActivateMouse (void);
+
 void R_NewMap (void)
 {
 	// normal light value
@@ -502,6 +520,9 @@ void R_NewMap (void)
 	R_SetLeafContents ();
 	R_ParseWorldSpawn ();
 
+	// release cached skins to save memory
+	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i]);
+
 	// as sounds are now cleared between maps these sounds also need to be
 	// reloaded otherwise the known_sfx will go out of sequence for them
 	// (this isn't the case any more but it does no harm)
@@ -516,6 +537,20 @@ void R_NewMap (void)
 	// also need it here as demos don't spawn a server!!!
 	// this was nasty as it meant that a random memory location was being overwritten by PVS data in demos!
 	fatpvs = NULL;
+
+	// see do we need to switch off the menus or console
+	if (key_dest != key_game && (cls.demoplayback || cls.demorecording || cls.timedemo))
+	{
+		Con_RemoveConsole ();
+		Menu_RemoveMenu ();
+
+		// switch to game
+		key_dest = key_game;
+	}
+
+	// activate the mouse and flush the directinput buffers
+	IN_ActivateMouse ();
+	IN_FlushDInput ();
 }
 
 

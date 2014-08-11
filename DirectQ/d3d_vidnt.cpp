@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern int NumFilteredStates;
 void D3D_SetDefaultStates (void);
+void D3D_SetAllStates (void);
 
 D3DTEXTUREFILTERTYPE d3d_3DFilterMin = D3DTEXF_LINEAR;
 D3DTEXTUREFILTERTYPE d3d_3DFilterMag = D3DTEXF_LINEAR;
@@ -47,9 +48,6 @@ extern LPDIRECT3DINDEXBUFFER9 d3d_DPSkyIndexes;
 extern LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts;
 
 DWORD d3d_VertexBufferUsage = 0;
-
-// if true all per-frame state updates are forced
-bool d3d_ForceStateUpdates = true;
 
 // for various render-to-texture and render-to-surface stuff
 LPDIRECT3DSURFACE9 d3d_BackBuffer = NULL;
@@ -74,7 +72,6 @@ unsigned	lumatable[256];
 bool d3d_DeviceLost = false;
 bool vid_canalttab = false;
 bool vid_initialized = false;
-bool DDActive = true;
 bool scr_skipupdate;
 
 
@@ -95,6 +92,10 @@ void VID_MenuKey (int key);
 
 // for building the menu after video comes up
 void Menu_VideoBuild (void);
+
+// hlsl
+void D3D_InitHLSL (void);
+void D3D_ShutdownHLSL (void);
 
 // fixme - merge these two
 HWND d3d_Window;
@@ -466,15 +467,13 @@ void D3D_RecoverDeviceResources (void)
 {
 	// recreate anything that needs to be recreated
 	D3D_InitUnderwaterTexture ();
+	D3D_InitHLSL ();
 
-	// set default states
-	D3D_SetDefaultStates ();
+	// recover all states back to what they should be
+	D3D_SetAllStates ();
 
 	// pull textures back to vram
 	D3D_PreloadTextures ();
-
-	// force an update of per-frame checked states
-	d3d_ForceStateUpdates = true;
 
 	// force a recalc of the refdef
 	vid.recalc_refdef = true;
@@ -485,6 +484,7 @@ void D3D_LoseDeviceResources (void)
 {
 	// release anything that needs to be released
 	D3D_KillUnderwaterTexture ();
+	D3D_ShutdownHLSL ();
 
 	// shove out all managed resources back to system memory
 	d3d_Device->EvictManagedResources ();
@@ -498,42 +498,27 @@ void Host_GetConsoleCommands (void);
 
 void D3D_VidRestart_f (void)
 {
-	// ok, this is evil but it's better than the alternative right now.
-#ifndef _DEBUG
-	if (!sv.active)
-	{
-		if (key_dest == key_console)
-		{
-			Con_Printf ("vid_restart from a disconnected console is currently broken\n");
-			Con_Printf ("either do it while connected or use the video menu instead\n");
-			return;
-		}
-	}
-#endif
-
 	// make sure that we're ready to reset
 	while (true)
 	{
 		Sleep (10);
 		hr = d3d_Device->TestCooperativeLevel ();
 
-		if (hr == D3D_OK)
-			break;
-		else if (hr == D3DERR_DEVICELOST)
-		{
-			d3d_DeviceLost = true;
-			return;
-		}
-		else if (hr == D3DERR_DEVICENOTRESET)
-			break;
-		else Sys_Error ("");
+		if (hr == D3D_OK) break;
 	}
 
-	// clear out stuff that needs to be cleared out before we can reset it
+	// release anything that needs to be released
 	D3D_LoseDeviceResources ();
 
 	// reset the device
 	hr = d3d_Device->Reset (&d3d_PresentParams);
+
+	// if we're going to a fullscreen mode we need to handle the mouse properly
+	if (!d3d_PresentParams.Windowed)
+	{
+		IN_ActivateMouse ();
+		IN_ShowMouse (FALSE);
+	}
 
 	if (FAILED (hr))
 	{
@@ -543,45 +528,17 @@ void D3D_VidRestart_f (void)
 		return;
 	}
 
-	// now we wait for the reset to complete
+	// make sure that the reset has completed
 	while (true)
 	{
 		Sleep (10);
 		hr = d3d_Device->TestCooperativeLevel ();
 
-		switch (hr)
-		{
-		case D3D_OK:
-			// recover stuff
-			D3D_RecoverDeviceResources ();
-
-			// this won't actually be displayed until after the reset completes as SCR_UpdateScreen is blocked
-			Con_Printf ("vid_restart OK\n");
-
-			if (!sv.active)
-			{
-				if (key_dest == key_console)
-				{
-					SCR_BlackScreen ();
-					Cbuf_InsertText ("togglemenu\n");
-					Cbuf_Execute ();
-					SCR_UpdateScreen ();
-				}
-			}
-			return;
-
-		case D3DERR_DEVICELOST:
-			d3d_DeviceLost = true;
-			return;
-
-		case D3DERR_DEVICENOTRESET:
-			break;
-
-		case D3DERR_DRIVERINTERNALERROR:
-		default:
-			Sys_Error ("");
-		}
+		if (hr == D3D_OK) break;
 	}
+
+	// bring back anything that needs to be brought back
+	D3D_RecoverDeviceResources ();
 }
 
 
@@ -651,6 +608,46 @@ void D3D_EnumerateVideoModes (void)
 
 		// no modes available for this format
 		if (!ModeCount) continue;
+
+		// check multisampling for this format - initially none
+		d3d_GlobalCaps.supportFullscreenMultisample[m] = 0;
+		d3d_GlobalCaps.supportWindowedMultisample[m] = 0;
+
+		// now get the level of fullscreen multisampling supported
+		for (int i = 2; i < 17; i++)
+		{
+			hr = d3d_Object->CheckDeviceMultiSampleType
+			(
+				D3DADAPTER_DEFAULT,
+				D3DDEVTYPE_HAL,
+				d3d_AdapterModeDescs[m],
+				FALSE,
+				(D3DMULTISAMPLE_TYPE) i,
+				NULL
+			);
+
+			if (SUCCEEDED (hr))
+				d3d_GlobalCaps.supportFullscreenMultisample[m] = i;
+			else break;
+		}
+
+		// now get the level of windowed multisampling supported
+		for (int i = 2; i < 17; i++)
+		{
+			hr = d3d_Object->CheckDeviceMultiSampleType
+			(
+				D3DADAPTER_DEFAULT,
+				D3DDEVTYPE_HAL,
+				d3d_AdapterModeDescs[m],
+				TRUE,
+				(D3DMULTISAMPLE_TYPE) i,
+				NULL
+			);
+
+			if (SUCCEEDED (hr))
+				d3d_GlobalCaps.supportWindowedMultisample[m] = i;
+			else break;
+		}
 
 		// enumerate them all
 		for (int i = 0; i < ModeCount; i++)
@@ -969,7 +966,8 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 
 	// clear to black immediately
-	SCR_BlackScreen ();
+	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
+	d3d_Device->Present (NULL, NULL, NULL, NULL);
 
 	// get capabilities on the device
 	hr = d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
@@ -1000,6 +998,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	d3d_GlobalCaps.supportDXT5 = D3D_CheckTextureFormat (D3DFMT_DXT5, FALSE);
 
 	D3D_InitUnderwaterTexture ();
+	D3D_InitHLSL ();
 
 	Con_Printf ("\n");
 
@@ -1082,7 +1081,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	(
 		ExWindowStyle,
 		D3D_WINDOW_CLASS_NAME,
-		"DirectQ Release 1.7.666",
+		"DirectQ Release 1.7.666b",
 		WindowStyle,
 		rect.left, rect.top,
 		width,
@@ -1159,7 +1158,7 @@ void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
 	// create the mode and activate input
 	D3D_CreateWindow (mode);
 	IN_ActivateMouse ();
-	IN_HideMouse ();
+	IN_ShowMouse (FALSE);
 
 	// now initialize direct 3d on the window
 	D3D_InitDirect3D (mode);
@@ -1186,6 +1185,7 @@ void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
 
 	Sleep (100);
 
+	// now we force the window to the top of the z-order and the foreground
 	SetWindowPos
 	(
 		d3d_Window,
@@ -1664,7 +1664,7 @@ void D3D_CheckTextureFiltering (void)
 	int real_aniso;
 
 	// check the cvar first for an early-out
-	if (r_anisotropicfilter.integer == old_aniso && !d3d_ForceStateUpdates) return;
+	if (r_anisotropicfilter.integer == old_aniso) return;
 
 	// get the real value from the cvar - users may enter any old crap manually!!!
 	for (real_aniso = 1; real_aniso < r_anisotropicfilter.value; real_aniso <<= 1);
@@ -1677,7 +1677,7 @@ void D3D_CheckTextureFiltering (void)
 	Cvar_Set (&r_anisotropicfilter, real_aniso);
 
 	// no change
-	if (real_aniso == old_aniso && !d3d_ForceStateUpdates) return;
+	if (real_aniso == old_aniso) return;
 
 	// store out
 	old_aniso = real_aniso;
@@ -1829,8 +1829,7 @@ void D3D_CheckGamma (void)
 	if ((int) (v_gamma.value * 100) == oldvgamma &&
 		(int) (r_gamma.value * 100) == oldrgamma &&
 		(int) (g_gamma.value * 100) == oldggamma &&
-		(int) (b_gamma.value * 100) == oldbgamma &&
-		!d3d_ForceStateUpdates)
+		(int) (b_gamma.value * 100) == oldbgamma)
 	{
 		// didn't change
 		return;
@@ -1846,6 +1845,23 @@ void D3D_CheckGamma (void)
 }
 
 
+void D3D_CheckSubdivideSize (void)
+{
+	extern cvar_t gl_subdivide_size;
+	extern cvar_t r_hlsl;
+	static float old_subdivide_size = gl_subdivide_size.value;
+
+	// no subdivision with hlsl
+	if (r_hlsl.value) return;
+
+	if (gl_subdivide_size.value != old_subdivide_size)
+	{
+		Con_Printf ("You must reload the map for this setting to take effect\n");
+		old_subdivide_size = gl_subdivide_size.value;
+	}
+}
+
+
 void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 {
 	// if (NumFilteredStates) Con_Printf ("Filtered %i redundant state changes\n", NumFilteredStates);
@@ -1858,9 +1874,7 @@ void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 	D3D_CheckGamma ();
 	D3D_CheckVidMode ();
 	D3D_CheckTextureFiltering ();
-
-	// flush any state update forcing
-	d3d_ForceStateUpdates = false;
+	D3D_CheckSubdivideSize ();
 
 	*x = *y = 0;
 	*width = window_rect.right - window_rect.left;
@@ -1881,6 +1895,36 @@ void D3D_EndRendering (void)
 	hr = d3d_Device->Present (NULL, NULL, NULL, NULL);
 
 	// check for a lost device
-	if (hr == D3DERR_DEVICELOST) d3d_DeviceLost = true;
+	if (hr == D3DERR_DEVICELOST)
+	{
+		d3d_DeviceLost = true;
+		return;
+	}
+
+	// handle the mouse state for both fullscreen and windowed modes.
+	// this ensures that it's always inactive and not buffering commands when
+	// not being used in fullscreen modes.
+	// the only difference for windowed modes is that the cursor is shown
+	extern bool mouseactive;
+
+	if (key_dest == key_menu || key_dest == key_console)
+	{
+		if (mouseactive)
+		{
+			IN_DeactivateMouse ();
+			if (d3d_CurrentMode.RefreshRate == 0) IN_ShowMouse (TRUE);
+
+			// recenter the cursor here so that it will be visible if windowed
+			SetCursorPos (window_center_x, window_center_y);
+		}
+	}
+	else
+	{
+		if (!mouseactive)
+		{
+			IN_ActivateMouse ();
+			IN_ShowMouse (FALSE);
+		}
+	}
 }
 

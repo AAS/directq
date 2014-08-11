@@ -23,8 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "winquake.h"
 
-extern bool d3d_ForceStateUpdates;
-
 void D3D_CheckDirtyMatrixes (void)
 {
 	d3d_ViewMatrixStack->CheckDirtyState ();
@@ -133,6 +131,8 @@ LPDIRECT3DTEXTURE9 d3d_Textures[8];
 
 void D3D_SetTexture (DWORD Sampler, LPDIRECT3DTEXTURE9 pTexture)
 {
+	if (Sampler > d3d_DeviceCaps.MaxTextureBlendStages) return;
+
 	if (d3d_Textures[Sampler] == pTexture)
 	{
 		// filter out rendundant changes before they go to the API
@@ -167,6 +167,301 @@ void D3D_SetFVF (DWORD FVF)
 }
 
 
+void D3D_SetAllStates (void)
+{
+	// recover all states back to what they should be
+	d3d_Device->SetRenderState (D3DRS_ZENABLE, d3d_RenderStates[(int) D3DRS_ZENABLE]);
+	d3d_Device->SetRenderState (D3DRS_FILLMODE, d3d_RenderStates[(int) D3DRS_FILLMODE]);
+	d3d_Device->SetRenderState (D3DRS_SHADEMODE, d3d_RenderStates[(int) D3DRS_SHADEMODE]);
+	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, d3d_RenderStates[(int) D3DRS_ZWRITEENABLE]);
+	d3d_Device->SetRenderState (D3DRS_ALPHATESTENABLE, d3d_RenderStates[(int) D3DRS_ALPHATESTENABLE]);
+	d3d_Device->SetRenderState (D3DRS_LASTPIXEL, d3d_RenderStates[(int) D3DRS_LASTPIXEL]);
+	d3d_Device->SetRenderState (D3DRS_SRCBLEND, d3d_RenderStates[(int) D3DRS_SRCBLEND]);
+	d3d_Device->SetRenderState (D3DRS_DESTBLEND, d3d_RenderStates[(int) D3DRS_DESTBLEND]);
+	d3d_Device->SetRenderState (D3DRS_CULLMODE, d3d_RenderStates[(int) D3DRS_CULLMODE]);
+	d3d_Device->SetRenderState (D3DRS_ZFUNC, d3d_RenderStates[(int) D3DRS_ZFUNC]);
+	d3d_Device->SetRenderState (D3DRS_ALPHAREF, d3d_RenderStates[(int) D3DRS_ALPHAREF]);
+	d3d_Device->SetRenderState (D3DRS_ALPHAFUNC, d3d_RenderStates[(int) D3DRS_ALPHAFUNC]);
+	d3d_Device->SetRenderState (D3DRS_DITHERENABLE, d3d_RenderStates[(int) D3DRS_DITHERENABLE]);
+	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, d3d_RenderStates[(int) D3DRS_ALPHABLENDENABLE]);
+	d3d_Device->SetRenderState (D3DRS_FOGENABLE, d3d_RenderStates[(int) D3DRS_FOGENABLE]);
+	d3d_Device->SetRenderState (D3DRS_SPECULARENABLE, d3d_RenderStates[(int) D3DRS_SPECULARENABLE]);
+	d3d_Device->SetRenderState (D3DRS_FOGCOLOR, d3d_RenderStates[(int) D3DRS_FOGCOLOR]);
+	d3d_Device->SetRenderState (D3DRS_FOGTABLEMODE, d3d_RenderStates[(int) D3DRS_FOGTABLEMODE]);
+	d3d_Device->SetRenderState (D3DRS_FOGSTART, d3d_RenderStates[(int) D3DRS_FOGSTART]);
+	d3d_Device->SetRenderState (D3DRS_FOGEND, d3d_RenderStates[(int) D3DRS_FOGEND]);
+	d3d_Device->SetRenderState (D3DRS_FOGDENSITY, d3d_RenderStates[(int) D3DRS_FOGDENSITY]);
+	d3d_Device->SetRenderState (D3DRS_RANGEFOGENABLE, d3d_RenderStates[(int) D3DRS_RANGEFOGENABLE]);
+	d3d_Device->SetRenderState (D3DRS_STENCILENABLE, d3d_RenderStates[(int) D3DRS_STENCILENABLE]);
+	d3d_Device->SetRenderState (D3DRS_STENCILFAIL, d3d_RenderStates[(int) D3DRS_STENCILFAIL]);
+	d3d_Device->SetRenderState (D3DRS_STENCILZFAIL, d3d_RenderStates[(int) D3DRS_STENCILZFAIL]);
+	d3d_Device->SetRenderState (D3DRS_STENCILPASS, d3d_RenderStates[(int) D3DRS_STENCILPASS]);
+	d3d_Device->SetRenderState (D3DRS_STENCILFUNC, d3d_RenderStates[(int) D3DRS_STENCILFUNC]);
+	d3d_Device->SetRenderState (D3DRS_STENCILREF, d3d_RenderStates[(int) D3DRS_STENCILREF]);
+	d3d_Device->SetRenderState (D3DRS_STENCILMASK, d3d_RenderStates[(int) D3DRS_STENCILMASK]);
+	d3d_Device->SetRenderState (D3DRS_STENCILWRITEMASK, d3d_RenderStates[(int) D3DRS_STENCILWRITEMASK]);
+	d3d_Device->SetRenderState (D3DRS_TEXTUREFACTOR, d3d_RenderStates[(int) D3DRS_TEXTUREFACTOR]);
+	d3d_Device->SetRenderState (D3DRS_WRAP0, d3d_RenderStates[(int) D3DRS_WRAP0]);
+	d3d_Device->SetRenderState (D3DRS_WRAP1, d3d_RenderStates[(int) D3DRS_WRAP1]);
+	d3d_Device->SetRenderState (D3DRS_WRAP2, d3d_RenderStates[(int) D3DRS_WRAP2]);
+	d3d_Device->SetRenderState (D3DRS_WRAP3, d3d_RenderStates[(int) D3DRS_WRAP3]);
+	d3d_Device->SetRenderState (D3DRS_WRAP4, d3d_RenderStates[(int) D3DRS_WRAP4]);
+	d3d_Device->SetRenderState (D3DRS_WRAP5, d3d_RenderStates[(int) D3DRS_WRAP5]);
+	d3d_Device->SetRenderState (D3DRS_WRAP6, d3d_RenderStates[(int) D3DRS_WRAP6]);
+	d3d_Device->SetRenderState (D3DRS_WRAP7, d3d_RenderStates[(int) D3DRS_WRAP7]);
+	d3d_Device->SetRenderState (D3DRS_CLIPPING, d3d_RenderStates[(int) D3DRS_CLIPPING]);
+	d3d_Device->SetRenderState (D3DRS_LIGHTING, d3d_RenderStates[(int) D3DRS_LIGHTING]);
+	d3d_Device->SetRenderState (D3DRS_AMBIENT, d3d_RenderStates[(int) D3DRS_AMBIENT]);
+	d3d_Device->SetRenderState (D3DRS_FOGVERTEXMODE, d3d_RenderStates[(int) D3DRS_FOGVERTEXMODE]);
+	d3d_Device->SetRenderState (D3DRS_COLORVERTEX, d3d_RenderStates[(int) D3DRS_COLORVERTEX]);
+	d3d_Device->SetRenderState (D3DRS_LOCALVIEWER, d3d_RenderStates[(int) D3DRS_LOCALVIEWER]);
+	d3d_Device->SetRenderState (D3DRS_NORMALIZENORMALS, d3d_RenderStates[(int) D3DRS_NORMALIZENORMALS]);
+	d3d_Device->SetRenderState (D3DRS_DIFFUSEMATERIALSOURCE, d3d_RenderStates[(int) D3DRS_DIFFUSEMATERIALSOURCE]);
+	d3d_Device->SetRenderState (D3DRS_SPECULARMATERIALSOURCE, d3d_RenderStates[(int) D3DRS_SPECULARMATERIALSOURCE]);
+	d3d_Device->SetRenderState (D3DRS_AMBIENTMATERIALSOURCE, d3d_RenderStates[(int) D3DRS_AMBIENTMATERIALSOURCE]);
+	d3d_Device->SetRenderState (D3DRS_EMISSIVEMATERIALSOURCE, d3d_RenderStates[(int) D3DRS_EMISSIVEMATERIALSOURCE]);
+	d3d_Device->SetRenderState (D3DRS_VERTEXBLEND, d3d_RenderStates[(int) D3DRS_VERTEXBLEND]);
+	d3d_Device->SetRenderState (D3DRS_CLIPPLANEENABLE, d3d_RenderStates[(int) D3DRS_CLIPPLANEENABLE]);
+	d3d_Device->SetRenderState (D3DRS_POINTSIZE, d3d_RenderStates[(int) D3DRS_POINTSIZE]);
+	d3d_Device->SetRenderState (D3DRS_POINTSIZE_MIN, d3d_RenderStates[(int) D3DRS_POINTSIZE_MIN]);
+	d3d_Device->SetRenderState (D3DRS_POINTSPRITEENABLE, d3d_RenderStates[(int) D3DRS_POINTSPRITEENABLE]);
+	d3d_Device->SetRenderState (D3DRS_POINTSCALEENABLE, d3d_RenderStates[(int) D3DRS_POINTSCALEENABLE]);
+	d3d_Device->SetRenderState (D3DRS_POINTSCALE_A, d3d_RenderStates[(int) D3DRS_POINTSCALE_A]);
+	d3d_Device->SetRenderState (D3DRS_POINTSCALE_B, d3d_RenderStates[(int) D3DRS_POINTSCALE_B]);
+	d3d_Device->SetRenderState (D3DRS_POINTSCALE_C, d3d_RenderStates[(int) D3DRS_POINTSCALE_C]);
+	d3d_Device->SetRenderState (D3DRS_MULTISAMPLEANTIALIAS, d3d_RenderStates[(int) D3DRS_MULTISAMPLEANTIALIAS]);
+	d3d_Device->SetRenderState (D3DRS_MULTISAMPLEMASK, d3d_RenderStates[(int) D3DRS_MULTISAMPLEMASK]);
+	d3d_Device->SetRenderState (D3DRS_PATCHEDGESTYLE, d3d_RenderStates[(int) D3DRS_PATCHEDGESTYLE]);
+	d3d_Device->SetRenderState (D3DRS_DEBUGMONITORTOKEN, d3d_RenderStates[(int) D3DRS_DEBUGMONITORTOKEN]);
+	d3d_Device->SetRenderState (D3DRS_POINTSIZE_MAX, d3d_RenderStates[(int) D3DRS_POINTSIZE_MAX]);
+	d3d_Device->SetRenderState (D3DRS_INDEXEDVERTEXBLENDENABLE, d3d_RenderStates[(int) D3DRS_INDEXEDVERTEXBLENDENABLE]);
+	d3d_Device->SetRenderState (D3DRS_COLORWRITEENABLE, d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE]);
+	d3d_Device->SetRenderState (D3DRS_TWEENFACTOR, d3d_RenderStates[(int) D3DRS_TWEENFACTOR]);
+	d3d_Device->SetRenderState (D3DRS_BLENDOP, d3d_RenderStates[(int) D3DRS_BLENDOP]);
+	d3d_Device->SetRenderState (D3DRS_POSITIONDEGREE, d3d_RenderStates[(int) D3DRS_POSITIONDEGREE]);
+	d3d_Device->SetRenderState (D3DRS_NORMALDEGREE, d3d_RenderStates[(int) D3DRS_NORMALDEGREE]);
+	d3d_Device->SetRenderState (D3DRS_SCISSORTESTENABLE, d3d_RenderStates[(int) D3DRS_SCISSORTESTENABLE]);
+	d3d_Device->SetRenderState (D3DRS_SLOPESCALEDEPTHBIAS, d3d_RenderStates[(int) D3DRS_SLOPESCALEDEPTHBIAS]);
+	d3d_Device->SetRenderState (D3DRS_ANTIALIASEDLINEENABLE, d3d_RenderStates[(int) D3DRS_ANTIALIASEDLINEENABLE]);
+	d3d_Device->SetRenderState (D3DRS_MINTESSELLATIONLEVEL, d3d_RenderStates[(int) D3DRS_MINTESSELLATIONLEVEL]);
+	d3d_Device->SetRenderState (D3DRS_MAXTESSELLATIONLEVEL, d3d_RenderStates[(int) D3DRS_MAXTESSELLATIONLEVEL]);
+	d3d_Device->SetRenderState (D3DRS_ADAPTIVETESS_X, d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_X]);
+	d3d_Device->SetRenderState (D3DRS_ADAPTIVETESS_Y, d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_Y]);
+	d3d_Device->SetRenderState (D3DRS_ADAPTIVETESS_Z, d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_Z]);
+	d3d_Device->SetRenderState (D3DRS_ADAPTIVETESS_W, d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_W]);
+	d3d_Device->SetRenderState (D3DRS_ENABLEADAPTIVETESSELLATION, d3d_RenderStates[(int) D3DRS_ENABLEADAPTIVETESSELLATION]);
+	d3d_Device->SetRenderState (D3DRS_TWOSIDEDSTENCILMODE, d3d_RenderStates[(int) D3DRS_TWOSIDEDSTENCILMODE]);
+	d3d_Device->SetRenderState (D3DRS_CCW_STENCILFAIL, d3d_RenderStates[(int) D3DRS_CCW_STENCILFAIL]);
+	d3d_Device->SetRenderState (D3DRS_CCW_STENCILZFAIL, d3d_RenderStates[(int) D3DRS_CCW_STENCILZFAIL]);
+	d3d_Device->SetRenderState (D3DRS_CCW_STENCILPASS, d3d_RenderStates[(int) D3DRS_CCW_STENCILPASS]);
+	d3d_Device->SetRenderState (D3DRS_CCW_STENCILFUNC, d3d_RenderStates[(int) D3DRS_CCW_STENCILFUNC]);
+	d3d_Device->SetRenderState (D3DRS_COLORWRITEENABLE1, d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE1]);
+	d3d_Device->SetRenderState (D3DRS_COLORWRITEENABLE2, d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE2]);
+	d3d_Device->SetRenderState (D3DRS_COLORWRITEENABLE3, d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE3]);
+	d3d_Device->SetRenderState (D3DRS_BLENDFACTOR, d3d_RenderStates[(int) D3DRS_BLENDFACTOR]);
+	d3d_Device->SetRenderState (D3DRS_SRGBWRITEENABLE, d3d_RenderStates[(int) D3DRS_SRGBWRITEENABLE]);
+	d3d_Device->SetRenderState (D3DRS_DEPTHBIAS, d3d_RenderStates[(int) D3DRS_DEPTHBIAS]);
+	d3d_Device->SetRenderState (D3DRS_WRAP8, d3d_RenderStates[(int) D3DRS_WRAP8]);
+	d3d_Device->SetRenderState (D3DRS_WRAP9, d3d_RenderStates[(int) D3DRS_WRAP9]);
+	d3d_Device->SetRenderState (D3DRS_WRAP10, d3d_RenderStates[(int) D3DRS_WRAP10]);
+	d3d_Device->SetRenderState (D3DRS_WRAP11, d3d_RenderStates[(int) D3DRS_WRAP11]);
+	d3d_Device->SetRenderState (D3DRS_WRAP12, d3d_RenderStates[(int) D3DRS_WRAP12]);
+	d3d_Device->SetRenderState (D3DRS_WRAP13, d3d_RenderStates[(int) D3DRS_WRAP13]);
+	d3d_Device->SetRenderState (D3DRS_WRAP14, d3d_RenderStates[(int) D3DRS_WRAP14]);
+	d3d_Device->SetRenderState (D3DRS_WRAP15, d3d_RenderStates[(int) D3DRS_WRAP15]);
+	d3d_Device->SetRenderState (D3DRS_SEPARATEALPHABLENDENABLE, d3d_RenderStates[(int) D3DRS_SEPARATEALPHABLENDENABLE]);
+	d3d_Device->SetRenderState (D3DRS_SRCBLENDALPHA, d3d_RenderStates[(int) D3DRS_SRCBLENDALPHA]);
+	d3d_Device->SetRenderState (D3DRS_DESTBLENDALPHA, d3d_RenderStates[(int) D3DRS_DESTBLENDALPHA]);
+	d3d_Device->SetRenderState (D3DRS_BLENDOPALPHA, d3d_RenderStates[(int) D3DRS_BLENDOPALPHA]);
+
+	for (int s = 0; s < 8; s++)
+	{
+		d3d_Device->SetSamplerState (s, D3DSAMP_ADDRESSU, d3d_SamplerStates[s][(int) D3DSAMP_ADDRESSU]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_ADDRESSV, d3d_SamplerStates[s][(int) D3DSAMP_ADDRESSV]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_ADDRESSW, d3d_SamplerStates[s][(int) D3DSAMP_ADDRESSW]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_BORDERCOLOR, d3d_SamplerStates[s][(int) D3DSAMP_BORDERCOLOR]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_MAGFILTER, d3d_SamplerStates[s][(int) D3DSAMP_MAGFILTER]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_MINFILTER, d3d_SamplerStates[s][(int) D3DSAMP_MINFILTER]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_MIPFILTER, d3d_SamplerStates[s][(int) D3DSAMP_MIPFILTER]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_MIPMAPLODBIAS, d3d_SamplerStates[s][(int) D3DSAMP_MIPMAPLODBIAS]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_MAXMIPLEVEL, d3d_SamplerStates[s][(int) D3DSAMP_MAXMIPLEVEL]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_MAXANISOTROPY, d3d_SamplerStates[s][(int) D3DSAMP_MAXANISOTROPY]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_SRGBTEXTURE, d3d_SamplerStates[s][(int) D3DSAMP_SRGBTEXTURE]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_ELEMENTINDEX, d3d_SamplerStates[s][(int) D3DSAMP_ELEMENTINDEX]);
+		d3d_Device->SetSamplerState (s, D3DSAMP_DMAPOFFSET, d3d_SamplerStates[s][(int) D3DSAMP_DMAPOFFSET]);
+
+		d3d_Device->SetTextureStageState (s, D3DTSS_COLOROP, d3d_TextureStageStates[s][(int) D3DTSS_COLOROP]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_COLORARG1, d3d_TextureStageStates[s][(int) D3DTSS_COLORARG1]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_COLORARG2, d3d_TextureStageStates[s][(int) D3DTSS_COLORARG2]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_ALPHAOP, d3d_TextureStageStates[s][(int) D3DTSS_ALPHAOP]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_ALPHAARG1, d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG1]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_ALPHAARG2, d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG2]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVMAT00, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT00]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVMAT01, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT01]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVMAT10, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT10]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVMAT11, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT11]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_TEXCOORDINDEX, d3d_TextureStageStates[s][(int) D3DTSS_TEXCOORDINDEX]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVLSCALE, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVLSCALE]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_BUMPENVLOFFSET, d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVLOFFSET]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_TEXTURETRANSFORMFLAGS, d3d_TextureStageStates[s][(int) D3DTSS_TEXTURETRANSFORMFLAGS]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_COLORARG0, d3d_TextureStageStates[s][(int) D3DTSS_COLORARG0]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_ALPHAARG0, d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG0]);
+		d3d_Device->SetTextureStageState (s, D3DTSS_RESULTARG, d3d_TextureStageStates[s][(int) D3DTSS_RESULTARG]);
+
+		d3d_Textures[s] = NULL;
+	}
+
+	d3d_FVF = D3DFVF_XYZ | D3DFVF_XYZRHW;
+}
+
+
+void D3D_GetAllStates (void)
+{
+	d3d_Device->GetRenderState (D3DRS_ZENABLE, &d3d_RenderStates[(int) D3DRS_ZENABLE]);
+	d3d_Device->GetRenderState (D3DRS_FILLMODE, &d3d_RenderStates[(int) D3DRS_FILLMODE]);
+	d3d_Device->GetRenderState (D3DRS_SHADEMODE, &d3d_RenderStates[(int) D3DRS_SHADEMODE]);
+	d3d_Device->GetRenderState (D3DRS_ZWRITEENABLE, &d3d_RenderStates[(int) D3DRS_ZWRITEENABLE]);
+	d3d_Device->GetRenderState (D3DRS_ALPHATESTENABLE, &d3d_RenderStates[(int) D3DRS_ALPHATESTENABLE]);
+	d3d_Device->GetRenderState (D3DRS_LASTPIXEL, &d3d_RenderStates[(int) D3DRS_LASTPIXEL]);
+	d3d_Device->GetRenderState (D3DRS_SRCBLEND, &d3d_RenderStates[(int) D3DRS_SRCBLEND]);
+	d3d_Device->GetRenderState (D3DRS_DESTBLEND, &d3d_RenderStates[(int) D3DRS_DESTBLEND]);
+	d3d_Device->GetRenderState (D3DRS_CULLMODE, &d3d_RenderStates[(int) D3DRS_CULLMODE]);
+	d3d_Device->GetRenderState (D3DRS_ZFUNC, &d3d_RenderStates[(int) D3DRS_ZFUNC]);
+	d3d_Device->GetRenderState (D3DRS_ALPHAREF, &d3d_RenderStates[(int) D3DRS_ALPHAREF]);
+	d3d_Device->GetRenderState (D3DRS_ALPHAFUNC, &d3d_RenderStates[(int) D3DRS_ALPHAFUNC]);
+	d3d_Device->GetRenderState (D3DRS_DITHERENABLE, &d3d_RenderStates[(int) D3DRS_DITHERENABLE]);
+	d3d_Device->GetRenderState (D3DRS_ALPHABLENDENABLE, &d3d_RenderStates[(int) D3DRS_ALPHABLENDENABLE]);
+	d3d_Device->GetRenderState (D3DRS_FOGENABLE, &d3d_RenderStates[(int) D3DRS_FOGENABLE]);
+	d3d_Device->GetRenderState (D3DRS_SPECULARENABLE, &d3d_RenderStates[(int) D3DRS_SPECULARENABLE]);
+	d3d_Device->GetRenderState (D3DRS_FOGCOLOR, &d3d_RenderStates[(int) D3DRS_FOGCOLOR]);
+	d3d_Device->GetRenderState (D3DRS_FOGTABLEMODE, &d3d_RenderStates[(int) D3DRS_FOGTABLEMODE]);
+	d3d_Device->GetRenderState (D3DRS_FOGSTART, &d3d_RenderStates[(int) D3DRS_FOGSTART]);
+	d3d_Device->GetRenderState (D3DRS_FOGEND, &d3d_RenderStates[(int) D3DRS_FOGEND]);
+	d3d_Device->GetRenderState (D3DRS_FOGDENSITY, &d3d_RenderStates[(int) D3DRS_FOGDENSITY]);
+	d3d_Device->GetRenderState (D3DRS_RANGEFOGENABLE, &d3d_RenderStates[(int) D3DRS_RANGEFOGENABLE]);
+	d3d_Device->GetRenderState (D3DRS_STENCILENABLE, &d3d_RenderStates[(int) D3DRS_STENCILENABLE]);
+	d3d_Device->GetRenderState (D3DRS_STENCILFAIL, &d3d_RenderStates[(int) D3DRS_STENCILFAIL]);
+	d3d_Device->GetRenderState (D3DRS_STENCILZFAIL, &d3d_RenderStates[(int) D3DRS_STENCILZFAIL]);
+	d3d_Device->GetRenderState (D3DRS_STENCILPASS, &d3d_RenderStates[(int) D3DRS_STENCILPASS]);
+	d3d_Device->GetRenderState (D3DRS_STENCILFUNC, &d3d_RenderStates[(int) D3DRS_STENCILFUNC]);
+	d3d_Device->GetRenderState (D3DRS_STENCILREF, &d3d_RenderStates[(int) D3DRS_STENCILREF]);
+	d3d_Device->GetRenderState (D3DRS_STENCILMASK, &d3d_RenderStates[(int) D3DRS_STENCILMASK]);
+	d3d_Device->GetRenderState (D3DRS_STENCILWRITEMASK, &d3d_RenderStates[(int) D3DRS_STENCILWRITEMASK]);
+	d3d_Device->GetRenderState (D3DRS_TEXTUREFACTOR, &d3d_RenderStates[(int) D3DRS_TEXTUREFACTOR]);
+	d3d_Device->GetRenderState (D3DRS_WRAP0, &d3d_RenderStates[(int) D3DRS_WRAP0]);
+	d3d_Device->GetRenderState (D3DRS_WRAP1, &d3d_RenderStates[(int) D3DRS_WRAP1]);
+	d3d_Device->GetRenderState (D3DRS_WRAP2, &d3d_RenderStates[(int) D3DRS_WRAP2]);
+	d3d_Device->GetRenderState (D3DRS_WRAP3, &d3d_RenderStates[(int) D3DRS_WRAP3]);
+	d3d_Device->GetRenderState (D3DRS_WRAP4, &d3d_RenderStates[(int) D3DRS_WRAP4]);
+	d3d_Device->GetRenderState (D3DRS_WRAP5, &d3d_RenderStates[(int) D3DRS_WRAP5]);
+	d3d_Device->GetRenderState (D3DRS_WRAP6, &d3d_RenderStates[(int) D3DRS_WRAP6]);
+	d3d_Device->GetRenderState (D3DRS_WRAP7, &d3d_RenderStates[(int) D3DRS_WRAP7]);
+	d3d_Device->GetRenderState (D3DRS_CLIPPING, &d3d_RenderStates[(int) D3DRS_CLIPPING]);
+	d3d_Device->GetRenderState (D3DRS_LIGHTING, &d3d_RenderStates[(int) D3DRS_LIGHTING]);
+	d3d_Device->GetRenderState (D3DRS_AMBIENT, &d3d_RenderStates[(int) D3DRS_AMBIENT]);
+	d3d_Device->GetRenderState (D3DRS_FOGVERTEXMODE, &d3d_RenderStates[(int) D3DRS_FOGVERTEXMODE]);
+	d3d_Device->GetRenderState (D3DRS_COLORVERTEX, &d3d_RenderStates[(int) D3DRS_COLORVERTEX]);
+	d3d_Device->GetRenderState (D3DRS_LOCALVIEWER, &d3d_RenderStates[(int) D3DRS_LOCALVIEWER]);
+	d3d_Device->GetRenderState (D3DRS_NORMALIZENORMALS, &d3d_RenderStates[(int) D3DRS_NORMALIZENORMALS]);
+	d3d_Device->GetRenderState (D3DRS_DIFFUSEMATERIALSOURCE, &d3d_RenderStates[(int) D3DRS_DIFFUSEMATERIALSOURCE]);
+	d3d_Device->GetRenderState (D3DRS_SPECULARMATERIALSOURCE, &d3d_RenderStates[(int) D3DRS_SPECULARMATERIALSOURCE]);
+	d3d_Device->GetRenderState (D3DRS_AMBIENTMATERIALSOURCE, &d3d_RenderStates[(int) D3DRS_AMBIENTMATERIALSOURCE]);
+	d3d_Device->GetRenderState (D3DRS_EMISSIVEMATERIALSOURCE, &d3d_RenderStates[(int) D3DRS_EMISSIVEMATERIALSOURCE]);
+	d3d_Device->GetRenderState (D3DRS_VERTEXBLEND, &d3d_RenderStates[(int) D3DRS_VERTEXBLEND]);
+	d3d_Device->GetRenderState (D3DRS_CLIPPLANEENABLE, &d3d_RenderStates[(int) D3DRS_CLIPPLANEENABLE]);
+	d3d_Device->GetRenderState (D3DRS_POINTSIZE, &d3d_RenderStates[(int) D3DRS_POINTSIZE]);
+	d3d_Device->GetRenderState (D3DRS_POINTSIZE_MIN, &d3d_RenderStates[(int) D3DRS_POINTSIZE_MIN]);
+	d3d_Device->GetRenderState (D3DRS_POINTSPRITEENABLE, &d3d_RenderStates[(int) D3DRS_POINTSPRITEENABLE]);
+	d3d_Device->GetRenderState (D3DRS_POINTSCALEENABLE, &d3d_RenderStates[(int) D3DRS_POINTSCALEENABLE]);
+	d3d_Device->GetRenderState (D3DRS_POINTSCALE_A, &d3d_RenderStates[(int) D3DRS_POINTSCALE_A]);
+	d3d_Device->GetRenderState (D3DRS_POINTSCALE_B, &d3d_RenderStates[(int) D3DRS_POINTSCALE_B]);
+	d3d_Device->GetRenderState (D3DRS_POINTSCALE_C, &d3d_RenderStates[(int) D3DRS_POINTSCALE_C]);
+	d3d_Device->GetRenderState (D3DRS_MULTISAMPLEANTIALIAS, &d3d_RenderStates[(int) D3DRS_MULTISAMPLEANTIALIAS]);
+	d3d_Device->GetRenderState (D3DRS_MULTISAMPLEMASK, &d3d_RenderStates[(int) D3DRS_MULTISAMPLEMASK]);
+	d3d_Device->GetRenderState (D3DRS_PATCHEDGESTYLE, &d3d_RenderStates[(int) D3DRS_PATCHEDGESTYLE]);
+	d3d_Device->GetRenderState (D3DRS_DEBUGMONITORTOKEN, &d3d_RenderStates[(int) D3DRS_DEBUGMONITORTOKEN]);
+	d3d_Device->GetRenderState (D3DRS_POINTSIZE_MAX, &d3d_RenderStates[(int) D3DRS_POINTSIZE_MAX]);
+	d3d_Device->GetRenderState (D3DRS_INDEXEDVERTEXBLENDENABLE, &d3d_RenderStates[(int) D3DRS_INDEXEDVERTEXBLENDENABLE]);
+	d3d_Device->GetRenderState (D3DRS_COLORWRITEENABLE, &d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE]);
+	d3d_Device->GetRenderState (D3DRS_TWEENFACTOR, &d3d_RenderStates[(int) D3DRS_TWEENFACTOR]);
+	d3d_Device->GetRenderState (D3DRS_BLENDOP, &d3d_RenderStates[(int) D3DRS_BLENDOP]);
+	d3d_Device->GetRenderState (D3DRS_POSITIONDEGREE, &d3d_RenderStates[(int) D3DRS_POSITIONDEGREE]);
+	d3d_Device->GetRenderState (D3DRS_NORMALDEGREE, &d3d_RenderStates[(int) D3DRS_NORMALDEGREE]);
+	d3d_Device->GetRenderState (D3DRS_SCISSORTESTENABLE, &d3d_RenderStates[(int) D3DRS_SCISSORTESTENABLE]);
+	d3d_Device->GetRenderState (D3DRS_SLOPESCALEDEPTHBIAS, &d3d_RenderStates[(int) D3DRS_SLOPESCALEDEPTHBIAS]);
+	d3d_Device->GetRenderState (D3DRS_ANTIALIASEDLINEENABLE, &d3d_RenderStates[(int) D3DRS_ANTIALIASEDLINEENABLE]);
+	d3d_Device->GetRenderState (D3DRS_MINTESSELLATIONLEVEL, &d3d_RenderStates[(int) D3DRS_MINTESSELLATIONLEVEL]);
+	d3d_Device->GetRenderState (D3DRS_MAXTESSELLATIONLEVEL, &d3d_RenderStates[(int) D3DRS_MAXTESSELLATIONLEVEL]);
+	d3d_Device->GetRenderState (D3DRS_ADAPTIVETESS_X, &d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_X]);
+	d3d_Device->GetRenderState (D3DRS_ADAPTIVETESS_Y, &d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_Y]);
+	d3d_Device->GetRenderState (D3DRS_ADAPTIVETESS_Z, &d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_Z]);
+	d3d_Device->GetRenderState (D3DRS_ADAPTIVETESS_W, &d3d_RenderStates[(int) D3DRS_ADAPTIVETESS_W]);
+	d3d_Device->GetRenderState (D3DRS_ENABLEADAPTIVETESSELLATION, &d3d_RenderStates[(int) D3DRS_ENABLEADAPTIVETESSELLATION]);
+	d3d_Device->GetRenderState (D3DRS_TWOSIDEDSTENCILMODE, &d3d_RenderStates[(int) D3DRS_TWOSIDEDSTENCILMODE]);
+	d3d_Device->GetRenderState (D3DRS_CCW_STENCILFAIL, &d3d_RenderStates[(int) D3DRS_CCW_STENCILFAIL]);
+	d3d_Device->GetRenderState (D3DRS_CCW_STENCILZFAIL, &d3d_RenderStates[(int) D3DRS_CCW_STENCILZFAIL]);
+	d3d_Device->GetRenderState (D3DRS_CCW_STENCILPASS, &d3d_RenderStates[(int) D3DRS_CCW_STENCILPASS]);
+	d3d_Device->GetRenderState (D3DRS_CCW_STENCILFUNC, &d3d_RenderStates[(int) D3DRS_CCW_STENCILFUNC]);
+	d3d_Device->GetRenderState (D3DRS_COLORWRITEENABLE1, &d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE1]);
+	d3d_Device->GetRenderState (D3DRS_COLORWRITEENABLE2, &d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE2]);
+	d3d_Device->GetRenderState (D3DRS_COLORWRITEENABLE3, &d3d_RenderStates[(int) D3DRS_COLORWRITEENABLE3]);
+	d3d_Device->GetRenderState (D3DRS_BLENDFACTOR, &d3d_RenderStates[(int) D3DRS_BLENDFACTOR]);
+	d3d_Device->GetRenderState (D3DRS_SRGBWRITEENABLE, &d3d_RenderStates[(int) D3DRS_SRGBWRITEENABLE]);
+	d3d_Device->GetRenderState (D3DRS_DEPTHBIAS, &d3d_RenderStates[(int) D3DRS_DEPTHBIAS]);
+	d3d_Device->GetRenderState (D3DRS_WRAP8, &d3d_RenderStates[(int) D3DRS_WRAP8]);
+	d3d_Device->GetRenderState (D3DRS_WRAP9, &d3d_RenderStates[(int) D3DRS_WRAP9]);
+	d3d_Device->GetRenderState (D3DRS_WRAP10, &d3d_RenderStates[(int) D3DRS_WRAP10]);
+	d3d_Device->GetRenderState (D3DRS_WRAP11, &d3d_RenderStates[(int) D3DRS_WRAP11]);
+	d3d_Device->GetRenderState (D3DRS_WRAP12, &d3d_RenderStates[(int) D3DRS_WRAP12]);
+	d3d_Device->GetRenderState (D3DRS_WRAP13, &d3d_RenderStates[(int) D3DRS_WRAP13]);
+	d3d_Device->GetRenderState (D3DRS_WRAP14, &d3d_RenderStates[(int) D3DRS_WRAP14]);
+	d3d_Device->GetRenderState (D3DRS_WRAP15, &d3d_RenderStates[(int) D3DRS_WRAP15]);
+	d3d_Device->GetRenderState (D3DRS_SEPARATEALPHABLENDENABLE, &d3d_RenderStates[(int) D3DRS_SEPARATEALPHABLENDENABLE]);
+	d3d_Device->GetRenderState (D3DRS_SRCBLENDALPHA, &d3d_RenderStates[(int) D3DRS_SRCBLENDALPHA]);
+	d3d_Device->GetRenderState (D3DRS_DESTBLENDALPHA, &d3d_RenderStates[(int) D3DRS_DESTBLENDALPHA]);
+	d3d_Device->GetRenderState (D3DRS_BLENDOPALPHA, &d3d_RenderStates[(int) D3DRS_BLENDOPALPHA]);
+
+	for (int s = 0; s < 8; s++)
+	{
+		d3d_Device->GetSamplerState (s, D3DSAMP_ADDRESSU, &d3d_SamplerStates[s][(int) D3DSAMP_ADDRESSU]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_ADDRESSV, &d3d_SamplerStates[s][(int) D3DSAMP_ADDRESSV]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_ADDRESSW, &d3d_SamplerStates[s][(int) D3DSAMP_ADDRESSW]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_BORDERCOLOR, &d3d_SamplerStates[s][(int) D3DSAMP_BORDERCOLOR]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_MAGFILTER, &d3d_SamplerStates[s][(int) D3DSAMP_MAGFILTER]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_MINFILTER, &d3d_SamplerStates[s][(int) D3DSAMP_MINFILTER]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_MIPFILTER, &d3d_SamplerStates[s][(int) D3DSAMP_MIPFILTER]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_MIPMAPLODBIAS, &d3d_SamplerStates[s][(int) D3DSAMP_MIPMAPLODBIAS]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_MAXMIPLEVEL, &d3d_SamplerStates[s][(int) D3DSAMP_MAXMIPLEVEL]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_MAXANISOTROPY, &d3d_SamplerStates[s][(int) D3DSAMP_MAXANISOTROPY]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_SRGBTEXTURE, &d3d_SamplerStates[s][(int) D3DSAMP_SRGBTEXTURE]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_ELEMENTINDEX, &d3d_SamplerStates[s][(int) D3DSAMP_ELEMENTINDEX]);
+		d3d_Device->GetSamplerState (s, D3DSAMP_DMAPOFFSET, &d3d_SamplerStates[s][(int) D3DSAMP_DMAPOFFSET]);
+
+		d3d_Device->GetTextureStageState (s, D3DTSS_COLOROP, &d3d_TextureStageStates[s][(int) D3DTSS_COLOROP]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_COLORARG1, &d3d_TextureStageStates[s][(int) D3DTSS_COLORARG1]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_COLORARG2, &d3d_TextureStageStates[s][(int) D3DTSS_COLORARG2]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_ALPHAOP, &d3d_TextureStageStates[s][(int) D3DTSS_ALPHAOP]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_ALPHAARG1, &d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG1]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_ALPHAARG2, &d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG2]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_BUMPENVMAT00, &d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT00]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_BUMPENVMAT01, &d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT01]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_BUMPENVMAT10, &d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT10]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_BUMPENVMAT11, &d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVMAT11]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_TEXCOORDINDEX, &d3d_TextureStageStates[s][(int) D3DTSS_TEXCOORDINDEX]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_BUMPENVLSCALE, &d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVLSCALE]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_BUMPENVLOFFSET, &d3d_TextureStageStates[s][(int) D3DTSS_BUMPENVLOFFSET]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_TEXTURETRANSFORMFLAGS, &d3d_TextureStageStates[s][(int) D3DTSS_TEXTURETRANSFORMFLAGS]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_COLORARG0, &d3d_TextureStageStates[s][(int) D3DTSS_COLORARG0]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_ALPHAARG0, &d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG0]);
+		d3d_Device->GetTextureStageState (s, D3DTSS_RESULTARG, &d3d_TextureStageStates[s][(int) D3DTSS_RESULTARG]);
+
+		d3d_Textures[s] = NULL;
+	}
+
+	d3d_FVF = D3DFVF_XYZ | D3DFVF_XYZRHW;
+}
+
+
 void D3D_SetDefaultStates (void)
 {
 	// clear down old matrix stacks
@@ -180,206 +475,9 @@ void D3D_SetDefaultStates (void)
 	d3d_WorldMatrixStack = new CD3D_MatrixStack (D3DTS_WORLD);
 
 	// init all render states
-	for (int i = 0; i < 256; i++)
-	{
-		DWORD rs;
+	D3D_GetAllStates ();
 
-		// we expect this to fail on some of the states as not every number from 0 to 255 is a render state!
-		hr = d3d_Device->GetRenderState ((D3DRENDERSTATETYPE) i, &rs);
-
-		if (SUCCEEDED (hr))
-		{
-			// cache something invalid in there
-			d3d_RenderStates[i] = (rs + 1);
-
-			// now send it through the manager to get a valid default forced
-			D3D_SetRenderState ((D3DRENDERSTATETYPE) i, rs);
-		}
-	}
-
-	for (int s = 0; s < 8; s++)
-	{
-		DWORD ss;
-
-		for (int i = 0; i < 64; i++)
-		{
-			// texture stage
-			hr = d3d_Device->GetTextureStageState (s, (D3DTEXTURESTAGESTATETYPE) i, &ss);
-
-			if (SUCCEEDED (hr))
-			{
-				// cache something invalid in there
-				d3d_TextureStageStates[s][i] = (ss + 1);
-
-				// now send it through the manager to get a valid default forced
-				D3D_SetTextureStageState (s, (D3DTEXTURESTAGESTATETYPE) i, ss);
-			}
-
-			// sampler
-			hr = d3d_Device->GetSamplerState (s, (D3DSAMPLERSTATETYPE) i, &ss);
-
-			if (SUCCEEDED (hr))
-			{
-				// cache something invalid in there
-				d3d_SamplerStates[s][i] = (ss + 1);
-
-				// now send it through the manager to get a valid default forced
-				D3D_SetSamplerState (s, (D3DSAMPLERSTATETYPE) i, ss);
-			}
-		}
-
-		// clear the cached texture too
-		d3d_Textures[s] = NULL;
-	}
-
-	NumFilteredStates = 0;
-	NumChangedStates = 0;
-
-	// now we set all of our states to the dcoumented D3D defaults; this is
-	// to protect us against drivers who think they know better than we do.
-	// (note: i observed bad defaults coming through on Intel cards here, so the exercise is valid)
-	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_TRUE);
-	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
-	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_LASTPIXEL, TRUE);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_ONE);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_ZERO);
-	D3D_SetRenderState (D3DRS_CULLMODE, D3DCULL_CCW);
-	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	D3D_SetRenderState (D3DRS_ALPHAREF, 0);
-	D3D_SetRenderState (D3DRS_ALPHAFUNC, D3DCMP_ALWAYS);
-	D3D_SetRenderState (D3DRS_DITHERENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_FOGENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_SPECULARENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_FOGCOLOR, 0);
-	D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
-	D3D_SetRenderStatef (D3DRS_FOGSTART, 0.0f);
-	D3D_SetRenderStatef (D3DRS_FOGEND, 1.0f);
-	D3D_SetRenderStatef (D3DRS_FOGDENSITY, 1.0f);
-	D3D_SetRenderState (D3DRS_RANGEFOGENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_STENCILENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_STENCILPASS, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_STENCILFUNC, D3DCMP_ALWAYS);
-	D3D_SetRenderState (D3DRS_STENCILREF, 0);
-	D3D_SetRenderState (D3DRS_STENCILMASK, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_STENCILWRITEMASK, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_TEXTUREFACTOR, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_WRAP0, 0);
-	D3D_SetRenderState (D3DRS_WRAP1, 0);
-	D3D_SetRenderState (D3DRS_WRAP2, 0);
-	D3D_SetRenderState (D3DRS_WRAP3, 0);
-	D3D_SetRenderState (D3DRS_WRAP4, 0);
-	D3D_SetRenderState (D3DRS_WRAP5, 0);
-	D3D_SetRenderState (D3DRS_WRAP6, 0);
-	D3D_SetRenderState (D3DRS_WRAP7, 0);
-	D3D_SetRenderState (D3DRS_CLIPPING, TRUE);
-	D3D_SetRenderState (D3DRS_LIGHTING, TRUE);
-	D3D_SetRenderState (D3DRS_AMBIENT, 0);
-	D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_NONE);
-	D3D_SetRenderState (D3DRS_COLORVERTEX, TRUE);
-	D3D_SetRenderState (D3DRS_LOCALVIEWER, TRUE);
-	D3D_SetRenderState (D3DRS_NORMALIZENORMALS, FALSE);
-	D3D_SetRenderState (D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1);
-	D3D_SetRenderState (D3DRS_SPECULARMATERIALSOURCE, D3DMCS_COLOR2);
-	D3D_SetRenderState (D3DRS_AMBIENTMATERIALSOURCE, D3DMCS_MATERIAL);
-	D3D_SetRenderState (D3DRS_EMISSIVEMATERIALSOURCE, D3DMCS_MATERIAL);
-	D3D_SetRenderState (D3DRS_VERTEXBLEND, D3DVBF_DISABLE);
-	D3D_SetRenderState (D3DRS_CLIPPLANEENABLE, 0);
-	D3D_SetRenderStatef (D3DRS_POINTSIZE, 1.0f);
-	D3D_SetRenderStatef (D3DRS_POINTSIZE_MIN, 1.0f);
-	D3D_SetRenderState (D3DRS_POINTSPRITEENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_POINTSCALEENABLE, FALSE);
-	D3D_SetRenderStatef (D3DRS_POINTSCALE_A, 1.0f);
-	D3D_SetRenderStatef (D3DRS_POINTSCALE_B, 0.0f);
-	D3D_SetRenderStatef (D3DRS_POINTSCALE_C, 0.0f);
-	D3D_SetRenderState (D3DRS_MULTISAMPLEANTIALIAS, TRUE);
-	D3D_SetRenderState (D3DRS_MULTISAMPLEMASK, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_PATCHEDGESTYLE, D3DPATCHEDGE_DISCRETE);
-	D3D_SetRenderState (D3DRS_DEBUGMONITORTOKEN, D3DDMT_DISABLE);
-	D3D_SetRenderStatef (D3DRS_POINTSIZE_MAX, 64.0f);
-	D3D_SetRenderState (D3DRS_INDEXEDVERTEXBLENDENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0x0000000F);
-	D3D_SetRenderStatef (D3DRS_TWEENFACTOR, 0.0f);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_POSITIONDEGREE, D3DDEGREE_CUBIC);
-	D3D_SetRenderState (D3DRS_NORMALDEGREE, D3DDEGREE_LINEAR);
-	D3D_SetRenderState (D3DRS_SCISSORTESTENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_SLOPESCALEDEPTHBIAS, 0);
-	D3D_SetRenderState (D3DRS_ANTIALIASEDLINEENABLE, FALSE);
-	D3D_SetRenderStatef (D3DRS_MINTESSELLATIONLEVEL, 1.0f);
-	D3D_SetRenderStatef (D3DRS_MAXTESSELLATIONLEVEL, 1.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_X, 0.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_Y, 0.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_Z, 1.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_W, 0.0f);
-	D3D_SetRenderState (D3DRS_ENABLEADAPTIVETESSELLATION, FALSE);
-	D3D_SetRenderState (D3DRS_TWOSIDEDSTENCILMODE, FALSE);
-	D3D_SetRenderState (D3DRS_CCW_STENCILFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_CCW_STENCILZFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_CCW_STENCILPASS, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_CCW_STENCILFUNC, D3DCMP_ALWAYS);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE1, 0x0000000f);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE2, 0x0000000f);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE3, 0x0000000f);
-	D3D_SetRenderState (D3DRS_BLENDFACTOR, 0xffffffff);
-	D3D_SetRenderState (D3DRS_SRGBWRITEENABLE, 0);
-	D3D_SetRenderStatef (D3DRS_DEPTHBIAS, 0);
-	D3D_SetRenderState (D3DRS_WRAP8, 0);
-	D3D_SetRenderState (D3DRS_WRAP9, 0);
-	D3D_SetRenderState (D3DRS_WRAP10, 0);
-	D3D_SetRenderState (D3DRS_WRAP11, 0);
-	D3D_SetRenderState (D3DRS_WRAP12, 0);
-	D3D_SetRenderState (D3DRS_WRAP13, 0);
-	D3D_SetRenderState (D3DRS_WRAP14, 0);
-	D3D_SetRenderState (D3DRS_WRAP15, 0);
-	D3D_SetRenderState (D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_SRCBLENDALPHA, D3DBLEND_ONE);
-	D3D_SetRenderState (D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO);
-	D3D_SetRenderState (D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
-
-	for (int s = 0; s < 8; s++)
-	{
-		D3D_SetSamplerState (s, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
-		D3D_SetSamplerState (s, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
-		D3D_SetSamplerState (s, D3DSAMP_ADDRESSW, D3DTADDRESS_WRAP);
-		D3D_SetSamplerState (s, D3DSAMP_BORDERCOLOR, 0x00000000);
-		D3D_SetSamplerState (s, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-		D3D_SetSamplerState (s, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-		D3D_SetSamplerState (s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-		D3D_SetSamplerState (s, D3DSAMP_MIPMAPLODBIAS, 0);
-		D3D_SetSamplerState (s, D3DSAMP_MAXMIPLEVEL, 0);
-		D3D_SetSamplerState (s, D3DSAMP_MAXANISOTROPY, 1);
-		D3D_SetSamplerState (s, D3DSAMP_SRGBTEXTURE, 0);
-		D3D_SetSamplerState (s, D3DSAMP_ELEMENTINDEX, 0);
-		D3D_SetSamplerState (s, D3DSAMP_DMAPOFFSET, 0);
-
-		D3D_SetTextureStageState (s, D3DTSS_COLOROP, s == 0 ? D3DTOP_MODULATE : D3DTOP_DISABLE);
-		D3D_SetTextureStageState (s, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-		D3D_SetTextureStageState (s, D3DTSS_COLORARG2, D3DTA_CURRENT);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAOP, s == 0 ? D3DTOP_SELECTARG1 : D3DTOP_DISABLE);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAARG2, D3DTA_CURRENT);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT00, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT01, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT10, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT11, 0.0f);
-		D3D_SetTextureStageState (s, D3DTSS_TEXCOORDINDEX, s);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVLSCALE, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVLOFFSET, 0.0f);
-		D3D_SetTextureStageState (s, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
-		D3D_SetTextureStageState (s, D3DTSS_COLORARG0, D3DTA_CURRENT);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAARG0, D3DTA_CURRENT);
-		D3D_SetTextureStageState (s, D3DTSS_RESULTARG, D3DTA_CURRENT);
-		//D3D_SetTextureStageState (s, D3DTSS_CONSTANT = 32,
-	}
-
-	if (NumChangedStates) Con_DPrintf ("%i States set back to correct defaults\n", NumChangedStates);
-
+	// no filtering yet
 	NumFilteredStates = 0;
 	NumChangedStates = 0;
 
@@ -387,9 +485,6 @@ void D3D_SetDefaultStates (void)
 	for (int l = 0; l < 8; l++) d3d_Device->LightEnable (l, FALSE);
 
 	D3D_SetRenderState (D3DRS_LIGHTING, FALSE);
-
-	// force updates of values that are checked per-frame
-	d3d_ForceStateUpdates = true;
 }
 
 

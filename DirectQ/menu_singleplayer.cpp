@@ -53,9 +53,12 @@ void Menu_SPNewGame (void)
 	Cvar_Set ("coop", 0.0f);
 	Cvar_Set ("teamplay", 0.0f);
 
+	// switch back to skill 1
+	Cvar_Set ("skill", 1.0f);
+
 	Cbuf_AddText ("maxplayers 1\n");
 
-	// different start map
+	// different start map (BASTARDS!)
 	if (com_nehahra.value)
 		Cbuf_AddText ("map nehstart\n");
 	else Cbuf_AddText ("map start\n");

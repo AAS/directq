@@ -524,9 +524,11 @@ void CL_ParseUpdate (int bits)
 
 	if (skin != ent->skinnum)
 	{
+		// skin has changed
 		ent->skinnum = skin;
-		if (num > 0 && num <= cl.maxclients)
-			D3D_TranslatePlayerSkin (num - 1);
+
+		// retranslate it if it's a player skin
+		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
 	}
 
 	if (bits & U_EFFECTS)
@@ -613,6 +615,7 @@ void CL_ParseUpdate (int bits)
 		}
 		else forcelink = true;	// hack to make null model players work
 
+		// if the moddl has changed and it's a player skin we need to retranslate it
 		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
 
 		// if the model has changed we must also reset the interpolation data
@@ -834,8 +837,9 @@ void CL_NewTranslation (int slot)
 	source = vid.colormap;
 	memcpy (dest, vid.colormap, sizeof(cl.scores[slot].translations));
 	top = cl.scores[slot].colors & 0xf0;
-	bottom = (cl.scores[slot].colors &15)<<4;
+	bottom = (cl.scores[slot].colors & 15) << 4;
 
+	// retranslate it (runtime change of colour)
 	D3D_TranslatePlayerSkin (slot);
 
 	// fixme - old winquake?
@@ -987,6 +991,8 @@ void CL_ParseStaticSound (int version)
 
 void SHOWLMP_decodehide (void);
 void SHOWLMP_decodeshow (void);
+
+void D3D_DeleteTranslation (int playernum);
 
 int MSG_PeekByte (void);
 //void CL_ParseProQuakeMessage (void);
@@ -1191,10 +1197,16 @@ void CL_ParseServerMessage (void)
 			if (i >= cl.maxclients)
 			{
 				Con_DPrintf ("CL_ParseServerMessage: svc_updatecolors > MAX_SCOREBOARD\n");
+
+				// read and discard the translation
 				MSG_ReadByte ();
 				break;
 			}
 
+			// delete the old translation if it's unused
+			D3D_DeleteTranslation (i);
+
+			// make the new translation
 			cl.scores[i].colors = MSG_ReadByte ();
 			CL_NewTranslation (i);
 			break;

@@ -352,8 +352,8 @@ void D3D_PrepareWorld (void)
 	// build the world
 	VectorCopy (r_origin, modelorg);
 
-	// never go < 2048
-	r_clipdist = 2048;
+	// never go < 4096 as that is the clip dist in regular quake and maps/mods may expect it
+	r_clipdist = 4096;
 
 	if (d3d_RenderDef.automap)
 		R_AutomapSurfaces ();

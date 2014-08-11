@@ -18,6 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 // view.c -- player eye positioning
+// renamed to cl_view to keep it grouped with the rest of the client code
 
 #include "quakedef.h"
 
@@ -63,6 +64,8 @@ cvar_t	scr_crosshairscale ("scr_crosshairscale", 1, CVAR_ARCHIVE);
 cvar_t	scr_crosshaircolor ("scr_crosshaircolor", "0", CVAR_ARCHIVE);
 
 cvar_t	gl_cshiftpercent ("gl_cshiftpercent", "100");
+
+cvar_t	r_gunangle ("r_gunangle", 2, CVAR_ARCHIVE);
 
 float	v_dmg_time, v_dmg_roll, v_dmg_pitch;
 
@@ -610,17 +613,18 @@ void V_BoundOffsets (void)
 	
 	ent = cl_entities[cl.viewentity];
 
-// absolutely bound refresh reletive to entity clipping hull
-// so the view can never be inside a solid wall
-
+	// absolutely bound refresh reletive to entity clipping hull
+	// so the view can never be inside a solid wall
 	if (r_refdef.vieworg[0] < ent->origin[0] - 14)
 		r_refdef.vieworg[0] = ent->origin[0] - 14;
 	else if (r_refdef.vieworg[0] > ent->origin[0] + 14)
 		r_refdef.vieworg[0] = ent->origin[0] + 14;
+
 	if (r_refdef.vieworg[1] < ent->origin[1] - 14)
 		r_refdef.vieworg[1] = ent->origin[1] - 14;
 	else if (r_refdef.vieworg[1] > ent->origin[1] + 14)
 		r_refdef.vieworg[1] = ent->origin[1] + 14;
+
 	if (r_refdef.vieworg[2] < ent->origin[2] - 22)
 		r_refdef.vieworg[2] = ent->origin[2] - 22;
 	else if (r_refdef.vieworg[2] > ent->origin[2] + 30)
@@ -683,16 +687,17 @@ void V_CalcIntermissionRefdef (void)
 	entity_t	*ent, *view;
 	float		old;
 
-// ent is the player model (visible when out of body)
+	// ent is the player model (visible when out of body)
 	ent = cl_entities[cl.viewentity];
-// view is the weapon model (only visible from inside body)
+
+	// view is the weapon model (only visible from inside body)
 	view = &cl.viewent;
 
 	VectorCopy (ent->origin, r_refdef.vieworg);
 	VectorCopy (ent->angles, r_refdef.viewangles);
 	view->model = NULL;
 
-// allways idle in intermission
+	// allways idle in intermission
 	old = v_idlescale.value;
 	v_idlescale.value = 1;
 	V_AddIdle ();
@@ -717,73 +722,62 @@ void V_CalcRefdef (void)
 
 	V_DriftPitch ();
 
-// ent is the player model (visible when out of body)
+	// ent is the player model (visible when out of body)
 	ent = cl_entities[cl.viewentity];
-// view is the weapon model (only visible from inside body)
-	view = &cl.viewent;
-	
 
-// transform the view offset by the model's matrix to get the offset from
-// model origin for the view
-	ent->angles[YAW] = cl.viewangles[YAW];	// the model should face
-										// the view dir
-	ent->angles[PITCH] = -cl.viewangles[PITCH];	// the model should face
-										// the view dir
-										
-	
+	// view is the weapon model (only visible from inside body)
+	view = &cl.viewent;
+
+	// transform the view offset by the model's matrix to get the offset from
+	// model origin for the view.  the model should face the view dir.
+	ent->angles[YAW] = cl.viewangles[YAW];
+	ent->angles[PITCH] = -cl.viewangles[PITCH];
+
 	bob = V_CalcBob ();
-	
-// refresh position
+
+	// refresh position
 	VectorCopy (ent->origin, r_refdef.vieworg);
 	r_refdef.vieworg[2] += cl.viewheight + bob;
 
-// never let it sit exactly on a node line, because a water plane can
-// dissapear when viewed with the eye exactly on it.
-// the server protocol only specifies to 1/16 pixel, so add 1/32 in each axis
-	r_refdef.vieworg[0] += 1.0/32;
-	r_refdef.vieworg[1] += 1.0/32;
-	r_refdef.vieworg[2] += 1.0/32;
+	// never let it sit exactly on a node line, because a water plane can
+	// dissapear when viewed with the eye exactly on it.
+	// the server protocol only specifies to 1/16 pixel, so add 1/32 in each axis
+	r_refdef.vieworg[0] += 1.0 / 32;
+	r_refdef.vieworg[1] += 1.0 / 32;
+	r_refdef.vieworg[2] += 1.0 / 32;
 
 	VectorCopy (cl.viewangles, r_refdef.viewangles);
 	V_CalcViewRoll ();
 	V_AddIdle ();
 
-// offsets
-	angles[PITCH] = -ent->angles[PITCH];	// because entity pitches are
-											//  actually backward
+	// offsets - because entity pitches are actually backward
+	angles[PITCH] = -ent->angles[PITCH];
 	angles[YAW] = ent->angles[YAW];
 	angles[ROLL] = ent->angles[ROLL];
 
 	AngleVectors (angles, forward, right, up);
 
-	for (i=0 ; i<3 ; i++)
-		r_refdef.vieworg[i] += scr_ofsx.value*forward[i]
-			+ scr_ofsy.value*right[i]
-			+ scr_ofsz.value*up[i];
-	
-	
+	for (i = 0; i < 3; i++)
+		r_refdef.vieworg[i] += scr_ofsx.value * forward[i] + scr_ofsy.value * right[i] + scr_ofsz.value * up[i];
+
 	V_BoundOffsets ();
-		
-// set up gun position
+
+	// set up gun position
 	VectorCopy (cl.viewangles, view->angles);
-	
+
 	CalcGunAngle ();
 
 	VectorCopy (ent->origin, view->origin);
 	view->origin[2] += cl.viewheight;
 
-	for (i=0 ; i<3 ; i++)
-	{
-		view->origin[i] += forward[i]*bob*0.4;
-//		view->origin[i] += right[i]*bob*0.4;
-//		view->origin[i] += up[i]*bob*0.8;
-	}
+	for (i = 0; i < 3; i++) view->origin[i] += forward[i] * bob * 0.4;
 
 	view->origin[2] += bob;
 
-	// note - roughly equates to glquakes "viewsize 100" position.
+	// note - default equates to glquakes "viewsize 100" position.
 	// fudging was only needed in software...
-	view->origin[2] += 2;
+	// set to 0 to replicate darkplaces/fitzquake style
+	view->origin[2] += r_gunangle.integer;
 
 	view->model = cl.model_precache[cl.stats[STAT_WEAPON]];
 	view->frame = cl.stats[STAT_WEAPONFRAME];
@@ -804,10 +798,10 @@ void V_CalcRefdef (void)
 		if (steptime < 0) steptime = 0;
 
 		oldz += steptime * 80;
-		if (oldz > ent->origin[2])
-			oldz = ent->origin[2];
-		if (ent->origin[2] - oldz > 12)
-			oldz = ent->origin[2] - 12;
+
+		if (oldz > ent->origin[2]) oldz = ent->origin[2];
+		if (ent->origin[2] - oldz > 12) oldz = ent->origin[2] - 12;
+
 		r_refdef.vieworg[2] += oldz - ent->origin[2];
 		view->origin[2] += oldz - ent->origin[2];
 	}

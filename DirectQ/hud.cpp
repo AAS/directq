@@ -238,6 +238,12 @@ Tab key up
 */
 void HUD_DontShowScores (void)
 {
+	if (cl.maxclients > 1)
+	{
+		// revert to old behaviour in multiplayer
+		hud_showscores = false;
+		hud_showdemoscores = false;
+	}
 }
 
 
@@ -444,9 +450,10 @@ void HUD_SaveHUD (void)
 		return;
 	}
 
+	// need to write these as floats because of alpha
 	for (cvar_t *var = cvar_vars; var; var = var->next)
 		if (var->usage & CVAR_HUD)
-			fprintf (f, "%s \"%i\"\n", var->name, var->integer);
+			fprintf (f, "%s \"%g\"\n", var->name, var->value);
 
 	fclose (f);
 	Con_Printf ("Wrote HUD layout to \"%s\"\n", hudscript);

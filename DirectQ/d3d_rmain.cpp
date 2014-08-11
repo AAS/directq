@@ -496,6 +496,28 @@ D3D_PrepareRender
 */
 void D3D_PrepareRender (void)
 {
+	// r_wireframe 1 is cheating in multiplayer
+	if (r_wireframe.integer)
+	{
+		if (sv.active)
+		{
+			if (svs.maxclients > 1)
+			{
+				// force off for the owner of a listen server
+				Cvar_Set (&r_wireframe, 0.0f);
+			}
+		}
+		else if (cls.demoplayback)
+		{
+			// do nothing
+		}
+		else if (cls.state == ca_connected)
+		{
+			// force r_wireframe off if not running a local server
+			Cvar_Set (&r_wireframe, 0.0f);
+		}
+	}
+
 	// always clear the zbuffer
 	DWORD d3d_ClearFlags = D3DCLEAR_ZBUFFER;
 	D3DVIEWPORT9 d3d_3DViewport;
@@ -689,7 +711,7 @@ void D3D_PrepareVisedicts (void)
 void D3D_PerpareFog (void)
 {
 	// no fog
-	if (!gl_fogenable.integer) return;
+	if (gl_fogenable.integer <= 0) return;
 	if (d3d_RenderDef.automap) return;
 
 	// sanity check cvars
@@ -716,19 +738,45 @@ void D3D_PerpareFog (void)
 
 	D3D_SetRenderState (D3DRS_FOGCOLOR, fogcolor);
 
+	// default fog is linear per-vertex
 	DWORD fvm = D3DFOG_LINEAR;
 	DWORD fpm = D3DFOG_NONE;
 
+	// if we're using pixel shaders we need to switch to per-pixel fog as we don't provide fog
+	// as an input to the vertex shader (for simplicity)
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		fpm = D3DFOG_LINEAR;
+		fvm = D3DFOG_NONE;
+	}
+
+	// now get the real mode - once again, if using pixel shaders we switch all per-vertex modes to per-pixel
 	switch (gl_fogenable.integer)
 	{
 	case 2:
-		fvm = D3DFOG_EXP;
-		fpm = D3DFOG_NONE;
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			fpm = D3DFOG_EXP;
+			fvm = D3DFOG_NONE;
+		}
+		else
+		{
+			fvm = D3DFOG_EXP;
+			fpm = D3DFOG_NONE;
+		}
 		break;
 
 	case 3:
-		fvm = D3DFOG_EXP2;
-		fpm = D3DFOG_NONE;
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			fpm = D3DFOG_EXP2;
+			fvm = D3DFOG_NONE;
+		}
+		else
+		{
+			fvm = D3DFOG_EXP2;
+			fpm = D3DFOG_NONE;
+		}
 		break;
 
 	case 4:
@@ -1139,6 +1187,9 @@ void R_RenderView (void)
 
 	if (r_norefresh.value) return;
 	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldbrush) return;
+
+	// see if we are using pixel shaders
+	d3d_GlobalCaps.usingPixelShaders = d3d_GlobalCaps.supportPixelShaders && r_hlsl.integer;
 
 	// always ensure this
 	cl.worldbrush->brushtype = MOD_BRUSH_WORLD;

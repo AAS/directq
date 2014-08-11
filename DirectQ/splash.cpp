@@ -51,8 +51,8 @@ LRESULT CALLBACK SplashProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			SplashBMP = new CGdiPlusBitmapResource ();
 			SplashBMP->Load (IDR_SPLASH, RT_RCDATA, GetModuleHandle (NULL));
 
-			int BMPWidth = SplashBMP->m_pBitmap->GetWidth ();
-			int BMPHeight = SplashBMP->m_pBitmap->GetHeight ();
+			int BMPWidth = SplashBMP->TheBitmap->GetWidth ();
+			int BMPHeight = SplashBMP->TheBitmap->GetHeight ();
 
 			// get the desktop resolution
 			HDC DesktopDC = GetDC (NULL);
@@ -71,7 +71,7 @@ LRESULT CALLBACK SplashProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 		{
 			hdc = BeginPaint (hWnd, &ps);
 			Gdiplus::Graphics g (hdc);
-			g.DrawImage (SplashBMP->m_pBitmap, 0, 0, SplashBMP->m_pBitmap->GetWidth (), SplashBMP->m_pBitmap->GetHeight ());
+			g.DrawImage (SplashBMP->TheBitmap, 0, 0, SplashBMP->TheBitmap->GetWidth (), SplashBMP->TheBitmap->GetHeight ());
 			EndPaint (hWnd, &ps);
 		}
 		Sleep (500);

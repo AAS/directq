@@ -39,7 +39,6 @@ d3d_texture_t *d3d_Textures = NULL;
 void D3D_KillUnderwaterTexture (void);
 
 // other textures we use
-extern LPDIRECT3DTEXTURE9 playertextures[];
 extern LPDIRECT3DTEXTURE9 char_texture;
 extern LPDIRECT3DTEXTURE9 solidskytexture;
 extern LPDIRECT3DTEXTURE9 alphaskytexture;
@@ -489,8 +488,10 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 		if (image->flags & IMAGE_MIPMAP) FilterFlags |= (D3DX_FILTER_MIRROR_U | D3DX_FILTER_MIRROR_V);
 	}
 
+	// default to the standard palette
 	PALETTEENTRY *activepal = texturepal;
 
+	// switch the palette
 	if (image->flags & IMAGE_LUMA) activepal = lumapal;
 
 	hr = D3DXLoadSurfaceFromMemory
@@ -870,6 +871,7 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (int width, int height, byte *data, int flags
 
 
 void R_ReleaseResourceTextures (void);
+void D3D_ShutdownHLSL (void);
 
 void D3D_ReleaseTextures (void)
 {
@@ -878,6 +880,7 @@ void D3D_ReleaseTextures (void)
 	extern LPDIRECT3DTEXTURE9 R_PaletteTexture;
 	extern LPDIRECT3DTEXTURE9 r_blacktexture;
 	extern LPDIRECT3DTEXTURE9 skyboxtextures[];
+	extern LPDIRECT3DTEXTURE9 d3d_PlayerSkins[];
 
 	// release cached textures
 	for (d3d_texture_t *tex = d3d_Textures; tex; tex = tex->next)
@@ -890,13 +893,14 @@ void D3D_ReleaseTextures (void)
 	}
 
 	// release player textures
-	for (int i = 0; i < 16; i++)
-		SAFE_RELEASE (playertextures[i]);
+	for (int i = 0; i < 256; i++)
+		SAFE_RELEASE (d3d_PlayerSkins[i]);
 
 	// release lightmaps too
 	SAFE_DELETE (d3d_Lightmaps);
 
 	D3D_KillUnderwaterTexture ();
+	D3D_ShutdownHLSL ();
 
 	// resource textures
 	R_ReleaseResourceTextures ();

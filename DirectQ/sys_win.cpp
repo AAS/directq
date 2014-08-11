@@ -37,7 +37,6 @@ HRESULT hr = S_OK;
 bool	ActiveApp, Minimized;
 bool	WinNT;
 
-static HANDLE	tevent;
 static HANDLE	hFile;
 static HANDLE	heventParent;
 static HANDLE	heventChild;
@@ -227,9 +226,6 @@ void Sys_Error (char *error, ...)
 void Sys_Quit (void)
 {
 	Host_Shutdown ();
-
-	if (tevent) CloseHandle (tevent);
-
 	exit (0);
 }
 
@@ -264,12 +260,6 @@ void Sys_SendKeyEvents (void)
 	  	TranslateMessage (&msg);
 	  	DispatchMessage (&msg);
 	}
-}
-
-
-void SleepUntilInput (int time)
-{
-	MsgWaitForMultipleObjects (1, &tevent, FALSE, time, QS_ALLINPUT);
 }
 
 
@@ -472,8 +462,6 @@ void SetQuakeDirectory (void)
 void Splash_Init (void);
 void IN_ActivateMouse (void);
 void IN_DeactivateMouse (void);
-void IN_HideMouse (void);
-void IN_ShowMouse (void);
 int MapKey (int key);
 void VID_UpdateWindowStatus (void);
 void ClearAllStates (void);
@@ -497,7 +485,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 	if (fActive)
 	{
 		IN_ActivateMouse ();
-		IN_HideMouse ();
+		IN_ShowMouse (FALSE);
 
 		if (modestate == MS_FULLDIB)
 		{
@@ -517,7 +505,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 	else
 	{
 		IN_DeactivateMouse ();
-		IN_ShowMouse ();
+		IN_ShowMouse (TRUE);
 
 		if (modestate == MS_FULLDIB)
 		{
@@ -603,8 +591,8 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		if (wParam & MK_MBUTTON)
 			temp |= 4;
 
-		IN_MouseEvent (temp);
-
+		// 3 buttons
+		IN_MouseEvent (temp, 3, false);
 		break;
 
 	// JACK: This is the mouse wheel with the Intellimouse
@@ -753,11 +741,9 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// initialize the splash screen
 	Splash_Init ();
 
-	if (!(tevent = CreateEvent (NULL, FALSE, FALSE, NULL))) Sys_Error ("Couldn't create event");
-
+	// set up and register the window class (d3d doesn't need CS_OWNDC)
 	WNDCLASS wc;
 
-	// set up and register the window class (d3d doesn't need CS_OWNDC)
 	wc.style = CS_HREDRAW | CS_VREDRAW | CS_CLASSDC;
 	wc.lpfnWndProc = (WNDPROC) MainWndProc;
 	wc.cbClsExtra = 0;
@@ -783,14 +769,14 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	while (1)
 	{
 		// yield the CPU for a little while when paused, minimized, or not the focus
-		if ((cl.paused && (!ActiveApp && !DDActive)) || Minimized || block_drawing)
+		if (cl.paused || !ActiveApp || Minimized || block_drawing)
 		{
-			SleepUntilInput (PAUSE_SLEEP);
-			scr_skipupdate = 1;		// no point in bothering to draw
-		}
-		else if (!ActiveApp && !DDActive)
-		{
-			SleepUntilInput (NOT_FOCUS_SLEEP);
+			// no point in bothering to draw
+			scr_skipupdate = 1;
+
+			if (cl.paused)
+				Sleep (PAUSE_SLEEP);
+			else Sleep (NOT_FOCUS_SLEEP);
 		}
 
 		newtime = Sys_FloatTime ();
@@ -798,9 +784,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 		Host_Frame (time);
 		oldtime = newtime;
+
+		// this doesn't really sleep, it just lets other threads spawned by the app do their thing
+		Sleep (0);
 	}
 
-	// return success of application
+	// return success of application (never reached owing to use of an exit.
 	return TRUE;
 }
 
