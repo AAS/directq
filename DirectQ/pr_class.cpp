@@ -72,6 +72,17 @@ CProgsDat::CProgsDat (void)
 	this->Statements = NULL;
 	this->Globals = NULL;
 	this->GlobalStruct = NULL;
+	this->EdictSize = 0;
+	this->CRC = 0;
+	this->XFunction = NULL;
+	this->XStatement = 0;
+	this->Trace = false;
+	this->Argc = 0;
+	this->FishHack = false;
+	this->NumFish = 0;
+	this->EdictPointers = NULL;
+	this->NumEdicts = 0;
+	this->MaxEdicts = 0;
 }
 
 
@@ -269,8 +280,6 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 	}
 
 	f = &this->Functions[fnum];
-	char *fname = this->Strings + f->s_name;
-	char *ffile = this->Strings + f->s_file;
 
 	runaway = 5000000;
 	this->Trace = false;
@@ -521,8 +530,6 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 
 			if (newf->first_statement < 0)
 			{
-				char *blah = this->Strings + newf->s_name;
-
 				// negative statements are built in functions
 				i = -newf->first_statement;
 

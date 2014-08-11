@@ -209,6 +209,20 @@ typedef struct brushpolyvert_s
 
 typedef struct msurface_s
 {
+	// data needed to draw the surface
+	brushpolyvert_t *vertexes;
+	int numvertexes;
+	int firstvertex;
+
+	unsigned short *indexes;
+	int numindexes;
+
+	mtexinfo_t	*texinfo;
+
+	int			LightmapTextureNum;
+	LPDIRECT3DTEXTURE9 d3d_LightmapTex;
+
+	// other stuff
 	int			clipflags;
 	int			surfnum;
 	int			visframe;		// should be drawn when node is crossed
@@ -220,11 +234,6 @@ typedef struct msurface_s
 	bool		rotated;
 
 	int			firstedge;
-	int			numverts;
-	int			numindexes;
-
-	brushpolyvert_t	*verts;
-	unsigned short *indexes;
 
 	struct msurface_s *chain;
 
@@ -240,15 +249,9 @@ typedef struct msurface_s
 	int			LightmapOffset;
 	int			LightBase;
 
-	mtexinfo_t	*texinfo;
-
 	// lighting info
 	int			dlightframe;
 	int			dlightbits[4];
-
-	// direct3d stuff
-	int			LightmapTextureNum;
-	LPDIRECT3DTEXTURE9 d3d_LightmapTex;
 
 	// overbright factor for surf
 	int			overbright;
@@ -277,7 +280,6 @@ typedef struct mnode_s
 	int			visframe;		// node needs to be traversed if current
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
-	float		volume;
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -300,7 +302,6 @@ typedef struct mleaf_s
 	int			visframe;		// node needs to be traversed if current
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
-	float		volume;
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -416,9 +417,9 @@ typedef struct aliasmesh_s
 
 typedef struct aliasskin_s
 {
+	struct image_s *cmapimage[4];	// player skins only
 	struct image_s *teximage[4];
 	struct image_s *lumaimage[4];
-	byte				*texels;
 } aliasskin_t;
 
 

@@ -36,8 +36,6 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 	int		outcount;
 	int		srcsample;
 	float	stepscale;
-	int		i;
-	int		sample, samplefrac, fracstep;
 	sfxcache_t	*sc;
 
 	sc = sfx->sndcache;
@@ -57,10 +55,10 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 		sc->loopstart = sc->loopstart / stepscale;
 
 	sc->speed = shm->speed;
+
 	if (loadas8bit.value)
 		sc->width = 1;
-	else
-		sc->width = inwidth;
+	else sc->width = inwidth;
 
 	sc->stereo = 0;
 
@@ -68,27 +66,29 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 	if (stepscale == 1 && inwidth == 1 && sc->width == 1)
 	{
 		// fast special case
-		for (i=0; i<outcount; i++)
-			((signed char *)sc->data)[i]
-			= (int)( (unsigned char)(data[i]) - 128);
+		for (int i = 0; i < outcount; i++)
+			((signed char *)sc->data)[i] = (int)((unsigned char)(data[i]) - 128);
 	}
 	else
 	{
 		// general case
-		samplefrac = 0;
-		fracstep = stepscale*256;
-		for (i=0; i<outcount; i++)
+		int samplefrac = 0;
+		int fracstep = stepscale*256;
+
+		for (int i = 0; i < outcount; i++)
 		{
+			int sample;
+
 			srcsample = samplefrac >> 8;
 			samplefrac += fracstep;
+
 			if (inwidth == 2)
 				sample = ((short *) data)[srcsample];
-			else
-				sample = (int)((unsigned char)(data[srcsample]) - 128) << 8;
+			else sample = (int)((unsigned char)(data[srcsample]) - 128) << 8;
+
 			if (sc->width == 2)
 				((short *)sc->data)[i] = sample;
-			else
-				((signed char *)sc->data)[i] = sample >> 8;
+			else ((signed char *)sc->data)[i] = sample >> 8;
 		}
 	}
 }
@@ -271,7 +271,6 @@ GetWavinfo
 wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 {
 	wavinfo_t	info;
-	int     i;
 	int     format;
 	int		samples;
 
@@ -329,14 +328,13 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 			if (!strncmp ((char *) data_p + 28, "mark", 4))
 			{	// this is not a proper parse, but it works with cooledit...
 				data_p += 24;
-				i = GetLittleLong ();	// samples in loop
+				int i = GetLittleLong ();	// samples in loop
 				info.samples = info.loopstart + i;
 //				Con_DPrintf ("looped length: %i\n", i);
 			}
 		}
 	}
-	else
-		info.loopstart = -1;
+	else info.loopstart = -1;
 
 // find data chunk
 	FindChunk("data");

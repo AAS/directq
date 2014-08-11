@@ -96,6 +96,6 @@ float	anglemod (float a);
 
 #define Q_rint(x) ((x) > 0 ? (int)((x) + 0.5) : (int)((x) - 0.5))
 
-#define Q_Random(MIN,MAX) ((rand() & 32767) * (((MAX) - (MIN)) * (1.0f / 32767.0f)) + (MIN))
+#define Q_Random(MIN,MAX) ((rand () & 32767) * (((MAX) - (MIN)) * (1.0f / 32767.0f)) + (MIN))
 
 void NonEulerInterpolateAngles (float *currangles, float *lastangles, float lerp, float *outangles);

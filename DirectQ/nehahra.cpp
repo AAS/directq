@@ -198,11 +198,12 @@ void Neh_QCWeeniesBurnInHell (void)
 	// eeeewwww!
 	if (!nehahra) return;
 
-	func_t RestoreGame;
 	dfunction_t *f;
 
 	if ((f = ED_FindFunction ("RestoreGame")))
 	{
+		func_t RestoreGame = 0;
+
 		if ((RestoreGame = (func_t) (f - SVProgs->Functions)))
 		{
 			SVProgs->GlobalStruct->time = sv.time;

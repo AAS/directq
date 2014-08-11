@@ -128,6 +128,9 @@ void D3DHLSL_SetVectorArray (D3DXHANDLE handle, D3DXVECTOR4 *vecs, int len);
 #define FX_PASS_LIQUID_RIPPLE				26
 #define FX_PASS_PARTICLE_SQUARE				27
 #define FX_PASS_ALIAS_KUROK					28
+#define FX_PASS_ALIAS_PLAYER_NOLUMA			29
+#define FX_PASS_ALIAS_PLAYER_LUMA			30
+#define FX_PASS_ALIAS_PLAYER_LUMA_NOLUMA	31
 
 
 void D3DHLSL_Init (void);
@@ -287,6 +290,8 @@ typedef struct d3d_renderdef_s
 	int numlock;
 	int numnode;
 	int numleaf;
+
+	bool rebuildworld;
 
 	mleaf_t *viewleaf;
 	mleaf_t *oldviewleaf;

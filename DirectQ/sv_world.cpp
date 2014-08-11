@@ -329,9 +329,9 @@ SV_TouchLinks
 */
 void SV_TouchLinks (edict_t *ent, areanode_t *node)
 {
-	link_t	       *l, *next;
-	edict_t	       *touch;
-	int	       old_self, old_other, touched = 0, i;
+	link_t *l;
+	edict_t	*touch;
+	int	old_self, old_other, touched = 0, i;
 
 	// Static due to recursive function
 	edict_t **list = (edict_t **) scratchbuf;
@@ -366,11 +366,7 @@ loc0:;
 	// touch linked edicts
 	for (i = 0; i < touched; ++i)
 	{
-		int ednum;
-
 		touch = list[i];
-
-		ednum = GetNumberForEdict (touch);
 
 		old_self = SVProgs->GlobalStruct->self;
 		old_other = SVProgs->GlobalStruct->other;
@@ -412,7 +408,6 @@ void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins
 	int i, j;
 	vec3_t bbox[8];
 	avectors_t av;
-	float angles[3];
 
 	// compute a full bounding box
 	for (i = 0; i < 8; i++)
@@ -457,7 +452,6 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 	float maxs[3];
 	vec3_t bbox[8];
 	avectors_t av;
-	float angles[3];
 
 	// compute a full bounding box
 	for (i = 0; i < 8; i++)
@@ -886,7 +880,6 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	// rotate start and end into the models frame of reference
 	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
 	{
-		vec3_t   a;
 		avectors_t av;
 		vec3_t   temp;
 
@@ -1056,7 +1049,6 @@ SV_Move
 trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, edict_t *passedict)
 {
 	moveclip_t	clip;
-	int			i;
 
 	memset (&clip, 0, sizeof (moveclip_t));
 
@@ -1072,7 +1064,7 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 
 	if (type == MOVE_MISSILE)
 	{
-		for (i = 0; i < 3; i++)
+		for (int i = 0; i < 3; i++)
 		{
 			clip.mins2[i] = -15;
 			clip.maxs2[i] = 15;

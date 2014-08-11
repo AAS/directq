@@ -104,7 +104,6 @@ int WINS_Init (void)
 	int		i;
 	char	buff[MAXHOSTNAMELEN];
 	char	*p;
-	int		r;
 	WORD	wVersionRequested;
 
 	winsock_lib_initialized = true;
@@ -116,7 +115,7 @@ int WINS_Init (void)
 	{
 		wVersionRequested = MAKEWORD (1, 1);
 
-		r = WSAStartup (MAKEWORD (1, 1), &winsockdata);
+		int r = WSAStartup (MAKEWORD (1, 1), &winsockdata);
 
 		if (r)
 		{
@@ -406,15 +405,13 @@ int WINS_MakeSocketBroadcastCapable (int socket)
 
 int WINS_Broadcast (int socket, byte *buf, int len)
 {
-	int ret;
-
 	if (socket != net_broadcastsocket)
 	{
 		if (net_broadcastsocket != 0)
 			Sys_Error ("Attempted to use multiple broadcasts sockets\n");
 
 		WINS_GetLocalAddress();
-		ret = WINS_MakeSocketBroadcastCapable (socket);
+		int ret = WINS_MakeSocketBroadcastCapable (socket);
 
 		if (ret == -1)
 		{

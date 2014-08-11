@@ -50,7 +50,6 @@ byte	*mod_novis;
 model_t	**mod_known = NULL;
 int		mod_numknown = 0;
 
-#define BBEXPAND	0.001f
 
 /*
 =================
@@ -372,7 +371,6 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 		Mod_LoadSpriteModel (mod, buf);
 		break;
 
-	case HL_BSPVERSION:
 	case Q1_BSPVERSION:
 	case PR_BSPVERSION:
 		// bsp files don't have a header ident... sigh...
@@ -444,88 +442,17 @@ miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipda
 
 void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 {
-#define MAX_HL_WADS	64
 	int		i, j, num, max, altmax;
 	miptex_t	*mt;
 	texture_t	*tx, *tx2;
 	texture_t	*anims[10];
 	texture_t	*altanims[10];
 	dmiptexlump_t *m;
-	char *hlWADs[MAX_HL_WADS] = {NULL};
 
 	if (!l->filelen)
 	{
 		mod->brushhdr->textures = NULL;
 		return;
-	}
-
-	// no wads yet
-	for (i = 0; i < MAX_HL_WADS; i++) hlWADs[i] = NULL;
-
-	// look for WADS in the entities lump
-	if (mod->brushhdr->bspversion == HL_BSPVERSION && e->filelen)
-	{
-		// get a pointer to the start of the lump
-		char *data = (char *) mod_base + e->fileofs;
-		char key[40];
-
-		// parse the opening brace
-		data = COM_Parse (data);
-
-		if (com_token[0] == '{')
-		{
-			while (1)
-			{
-				// parse the key
-				data = COM_Parse (data);
-
-				// there is no key (end of worldspawn)
-				if (!data) break;
-				if (com_token[0] == '}') break;
-
-				// allow keys with a leading _
-				if (com_token[0] == '_')
-					Q_strncpy (key, &com_token[1], 39);
-				else Q_strncpy (key, com_token, 39);
-
-				// remove trailing spaces
-				while (key[strlen (key) - 1] == ' ') key[strlen (key) - 1] = 0;
-
-				// parse the value
-				data = COM_Parse (data);
-
-				// likewise should never happen (has already been successfully parsed server-side and any errors that
-				// were going to happen would have happened then; we only check to guard against pointer badness)
-				if (!data) break;
-
-				// check the key for a wad
-				if (!stricmp (key, "wad"))
-				{
-					// store out
-					hlWADs[0] = com_token;
-
-					// done
-					break;
-				}
-			}
-		}
-
-		// did we get any wads?
-		if (hlWADs[0])
-		{
-			for (i = 0, j = 1;; i++)
-			{
-				// end of the list
-				if (!hlWADs[0][i]) break;
-
-				// semi-colon delimited
-				if (hlWADs[0][i] == ';')
-				{
-					hlWADs[j++] = &hlWADs[0][i + 1];
-					hlWADs[0][i] = 0;
-				}
-			}
-		}
 	}
 
 	m = (dmiptexlump_t *) (mod_base + l->fileofs);
@@ -556,30 +483,6 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 
 		tx->size[0] = mt->width;
 		tx->size[1] = mt->height;
-
-		if (mt->offsets[0] == 0 && mod->brushhdr->bspversion == HL_BSPVERSION)
-		{
-			// texture from a WAD
-			for (j = 0; j < MAX_HL_WADS; j++)
-			{
-				if (!hlWADs[j]) continue;
-				if (!hlWADs[j][0]) continue;
-
-				// did we get it
-				if (W_LoadTextureFromHLWAD (hlWADs[j], mt->name, &hlmip))
-				{
-					mt = hlmip;
-					break;
-				}
-			}
-		}
-
-		// switch water indicator for halflife
-		if (mod->brushhdr->bspversion == HL_BSPVERSION && mt->name[0] == '!')
-		{
-			mt->name[0] = '*';
-			tx->name[0] = '*';
-		}
 
 		byte *texels = (byte *) (mt + 1);
 
@@ -868,15 +771,6 @@ void Mod_LoadLighting (model_t *mod, byte *mod_base, lump_t *l)
 		return;
 	}
 
-	if (mod->brushhdr->bspversion == HL_BSPVERSION)
-	{
-		// read direct with no LIT file or no expansion
-		mod->brushhdr->lightdata = (byte *) MainHunk->Alloc (l->filelen, FALSE);
-		memcpy (mod->brushhdr->lightdata, mod_base + l->fileofs, l->filelen);
-		Mod_SwapLighting (mod->brushhdr->lightdata, l->filelen);
-		return;
-	}
-
 	// expand size to 3 component
 	mod->brushhdr->lightdata = (byte *) MainHunk->Alloc (l->filelen * 3, FALSE);
 
@@ -1051,7 +945,7 @@ int d3d_MaxSurfVerts = 0;
 void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *verts, unsigned short *indexes)
 {
 	// just set these up for now, we generate them in the next step
-	surf->verts = verts;
+	surf->vertexes = verts;
 	surf->indexes = indexes;
 
 	// let's calc bounds and extents here too...!
@@ -1061,7 +955,7 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 	surf->mins[0] = surf->mins[1] = surf->mins[2] = 99999999;
 	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -99999999;
 
-	for (int i = 0; i < surf->numverts; i++, verts++)
+	for (int i = 0; i < surf->numvertexes; i++, verts++)
 	{
 		int lindex = d_bspmodel.surfedges[surf->firstedge + i];
 
@@ -1110,23 +1004,29 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 		}
 	}
 
-	// get final mindpoint
-	surf->midpoint[0] = surf->mins[0] + (surf->maxs[0] - surf->mins[0]) * 0.5f;
-	surf->midpoint[1] = surf->mins[1] + (surf->maxs[1] - surf->mins[1]) * 0.5f;
-	surf->midpoint[2] = surf->mins[2] + (surf->maxs[2] - surf->mins[2]) * 0.5f;
+	for (int i = 0; i < 3; i++)
+	{
+		// expand the bbox by 1 unit in each direction to ensure that marginal surfs don't get culled
+		// (needed for R_RecursiveWorldNode avoidance)
+		surf->mins[i] -= 1.0f;
+		surf->maxs[i] += 1.0f;
+
+		// get final mindpoint
+		surf->midpoint[i] = surf->mins[i] + (surf->maxs[i] - surf->mins[i]) * 0.5f;
+	}
 
 	if (!gl_keeptjunctions.value)
 	{
-		int lnumverts = surf->numverts;
+		int lnumverts = surf->numvertexes;
 
 		for (int i = 0; i < lnumverts; i++)
 		{
 			vec3_t v1, v2;
 			float *v_prev, *v_this, *v_next;
 
-			v_prev = surf->verts[(i + lnumverts - 1) % lnumverts].xyz;
-			v_this = surf->verts[i].xyz;
-			v_next = surf->verts[(i + 1) % lnumverts].xyz;
+			v_prev = surf->vertexes[(i + lnumverts - 1) % lnumverts].xyz;
+			v_this = surf->vertexes[i].xyz;
+			v_next = surf->vertexes[(i + 1) % lnumverts].xyz;
 
 			VectorSubtract (v_this, v_prev, v1);
 			VectorNormalize (v1);
@@ -1140,12 +1040,12 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 				for (int j = i + 1; j < lnumverts; j++)
 				{
 					// don't bother copying the lightmap coords because they haven't been generated yet
-					surf->verts[j - 1].xyz[0] = surf->verts[j].xyz[0];
-					surf->verts[j - 1].xyz[1] = surf->verts[j].xyz[1];
-					surf->verts[j - 1].xyz[2] = surf->verts[j].xyz[2];
+					surf->vertexes[j - 1].xyz[0] = surf->vertexes[j].xyz[0];
+					surf->vertexes[j - 1].xyz[1] = surf->vertexes[j].xyz[1];
+					surf->vertexes[j - 1].xyz[2] = surf->vertexes[j].xyz[2];
 
-					surf->verts[j - 1].st[0][0] = surf->verts[j].st[0][0];
-					surf->verts[j - 1].st[0][1] = surf->verts[j].st[0][1];
+					surf->vertexes[j - 1].st[0][0] = surf->vertexes[j].st[0][0];
+					surf->vertexes[j - 1].st[0][1] = surf->vertexes[j].st[0][1];
 				}
 
 				lnumverts--;
@@ -1154,20 +1054,20 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 			}
 		}
 
-		surf->numverts = lnumverts;
+		surf->numvertexes = lnumverts;
 	}
 
 	// don't bother with stripping it; there's no real big deal
-	for (int i = 2; i < surf->numverts; i++, indexes += 3)
+	for (int i = 2; i < surf->numvertexes; i++, indexes += 3)
 	{
 		indexes[0] = 0;
 		indexes[1] = i - 1;
 		indexes[2] = i;
 	}
 
-	if (d3d_MaxSurfVerts < surf->numverts)
+	if (d3d_MaxSurfVerts < surf->numvertexes)
 	{
-		d3d_MaxSurfVerts = surf->numverts;
+		d3d_MaxSurfVerts = surf->numvertexes;
 		Con_DPrintf ("d3d_MaxSurfVerts %i\n", d3d_MaxSurfVerts);
 	}
 
@@ -1223,8 +1123,8 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 
 		// verts/etc
 		surf->firstedge = face->firstedge;
-		surf->numverts = (unsigned short) face->numedges;
-		surf->numindexes = (surf->numverts - 2) * 3;
+		surf->numvertexes = (unsigned short) face->numedges;
+		surf->numindexes = (surf->numvertexes - 2) * 3;
 		surf->flags = 0;
 
 		if (face->side) surf->flags |= SURF_PLANEBACK;
@@ -1271,7 +1171,7 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 			surf->flags |= SURF_DRAWTURB;
 		}
 
-		totalverts += surf->numverts;
+		totalverts += surf->numvertexes;
 		totalindexes += surf->numindexes;
 	}
 
@@ -1281,6 +1181,7 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 	// note that in DirectQ there are no longer any differences between surface types at this stage
 	brushpolyvert_t *verts = (brushpolyvert_t *) MainHunk->Alloc (totalverts * sizeof (brushpolyvert_t), FALSE);
 	unsigned short *indexes = (unsigned short *) MainHunk->Alloc (totalindexes * sizeof (unsigned short), FALSE);
+	int firstvertex = 0;
 
 	for (int i = 0; i < count; i++)
 	{
@@ -1289,7 +1190,10 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 		// load all of the vertexes and calc bounds and extents for frustum culling
 		Mod_LoadSurfaceVertexes (mod, surf, verts, indexes);
 
-		verts += surf->numverts;
+		surf->firstvertex = firstvertex;
+		firstvertex += surf->numvertexes;
+
+		verts += surf->numvertexes;
 		indexes += surf->numindexes;
 	}
 }
@@ -1669,13 +1573,6 @@ void Mod_LoadPlanes (model_t *mod, byte *mod_base, lump_t *l)
 }
 
 
-void Mod_NodeVolumeFromBBox (mnode_t *node)
-{
-	node->volume = (node->maxs[0] - node->mins[0]) * (node->maxs[1] - node->mins[1]) * (node->maxs[2] - node->mins[2]);
-	node->volume = pow (node->volume, (1.0f / 3.0f));
-}
-
-
 static void Mod_RecalcNodeBBox (mnode_t *node)
 {
 	if (!node->plane || node->contents < 0)
@@ -1704,18 +1601,8 @@ static void Mod_RecalcNodeBBox (mnode_t *node)
 
 				mark++;
 			} while (--c);
-
-			// expand the bbox a little to ensure that it's a real box
-			leaf->mins[0] -= BBEXPAND;
-			leaf->mins[1] -= BBEXPAND;
-			leaf->mins[2] -= BBEXPAND;
-
-			leaf->maxs[0] += BBEXPAND;
-			leaf->maxs[1] += BBEXPAND;
-			leaf->maxs[2] += BBEXPAND;
 		}
 
-		Mod_NodeVolumeFromBBox (node);
 		return;
 	}
 
@@ -1731,8 +1618,6 @@ static void Mod_RecalcNodeBBox (mnode_t *node)
 	node->maxs[0] = max (node->children[0]->maxs[0], node->children[1]->maxs[0]);
 	node->maxs[1] = max (node->children[0]->maxs[1], node->children[1]->maxs[1]);
 	node->maxs[2] = max (node->children[0]->maxs[2], node->children[1]->maxs[2]);
-
-	Mod_NodeVolumeFromBBox (node);
 }
 
 
@@ -1788,9 +1673,9 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	int i = header->version;
 
 	// drop to console
-	if (i != PR_BSPVERSION && i != Q1_BSPVERSION && i != HL_BSPVERSION)
+	if (i != PR_BSPVERSION && i != Q1_BSPVERSION)
 	{
-		Host_Error ("Mod_LoadBrushModel: %s has wrong version number\n(%i should be %i, %i or %i)", mod->name, i, PR_BSPVERSION, Q1_BSPVERSION, HL_BSPVERSION);
+		Host_Error ("Mod_LoadBrushModel: %s has wrong version number\n(%i should be %i or %i)", mod->name, i, PR_BSPVERSION, Q1_BSPVERSION);
 		return;
 	}
 
@@ -2131,6 +2016,48 @@ void Mod_FloodFillSkin (byte *skin, int skinwidth, int skinheight)
 	}
 }
 
+
+image_t *Mod_LoadPlayerColormap (char *name, model_t *mod, aliashdr_t *pheader, byte *texels)
+{
+	int s = pheader->skinwidth * pheader->skinheight;
+	unsigned int *rgba = (unsigned int *) MainZone->Alloc (s * 4);
+	byte *pixels = (byte *) rgba;
+
+	for (int j = 0; j < s; j++, pixels += 4)
+	{
+		bool base = false;
+		bool shirt = false;
+		bool pants = false;
+
+		if (texels[j] < 16)
+			base = true;
+		else if (texels[j] < 32)
+			shirt = true;
+		else if (texels[j] < 96)
+			base = true;
+		else if (texels[j] < 112)
+			pants = true;
+		else base = true;
+
+		// these are greyscale colours so we can just take the red channel (the others are equal anyway)
+		pixels[2] = base ? 255 : 0;
+		pixels[1] = shirt ? d3d_QuakePalette.standard[texels[j] - 16].peRed : 0;
+		pixels[0] = pants ? d3d_QuakePalette.standard[texels[j] - 96].peRed : 0;
+		pixels[3] = 255;
+	}
+
+	image_t *img = D3D_LoadTexture (va ("%s_colormap", name),
+		pheader->skinwidth, pheader->skinheight,
+		(byte *) rgba, IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_32BIT);
+
+	// SCR_WriteDataToTGA ("playerskin.tga", (byte *) rgba, pheader->skinwidth, pheader->skinheight, 32, 24);
+
+	MainZone->Free (rgba);
+
+	return img;
+}
+
+
 /*
 ===============
 Mod_LoadAllSkins
@@ -2153,29 +2080,18 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 	pheader->skins = (aliasskin_t *) MainCache->Alloc (pheader->numskins * sizeof (aliasskin_t));
 	s = pheader->skinwidth * pheader->skinheight;
 
-	image_s *tex, *luma;
+	image_t *tex, *luma;
+	image_t *cmap;
 	byte *texels;
 
 	// don't remove the extension here as Q1 has s_light.mdl and s_light.spr, so we need to differentiate them
 	// dropped skin padding because there are too many special cases
 	for (i = 0; i < pheader->numskins; i++)
 	{
-		// no saved texels
-		pheader->skins[i].texels = NULL;
-
 		if (pskintype->type == ALIAS_SKIN_SINGLE)
 		{
 			// fixme - is this even needed any more (due to padding?)
 			Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
-
-			// save 8 bit texels for the player model to remap
-			// progs/player.mdl is already hardcoded in sv_main so it's ok here too
-			if (!stricmp (mod->name, "progs/player.mdl"))
-			{
-				pheader->skins[i].texels = (byte *) MainCache->Alloc (s);
-				memcpy (pheader->skins[i].texels, (byte *) (pskintype + 1), s);
-				mod->flags |= EF_PLAYER;
-			}
 
 			_snprintf (name, 32, "%s_%i", mod->name, i);
 
@@ -2187,11 +2103,21 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 			luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 			tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
 
-			// load fullbright
-			pheader->skins[i].lumaimage[0] = pheader->skins[i].lumaimage[1] = pheader->skins[i].lumaimage[2] = pheader->skins[i].lumaimage[3] = luma;
-			pheader->skins[i].teximage[0] = pheader->skins[i].teximage[1] = pheader->skins[i].teximage[2] = pheader->skins[i].teximage[3] = tex;
+			if (!stricmp (mod->name, "progs/player.mdl"))
+			{
+				cmap = Mod_LoadPlayerColormap (name, mod, pheader, texels);
+				mod->flags |= EF_PLAYER;
+			}
+			else cmap = NULL;
 
-			pskintype = (daliasskintype_t *) ((byte *) (pskintype + 1) + s);
+			for (s = 0; s < 4; s++)
+			{
+				pheader->skins[i].lumaimage[s] = luma;
+				pheader->skins[i].teximage[s] = tex;
+				pheader->skins[i].cmapimage[s] = cmap;
+			}
+
+			pskintype = (daliasskintype_t *) ((byte *) (pskintype + 1) + (pheader->skinwidth * pheader->skinheight));
 		}
 		else
 		{
@@ -2207,15 +2133,6 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 			{
 				Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
 
-				if (j == 0 && !stricmp (mod->name, "progs/player.mdl"))
-				{
-					// saving this out doesn't really work as each skin in the group will
-					// overwrite the last.
-					pheader->skins[i].texels = (byte *) MainCache->Alloc (s);
-					memcpy (pheader->skins[i].texels, (byte *) (pskintype), s);
-					mod->flags |= EF_PLAYER;
-				}
-
 				_snprintf (name, 32, "%s_%i_%i", mod->name, i, j);
 
 				texels = (byte *) (pskintype);
@@ -2226,10 +2143,19 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 				luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 				tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
 
+				if (!stricmp (mod->name, "progs/player.mdl"))
+				{
+					cmap = Mod_LoadPlayerColormap (name, mod, pheader, texels);
+					mod->flags |= EF_PLAYER;
+				}
+				else cmap = NULL;
+
 				// this tries to catch models with > 4 group skins
 				pheader->skins[i].teximage[j & 3] = tex;
 				pheader->skins[i].lumaimage[j & 3] = luma;
-				pskintype = (daliasskintype_t *) ((byte *) (pskintype) + s);
+				pheader->skins[i].cmapimage[j & 3] = cmap;
+
+				pskintype = (daliasskintype_t *) ((byte *) (pskintype) + (pheader->skinwidth * pheader->skinheight));
 			}
 
 			k = j;
@@ -2239,6 +2165,7 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 			{
 				pheader->skins[i].teximage[j & 3] = pheader->skins[i].teximage[j - k];
 				pheader->skins[i].lumaimage[j & 3] = pheader->skins[i].lumaimage[j - k];
+				pheader->skins[i].cmapimage[j & 3] = pheader->skins[i].cmapimage[j - k];
 			}
 		}
 	}

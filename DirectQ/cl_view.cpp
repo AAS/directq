@@ -376,7 +376,6 @@ a lot of this can go away with a non-sw renderer
 void V_UpdateCShifts (void)
 {
 	int		i, j;
-	bool	force;
 
 	V_CalcPowerupCshift ();
 
@@ -547,9 +546,6 @@ V_CalcViewRoll
 Roll is induced by movement and damage
 ==============
 */
-float deadangles[3] = {0, 0, 80};
-float deadtime;
-
 void V_CalcViewRoll (void)
 {
 	float side;
@@ -566,19 +562,9 @@ void V_CalcViewRoll (void)
 
 	if (cl.stats[STAT_HEALTH] <= 0)
 	{
-		float deadlerp = (cl.time - deadtime) * 5.0f;
-		float ang[3];
-
-		if (deadlerp > 1) deadlerp = 1;
-		NonEulerInterpolateAngles (deadangles, r_refdef.viewangles, deadlerp, ang);
-
-		// only 2 should be updated so that we can still look around when dead
-		//r_refdef.viewangles[0] = deadangles[0];	// dead view angle
-		//r_refdef.viewangles[1] = deadangles[1];	// dead view angle
-		r_refdef.viewangles[2] = ang[2];	// dead view angle
+		r_refdef.viewangles[2] = 80;
 		return;
 	}
-
 }
 
 
@@ -731,9 +717,6 @@ the entity origin, so any view position inside that will be valid
 void V_RenderView (void)
 {
 	if (!cls.maprunning) return;
-
-	// ent is the player model (visible when out of body)
-	entity_t *ent = cl_entities[cl.viewentity];
 
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1)

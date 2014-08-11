@@ -854,7 +854,6 @@ void D3D_ReleaseTextures (void)
 	extern LPDIRECT3DTEXTURE9 d3d_MapshotTexture;
 	extern LPDIRECT3DTEXTURE9 skyboxtextures[];
 	extern LPDIRECT3DCUBETEXTURE9 skyboxcubemap;
-	extern image_t d3d_PlayerSkins[];
 
 	// release cached textures
 	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
@@ -865,10 +864,6 @@ void D3D_ReleaseTextures (void)
 		// (needed because game changing goes through this path too)
 		memcpy (tex->texture->hash, no_match_hash, 16);
 	}
-
-	// release player textures
-	for (int i = 0; i < 256; i++)
-		SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);
 
 	// skyboxes
 	for (int i = 0; i < 6; i++)
@@ -1120,11 +1115,6 @@ void D3D_RegisterExternalTexture (char *texname)
 	Q_strncpy (et->texpath, texname, 255);
 	Q_strncpy (et->basename, texname, 255);
 	strlwr (et->texpath);
-
-	if (strstr (et->texpath, "\\crosshairs\\"))
-	{
-		d3d_NumExternalTextures = d3d_NumExternalTextures;
-	}
 
 	// check for special handling of some types
 	char *checkstuff = strstr (et->texpath, "\\save\\");

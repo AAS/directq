@@ -55,65 +55,13 @@ pack_t *COM_LoadPackFile (char *packfile);
 =============
 COM_ExecQuakeRC
 
-This is a HUGE hack to inject an "exec directq.cfg" command after the "exec config.cfg" in a quake.rc file
-and is provided for mods that use a custom quake.rc containing commands of their own.
 =============
 */
 void COM_ExecQuakeRC (void)
 {
-	char *rcfile = (char *) COM_LoadFile ("quake.rc");
-
-	// didn't find it
-	if (!rcfile) return;
-
-	// alloc a new buffer to hold the new RC file.
-	// this should give sufficient space even if it only contains a single "exec config.cfg"
-	int len = strlen (rcfile) * 3;
-
-	// alloc a new buffer including space for "exec directq.cfg"
-	char *newrc = (char *) Zone_Alloc (len);
-	char *oldrc = rcfile;
-	char *rcnew = newrc;
-
-	newrc[0] = 0;
-
-	bool incomment = false;
-
-	// this breaks with quoth's quake.rc...
-	while (1)
-	{
-		// end of the file
-		if (!(*oldrc))
-		{
-			*rcnew = 0;
-			break;
-		}
-
-		// detect comments
-		if (!strncmp (oldrc, "//", 2)) incomment = true;
-
-		if (oldrc[0] == '\n') incomment = false;
-
-		// look for config.cfg - there might be 2 or more spaces between exec and the filename!!!
-		if (!strnicmp (oldrc, "config.cfg", 10) && !incomment)
-		{
-			// copy in the new exec statement, ensure that it's on the same line in
-			// case the config.cfg entry is in a comment
-			strcpy (&rcnew[0], "config.cfg;exec directq.cfg");
-
-			// skip over
-			rcnew += 27;
-			oldrc += 10;
-			continue;
-		}
-
-		// copy in text
-		*rcnew++ = *oldrc++;
-	}
-
-	Cbuf_InsertText (newrc);
-	Zone_Free (rcfile);
-	Zone_Free (newrc);
+	// OK, I was stupid and didn't know how Cbuf_InsertText worked.  shoot me.
+	Cbuf_InsertText ("exec quake.rc\n");
+	return;
 }
 
 

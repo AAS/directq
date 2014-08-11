@@ -298,7 +298,7 @@ int Datagram_GetMessage (qsocket_t *sock)
 	{
 		length = sfunc.Read (sock->socket, (byte *) &packetBuffer, NET_DATAGRAMSIZE, &readaddr);
 
-		//	if ((rand() & 255) > 220)
+		//	if ((rand () & 255) > 220)
 		//		continue;
 
 		if (length == 0)
@@ -538,7 +538,6 @@ static void Test_Poll (void *blah)
 	struct qsockaddr clientaddr;
 	int	control, len, colors, frags, connectTime;
 	char	name[32], address[64];
-	byte	playerNumber;
 
 	net_landriverlevel = testDriver;
 
@@ -571,7 +570,7 @@ static void Test_Poll (void *blah)
 			break;
 		}
 
-		playerNumber = MSG_ReadByte ();
+		byte playerNumber = MSG_ReadByte ();
 		strcpy (name, MSG_ReadString());
 		colors = MSG_ReadLong ();
 		frags = MSG_ReadLong ();
@@ -1562,7 +1561,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	struct qsockaddr sendaddr;
 	struct qsockaddr readaddr;
 	qsocket_t	*sock;
-	int		newsock, clientsock, ret, len, reps;
+	int		newsock, ret, len, reps;
 	double		start_time;
 	int		control;
 	char		*reason;
@@ -1762,7 +1761,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	// joe, from ProQuake: make NAT work by opening a new socket
 	if (sock->mod == MOD_PROQUAKE && sock->mod_version >= 34)
 	{
-		clientsock = dfunc.OpenSocket (0);
+		int clientsock = dfunc.OpenSocket (0);
 
 		if (clientsock == -1)
 			goto ErrorReturn;

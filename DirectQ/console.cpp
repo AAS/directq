@@ -444,8 +444,6 @@ Con_Printf
 Handles cursor positioning, line wrapping, etc
 ================
 */
-void Menu_PutConsolePrintInbuffer (char *text);
-
 static void Con_PrintfCommon (char *msg, bool silent)
 {
 	// log all messages to file
@@ -483,9 +481,6 @@ void Con_Printf (char *fmt, ...)
 
 	QC_DebugOutput (msg);
 	Con_PrintfCommon (msg, false);
-
-	// take a copy for the menus
-	if (key_dest == key_menu && msg[0]) Menu_PutConsolePrintInbuffer (msg);
 }
 
 
@@ -607,20 +602,41 @@ void Con_DrawNotify (void)
 
 		if ((time = con_times[i % CON_MAXNOTIFYLINES]) < 0.001f) continue;
 		if ((time = realtime - time) > con_notifytime.value) continue;
-		if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (con_notifytime.value - time);
+
+		if (con_notifytime.value - time < 1.0f)
+			D3D_Set2DShade (con_notifytime.value - time);
+		else D3D_Set2DShade (1.0f);
 
 		text = con_text + (i % con_totallines) * con_linewidth;
 		clearnotify = 0;
 
 		D3DDraw_SetSize (&vid.sbarsize);
 
-		for (x = 0; x < con_linewidth; x++)
-			Draw_Character ((x + 1) << 3, v, text[x]);
+		if (key_dest == key_menu)
+		{
+			for (x = con_linewidth - 1; x > 0; x--)
+				if (text[x] > 32)
+					break;
 
-		if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (1.0f);
+			int xpos = (vid.sbarsize.width - (x << 3)) >> 1;
+
+			for (x = 0; x < con_linewidth; x++)
+			{
+				int y = vid.sbarsize.height - con_notify_lines.integer * con_lineheight.value - (con_lineheight.integer >> 1);
+
+				Draw_Character ((x << 3) + xpos - 4, y + v, (text[x] + 128) & 255);
+			}
+		}
+		else
+		{
+			for (x = 0; x < con_linewidth; x++)
+				Draw_Character ((x + 1) << 3, v, text[x]);
+		}
 
 		v += con_lineheight.value;
 	}
+
+	D3D_Set2DShade (1.0f);
 
 	if (key_dest == key_message)
 	{

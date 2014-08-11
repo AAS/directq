@@ -181,6 +181,7 @@ void R_ForceRecache (cvar_t *var)
 {
 	// force a rebuild of the PVS if any of the cvars attached to this change
 	d3d_RenderDef.oldviewleaf = NULL;
+	d3d_RenderDef.rebuildworld = true;
 }
 
 cvar_t r_novis ("r_novis", "0", 0, R_ForceRecache);
@@ -550,8 +551,43 @@ D3D_PrepareRender
 */
 int D3DRTT_RescaleDimension (int dim);
 
+float r_oldvieworigin[3];
+float r_oldviewangles[3];
+
 void D3DMain_SetupD3D (void)
 {
+	vec3_t o, a;
+
+	VectorSubtract (r_refdef.vieworigin, r_oldvieworigin, o);
+	VectorSubtract (r_refdef.viewangles, r_oldviewangles, a);
+
+	// this prevents greyflash when going to intermission (the client pos can interpolate between the changelevel and the intermission point)
+	if (d3d_RenderDef.viewleaf && d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID) d3d_RenderDef.rebuildworld = true;
+
+	// also check for and catch cases where a rebuildworld is flagged elsewhere so that we can update the old values correctly
+	// (tighter frustum culling means that we can't use the looser check from the original)
+	if (Length (o) >= 0.5f || Length (a) >= 0.2f || d3d_RenderDef.rebuildworld)
+	{
+		// Con_Printf ("rebuild on frame %i\n", d3d_RenderDef.framecount);
+		d3d_RenderDef.rebuildworld = true;
+		VectorCopy2 (r_oldvieworigin, r_refdef.vieworigin);
+		VectorCopy2 (r_oldviewangles, r_refdef.viewangles);
+	}
+
+	/*
+	if (memcmp (r_refdef.viewangles, r_oldviewangles, sizeof (vec3_t)))
+	{
+		VectorCopy2 (r_oldviewangles, r_refdef.viewangles);
+		d3d_RenderDef.rebuildworld = true;
+	}
+
+	if (memcmp (r_refdef.vieworigin, r_oldvieworigin, sizeof (vec3_t)))
+	{
+		VectorCopy2 (r_oldvieworigin, r_refdef.vieworigin);
+		d3d_RenderDef.rebuildworld = true;
+	}
+	*/
+
 	// r_wireframe 1 is cheating in multiplayer
 	if (r_wireframe.integer)
 	{

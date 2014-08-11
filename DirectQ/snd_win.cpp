@@ -102,8 +102,6 @@ FreeSound
 */
 void FreeSound (void)
 {
-	int	i;
-
 	if (ds_SecondaryBuffer8)
 	{
 		ds_SecondaryBuffer8->Stop ();
@@ -283,8 +281,6 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	if (ds_device.integer < 0) Cvar_Set (&ds_device, 0.0f);
 	if (ds_device.integer >= MAX_DS_DEVICES) Cvar_Set (&ds_device, (float) (MAX_DS_DEVICES - 1));
-
-	ds_Device_t *ds_SelectedDevice = &ds_Devices[ds_device.integer];
 
 	if (!ds_Devices[ds_device.integer].Valid)
 	{

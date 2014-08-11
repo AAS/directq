@@ -20,7 +20,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <windows.h>
 #include "resource.h"
 
+// not present with MSVC 2008 express
+#ifndef IDC_STATIC
+#define IDC_STATIC (-1)
+#endif
+
+// images
 IDR_CROSSHAIR		RCDATA		"CrosshairFont.png"
+IDB_DQLOGO256		BITMAP  DISCARDABLE     "dqlogoint.bmp"
 
 // shaders
 IDR_MASTERFX		RCDATA		"fxMaster.fx"
@@ -28,4 +35,15 @@ IDR_MASTERFX		RCDATA		"fxMaster.fx"
 // icons
 IDI_APPICON			ICON		"dq.ico"
 
+#define SPLASH_WIDTH	67
+#define SPLASH_HEIGHT	36
+
+// splash screen
+IDD_DIALOG1 DIALOGEX 0, 0, SPLASH_WIDTH, SPLASH_HEIGHT
+	STYLE DS_SETFOREGROUND | DS_CENTER | WS_POPUP | WS_VISIBLE
+	EXSTYLE WS_EX_TOOLWINDOW
+	FONT 16, "Times New Roman", 0, 0, 0x1
+	BEGIN
+		CONTROL IDB_DQLOGO256, IDC_STATIC, "Static", SS_BITMAP | SS_REALSIZEIMAGE, 0, 0, SPLASH_WIDTH, SPLASH_HEIGHT
+	END
 

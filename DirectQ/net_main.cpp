@@ -279,8 +279,6 @@ void NET_SetPort (char *newport)
 
 static void NET_Port_f (void)
 {
-	int 	n;
-
 	if (Cmd_Argc () != 2)
 	{
 		Con_Printf ("\"port\" is \"%u\"\n", net_hostport);
@@ -496,23 +494,15 @@ NET_CheckNewConnections
 ===================
 */
 
-struct
-{
-	float	time;
-	int		op;
-	long	session;
-} vcrConnect;
-
 qsocket_t *NET_CheckNewConnections (void)
 {
 	qsocket_t	*ret;
 
-	SetNetTime();
+	SetNetTime ();
 
 	for (net_driverlevel = 0; net_driverlevel < net_numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false) continue;
-
 		if (net_driverlevel && listening == false) continue;
 
 		ret = net_DriverFunc.CheckNewConnections ();
@@ -556,15 +546,6 @@ returns 1 if a message was received
 returns -1 if connection is invalid
 =================
 */
-
-struct
-{
-	float	time;
-	int		op;
-	long	session;
-	int		ret;
-	int		len;
-} vcrGetMessage;
 
 extern void PrintStats (qsocket_t *s);
 
@@ -630,13 +611,6 @@ returns 1 if the message was sent properly
 returns -1 if the connection died
 ==================
 */
-struct
-{
-	float	time;
-	int		op;
-	long	session;
-	int		r;
-} vcrSendMessage;
 
 int NET_SendMessage (qsocket_t *sock, sizebuf_t *data)
 {
@@ -883,7 +857,6 @@ static PollProcedure *pollProcedureList = NULL;
 void NET_Poll (void)
 {
 	PollProcedure *pp;
-	bool	useModem;
 
 	if (!configRestored)
 		configRestored = true;

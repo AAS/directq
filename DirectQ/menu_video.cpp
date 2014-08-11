@@ -289,11 +289,6 @@ void Menu_VideoDecodeVideoMode (void)
 		return;
 	}
 
-	// note: on any sane and reasonable driver these will all eval to true
-	// on the kind of crap that *certain* people use they might not...
-	bool allowwindowed = false;
-	bool allowfullscreen = false;
-
 	char *fullresolutions = (char *) scratchbuf;
 	int numfullresolutions = 0;
 
@@ -309,14 +304,12 @@ void Menu_VideoDecodeVideoMode (void)
 			sprintf (windresolutions, "%i x %i", mode->Width, mode->Height);
 			windresolutions += 32;
 			numwindresolutions++;
-			allowwindowed = true;
 		}
 		else
 		{
 			sprintf (fullresolutions, "%i x %i", mode->Width, mode->Height);
 			fullresolutions += 32;
 			numfullresolutions++;
-			allowfullscreen = true;
 		}
 	}
 

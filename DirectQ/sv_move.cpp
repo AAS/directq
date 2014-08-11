@@ -112,10 +112,8 @@ SVProgs->GlobalStruct->trace_normal is set to the normal of the blocking wall
 */
 bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
 {
-	float		dz;
 	vec3_t		oldorg, neworg, end;
 	trace_t		trace;
-	int			i;
 	edict_t		*enemy;
 
 	// try the move
@@ -126,20 +124,17 @@ bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
 	if ((int) ent->v.flags & (FL_SWIM | FL_FLY))
 	{
 		// try one move with vertical motion, then one without
-		for (i = 0; i < 2; i++)
+		for (int i = 0; i < 2; i++)
 		{
 			VectorAdd (ent->v.origin, move, neworg);
 			enemy = PROG_TO_EDICT (ent->v.enemy);
 
 			if (i == 0 && enemy != SVProgs->EdictPointers[0])
 			{
-				dz = ent->v.origin[2] - PROG_TO_EDICT (ent->v.enemy)->v.origin[2];
+				float dz = ent->v.origin[2] - PROG_TO_EDICT (ent->v.enemy)->v.origin[2];
 
-				if (dz > 40)
-					neworg[2] -= 8;
-
-				if (dz < 30)
-					neworg[2] += 8;
+				if (dz > 40) neworg[2] -= 8;
+				if (dz < 30) neworg[2] += 8;
 			}
 
 			trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, neworg, false, ent);
@@ -251,7 +246,6 @@ void PF_changeyaw (void);
 bool SV_StepDirection (edict_t *ent, float yaw, float dist)
 {
 	vec3_t		move, oldorigin;
-	float		delta;
 
 	ent->v.ideal_yaw = yaw;
 	PF_changeyaw();
@@ -265,7 +259,7 @@ bool SV_StepDirection (edict_t *ent, float yaw, float dist)
 
 	if (SV_movestep (ent, move, false))
 	{
-		delta = ent->v.angles[YAW] - ent->v.ideal_yaw;
+		float delta = ent->v.angles[YAW] - ent->v.ideal_yaw;
 
 		if (delta > 45 && delta < 315)
 		{
@@ -343,7 +337,7 @@ void SV_NewChaseDir (edict_t *actor, edict_t *enemy, float dist)
 	}
 
 	// try other directions
-	if (((rand() & 3) & 1) ||  abs (deltay) > abs (deltax))
+	if (((rand () & 3) & 1) ||  abs (deltay) > abs (deltax))
 	{
 		tdir = d[1];
 		d[1] = d[2];
@@ -363,7 +357,7 @@ void SV_NewChaseDir (edict_t *actor, edict_t *enemy, float dist)
 	if (olddir != DI_NODIR && SV_StepDirection (actor, olddir, dist))
 		return;
 
-	if (rand() & 1) 	/*randomly determine direction of search*/
+	if (rand () & 1) 	/*randomly determine direction of search*/
 	{
 		for (tdir = 0; tdir <= 315; tdir += 45)
 			if (tdir != turnaround && SV_StepDirection (actor, tdir, dist))
@@ -446,7 +440,7 @@ void SV_MoveToGoal (void)
 		return;
 
 	// bump around...
-	if ((rand() & 3) == 1 || !SV_StepDirection (ent, ent->v.ideal_yaw, dist))
+	if ((rand () & 3) == 1 || !SV_StepDirection (ent, ent->v.ideal_yaw, dist))
 	{
 		SV_NewChaseDir (ent, goal, dist);
 	}

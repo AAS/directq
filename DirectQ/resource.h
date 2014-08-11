@@ -17,10 +17,14 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+// dialog
+#define IDD_DIALOG1					108
+
 // shaders
 #define IDR_MASTERFX				400
 
 // bitmaps and other images
+#define IDB_DQLOGO256				610
 #define IDR_CROSSHAIR				620
 
 // icons

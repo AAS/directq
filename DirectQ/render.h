@@ -33,6 +33,7 @@ typedef struct aliascache_s
 
 	struct image_s *teximage;
 	struct image_s *lumaimage;
+	struct image_s *cmapimage;
 	vec3_t lightspot;
 	struct mplane_s *lightplane;
 } aliasstate_t;

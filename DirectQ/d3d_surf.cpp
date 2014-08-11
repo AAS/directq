@@ -57,6 +57,33 @@ void D3DBrush_ShowNodesBegin (void);
 void D3DBrush_ShowNodesDrawSurfaces (mnode_t *node, int depth);
 void D3DBrush_ShowLeafsDrawSurfaces (mleaf_t *leaf);
 
+msurface_t **r_cachedworldsurfaces = NULL;
+int r_numcachedworldsurfaces = 0;
+
+
+mleaf_t **r_cachedworldleafs = NULL;
+int r_numcachedworldleafs = 0;
+
+mnode_t **r_cachedworldnodes = NULL;
+int r_numcachedworldnodes = 0;
+
+void D3DSurf_BuildWorldCache (void)
+{
+	r_cachedworldsurfaces = (msurface_t **) MainHunk->Alloc (cl.worldmodel->brushhdr->numsurfaces * sizeof (msurface_t *));
+	r_numcachedworldsurfaces = 0;
+
+	r_cachedworldleafs = (mleaf_t **) MainHunk->Alloc (cl.worldmodel->brushhdr->numleafs * sizeof (mleaf_t *));
+	r_numcachedworldleafs = 0;
+
+	// not doing anything with this yet...
+	//r_cachedworldnodes = (mnode_t **) MainHunk->Alloc (cl.worldmodel->brushhdr->numnodes * sizeof (mnode_t *));
+	//r_numcachedworldnodes = 0;
+
+	// always rebuild the world
+	d3d_RenderDef.rebuildworld = true;
+}
+
+
 /*
 =============================================================
 
@@ -279,6 +306,8 @@ void R_StoreEfrags (struct efrag_s **ppefrag);
 
 void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 {
+	// the compiler should optimize this automatically anyway
+tail_recurse:;
 	if (node->contents == CONTENTS_SOLID) return;
 	if (node->visframe != d3d_RenderDef.visframecount) return;
 
@@ -313,7 +342,13 @@ void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 			} while (--c);
 		}
 
-		R_StoreEfrags (&leaf->efrags);
+		// cache this leaf for reuse (only needed for efrags)
+		r_cachedworldleafs[r_numcachedworldleafs] = leaf;
+		r_numcachedworldleafs++;
+
+		if (leaf->efrags)
+			R_StoreEfrags (&leaf->efrags);
+
 		d3d_RenderDef.numleaf++;
 		return;
 	}
@@ -353,21 +388,29 @@ void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 			// this only ever comes from the world so entity is always NULL and we never have explicit alpha
 			D3D_AllocModelSurf (surf, R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture));
 
+			// cache this surface for reuse
+			r_cachedworldsurfaces[r_numcachedworldsurfaces] = surf;
+			r_numcachedworldsurfaces++;
+
 			// because multiple surfs can share the same mesh we need to invalidate it's visframe to prevent it
-			// from being added multiple times
-			surf->visframe = -1;
+			// from being added multiple times; this marks the surface as being visible in the next frame too
+			// which resolves a LOT of problems with crossing water boundaries
+			surf->visframe = d3d_RenderDef.framecount + 1;
 			nodesurfs++;
 		}
 
 		if (nodesurfs)
 		{
+			// Con_Printf ("node with %i surfaces\n", node->numsurfaces);
 			// Con_Printf ("node volume is %f\n", node->volume);
 			d3d_RenderDef.numnode++;
 		}
 	}
 
 	// recurse down the back side (the compiler should optimize this tail recursion)
-	R_RecursiveWorldNode (node->children[!node->side], clipflags);
+	node = node->children[!node->side];
+	goto tail_recurse;
+	//R_RecursiveWorldNode (node->children[!node->side], clipflags);
 }
 
 
@@ -555,15 +598,42 @@ void D3D_BuildWorld (void)
 	R_PushDlights (cl.worldmodel->brushhdr->nodes);
 
 	d3d_NumModelSurfs = 0;
-	r_farclip = 4096.0f;	// never go below this
 
 	d3d_RenderDef.numnode = 0;
 	d3d_RenderDef.numleaf = 0;
 
-	R_RecursiveWorldNode (cl.worldmodel->brushhdr->nodes, 15);
+	if (d3d_RenderDef.rebuildworld)
+	{
+		// go to a new cache
+		r_numcachedworldsurfaces = 0;
+		r_numcachedworldleafs = 0;
+		r_farclip = 4096.0f;	// never go below this
+		R_RecursiveWorldNode (cl.worldmodel->brushhdr->nodes, 15);
+		d3d_RenderDef.rebuildworld = false;
 
-	// r_farclip so far represents one side of a right-angled triangle with the longest side being what we actually want
-	r_farclip = sqrt (r_farclip * r_farclip + r_farclip * r_farclip);
+		// r_farclip so far represents one side of a right-angled triangle with the longest side being what we actually want
+		r_farclip = sqrt (r_farclip * r_farclip + r_farclip * r_farclip);
+	}
+	else
+	{
+		// reuse from the existing cache
+		for (int i = 0; i < r_numcachedworldleafs; i++)
+		{
+			if (r_cachedworldleafs[i]->efrags)
+			{
+				R_StoreEfrags (&r_cachedworldleafs[i]->efrags);
+				d3d_RenderDef.numleaf++;
+			}
+		}
+
+		for (int i = 0; i < r_numcachedworldsurfaces; i++)
+		{
+			msurface_t *surf = r_cachedworldsurfaces[i];
+
+			D3D_AllocModelSurf (surf, R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture));
+			surf->visframe = d3d_RenderDef.framecount + 1;
+		}
+	}
 }
 
 
@@ -661,6 +731,9 @@ void R_MarkLeaves (void)
 
 	// go to a new visframe
 	d3d_RenderDef.visframecount++;
+
+	// rebuild the world lists
+	d3d_RenderDef.rebuildworld = true;
 
 	// add in visible leafs - we always add the fat PVS to ensure that client visibility
 	// is the same as that which was used by the server; R_CullBox will take care of unwanted leafs

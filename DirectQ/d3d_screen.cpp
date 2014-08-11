@@ -435,6 +435,9 @@ static void SCR_CalcRefdef (void)
 	// don't need a recalc
 	vid.recalc_refdef = 0;
 
+	// rebuild world surfaces
+	d3d_RenderDef.rebuildworld = true;
+
 	// yeah, and fuck you too
 	if (kurok) Cvar_Set (&scr_viewsize, scr_viewsize.value - 10);
 

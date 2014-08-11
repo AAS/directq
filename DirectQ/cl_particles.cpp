@@ -212,24 +212,21 @@ void R_EntityParticles (entity_t *ent)
 {
 	if (key_dest != key_game) return;
 
-	int			count;
-	int			i;
 	particle_t	*p;
 	float		angle;
-	float		sr, sp, sy, cr, cp, cy;
+	float		sp, sy, cp, cy;
 	vec3_t		forward;
 	float		dist;
 
 	dist = 64;
-	count = 50;
 
 	if (!avelocities[0][0])
-		for (i = 0; i < NUMVERTEXNORMALS * 3; i++)
+		for (int i = 0; i < NUMVERTEXNORMALS * 3; i++)
 			avelocities[0][i] = (rand () & 255) * 0.01;
 
 	particle_type_t *pt = R_NewParticleType (ent->origin);
 
-	for (i = 0; i < NUMVERTEXNORMALS; i++)
+	for (int i = 0; i < NUMVERTEXNORMALS; i++)
 	{
 		angle = cl.time * avelocities[i][0];
 		sy = sin (angle);
@@ -237,9 +234,6 @@ void R_EntityParticles (entity_t *ent)
 		angle = cl.time * avelocities[i][1];
 		sp = sin (angle);
 		cp = cos (angle);
-		angle = cl.time * avelocities[i][2];
-		sr = sin (angle);
-		cr = cos (angle);
 
 		forward[0] = cp * cy;
 		forward[1] = cp * sy;
@@ -434,8 +428,8 @@ void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
 
 		for (j = 0; j < 3; j++)
 		{
-			p->org[j] = org[j] + ((rand() % 32) - 16);
-			p->vel[j] = (rand() % 512) - 256;
+			p->org[j] = org[j] + ((rand () % 32) - 16);
+			p->vel[j] = (rand () % 512) - 256;
 		}
 	}
 
@@ -467,23 +461,23 @@ void R_BlobExplosion (vec3_t org)
 		if (i & 1)
 		{
 			p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
-			p->color = 66 + rand() % 6;
+			p->color = 66 + rand () % 6;
 
 			for (j = 0; j < 3; j++)
 			{
-				p->org[j] = org[j] + ((rand() % 32) - 16);
-				p->vel[j] = (rand() % 512) - 256;
+				p->org[j] = org[j] + ((rand () % 32) - 16);
+				p->vel[j] = (rand () % 512) - 256;
 			}
 		}
 		else
 		{
 			p->dvel[0] = p->dvel[1] = -4;
-			p->color = 150 + rand() % 6;
+			p->color = 150 + rand () % 6;
 
 			for (j = 0; j < 3; j++)
 			{
-				p->org[j] = org[j] + ((rand() % 32) - 16);
-				p->vel[j] = (rand() % 512) - 256;
+				p->org[j] = org[j] + ((rand () % 32) - 16);
+				p->vel[j] = (rand () % 512) - 256;
 			}
 		}
 	}
@@ -750,20 +744,20 @@ void R_TeleportSplash (vec3_t org)
 			{
 				if (!(p = R_NewParticle (pt))) return;
 
-				p->die = cl.time + (0.2 + (rand() & 7) * 0.02);
-				p->color = 7 + (rand() & 7);
+				p->die = cl.time + (0.2 + (rand () & 7) * 0.02);
+				p->color = 7 + (rand () & 7);
 				p->grav = -1;
 
 				dir[0] = j * 8;
 				dir[1] = i * 8;
 				dir[2] = k * 8;
 
-				p->org[0] = org[0] + i + (rand() & 3);
-				p->org[1] = org[1] + j + (rand() & 3);
-				p->org[2] = org[2] + k + (rand() & 3);
+				p->org[0] = org[0] + i + (rand () & 3);
+				p->org[1] = org[1] + j + (rand () & 3);
+				p->org[2] = org[2] + k + (rand () & 3);
 
 				VectorNormalize (dir);
-				vel = 50 + (rand() & 63);
+				vel = 50 + (rand () & 63);
 				VectorScale (dir, vel, p->vel);
 			}
 		}

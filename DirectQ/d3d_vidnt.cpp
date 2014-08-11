@@ -218,7 +218,8 @@ void D3DVid_ResizeToDimension (int width, int height)
 	vid.recalc_refdef = 1;
 	IN_UpdateClipCursor ();
 	D3DVid_ClearScreen ();
-	D3DVid_Restart_f ();
+	//D3DVid_Restart_f ();
+	vid_queuerestart = true;
 
 	// note - this will recursively call this function but the checks above will catch it
 	D3DVid_ResetWindow (&d3d_CurrentMode);
@@ -546,7 +547,7 @@ void D3DVid_Restart_f (void)
 	while (true)
 	{
 		Sys_SendKeyEvents ();
-		Sleep (10);
+		Sleep (1);
 		hr = d3d_Device->TestCooperativeLevel ();
 
 		if (hr == D3D_OK) break;
@@ -575,7 +576,7 @@ void D3DVid_Restart_f (void)
 	while (true)
 	{
 		Sys_SendKeyEvents ();
-		Sleep (10);
+		Sleep (1);
 		hr = d3d_Device->TestCooperativeLevel ();
 
 		if (hr == D3D_OK) break;
@@ -594,6 +595,8 @@ void D3DVid_Restart_f (void)
 
 	Cbuf_InsertText ("\n");
 	Cbuf_Execute ();
+
+	// Con_Printf ("reset video mode\n");
 }
 
 
@@ -905,6 +908,7 @@ void D3DVid_InfoDump_f (void)
 		fwrite (&d3d_PresentParams, sizeof (D3DPRESENT_PARAMETERS), 1, f);
 
 		Con_Printf ("Done\n");
+		fclose (f);
 		return;
 	}
 
@@ -996,9 +1000,9 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_CLAMP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_CLAMP to run DirectQ");
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_WRAP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_WRAP to run DirectQ");
 
-	// check for TMU support - Anything less than 3 TMUs is not d3d9 hardware
-	if (d3d_DeviceCaps.MaxTextureBlendStages < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
-	if (d3d_DeviceCaps.MaxSimultaneousTextures < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
+	// check for TMU support - Anything less than 4 TMUs is not d3d9 hardware (d3d9 actually guarantees 8)
+	if (d3d_DeviceCaps.MaxTextureBlendStages < 4) Sys_Error ("You need a device with at least 4 TMUs to run DirectQ");
+	if (d3d_DeviceCaps.MaxSimultaneousTextures < 4) Sys_Error ("You need a device with at least 4 TMUs to run DirectQ");
 	if (d3d_DeviceCaps.MaxStreams < 4) Sys_Error ("You need a device with at least 4 Vertex Streams to run DirectQ");
 
 	// check for z buffer support
@@ -1023,6 +1027,9 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 
 	// ensure our device is validly gone
 	SAFE_RELEASE (d3d_Device);
+
+	extern HWND hwndSplash;
+	if (hwndSplash) DestroyWindow (hwndSplash);
 
 	hr = d3d_Object->CreateDevice
 	(
@@ -1743,7 +1750,7 @@ void D3DVid_RecoverLostDevice (void)
 		Sys_SendKeyEvents ();
 
 		// yield CPU for a while
-		Sleep (20);
+		Sleep (1);
 
 		// see if the device can be recovered
 		hr = d3d_Device->TestCooperativeLevel ();
@@ -1796,11 +1803,11 @@ void D3DVid_BeginRendering (void)
 	if (vid_queuerestart)
 	{
 		// fixme - move device creation to first time through here...?
-		vid_queuerestart = false;
 		vid.recalc_refdef = 1;
 		D3DVid_ResizeToDimension (vid_width.integer, vid_height.integer);
 		D3DVid_CheckVidMode ();
 		D3DVid_Restart_f ();
+		vid_queuerestart = false;
 		return;
 	}
 

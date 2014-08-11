@@ -260,7 +260,6 @@ Host_InitLocal
 void Host_InitLocal (void)
 {
 	Host_InitCommands ();
-
 	Host_FindMaxClients ();
 }
 
@@ -585,7 +584,8 @@ void Host_ClearMemory (void)
 	}
 
 	// clear virtual memory pools for the map
-	MainHunk->Free ();
+	MainHunk->FreeToLowMark (0);
+	// MainHunk->Free ();
 
 	// this is not used in the current code but we'll keep it around in case we ever need it
 	SAFE_DELETE (MapZone);
@@ -742,6 +742,82 @@ bool Host_FilterTime (DWORD time)
 	return true;
 }
 
+void VID_DefaultMonitorGamma_f (void);
+
+LONG WINAPI ExceptClient (LPEXCEPTION_POINTERS toast)
+{
+	// restore monitor gamma
+	VID_DefaultMonitorGamma_f ();
+
+	// if we're not using a debug build all that we can do is display an error
+	MessageBox (NULL, "Unhandled exception during client frame.\n",
+				"An error has occurred",
+				MB_OK | MB_ICONSTOP);
+
+	// down she goes
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+
+LONG WINAPI ExceptPreClient (LPEXCEPTION_POINTERS toast)
+{
+	// restore monitor gamma
+	VID_DefaultMonitorGamma_f ();
+
+	// if we're not using a debug build all that we can do is display an error
+	MessageBox (NULL, "Unhandled exception during pre-client frame.\n",
+				"An error has occurred",
+				MB_OK | MB_ICONSTOP);
+
+	// down she goes
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+
+LONG WINAPI ExceptServer (LPEXCEPTION_POINTERS toast)
+{
+	// restore monitor gamma
+	VID_DefaultMonitorGamma_f ();
+
+	// if we're not using a debug build all that we can do is display an error
+	MessageBox (NULL, "Unhandled exception during server frame.\n",
+				"An error has occurred",
+				MB_OK | MB_ICONSTOP);
+
+	// down she goes
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+
+LONG WINAPI ExceptRenderer (LPEXCEPTION_POINTERS toast)
+{
+	// restore monitor gamma
+	VID_DefaultMonitorGamma_f ();
+
+	// if we're not using a debug build all that we can do is display an error
+	MessageBox (NULL, "Unhandled exception during renderer frame.\n",
+				"An error has occurred",
+				MB_OK | MB_ICONSTOP);
+
+	// down she goes
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+
+LONG WINAPI ExceptSound (LPEXCEPTION_POINTERS toast)
+{
+	// restore monitor gamma
+	VID_DefaultMonitorGamma_f ();
+
+	// if we're not using a debug build all that we can do is display an error
+	MessageBox (NULL, "Unhandled exception during sound frame.\n",
+				"An error has occurred",
+				MB_OK | MB_ICONSTOP);
+
+	// down she goes
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
 
 void Host_Frame (DWORD time)
 {
@@ -760,6 +836,8 @@ void Host_Frame (DWORD time)
 	// decide if we're going to run a frame
 	if (!Host_FilterTime (time)) return;
 
+	//SetUnhandledExceptionFilter (ExceptPreClient);
+
 	// always accumulate commands even if we're not sending to the server
 	CL_AccumulateCmd ();
 
@@ -770,6 +848,7 @@ void Host_Frame (DWORD time)
 	if (sv.active && host_svtimer.runframe)
 	{
 		CL_SendCmd ();
+		//SetUnhandledExceptionFilter (ExceptServer);
 		SV_UpdateServer (host_svtimer.frametime);
 	}
 	else if (!sv.active && host_fxtimer.runframe)
@@ -777,6 +856,8 @@ void Host_Frame (DWORD time)
 
 	if (cls.state == ca_connected)
 	{
+		//SetUnhandledExceptionFilter (ExceptClient);
+
 		// the client is only updated if actually connected
 		if ((sv.active && host_svtimer.runframe) || !sv.active)
 			CL_UpdateClient (host_timer.frametime, true);
@@ -785,6 +866,8 @@ void Host_Frame (DWORD time)
 
 	if (host_speeds.value) time1 = Sys_FloatTime ();
 
+	//SetUnhandledExceptionFilter (ExceptRenderer);
+
 	// update the display
 	SCR_UpdateScreen (host_timer.frametime);
 
@@ -792,6 +875,8 @@ void Host_Frame (DWORD time)
 
 	if (host_fxtimer.runframe)
 	{
+		//SetUnhandledExceptionFilter (ExceptSound);
+
 		// sound is CPU-intensive so we scale back the rate at which it updates
 		if (cls.signon == SIGNON_CONNECTED)
 			S_Update (host_fxtimer.frametime, r_refdef.vieworigin, r_viewvectors.forward, r_viewvectors.right, r_viewvectors.up);

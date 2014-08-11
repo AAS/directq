@@ -206,7 +206,6 @@ void Chase_Adjust (vec3_t chase_dest)
 
 void Chase_Update (void)
 {
-	int		i;
 	float	dist;
 	avectors_t av;
 	vec3_t	dest, stop;

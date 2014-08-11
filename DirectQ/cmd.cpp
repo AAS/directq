@@ -626,6 +626,9 @@ void Cmd_Exec_f (void)
 	Cbuf_InsertText (f);
 	Cbuf_InsertText ("\n");
 	Zone_Free (f);
+
+	// OK, I was stupid and didn't know how Cbuf_InsertText worked.  shoot me.
+	if (!stricmp (cfgfile, "config.cfg")) Cbuf_InsertText ("exec directq.cfg\n");
 }
 
 
@@ -761,14 +764,63 @@ void Cmd_Alias_f (void)
 	Cmd_BuildCompletionList ();
 }
 
+void Cmd_Unalias_f (void)
+{
+	cmdalias_t	*a, *prev;
+
+	switch (Cmd_Argc())
+	{
+	default:
+	case 1:
+		Con_Printf ("unalias <name> : delete alias\n");
+		break;
+
+	case 2:
+		for (prev = a = cmd_alias; a; a = a->next)
+		{
+			if (!strcmp (Cmd_Argv (1), a->name))
+			{
+				prev->next = a->next;
+				Zone_Free (a->value);
+				Zone_Free (a->name);
+				Zone_Free (a);
+				prev = a;
+
+				// rebuild the autocomplete list
+				Cmd_BuildCompletionList ();
+
+				return;
+			}
+
+			prev = a;
+		}
+
+		break;
+	}
+}
+
 void Cmd_ClearAlias_f (void)
 {
-	// just leaks the memory for now...
+	cmdalias_t	*blah;
+
+	while (cmd_alias)
+	{
+		blah = cmd_alias->next;
+		Zone_Free (cmd_alias->value);
+		Zone_Free (cmd_alias->name);
+		Zone_Free (cmd_alias);
+		cmd_alias = blah;
+	}
+
 	cmd_alias = NULL;
+
+	// rebuild the autocomplete list
+	Cmd_BuildCompletionList ();
 }
 
 
-cmd_t clear_alias_cmd ("clear_alias", Cmd_ClearAlias_f);
+cmd_t unaliasall_cmd ("unaliasall", Cmd_ClearAlias_f);
+cmd_t unalias_cmd ("unalias", Cmd_Unalias_f);
 
 /*
 =============================================================================
@@ -781,7 +833,7 @@ cmd_t clear_alias_cmd ("clear_alias", Cmd_ClearAlias_f);
 #define	MAX_ARGS		80
 
 static	int			cmd_argc;
-static	char		**cmd_argv = NULL;
+static	char		*cmd_argv[MAX_ARGS];
 static	char		*cmd_null_string = "";
 static	char		*cmd_args = NULL;
 
@@ -852,17 +904,9 @@ Parses the given string into command line tokens.
 */
 void Cmd_TokenizeString (char *text)
 {
-	int		i;
-
-	if (!cmd_argv)
-	{
-		// because these are reused every frame as commands are executed,
-		// we put them in a large one-time-only block instead of dynamically allocating
-		cmd_argv = (char **) Zone_Alloc (80 * sizeof (char *));
-
-		for (i = 0; i < MAX_ARGS; i++)
-			cmd_argv[i] = (char *) Zone_Alloc (1024);
-	}
+	// the maximum com_token is 1024 so the command buffer will never be larger than this
+	static char argbuf[MAX_ARGS * (1024 + 1)];
+	char *currarg = argbuf;
 
 	cmd_argc = 0;
 	cmd_args = NULL;
@@ -881,15 +925,14 @@ void Cmd_TokenizeString (char *text)
 		}
 
 		if (!*text) return;
-
 		if (cmd_argc == 1) cmd_args = text;
-
 		if (!(text = COM_Parse (text))) return;
 
 		if (cmd_argc < MAX_ARGS)
 		{
-			// prevent overflow
-			Q_strncpy (cmd_argv[cmd_argc], com_token, 1023);
+			cmd_argv[cmd_argc] = currarg;
+			strcpy (cmd_argv[cmd_argc], com_token);
+			currarg += strlen (com_token) + 1;
 			cmd_argc++;
 		}
 	}
@@ -1071,13 +1114,12 @@ void Cmd_ForwardToServer (void)
 		SZ_Print (&cls.message, Cmd_Argv(0));
 		SZ_Print (&cls.message, " ");
 	}
+
 	if (Cmd_Argc() > 1)
 		SZ_Print (&cls.message, Cmd_Args());
-	else
-		SZ_Print (&cls.message, "\n");
+	else SZ_Print (&cls.message, "\n");
 #else
 	char *src, *dst, buff[128];			// JPG - used for say/say_team formatting
-	int minutes, seconds, match_time;	// JPG - used for %t
 
 	if (cls.state != ca_connected)
 	{
@@ -1211,25 +1253,32 @@ void Cmd_ForwardToServer (void)
 
 				case 'T':
 				case 't':
-					if ((cl.minutes || cl.seconds) && cl.seconds < 128)
 					{
-						if (cl.match_pause_time)
-							match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.match_pause_time - cl.last_match_time));
-						else match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.time - cl.last_match_time));
+						int minutes, seconds;
 
-						minutes = match_time / 60;
-						seconds = match_time - 60 * minutes;
+						if ((cl.minutes || cl.seconds) && cl.seconds < 128)
+						{
+							int match_time;
+
+							if (cl.match_pause_time)
+								match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.match_pause_time - cl.last_match_time));
+							else match_time = ceil (60.0 * cl.minutes + cl.seconds - (cl.time - cl.last_match_time));
+
+							minutes = match_time / 60;
+							seconds = match_time - 60 * minutes;
+						}
+						else
+						{
+							seconds = (int) cl.time;
+							minutes = (int) (cl.time / 60);
+							seconds -= minutes * 60;
+
+							minutes &= 511;
+						}
+
+						dst += sprintf (dst, "%d:%02d", minutes, seconds);
 					}
-					else
-					{
-						seconds = (int) cl.time;
-						minutes = (int) (cl.time / 60);
-						seconds -= minutes * 60;
 
-						minutes &= 511;
-					}
-
-					dst += sprintf (dst, "%d:%02d", minutes, seconds);
 					break;
 
 				default:

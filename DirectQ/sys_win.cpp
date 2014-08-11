@@ -20,10 +20,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "winquake.h"
-#include "errno.h"
 #include "resource.h"
-#include "shlobj.h"
+#include <shlobj.h>
 
+HWND hwndSplash;
 SYSTEM_INFO SysInfo;
 bool bWindowActive = false;
 void AllowAccessibilityShortcutKeys (bool bAllowKeys);
@@ -125,12 +125,8 @@ void Sys_Init (void)
 void Sys_Error (char *error, ...)
 {
 	va_list		argptr;
-	char		text[1024], text2[1024];
-	char		*text3 = "Press Enter to exit\n";
-	char		*text4 = "***********************************\n";
-	char		*text5 = "\n";
+	char		text[1024];
 	DWORD		dummy;
-	float		starttime;
 	static int	in_sys_error0 = 0;
 	static int	in_sys_error1 = 0;
 	static int	in_sys_error2 = 0;
@@ -643,10 +639,13 @@ void AppActivate (BOOL fActive, BOOL minimize)
 
 void D3DVid_ResizeWindow (HWND hWnd);
 
+cvar_t sys_idletime ("sys_idletime", 10.0f, CVAR_ARCHIVE);
+double last_inputtime = 0;
+
 /* main window procedure */
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-	int fActive, fMinimized, temp;
+	int fActive, fMinimized;
 
 	switch (Msg)
 	{
@@ -681,6 +680,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		return 0;
 
 	case WM_INPUT:
+		last_inputtime = realtime;
 		IN_ReadRawInput ((HRAWINPUT) lParam);
 		return 0;
 
@@ -790,8 +790,9 @@ LONG WINAPI TildeDirectQ (LPEXCEPTION_POINTERS toast)
 	// restore monitor gamma
 	VID_DefaultMonitorGamma_f ();
 
-	// get and display what caused the crash (debug builds only) or display a generic error (release builds)
-	GetCrashReason (toast);
+	MessageBox (NULL, "Unhandled exception during initialization.\n",
+				"An error has occurred",
+				MB_OK | MB_ICONSTOP);
 
 	// down she goes
 	return EXCEPTION_EXECUTE_HANDLER;
@@ -805,6 +806,14 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// this is useless for error diagnosis but at least restores gamma on a crash
 	SetUnhandledExceptionFilter (TildeDirectQ);
 
+	if ((hwndSplash = CreateDialog (hInstance, MAKEINTRESOURCE (IDD_DIALOG1), NULL, NULL)) != NULL)
+	{
+		ShowWindow (hwndSplash, SW_SHOWDEFAULT);
+		UpdateWindow (hwndSplash);
+		SetForegroundWindow (hwndSplash);
+		Sleep (750);
+	}
+
 	// in case we ever need it for anything...
 	GetSystemInfo (&SysInfo);
 
@@ -813,7 +822,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	WNDCLASS wc;
 
 	// here we use DefWindowProc because we're going to change it a few times and we don't want spurious messages
-	wc.style = CS_CLASSDC;
+	wc.style = CS_HREDRAW | CS_VREDRAW | CS_CLASSDC;
 	wc.lpfnWndProc = (WNDPROC) DefWindowProc;
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
@@ -1001,10 +1010,21 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 			Sleep (PAUSE_SLEEP);
 		else if (!ActiveApp || Minimized || block_drawing)
 			Sleep (NOT_FOCUS_SLEEP);
+		else if (sys_idletime.value > 0 && !cls.demoplayback)
+		{
+			// start sleeping if we go idle (unless we're in a demo in which case we take the full CPU)
+			if (realtime > last_inputtime + (sys_idletime.value * 8))
+				Sleep (100);
+			else if (realtime > last_inputtime + (sys_idletime.value * 4))
+				Sleep (5);
+			else if (realtime > last_inputtime + (sys_idletime.value * 2))
+				Sleep (1);
+			else if (realtime > last_inputtime + sys_idletime.value)
+				Sleep (0);
+		}
 
 		// RMQ engine timer; more limited resolution than QPC but virtually immune to resolution problems at very high FPS
-		// and gives ultra-smooth performance (some low-level sub-millisecond graininess is present with decoupled timers
-		// but that's an artefact of timer-decoupling rather than related to the timer.....)
+		// and gives ultra-smooth performance
 		DWORD newtime = Sys_Milliseconds ();
 		DWORD time = newtime - oldtime;
 

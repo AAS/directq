@@ -108,18 +108,10 @@ cvar_alias_t r_interpolate_model_transform ("r_interpolate_model_transform", &r_
 
 cmd_t R_ReadPointFile_f_Cmd ("pointfile", R_ReadPointFile_f);
 
-extern image_t d3d_PlayerSkins[];
-
 void R_Init (void)
 {
 	R_InitParticles ();
 	R_InitResourceTextures ();
-
-	for (int i = 0; i < 256; i++)
-	{
-		SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);
-		d3d_PlayerSkins[i].LastUsage = 0;
-	}
 }
 
 
@@ -231,6 +223,7 @@ void D3DBrush_CreateVBOs (void);
 void D3DLight_EndBuildingLightmaps (void);
 void D3DBrush_BuildBModelVBOs (void);
 void Host_InitTimers (void);
+void D3DSurf_BuildWorldCache (void);
 
 void R_NewMap (void)
 {
@@ -277,9 +270,6 @@ void R_NewMap (void)
 	Fog_ParseWorldspawn ();
 	D3DAlias_CreateBuffers ();
 
-	// release cached skins to save memory
-	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);
-
 	// as sounds are now cleared between maps these sounds also need to be
 	// reloaded otherwise the known_sfx will go out of sequence for them
 	// (this isn't the case any more but it does no harm)
@@ -289,6 +279,7 @@ void R_NewMap (void)
 	D3DTexture_RegisterChains ();
 	D3DBrush_CreateVBOs ();
 	D3DBrush_BuildBModelVBOs ();
+	D3DSurf_BuildWorldCache ();
 
 	// see do we need to switch off the menus or console
 	if (key_dest != key_game && (cls.demoplayback || cls.demorecording || cls.timedemo))

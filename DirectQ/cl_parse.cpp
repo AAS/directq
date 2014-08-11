@@ -862,7 +862,10 @@ void CL_ParseUpdate (int bits)
 	{
 		// only interpolate orientation if we're not doing so on the server
 		if (sv.active)
+		{
 			ent->lerpflags &= ~LERP_MOVESTEP;
+			// ent->forcelink = true;
+		}
 		else
 		{
 			ent->lerpflags |= LERP_MOVESTEP;
@@ -965,9 +968,6 @@ CL_ParseClientdata
 Server information pertaining to this client only
 ==================
 */
-extern float deadangles[];
-extern float deadtime;
-
 void CL_ParseClientdata (void)
 {
 	int		i, j;
@@ -1054,13 +1054,6 @@ void CL_ParseClientdata (void)
 
 	if (cl.stats[STAT_HEALTH] > 0 && clnewstats[STAT_HEALTH] < 1)
 	{
-		// calc new roll angles every time we die
-		deadangles[0] = rand () % 360;
-		deadangles[1] = rand () % 360;
-		deadangles[2] = rand () % 360;
-
-		deadtime = cl.time;
-
 		// update death location
 		cl.death_location[0] = cl_entities[cl.viewentity]->origin[0];
 		cl.death_location[1] = cl_entities[cl.viewentity]->origin[1];
@@ -1710,7 +1703,6 @@ cvar_t pq_scoreboard_pings ("pq_scoreboard_pings", "1", CVAR_ARCHIVE);
 void CL_ParseProQuakeString (char *string)
 {
 	static int checkping = -1;
-	int ping, i;
 	char *s, *s2, *s3;
 	static int checkip = -1;	// player whose IP address we're expecting
 
@@ -1733,7 +1725,7 @@ void CL_ParseProQuakeString (char *string)
 	{
 		while (*s == ' ') s++;
 
-		ping = 0;
+		int ping = 0;
 
 		if (*s >= '0' && *s <= '9')
 		{
@@ -1798,7 +1790,7 @@ void CL_ParseProQuakeString (char *string)
 	else if (checkping < 0)
 	{
 		s = string;
-		i = 0;
+		int i = 0;
 
 		while (*s >= '0' && *s <= '9')
 			i = 10 * i + *s++ - '0';

@@ -214,7 +214,6 @@ char *PF_VarString (int	first)
 	{
 		char *append = SVProgs->Strings + ((int *) SVProgs->Globals)[OFS_PARM0 + i * 3];
 		float fvarstring = SVProgs->Globals[OFS_PARM0 + i * 3];
-		int ivarstring = ((int *) SVProgs->Globals)[OFS_PARM0 + i * 3];
 
 		if (fvarstring != fvarstring)
 		{
@@ -330,15 +329,10 @@ void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins
 
 void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 {
-	float	*angles;
 	vec3_t	rmin, rmax;
 	float	bounds[2][3];
-	float	xvector[2], yvector[2];
-	float	a;
-	vec3_t	base, transformed;
-	int		i, j, k, l;
 
-	for (i = 0; i < 3; i++)
+	for (int i = 0; i < 3; i++)
 	{
 		if (min[i] > max[i])
 		{
@@ -592,7 +586,6 @@ vector vectoangles(vector)
 void PF_vectoangles (void)
 {
 	float	*value1;
-	float	forward;
 	float	yaw, pitch;
 
 	value1 = G_VECTOR (OFS_PARM0);
@@ -613,7 +606,7 @@ void PF_vectoangles (void)
 		if (yaw < 0)
 			yaw += 360;
 
-		forward = sqrt (value1[0] * value1[0] + value1[1] * value1[1]);
+		float forward = sqrt (value1[0] * value1[0] + value1[1] * value1[1]);
 		pitch = (int) (atan2 (value1[2], forward) * 180 / D3DX_PI);
 
 		if (pitch < 0)
@@ -1522,10 +1515,8 @@ void PF_aim (void)
 	int		i, j;
 	trace_t	tr;
 	float	dist, bestdist;
-	float	speed;
 
 	ent = G_EDICT (OFS_PARM0);
-	speed = G_FLOAT (OFS_PARM1);
 
 	VectorCopy (ent->v.origin, start);
 	start[2] += 20;
@@ -2262,7 +2253,6 @@ void PF_substring (void)
 typedef union
 {
 	float flt;
-	int i;
 	FILE *f;
 } QFILE;
 

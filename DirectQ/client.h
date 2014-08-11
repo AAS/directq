@@ -26,6 +26,7 @@ typedef struct
 	float	forwardmove;
 	float	sidemove;
 	float	upmove;
+	bool	accumulated;
 } usercmd_t;
 
 typedef struct

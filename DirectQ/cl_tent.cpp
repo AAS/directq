@@ -55,6 +55,7 @@ sfx_t			*cl_sfx_ric3;
 sfx_t			*cl_sfx_r_exp3;
 
 cvar_t r_extradlight ("r_extradlight", "1", CVAR_ARCHIVE);
+cvar_t cl_shaftspeed ("cl_shaftspeed", 20.0f, CVAR_ARCHIVE);
 
 void D3D_AddVisEdict (entity_t *ent);
 
@@ -239,11 +240,11 @@ void CL_ParseTEnt (void)
 
 		R_WallHitParticles (pos, vec3_origin, 0, 10);
 
-		if (rand() % 5)
+		if (rand () % 5)
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
 		{
-			rnd = rand() & 3;
+			rnd = rand () & 3;
 
 			if (rnd == 1)
 				S_StartSound (-1, 0, cl_sfx_ric1, pos, 1, 1);
@@ -260,11 +261,11 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_WallHitParticles (pos, vec3_origin, 0, 20);
 
-		if (rand() % 5)
+		if (rand () % 5)
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
 		{
-			rnd = rand() & 3;
+			rnd = rand () & 3;
 
 			if (rnd == 1)
 				S_StartSound (-1, 0, cl_sfx_ric1, pos, 1, 1);
@@ -701,7 +702,7 @@ void CL_UpdateTEnts (void)
 			ent->alphaval = 255;
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
-			ent->angles[2] = anglestable[(int) ((cl.time * 15) + d) & 1023];
+			ent->angles[2] = anglestable[(int) ((cl.time * cl_shaftspeed.value) + d) & 1023];
 
 			// i is no longer on the outer loop
 			for (int i = 0; i < 3; i++)

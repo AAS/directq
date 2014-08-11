@@ -1578,7 +1578,7 @@ bool ValidateMap (char *mapname, int itemnum)
 		return false;
 	}
 
-	if (bsphead.version != PR_BSPVERSION && bsphead.version != Q1_BSPVERSION && bsphead.version != HL_BSPVERSION)
+	if (bsphead.version != PR_BSPVERSION && bsphead.version != Q1_BSPVERSION)
 	{
 		// don't add maps with a bad version number to the list
 		COM_FCloseFile (&fh);
@@ -1849,8 +1849,6 @@ demo_serverinfo_t dsi = {15, 1, 0, "", NULL, NULL, NULL, 0};
 bool M_Menu_Demo_Info (char *demofile)
 {
 	HANDLE fh = INVALID_HANDLE_VALUE;
-	int rlen;
-	int msg;
 	int msgsize;
 	float viewangs[3];
 
@@ -1872,14 +1870,13 @@ bool M_Menu_Demo_Info (char *demofile)
 		{
 			char cmsg;
 
-			rlen = COM_FReadFile (fh, &cmsg, 1);
+			int rlen = COM_FReadFile (fh, &cmsg, 1);
 
 			if (cmsg == '\n') break;
 
 			if (cmsg == '-')
 				neg = true;
-			else
-				dsi.cdtrack = dsi.cdtrack * 10 + (cmsg - '0');
+			else dsi.cdtrack = dsi.cdtrack * 10 + (cmsg - '0');
 		}
 
 		if (neg) dsi.cdtrack = -dsi.cdtrack;
@@ -1889,7 +1886,7 @@ bool M_Menu_Demo_Info (char *demofile)
 		while (1)
 		{
 			// get the size of the message
-			rlen = COM_FReadFile (fh, &msgsize, 4);
+			int rlen = COM_FReadFile (fh, &msgsize, 4);
 
 			// read viewangles
 			rlen = COM_FReadFile (fh, viewangs, sizeof (float) * 3);
@@ -1902,7 +1899,7 @@ bool M_Menu_Demo_Info (char *demofile)
 			for (int msgpos = 0;;)
 			{
 				// parse out the message id
-				msg = msgdata[msgpos++];
+				int msg = msgdata[msgpos++];
 
 				// handle the message
 				switch (msg)

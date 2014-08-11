@@ -752,7 +752,6 @@ void R_MinimumLight (float *c, float factor)
 
 void D3DLight_LightPoint (entity_t *e, float *c)
 {
-	float add;
 	vec3_t dist;
 	vec3_t start;
 	vec3_t end;
@@ -809,17 +808,20 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 		R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
 	}
 
+	// round lighting to the nearest to help prevent stair steps
+	int add = (1 << (kurok ? ((6 + r_overbright.integer)) : ((7 + r_overbright.integer)))) >> 1;
+
 	// keep MDL lighting consistent with the world
 	for (int i = 0; i < 3; i++)
 	{
 		if (kurok)
 		{
-			int rgb = ((int) (c[i] + 0.5f)) >> (6 + r_overbright.integer);
+			int rgb = ((int) (c[i] + 0.5f) + add) >> (6 + r_overbright.integer);
 			c[i] = (float) lm_gammatable[BYTE_CLAMP (rgb)];
 		}
 		else
 		{
-			int rgb = ((int) (c[i] + 0.5f)) >> (7 + r_overbright.integer);
+			int rgb = ((int) (c[i] + 0.5f) + add) >> (7 + r_overbright.integer);
 			c[i] = (float) lm_gammatable[BYTE_CLAMP (rgb)];
 		}
 	}
@@ -861,15 +863,15 @@ __inline void D3DLight_ClearToAmbient (unsigned *bl, int size, int amb)
 
 
 #define DUFFLIGHT_NOGAMMA \
-	t = *bl++ >> shift; *dest++ = BYTE_CLAMP (t); \
-	t = *bl++ >> shift; *dest++ = BYTE_CLAMP (t); \
-	t = *bl++ >> shift; *dest++ = BYTE_CLAMP (t); \
+	t = ((*bl++) + add) >> shift; *dest++ = BYTE_CLAMP (t); \
+	t = ((*bl++) + add) >> shift; *dest++ = BYTE_CLAMP (t); \
+	t = ((*bl++) + add) >> shift; *dest++ = BYTE_CLAMP (t); \
 	*dest++ = 255;
 
 #define DUFFLIGHT_WITHGAMMA \
-	t = *bl++ >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
-	t = *bl++ >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
-	t = *bl++ >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
+	t = ((*bl++) + add) >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
+	t = ((*bl++) + add) >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
+	t = ((*bl++) + add) >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
 	*dest++ = 255;
 
 void D3DLight_BuildLightmap (msurface_t *surf, int texnum)
@@ -966,14 +968,10 @@ void D3DLight_BuildLightmap (msurface_t *surf, int texnum)
 	}
 
 	int t;
-	int shift = 7 + r_overbright.integer;
+	int shift = (kurok ? 6 : 7) + r_overbright.integer;
 	int stride = (LightmapWidth << 2) - (surf->smax << 2);
 	byte *dest = d3d_Lightmaps[texnum].Data + surf->LightBase;
-
-	// slightly evil this...
-	if (kurok)
-		shift = 6 + r_overbright.integer;
-	else shift = 7 + r_overbright.integer;
+	int add = (1 << shift) >> 1; // round lighting to the nearest to help prevent stair steps
 
 	bl = d3d_BlockLights;
 
@@ -1100,9 +1098,9 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 		// we can't create lightmap texcoords until the positioning of the surf within the
 		// lightmap texture is known so it's deferred until here
 		// note: _controlfp is ineffective here
-		for (int i = 0; i < surf->numverts; i++)
+		for (int i = 0; i < surf->numvertexes; i++)
 		{
-			brushpolyvert_t *vert = &surf->verts[i];
+			brushpolyvert_t *vert = &surf->vertexes[i];
 
 			vert->st[1][0] = DotProduct (vert->xyz, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
 			vert->st[1][0] -= surf->texturemins[0];

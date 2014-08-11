@@ -845,7 +845,6 @@ pack_t *COM_LoadPackFile (char *packfile)
 	pack_t *pack;
 	FILE *packfp;
 	packfile_t *info;
-	unsigned short crc;
 
 	// read and validate the header
 	if (!(packfp = fopen (packfile, "rb"))) return NULL;

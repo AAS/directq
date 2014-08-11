@@ -117,7 +117,7 @@ bool Cvar_SetPrevalidate (cvar_t *var)
 	if (!var)
 	{
 		// there is an error in C code if this happens
-		Con_Printf ("Cvar_Set: variable %s not found\n", var->name);
+		Con_Printf ("Cvar_Set: variable not found\n");
 		return false;
 	}
 

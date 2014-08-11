@@ -81,10 +81,10 @@ public:
 	int EnterFunction (dfunction_t *f);
 	int LeaveFunction (void);
 	void PrintStatement (dstatement_t *s);
-	void CProgsDat::RunError (char *error, ...);
+	void RunError (char *error, ...);
 
 	void Profile (void);
-	void CProgsDat::StackTrace (void);
+	void StackTrace (void);
 
 	bool	FishHack;
 	int		NumFish;

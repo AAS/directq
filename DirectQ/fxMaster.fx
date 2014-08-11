@@ -257,6 +257,61 @@ float4 PSAliasLumaNoLuma (VertAliasPS Input) : COLOR0
 }
 
 
+float4 shirtcolor;
+float4 pantscolor;
+
+float4 GetColormapColor (VertAliasPS Input)
+{
+	float4 colormap = tex2D (tmu2Sampler, Input.Tex0);
+	return (tex2D (tmu0Sampler, Input.Tex0) * colormap.r) + (shirtcolor * colormap.g) + (pantscolor * colormap.b);
+}
+
+
+float4 PSAliasPlayerLumaNoLuma (VertAliasPS Input) : COLOR0
+{
+	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = FogCalc ((GetColormapColor (Input) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright), Input.FogPosition);
+#else
+	float4 color = (GetColormapColor (Input) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright);
+#endif
+
+	color.a = AlphaVal;
+	return color;
+}
+
+
+float4 PSAliasPlayerLuma (VertAliasPS Input) : COLOR0
+{
+	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = GetLumaColor (GetColormapColor (Input), Shade, tex2D (tmu1Sampler, Input.Tex0), Input.FogPosition);
+#else
+	float4 color = GetLumaColor (GetColormapColor (Input), Shade, tex2D (tmu1Sampler, Input.Tex0));
+#endif
+
+	color.a = AlphaVal;
+	return color;
+}
+
+
+float4 PSAliasPlayerNoLuma (VertAliasPS Input) : COLOR0
+{
+	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = FogCalc (GetColormapColor (Input) * (Shade * Overbright), Input.FogPosition);
+#else
+	float4 color = GetColormapColor (Input) * (Shade * Overbright);
+#endif
+
+	color.a = AlphaVal;
+	return color;
+}
+
+
 float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 {
 	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
@@ -1123,6 +1178,24 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 VSAliasVS ();
 		PixelShader = compile ps_2_0 PSAliasKurok ();
+	}
+
+	pass FX_PASS_ALIAS_PLAYER_NOLUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVS ();
+		PixelShader = compile ps_2_0 PSAliasPlayerNoLuma ();
+	}
+
+	pass FX_PASS_ALIAS_PLAYER_LUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVS ();
+		PixelShader = compile ps_2_0 PSAliasPlayerLuma ();
+	}
+
+	pass FX_PASS_ALIAS_PLAYER_LUMA_NOLUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVS ();
+		PixelShader = compile ps_2_0 PSAliasPlayerLumaNoLuma ();
 	}
 }
 

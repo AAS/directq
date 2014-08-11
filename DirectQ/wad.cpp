@@ -93,11 +93,6 @@ bool W_LoadWadFile (char *filename)
 		lump_p->filepos = lump_p->filepos;
 		lump_p->size = lump_p->size;
 		W_CleanupName (lump_p->name, lump_p->name);
-
-		if (lump_p->type == TYP_QPIC)
-		{
-			qpic_t *pic = (qpic_t *) (wad_base + lump_p->filepos);
-		}
 	}
 
 	return true;
@@ -194,7 +189,6 @@ miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 
 		// invalid attributes
 		if (lump.compression) continue;
-
 		if (lump.type != 'C') continue;
 
 		// clean the name/etc
@@ -214,51 +208,6 @@ miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 	}
 
 	// found nothing
-	return NULL;
-}
-
-
-miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipdata)
-{
-	if (!mipdata) return NULL;
-
-	// hl WAD files contain an absolute path to the dev directory of whoever built it,
-	// which isn't much use for loading for real, so jump backwards through the path
-	// looking for one that does actually exist until we either find one or run out.
-	for (int i = strlen (wadname); i >= 0; i--)
-	{
-		if (wadname[i] == '/' || wadname[i] == '\\')
-		{
-			HANDLE fh = INVALID_HANDLE_VALUE;
-
-			COM_FOpenFile (&wadname[i + 1], &fh);
-
-			if (fh != INVALID_HANDLE_VALUE)
-			{
-				// found one; now look for the texture in it
-				miptex_t *texmip = W_ValidateHLWAD (fh, texname);
-
-				if (!texmip)
-				{
-					// didn't find the texture
-					COM_FCloseFile (&fh);
-					continue;
-				}
-
-				// found it!!!  alloc a buffer to hold the new texture - this must be big enough for 4
-				// miplevels plus the palette
-				mipdata[0] = (miptex_t *) Zone_Alloc (sizeof (miptex_t) + ((texmip->width * texmip->height * 85) >> 6) + 770);
-				memcpy (mipdata[0], texmip, sizeof (miptex_t));
-
-				// now read the rest of the data
-				COM_FReadFile (fh, (byte *) (mipdata[0] + 1), ((texmip->width * texmip->height * 85) >> 6) + 770);
-
-				COM_FCloseFile (&fh);
-				return mipdata[0];
-			}
-		}
-	}
-
 	return NULL;
 }
 

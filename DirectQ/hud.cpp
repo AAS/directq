@@ -790,8 +790,8 @@ void HUD_SoloScoreboard (qpic_t *pic, float solotime)
 	{
 		// kill count - remake quake compatibility
 		if (cl.stats[STAT_TOTALMONSTERS] == 0)
-			_snprintf (str, 80, "Monsters: %i", cl.stats[STAT_MONSTERS]);
-		else _snprintf (str, 80, "Monsters: %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
+			_snprintf (str, 80, "Kills: %i", cl.stats[STAT_MONSTERS]);
+		else _snprintf (str, 80, "Kills: %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
 
 		l = strlen (str);
 		SBY += 12;

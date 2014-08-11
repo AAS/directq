@@ -287,7 +287,6 @@ void CDAudio_Resume (void)
 static void CD_f (void)
 {
 	char	*command;
-	int		ret;
 	int		n;
 
 	if (Cmd_Argc() < 2)
@@ -326,7 +325,7 @@ static void CD_f (void)
 
 	if (stricmp (command, "remap") == 0)
 	{
-		ret = Cmd_Argc() - 2;
+		int ret = Cmd_Argc() - 2;
 
 		if (ret <= 0)
 		{

@@ -24,9 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
-// up to 16 color translated skins
-image_t d3d_PlayerSkins[256];
-
 void D3DLight_LightPoint (entity_t *e, float *c);
 
 cvar_t r_aliaslightscale ("r_aliaslightscale", "1", CVAR_ARCHIVE);
@@ -46,7 +43,6 @@ ALIAS MODEL DISPLAY LIST GENERATION
 #define AM_EYES				4
 #define AM_DRAWSHADOW		8
 #define AM_VIEWMODEL		16
-
 
 typedef struct aliasbuffers_s
 {
@@ -703,25 +699,17 @@ void D3DAlias_SetupLighting (entity_t *ent, float *shadevector, float *shadeligh
 
 void D3DAlias_TransformFinal (entity_t *ent, aliashdr_t *hdr)
 {
-#if 0
-	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.integer)
+	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.value)
 	{
 		// the scaling needs to be included at this time
-		// (fixme - this is incorrect in everything!!!) (done--ish)
-		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0] - 1.41f, hdr->scale_origin[1] - 3.2f, hdr->scale_origin[2] - 24.0f);
+		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2] - (22 + 8));
 		D3DMatrix_Scale (&ent->matrix, hdr->scale[0] * 2.0f, hdr->scale[1] * 2.0f, hdr->scale[2] * 2.0f);
 	}
 	else
-#endif
 	{
 		// the scaling needs to be included at this time
 		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin);
 		D3DMatrix_Scale (&ent->matrix, hdr->scale);
-	}
-
-	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.integer)
-	{
-		// double the size of the eyes
 	}
 }
 
@@ -1060,110 +1048,6 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 }
 
 
-// to do -
-// a more robust general method is needed.  use the middle line of the colormap, always store out texels
-// detect if the colormap changes and work on the actual proper texture instead of a copy in the playerskins array
-// no, because we're not creating a colormap for the entity any more.  in fact storing the colormap in the ent
-// and the translation in cl.scores is now largely redundant...
-// also no because working on the skin directly will break with instanced models
-// alternative - take the main skin to white, eval shirt and pants colours, multiply them by the skin in a pixel shader
-bool D3DAlias_TranslateAliasSkin (entity_t *ent)
-{
-	// no translation
-	if (ent->playerskin < 0) return false;
-	if (!ent->model) return false;
-	if (ent->model->type != mod_alias) return false;
-	if (!(ent->model->flags & EF_PLAYER)) return false;
-
-	// sanity
-	ent->playerskin &= 255;
-
-	// already built a skin for this colour
-	if (d3d_PlayerSkins[ent->playerskin].d3d_Texture) return true;
-
-	byte	translate[256];
-	byte	*original;
-	static int skinsize = -1;
-	static byte *translated = NULL;
-
-	aliashdr_t *paliashdr = ent->model->aliashdr;
-	int s = paliashdr->skinwidth * paliashdr->skinheight;
-
-	if (ent->skinnum < 0 || ent->skinnum >= paliashdr->numskins)
-	{
-		Con_Printf ("(%d): Invalid player skin #%d\n", ent->playerskin, ent->skinnum);
-		original = paliashdr->skins[0].texels;
-	}
-	else original = paliashdr->skins[ent->skinnum].texels;
-
-	// no texels were saved
-	if (!original) return false;
-
-	if (s & 3)
-	{
-		Con_Printf ("D3DAlias_TranslateAliasSkin: s & 3\n");
-		return false;
-	}
-
-	int top = ent->playerskin & 0xf0;
-	int bottom = (ent->playerskin & 15) << 4;
-
-	// baseline has no palette translation
-	for (int i = 0; i < 256; i++) translate[i] = i;
-
-	for (int i = 0; i < 16; i++)
-	{
-		if (top < 128)	// the artists made some backwards ranges.  sigh.
-			translate[TOP_RANGE + i] = top + i;
-		else translate[TOP_RANGE + i] = top + 15 - i;
-
-		if (bottom < 128)
-			translate[BOTTOM_RANGE + i] = bottom + i;
-		else translate[BOTTOM_RANGE + i] = bottom + 15 - i;
-	}
-
-	// recreate the texture
-	SAFE_RELEASE (d3d_PlayerSkins[ent->playerskin].d3d_Texture);
-
-	// check for size change
-	if (skinsize != s)
-	{
-		// cache the size
-		skinsize = s;
-
-		// free the current buffer
-		if (translated) Zone_Free (translated);
-
-		translated = NULL;
-	}
-
-	// create a new buffer only if required (more optimization)
-	if (!translated) translated = (byte *) Zone_Alloc (s);
-
-	for (int i = 0; i < s; i += 4)
-	{
-		translated[i] = translate[original[i]];
-		translated[i + 1] = translate[original[i + 1]];
-		translated[i + 2] = translate[original[i + 2]];
-		translated[i + 3] = translate[original[i + 3]];
-	}
-
-	// don't compress these because it takes too long
-	D3D_UploadTexture
-	(
-		&d3d_PlayerSkins[ent->playerskin].d3d_Texture,
-		translated,
-		paliashdr->skinwidth,
-		paliashdr->skinheight,
-		IMAGE_MIPMAP | IMAGE_NOEXTERN
-	);
-
-	// Con_Printf ("Translated skin to %i\n", ent->playerskin);
-	// success
-	return true;
-}
-
-
 void D3DAlias_SetupAliasModel (entity_t *ent)
 {
 	// take pointers for easier access
@@ -1211,19 +1095,11 @@ void D3DAlias_SetupAliasModel (entity_t *ent)
 	// software quake randomises the base animation and so should we
 	int anim = (int) ((cl.time + ent->skinbase) * 10) & 3;
 
-	// switch the entity to a skin texture at &d3d_PlayerSkins[ent->playerskin]
-	// move all skin translation to here (only if translation succeeds)
-	if (D3DAlias_TranslateAliasSkin (ent))
-	{
-		state->teximage = &d3d_PlayerSkins[ent->playerskin];
-		state->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
-		d3d_PlayerSkins[ent->playerskin].LastUsage = 0;
-	}
-	else
-	{
-		state->teximage = hdr->skins[ent->skinnum].teximage[anim];
-		state->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
-	}
+	// select the proper skins (this can now work with any model, not just the player)
+	// (although in it's current incarnation the supporting infrastructure just works with the player)
+	state->teximage = hdr->skins[ent->skinnum].teximage[anim];
+	state->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
+	state->cmapimage = hdr->skins[ent->skinnum].cmapimage[anim];
 
 	// build the sort order (which may be inverted for more optimal reuse)
 	// keeping the lowest first ensures that it's more likely to be reused, which works out well for quake anims
@@ -1264,11 +1140,14 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 
 		if (!stateset)
 		{
+			// we need the third texture unit for player skins
 			D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
 			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+			D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
 
 			D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
 			D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
+			D3D_SetTextureAddress (2, D3DTADDRESS_CLAMP);
 
 			D3D_SetVertexDeclaration (d3d_AliasDecl);
 
@@ -1278,6 +1157,19 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 		// interpolation clearing gets this
 		if (ent->lerppose[LERP_CURR] < 0) ent->lerppose[LERP_CURR] = 0;
 		if (ent->lerppose[LERP_LAST] < 0) ent->lerppose[LERP_LAST] = 0;
+
+		if (ent->model->flags & EF_PLAYER)
+		{
+			int top = ent->playerskin & 0xf0;
+			int bottom = (ent->playerskin & 15) << 4;
+
+			// backward ranges are already correct so jump to the brighest of a forward range
+			if (top < 128) top += 15;
+			if (bottom < 128) bottom += 15;
+
+			D3DHLSL_SetFloatArray ("shirtcolor", d3d_QuakePalette.colorfloat[top], 4);
+			D3DHLSL_SetFloatArray ("pantscolor", d3d_QuakePalette.colorfloat[bottom], 4);
+		}
 
 		// update textures if necessary
 		if ((state->teximage != d3d_AliasState.lasttexture) || (state->lumaimage != d3d_AliasState.lastluma))
@@ -1289,16 +1181,33 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 			}
 			else if (state->lumaimage)
 			{
-				if (gl_fullbrights.integer)
-					D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
-				else D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA_NOLUMA);
+				if ((ent->model->flags & EF_PLAYER) && state->cmapimage)
+				{
+					if (gl_fullbrights.integer)
+						D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA);
+					else D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_LUMA_NOLUMA);
+
+					D3DHLSL_SetTexture (2, state->cmapimage->d3d_Texture);
+				}
+				else
+				{
+					if (gl_fullbrights.integer)
+						D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
+					else D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA_NOLUMA);
+				}
 
 				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
 				D3DHLSL_SetTexture (1, state->lumaimage->d3d_Texture);
 			}
 			else
 			{
-				D3DHLSL_SetPass (FX_PASS_ALIAS_NOLUMA);
+				if ((ent->model->flags & EF_PLAYER) && state->cmapimage)
+				{
+					D3DHLSL_SetPass (FX_PASS_ALIAS_PLAYER_NOLUMA);
+					D3DHLSL_SetTexture (2, state->cmapimage->d3d_Texture);	// the colormap must always go in tmu2
+				}
+				else D3DHLSL_SetPass (FX_PASS_ALIAS_NOLUMA);
+
 				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
 			}
 
@@ -1454,6 +1363,9 @@ void D3DAlias_DrawInstanced (entity_t **ents, int numents)
 		}
 
 		if (numinstances >= MAX_ALIAS_INSTANCES) breakbatch = true;
+
+		// players must be drawn individually for colormapping
+		if (ent->model->flags & EF_PLAYER) breakbatch = true;
 
 		if (breakbatch)
 		{

@@ -321,15 +321,8 @@ cvar_t cl_fullpitch ("cl_fullpitch", "0", CVAR_ARCHIVE);
 // ProQuake compatibility
 cvar_alias_t pq_fullpitch ("pq_fullpitch", &cl_fullpitch);
 
-// fitzquake compatibility
-cvar_t cl_maxpitch ("cl_maxpitch", 80.0f, CVAR_ARCHIVE);
-cvar_t cl_minpitch ("cl_minpitch", -70.0f, CVAR_ARCHIVE);
-
 void CL_BoundViewPitch (float *viewangles)
 {
-	if (cl_maxpitch.value > 90.0f) Cvar_Set (&cl_maxpitch, 90.0f);
-	if (cl_minpitch.value < -90.0f) Cvar_Set (&cl_minpitch, -90.0f);
-
 	if (cl_fullpitch.integer)
 	{
 		if (viewangles[PITCH] > 90) viewangles[PITCH] = 90;
@@ -337,8 +330,9 @@ void CL_BoundViewPitch (float *viewangles)
 	}
 	else
 	{
-		if (viewangles[PITCH] > cl_maxpitch.value) viewangles[PITCH] = cl_maxpitch.value;
-		if (viewangles[PITCH] < cl_minpitch.value) viewangles[PITCH] = cl_minpitch.value;
+		// cvarizing these was great, but it causes havoc on pq servers
+		if (viewangles[PITCH] > 80.0f) viewangles[PITCH] = 80.0f;
+		if (viewangles[PITCH] < -70.0f) viewangles[PITCH] = -70.0f;
 	}
 }
 
@@ -411,11 +405,16 @@ void CL_SendLagMove (void)
 			continue;	// return -> continue
 		}
 
+#if 1
+		// don't check for lost connection here
+		NET_SendUnreliableMessage (cls.netcon, &lag_buff[(lag_tail - 1) & 31]);
+#else
 		if (NET_SendUnreliableMessage (cls.netcon, &lag_buff[(lag_tail - 1) & 31]) == -1)
 		{
 			Con_Printf ("CL_SendLagMove: lost server connection\n");
 			CL_Disconnect ();
 		}
+#endif
 
 		// Con_Printf ("sent %i\n", lag_buff[(lag_tail - 1) & 31].cursize);
 	}
@@ -558,6 +557,7 @@ void CL_ClearCmd (usercmd_t *cmd)
 	cmd->forwardmove = 0;
 	cmd->sidemove = 0;
 	cmd->upmove = 0;
+	cmd->accumulated = false;
 }
 
 
@@ -678,6 +678,8 @@ void CL_AccumulateCmd (void)
 		IN_MouseMove (&cl_usercommand, cl.frametime);
 		IN_JoyMove (&cl_usercommand, cl.frametime);
 
+		cl_usercommand.accumulated = true;
+
 		return;
 	}
 
@@ -695,8 +697,12 @@ void CL_SendCmd (void)
 
 	if (cls.signon == SIGNON_CONNECTED)
 	{
-		// send the unreliable message
-		CL_SendMove (&cl_usercommand);
+		// send the unreliable message (only send if there was an actual move (sometimes there is none)
+		if (cl_usercommand.accumulated)
+		{
+			CL_SendMove (&cl_usercommand);
+			cl_usercommand.accumulated = false;
+		}
 	}
 
 	// clear the command after sending (or if we're not sending)

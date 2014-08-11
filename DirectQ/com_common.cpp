@@ -207,7 +207,6 @@ void COM_CheckRegistered (void)
 {
 	HANDLE fh = INVALID_HANDLE_VALUE;
 	unsigned short check[128];
-	int i;
 
 	// allow this in shareware too
 	Cvar_Set ("cmdline", com_cmdline);

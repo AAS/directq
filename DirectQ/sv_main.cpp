@@ -445,7 +445,6 @@ void SV_ConnectClient (int clientnum)
 	client_t		*client;
 	int				edictnum;
 	struct qsocket_s *netconnection;
-	int				i;
 	float			spawn_parms[NUM_SPAWN_PARMS];
 
 	client = svs.clients + clientnum;
@@ -485,7 +484,7 @@ void SV_ConnectClient (int clientnum)
 		// call the progs to get default spawn parms for the new client
 		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->SetNewParms);
 
-		for (i = 0; i < NUM_SPAWN_PARMS; i++)
+		for (int i = 0; i < NUM_SPAWN_PARMS; i++)
 			client->spawn_parms[i] = (&SVProgs->GlobalStruct->parm1)[i];
 	}
 
@@ -631,7 +630,6 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 	int		e, i;
 	int		bits;
 	vec3_t	org;
-	float	miss, fullbright;
 	edict_t	*ent;
 	edict_t *clent;
 	int alpha;
@@ -722,8 +720,8 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 			origin[0] = ent->stepoldorigin[0] * moveilerp + ent->steporigin[0] * movelerp;
 			origin[1] = ent->stepoldorigin[1] * moveilerp + ent->steporigin[1] * movelerp;
 			origin[2] = ent->stepoldorigin[2] * moveilerp + ent->steporigin[2] * movelerp;
-
-#if 1
+#if 0
+			// this is more mathematically correct but it breaks under certain circumstances in Quake
 			NonEulerInterpolateAngles (ent->stepangles, ent->stepoldangles, movelerp, angles);
 #else
 			// choose shortest rotate (to avoid 'spin around' situations)
@@ -806,6 +804,9 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 			}
 			else alpha = 255;
 		}
+
+		// to do
+		float fullbright;
 
 		if (ed_fullbright)
 		{

@@ -68,8 +68,7 @@ void GetCrashReason (LPEXCEPTION_POINTERS ep)
 void GetCrashReason (LPEXCEPTION_POINTERS ep)
 {
 	// if we're not using a debug build all that we can do is display an error
-	MessageBox (NULL, "Something bad happened and DirectQ is now toast.\n"
-				"Please visit http://mhquake.blogspot.com and report this crash.",
+	MessageBox (NULL, "Unhandled exception during client frame.\n",
 				"An error has occurred",
 				MB_OK | MB_ICONSTOP);
 }

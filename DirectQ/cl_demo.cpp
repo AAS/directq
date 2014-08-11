@@ -134,7 +134,6 @@ int CL_GetMessage (void)
 	int	    r, i;
 	float	    f;
 	bool    Success;
-	static double td_oldrealtime = 0;
 
 	if (cls.demoplayback)
 	{
@@ -152,7 +151,6 @@ int CL_GetMessage (void)
 				// so the bogus time on the first frame doesn't count
 				if (td_frames == 2) cls.td_starttime = realtime;
 
-				td_oldrealtime = realtime;
 				td_frames++;
 			}
 			else

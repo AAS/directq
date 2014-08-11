@@ -1080,8 +1080,7 @@ void SV_WalkMove (edict_t *ent, double frametime)
 	}
 
 	// extra friction based on view angle
-	if (clip & 2)
-		SV_WallFriction (ent, &steptrace);
+	if (clip & 2) SV_WallFriction (ent, &steptrace);
 
 	// move down
 	downtrace = SV_PushEntity (ent, downmove);	// FIXME: don't link?
@@ -1393,11 +1392,11 @@ will fall if the floor is pulled out from under them.
 */
 void SV_Physics_Step (edict_t *ent, double frametime)
 {
-	bool hitsound;
-
 	// freefall if not onground
 	if (!((int) ent->v.flags & (FL_ONGROUND | FL_FLY | FL_SWIM)))
 	{
+		bool hitsound = false;
+
 		if (ent->v.velocity[2] < sv_gravity.value * -0.1)
 			hitsound = true;
 		else hitsound = false;

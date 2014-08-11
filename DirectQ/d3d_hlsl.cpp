@@ -330,7 +330,7 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 	if (FAILED (hr))
 	{
 		char *errstr = (char *) errbuf->GetBufferPointer ();
-		Con_SafePrintf ("D3DHLSL_LoadEffect: Fatal error compiling %s\n%s", name, errstr);
+		Sys_Error ("D3DHLSL_LoadEffect: Fatal error compiling %s\n%s", name, errstr);
 
 #ifdef _DEBUG
 		DebugBreak ();
@@ -341,7 +341,7 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 	else if (errbuf)
 	{
 		char *errstr = (char *) errbuf->GetBufferPointer ();
-		Con_SafePrintf ("D3DHLSL_LoadEffect: Non-fatal error compiling %s\n%s", name, errstr);
+		Sys_Error ("D3DHLSL_LoadEffect: Non-fatal error compiling %s\n%s", name, errstr);
 
 #ifdef _DEBUG
 		DebugBreak ();

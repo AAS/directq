@@ -245,7 +245,7 @@ An svc_signonnum has been received, perform a client side setup
 */
 void CL_SignonReply (void)
 {
-	static char 	str[8192];
+	char *str = (char *) scratchbuf;
 
 	Con_DPrintf ("CL_SignonReply: %i\n", cls.signon);
 
@@ -528,8 +528,6 @@ float CL_LerpPoint (void)
 }
 
 
-extern cvar_t r_lerporient;
-
 void CL_EntityInterpolateOrigins (entity_t *ent)
 {
 	float timepassed = cl.time - ent->translatestarttime;
@@ -574,7 +572,6 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 {
 	float timepassed = cl.time - ent->rotatestarttime;
 	float blend = 0;
-	vec3_t delta = {0, 0, 0};
 
 	if (ent->rotatestarttime < 0.001 || timepassed > 1)
 	{
@@ -602,7 +599,8 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 		if (cl.paused || blend > 1) blend = 1;
 	}
 
-#if 1
+#if 0
+	// this is more mathematically correct but it breaks under certain circumstances in Quake
 	NonEulerInterpolateAngles (ent->lerpangles[LERP_CURR], ent->lerpangles[LERP_LAST], blend, ent->angles);
 #else
 	for (int i = 0; i < 3; i++)
@@ -666,9 +664,13 @@ void CL_RelinkEntities (void)
 	for (int i = 0; i < 3; i++)
 		cl.velocity[i] = cl.mvelocity[1][i] + frac * (cl.mvelocity[0][i] - cl.mvelocity[1][i]);
 
+	// keep random effects consistent with time
+	srand ((unsigned int) (cl.time * 1000.0f));
+
 	if (cls.demoplayback)
 	{
-#if 1
+#if 0
+		// this is more mathematically correct but it breaks under certain circumstances in Quake
 		NonEulerInterpolateAngles (cl.mviewangles[0], cl.mviewangles[1], frac, cl.viewangles);
 #else
 		// interpolate the angles
@@ -732,13 +734,14 @@ void CL_RelinkEntities (void)
 			}
 
 			// if we're interpolating position/angles don't interpolate them here
-			if (r_lerporient.integer && (ent->lerpflags & LERP_MOVESTEP)) f = 1;
+			if (r_lerporient.integer && (ent->lerpflags & LERP_MOVESTEP) && !sv.active) f = 1;
 
-#if 1
+#if 0
 			// interpolate the origin and angles
 			for (int j = 0; j < 3; j++)
 				ent->origin[j] = ent->msg_origins[1][j] + f * delta[j];
 
+			// this is more mathematically correct but it breaks under certain circumstances in Quake
 			NonEulerInterpolateAngles (ent->msg_angles[0], ent->msg_angles[1], f, ent->angles);
 #else
 			for (int j = 0; j < 3; j++)
@@ -840,7 +843,7 @@ void CL_RelinkEntities (void)
 				AngleVectors (ent->angles, &av);
 
 				VectorMad (dl->origin, 18, av.forward, dl->origin);
-				dl->radius = 200 + (rand() & 31);
+				dl->radius = 200 + (rand () & 31);
 
 				// the server clears muzzleflashes after each frame, but as the client is now running faster, it won't get the message for several
 				// frames - potentially over 10.  therefore we should also clear the flash on the client too.  this also fixes demos ;)
@@ -853,8 +856,8 @@ void CL_RelinkEntities (void)
 				dl = CL_AllocDlight (i);
 				VectorCopy2 (dl->origin, ent->origin);
 				dl->origin[2] += 16;
-				dl->radius = 400 + (rand() & 31);
-				dl->die = cl.time + 0.1;
+				dl->radius = 400 + (rand () & 31);
+				dl->die = cl.time + 0.001;
 				dl->flags |= DLF_NOCORONA;
 
 				if (kurok) R_ColourDLight (dl, 450, 256, 128);
@@ -865,14 +868,16 @@ void CL_RelinkEntities (void)
 				// note - by using the entity num as the key, this just updates the existing light rather than allocating a new one.
 				dl = CL_AllocDlight (i);
 				VectorCopy2 (dl->origin, ent->origin);
-				dl->radius = 300 + (rand() & 63);
-				dl->die = cl.time + 0.1;
-				dl->flags |= DLF_NOCORONA;
+				dl->radius = 200 + (rand () & 31);
+				dl->die = cl.time + 0.001;
+
+				// if it's a powerup coming from the viewent then we remove the corona
+				if (i == cl.viewentity) dl->flags |= DLF_NOCORONA;
 
 				// powerup dynamic lights
 				if (kurok)
 				{
-					dl->radius = 100 + (rand() & 31);
+					dl->radius = 100 + (rand () & 31);
 					R_ColourDLight (dl, 128, 128, 128);
 				}
 				else if (i == cl.viewentity)

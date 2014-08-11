@@ -368,9 +368,8 @@ void SND_Spatialize(channel_t *ch)
     vec_t dist;
     vec_t lscale, rscale, scale;
     vec3_t source_vec;
-	sfx_t *snd;
 
-// anything coming from the view entity will allways be full volume
+	// anything coming from the view entity will allways be full volume
 	if (ch->entnum == cl.viewentity)
 	{
 		ch->leftvol = ch->master_vol;
@@ -378,9 +377,7 @@ void SND_Spatialize(channel_t *ch)
 		return;
 	}
 
-// calculate stereo seperation and distance attenuation
-
-	snd = ch->sfx;
+	// calculate stereo seperation and distance attenuation
 	VectorSubtract(ch->origin, listener_origin, source_vec);
 	
 	dist = VectorNormalize(source_vec) * ch->dist_mult;

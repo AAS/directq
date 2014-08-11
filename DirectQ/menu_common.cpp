@@ -274,40 +274,6 @@ void Menu_PrintCenterWhite (int cy, char *str)
 }
 
 
-/*
-=====================================================================================================================================
-
-				CONSOLE TEXT BUFFER
-
-		Because console output can happen while in the menus we replicate the last line of console text at the bottom of the screen
-
-=====================================================================================================================================
-*/
-
-char menu_ConBuffer[1024];
-float ConBufferEndTime = 0;
-float ConBufferStartTime = 0;
-
-void Menu_PutConsolePrintInbuffer (char *text)
-{
-	extern cvar_t scr_centertime;
-
-	if (realtime > ConBufferStartTime)
-	{
-		// clear the buffer if we're going to a new print
-		menu_ConBuffer[0] = 0;
-		ConBufferStartTime = realtime;
-	}
-
-	// append to console buffer
-	strncat (menu_ConBuffer, text, 1023);
-
-	// display time
-	// give it an extra few seconds so the user has a chance to read it
-	ConBufferEndTime = realtime + 3 + scr_centertime.value;
-}
-
-
 bool GetToggleState (float tmin, float tmax, float tvalue)
 {
 	float deltamin = fabs (tvalue - tmin);
@@ -357,6 +323,12 @@ CQMenuSpinControl::CQMenuSpinControl (char *commandtext, int *menuval, char ***s
 	this->MenuCvar = NULL;
 
 	this->AcceptsInput = true;
+
+	this->MinVal = 0;
+	this->MaxVal = 0;
+	this->Increment = 0;
+	this->ZeroText = NULL;
+	this->Units[0] = 0;
 }
 
 
@@ -374,6 +346,12 @@ CQMenuSpinControl::CQMenuSpinControl (char *commandtext, int *menuval, char **st
 	this->MenuCvar = NULL;
 
 	this->AcceptsInput = true;
+
+	this->MinVal = 0;
+	this->MaxVal = 0;
+	this->Increment = 0;
+	this->ZeroText = NULL;
+	this->Units[0] = 0;
 }
 
 
@@ -1919,48 +1897,6 @@ void CQMenu::Draw (void)
 		// get the next y position
 		y += opt->GetYAdvance ();
 	}
-
-	// draw the console buffer (multiline)
-	if (ConBufferEndTime > realtime && menu_ConBuffer[0])
-	{
-		int lines = 0;
-		char **buflines = (char **) scratchbuf;
-		int *restorelines = ((int *) (buflines)) + 65536;
-		char *first = menu_ConBuffer;
-
-		for (int i = 0; ; i++)
-		{
-			if (!menu_ConBuffer[i]) break;
-
-			if (menu_ConBuffer[i] == '\n')
-			{
-				buflines[lines] = first;
-				first = &menu_ConBuffer[i + 1];
-				menu_ConBuffer[i] = 0;
-				restorelines[lines] = i;
-				lines++;
-			}
-		}
-
-		if (!lines)
-		{
-			// !lines should never happen
-			y = vid.currsize->height - ((vid.currsize->height - 480) / 2) - 25;
-			Menu_PrintCenter (y, menu_ConBuffer);
-		}
-		else
-		{
-			y = vid.currsize->height - ((vid.currsize->height - 480) / 2) - 20 - (lines * 5);
-
-			for (int i = 0; i < lines; i++)
-			{
-				Menu_PrintCenter (y, buflines[i]);
-				menu_ConBuffer[restorelines[i]] = '\n';
-				y += 10;
-			}
-		}
-	}
-	else menu_ConBuffer[0] = 0;
 }
 
 
@@ -2410,7 +2346,6 @@ void M_Draw (void)
 		// we can't reset key_dest here as doing so breaks the console entirely
 		m_state = m_none;
 		menu_StackDepth = 0;
-		menu_ConBuffer[0] = 0;
 		menu_Current = NULL;
 		return;
 	}
@@ -2440,6 +2375,9 @@ void M_Draw (void)
 
 	// restore original draw offsets
 	D3DDraw_SetOfs (0, 0);
+
+	// draw console notify lines even if in the menus
+	if (cls.maprunning) Con_DrawNotify ();
 
 	// run the appropriate sound
 	switch (menu_soundlevel)

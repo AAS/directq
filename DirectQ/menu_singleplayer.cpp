@@ -166,8 +166,6 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 
 	// these exist to soak up data we skip over
 	float fsoak;
-	int isoak;
-	char csoak[256];
 
 	// skip spawn parms
 	for (int i = 0; i < NUM_SPAWN_PARMS; i++) fscanf (f, "%f\n", &fsoak);
@@ -179,7 +177,6 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 
 	// sanity check (in case the save is manually hacked...)
 	if (si->skill > 3) si->skill = 3;
-
 	if (si->skill < 0) si->skill = 0;
 
 	// read bsp mapname
@@ -409,6 +406,9 @@ void Menu_SaveLoadAddSave (WIN32_FIND_DATA *savefile)
 	if (version != SAVEGAME_VERSION) return;
 
 	CSaveInfo *si = new CSaveInfo (f, savefile->cFileName);
+
+	// CSaveInfo constructor closes f via Menu_ParseSaveInfo
+	// fclose (f);
 
 	// chain in reverse order so that most recent will be on top
 	si->Next = SaveInfoList;
