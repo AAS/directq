@@ -24,12 +24,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	WAV_BUFFERS				64
 #define	WAV_MASK				0x3F
 #define	WAV_BUFFER_SIZE			0x0400
+
+// 1 second at 16-bit stereo 44100hz
 #define SECONDARY_BUFFER_SIZE	0x100000
 
-static bool	wavonly;
-static bool	dsound_init;
-static bool	primary_format_set;
-
+static bool dsound_init = false;
 static int	sample16;
 static int	snd_sent, snd_completed;
 
@@ -50,6 +49,48 @@ LPDIRECTSOUNDBUFFER8 ds_SecondaryBuffer8 = NULL;
 DSCAPS ds_DeviceCaps;
 
 sndinitstat SNDDMA_InitDirect (void);
+
+
+bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize, void **pbuf2, DWORD *dwSize2, DWORD dwFlags)
+{
+	extern bool dsound_init;
+
+	// if plan A fails try plan A
+	for (int reps = 0;;)
+	{
+		// attempt to lock the buffer until we either succeed, lose the buffer, or time out in some fashion
+		hr = ds_SecondaryBuffer8->Lock (dwOffset, dwBytes, pbuf, dwSize, pbuf2, dwSize2, dwFlags);
+
+		// do this right
+		if (SUCCEEDED (hr)) return true;
+
+		if (hr != DSERR_BUFFERLOST)
+		{
+			if (dsound_init)
+			{
+				// prevent recursive reinitialization
+				Con_Printf ("S_GetBufferLock: DS::Lock Sound Buffer Failed\n");
+				S_Shutdown ();
+				S_Startup ();
+			}
+
+			return false;
+		}
+
+		if (++reps > 10000)
+		{
+			if (dsound_init)
+			{
+				// prevent recursive reinitialization
+				Con_Printf ("S_GetBufferLock: DS: couldn't restore buffer\n");
+				S_Shutdown ();
+				S_Startup ();
+			}
+
+			return false;
+		}
+	}
+}
 
 
 /*
@@ -140,13 +181,14 @@ SNDDMA_InitDirect
 Direct-Sound support
 ==================
 */
+bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize, void **pbuf2, DWORD *dwSize2, DWORD dwFlags);
+
 sndinitstat SNDDMA_InitDirect (void)
 {
 	DSBUFFERDESC	ds_BufferDesc;
 	DSBCAPS			ds_BufferCaps;
 	DWORD			dwSize, dwWrite;
 	WAVEFORMATEX	format, pformat;
-	int				reps;
 
 	CoInitialize (NULL);
 
@@ -154,6 +196,7 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	shm = &sn;
 
+	// defaults
 	shm->channels = 2;
 	shm->samplebits = 16;
 	shm->speed = 11025;
@@ -245,14 +288,14 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	// no need to create a primry buffer; directsound will do it automatically for us
 	// create the secondary buffer we'll actually work with
-	memset (&ds_BufferDesc, 0, sizeof(ds_BufferDesc));
-	ds_BufferDesc.dwSize = sizeof(DSBUFFERDESC);
+	memset (&ds_BufferDesc, 0, sizeof (ds_BufferDesc));
+	ds_BufferDesc.dwSize = sizeof (DSBUFFERDESC);
 	ds_BufferDesc.dwFlags = DSBCAPS_CTRLFREQUENCY | DSBCAPS_LOCSOFTWARE | DSBCAPS_CTRLFX;
 	ds_BufferDesc.dwBufferBytes = SECONDARY_BUFFER_SIZE;
 	ds_BufferDesc.lpwfxFormat = &format;
 
-	memset (&ds_BufferCaps, 0, sizeof(ds_BufferCaps));
-	ds_BufferCaps.dwSize = sizeof(ds_BufferCaps);
+	memset (&ds_BufferCaps, 0, sizeof (ds_BufferCaps));
+	ds_BufferCaps.dwSize = sizeof (ds_BufferCaps);
 
 	// we need to create a legacy buffer first so that we can obtain the LPDIRECTSOUNDBUFFER8 interface from it
 	LPDIRECTSOUNDBUFFER ds_LegacyBuffer = NULL;
@@ -278,6 +321,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	// don't need the legacy buffer any more
 	ds_LegacyBuffer->Release ();
 
+	// now update it with what we got
 	shm->channels = format.nChannels;
 	shm->samplebits = format.wBitsPerSample;
 	shm->speed = format.nSamplesPerSec;
@@ -294,29 +338,19 @@ sndinitstat SNDDMA_InitDirect (void)
 	// Make sure mixer is active
 	ds_SecondaryBuffer8->Play (0, 0, DSBPLAY_LOOPING);
 
-	Con_SafePrintf ("   %d channel(s)\n   %d bits/sample\n   %d bytes/sec\n", shm->channels, shm->samplebits, shm->speed);
+	Con_SafePrintf ("   %d channel(s)\n", shm->channels);
+	Con_SafePrintf ("   %d bits/sample\n", shm->samplebits);
+	Con_SafePrintf ("   %d bytes/sec\n", shm->speed);
 
 	ds_SoundBufferSize = ds_BufferCaps.dwBufferBytes;
 
-	// initialize the buffer
-	reps = 0;
-
 	// attempt to lock it
-	while ((hr = ds_SecondaryBuffer8->Lock (0, ds_SoundBufferSize, (LPVOID *) &lpData, &dwSize, NULL, NULL, 0)) != DS_OK)
+	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &lpData, &dwSize, NULL, NULL, 0))
 	{
-		if (hr != DSERR_BUFFERLOST)
-		{
-			Con_SafePrintf ("SNDDMA_InitDirect: DS::Lock Sound Buffer Failed\n");
-			FreeSound ();
-			return SIS_FAILURE;
-		}
-
-		if (++reps > 10000)
-		{
-			Con_SafePrintf ("SNDDMA_InitDirect: DS: couldn't restore buffer\n");
-			FreeSound ();
-			return SIS_FAILURE;
-		}
+		// this should never happen
+		Con_SafePrintf ("SNDDMA_InitDirect: DS::Lock Sound Buffer Failed\n");
+		FreeSound ();
+		return SIS_FAILURE;
 	}
 
 	// DirectSound doesn't guarantee that a new buffer will be silent, so we make it silent
@@ -334,11 +368,11 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	shm->soundalive = true;
 	shm->splitbuffer = false;
-	shm->samples = ds_SoundBufferSize/(shm->samplebits/8);
+	shm->samples = ds_SoundBufferSize / (shm->samplebits / 8);
 	shm->samplepos = 0;
 	shm->submission_chunk = 1;
 	shm->buffer = (unsigned char *) lpData;
-	sample16 = (shm->samplebits/8) - 1;
+	sample16 = (shm->samplebits / 8) - 1;
 
 	dsound_init = true;
 
@@ -406,7 +440,7 @@ int SNDDMA_GetDMAPos (void)
 
 	s >>= sample16;
 
-	s &= (shm->samples-1);
+	s &= (shm->samples - 1);
 
 	return s;
 }

@@ -42,7 +42,7 @@ void R_LightPoint (entity_t *e, float *c);
 void D3D_RotateForEntity (entity_t *e);
 void R_PushDlights (mnode_t *headnode);
 __inline void R_AddSurfToDrawLists (msurface_t *surf);
-extern DWORD D3D_OVERBRIGHT_MODULATE;
+
 
 /*
 =======================

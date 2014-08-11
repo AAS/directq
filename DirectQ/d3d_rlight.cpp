@@ -811,7 +811,7 @@ CD3DLightmap::CD3DLightmap (msurface_t *surf)
 		this->size,
 		1,
 		0,
-		D3DFMT_X8R8G8B8,
+		d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8,
 		D3DPOOL_MANAGED,
 		&this->d3d_Texture,
 		NULL

@@ -48,9 +48,6 @@ typedef struct
 extern	viddef_t	vid;				// global video state
 extern	unsigned	d_8to24table[256];
 
-void	VID_SetPalette (unsigned char *palette);
-// called at startup and after any gamma correction
-
 void	VID_Shutdown (void);
 // Called at shutdown
 

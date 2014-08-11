@@ -526,14 +526,14 @@ nextmsg:
 			{
 			case -1:
 				goto nextmsg;		// end of message
-				
+
 			default:
 				Con_Printf ("SV_ReadClientMessage: unknown command %i\n", cmd);
 				return false;
 
 			case clc_nop:
 				break;
-				
+
 			case clc_stringcmd:	
 				s = MSG_ReadString ();
 				if (host_client->privileged)
@@ -595,7 +595,7 @@ nextmsg:
 			}
 		}
 	} while (ret == 1);
-	
+
 	return true;
 }
 

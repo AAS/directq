@@ -47,8 +47,6 @@ D3DPRESENT_PARAMETERS d3d_PresentParams;
 extern LPDIRECT3DINDEXBUFFER9 d3d_DPSkyIndexes;
 extern LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts;
 
-DWORD d3d_VertexBufferUsage = 0;
-
 // for various render-to-texture and render-to-surface stuff
 LPDIRECT3DSURFACE9 d3d_BackBuffer = NULL;
 
@@ -921,49 +919,41 @@ void D3D_InfoDump_f (void)
 
 cmd_t d3d_InfoDump_Cmd ("d3d_infodump", D3D_InfoDump_f);
 
-void D3D_ReportCreation (D3DDISPLAYMODE *mode, int flags)
-{
-	Con_Printf ("Video mode %i (%ix%i) Initialized\n", d3d_mode.integer, mode->Width, mode->Height);
-	Con_Printf ("Back Buffer Format: %s (created %i %s)\n", D3DTypeToString (mode->Format), d3d_PresentParams.BackBufferCount, d3d_PresentParams.BackBufferCount > 1 ? "backbuffers" : "backbuffer");
-	Con_Printf ("Depth/Stencil format: %s\n", D3DTypeToString (d3d_PresentParams.AutoDepthStencilFormat));
-	Con_Printf ("Refresh Rate: %i Hz (%s)\n", mode->RefreshRate, mode->RefreshRate ? "Fullscreen" : "Windowed");
-	Con_Printf ("\n");
-
-	if (flags & D3DCREATE_HARDWARE_VERTEXPROCESSING)
-	{
-		d3d_VertexBufferUsage = 0;
-		Con_Printf ("Using Hardware Vertex Processing\n\n");
-	}
-	else
-	{
-		d3d_VertexBufferUsage = D3DUSAGE_SOFTWAREPROCESSING;
-		Con_Printf ("Using Software Vertex Processing\n\n");
-	}
-}
+extern DWORD d3d_BufferUsage;
 
 
 void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 {
 	D3D_SetPresentParams (&d3d_PresentParams, mode);
 
-	// prefer hardware vertex processing
-	// we can't use a pure device as we want to do some gets on renderstates
-	LONG DesiredFlags[] = {D3DCREATE_HARDWARE_VERTEXPROCESSING, D3DCREATE_SOFTWARE_VERTEXPROCESSING, -1};
+	// attempt to create the device - we can ditch all of the extra flags now :)
+	hr = d3d_Object->CreateDevice (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_Window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &d3d_PresentParams, &d3d_Device);
 
-	for (int i = 0; ; i++)
+	if (FAILED (hr))
 	{
-		// failed
-		if (DesiredFlags[i] == -1) Sys_Error ("D3D_InitDirect3D: d3d_Object->CreateDevice failed");
+		hr = d3d_Object->CreateDevice (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_Window, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3d_PresentParams, &d3d_Device);
 
-		// attempt to create the device - we can ditch all of the extra flags now :)
-		hr = d3d_Object->CreateDevice (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_Window, DesiredFlags[i], &d3d_PresentParams, &d3d_Device);
-
-		if (SUCCEEDED (hr))
+		if (FAILED (hr))
 		{
-			D3D_ReportCreation (mode, DesiredFlags[i]);
-			break;
+			Sys_Error ("D3D_InitDirect3D: IDirect3D9::CreateDevice failed");
+			return;
 		}
+
+		Con_Printf ("Using Software Vertex Processing\n\n");
+		d3d_BufferUsage = D3DUSAGE_SOFTWAREPROCESSING;
 	}
+	else
+	{
+		Con_Printf ("Using Hardware Vertex Processing\n\n");
+		d3d_BufferUsage = 0;
+	}
+
+	// report some caps
+	Con_Printf ("Video mode %i (%ix%i) Initialized\n", d3d_mode.integer, mode->Width, mode->Height);
+	Con_Printf ("Back Buffer Format: %s (created %i %s)\n", D3DTypeToString (mode->Format), d3d_PresentParams.BackBufferCount, d3d_PresentParams.BackBufferCount > 1 ? "backbuffers" : "backbuffer");
+	Con_Printf ("Depth/Stencil format: %s\n", D3DTypeToString (d3d_PresentParams.AutoDepthStencilFormat));
+	Con_Printf ("Refresh Rate: %i Hz (%s)\n", mode->RefreshRate, mode->RefreshRate ? "Fullscreen" : "Windowed");
+	Con_Printf ("\n");
 
 	// clear to black immediately
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
@@ -986,11 +976,13 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	Con_Printf ("Maximum Anisotropic Filter: %i\n", d3d_DeviceCaps.MaxAnisotropy);
 	Con_Printf ("\n");
 
-	// check for availability of mandatory texture formats
-	D3D_CheckTextureFormat (D3DFMT_A8R8G8B8, TRUE);
-	D3D_CheckTextureFormat (D3DFMT_X8R8G8B8, TRUE);
-	D3D_CheckTextureFormat (D3DFMT_L8, TRUE);
-	D3D_CheckTextureFormat (D3DFMT_A8L8, TRUE);
+	// check for availability of rgb texture formats (ARGB is required by Quake)
+	d3d_GlobalCaps.supportARGB = D3D_CheckTextureFormat (D3DFMT_A8R8G8B8, TRUE);
+	d3d_GlobalCaps.supportXRGB = D3D_CheckTextureFormat (D3DFMT_X8R8G8B8, FALSE);
+
+	// check for availability of alpha/luminance formats
+	// unused d3d_GlobalCaps.supportL8 = D3D_CheckTextureFormat (D3DFMT_L8, FALSE);
+	d3d_GlobalCaps.supportA8L8 = D3D_CheckTextureFormat (D3DFMT_A8L8, FALSE);
 
 	// check for availability of compressed texture formats
 	d3d_GlobalCaps.supportDXT1 = D3D_CheckTextureFormat (D3DFMT_DXT1, FALSE);
@@ -1081,7 +1073,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	(
 		ExWindowStyle,
 		D3D_WINDOW_CLASS_NAME,
-		"DirectQ Release 1.7.666b",
+		"DirectQ Release 1.7.666c",
 		WindowStyle,
 		rect.left, rect.top,
 		width,
@@ -1293,54 +1285,17 @@ static void PaletteFromColormap (byte *pal, byte *map)
 	{
 		int cmap1 = map[31 * 256 + i];
 		int cmap2 = map[32 * 256 + i];
+		int paltotal = 0;
 
 		for (int c = 0; c < 3; c++)
 		{
 			float f = ((float) basepal[cmap1 * 3 + c] + (float) basepal[cmap2 * 3 + c]) / 2.0f;
 			pal[i * 3 + c] = BYTE_CLAMP ((int) f);
+			paltotal += pal[i * 3 + c];
 		}
-	}
-}
-
-
-static void Check_Gamma (unsigned char *pal)
-{
-	int		i;
-	unsigned char	palette[768];
-	float vid_gamma;
-
-	// default to 0.7 on non-3dfx hardware
-	// (nobody has a 3dfx any more...)
-	if ((i = COM_CheckParm ("-gamma")) == 0)
-		vid_gamma = 0.7f;
-	else vid_gamma = atof (com_argv[i + 1]);
-
-	for (i = 0; i < 768; i++)
-	{
-		// this gives the same result as the MGL gamma in software Quake
-		float f = pow ((float) ((pal[i] + 1) / 256.0), (float) vid_gamma);
-		int inf = (f * 255.0f + 0.5f);
-
-		palette[i] = BYTE_CLAMP (inf);
-	}
-
-	memcpy (pal, palette, sizeof (palette));
-}
-
-
-void VID_SetPalette (unsigned char *palette)
-{
-	for (int i = 0; i < 256; i++)
-	{
-		int r = palette[i * 3 + 0];
-		int g = palette[i * 3 + 1];
-		int b = palette[i * 3 + 2];
-
-		// BGRA format for D3D
-		d_8to24table[i] = (255 << 24) + (b << 0) + (g << 8) + (r << 16);
 
 		// don't set dark colours to fullbright
-		if ((r + g + b) < 21) vid.fullbright[i] = false;
+		if (paltotal < 21) vid.fullbright[i] = false;
 
 		// set correct luma table
 		if (vid.fullbright[i])
@@ -1348,11 +1303,50 @@ void VID_SetPalette (unsigned char *palette)
 		else lumatable[i] = 0;
 	}
 
-	// set correct alpha colour to avoid pink fringes
-	d_8to24table[255] = 0;
-
-	// entry 255 is also not a luma
+	// entry 255 is not a luma
+	vid.fullbright[255] = false;
 	lumatable[255] = 0;
+}
+
+
+static void Check_Gamma (unsigned char *pal)
+{
+	int i;
+
+	// set -gamma properly (the config will be up by now so this will override whatever was in it)
+	if ((i = COM_CheckParm ("-gamma"))) Cvar_Set (&v_gamma, atof (com_argv[i + 1]));
+
+	// apply default Quake gamma to texture palette
+	for (i = 0; i < 768; i++)
+	{
+		// this calculation is IMPORTANT for retaining the full colour range of a LOT of
+		// Quake 1 textures which gets LOST otherwise.
+		float f = pow ((float) ((pal[i] + 1) / 256.0), 0.7f);
+
+		// note: + 0.5f is IMPORTANT here for retaining a LOT of the visual look of Quake
+		int inf = (f * 255.0f + 0.5f);
+
+		// store back
+		pal[i] = BYTE_CLAMP (inf);
+	}
+}
+
+
+void VID_SetPalette (unsigned char *palette, byte *dst)
+{
+	// entry 255 is alpha, set to black to avoid pink fringes around stuff
+	((unsigned *) dst)[255] = 0;
+
+	// only go 0 to 254 here
+	for (int i = 0; i < 255; i++)
+	{
+		// BGRA format for D3D
+		dst[2] = palette[i * 3 + 0];
+		dst[1] = palette[i * 3 + 1];
+		dst[0] = palette[i * 3 + 2];
+		dst[3] = 255;
+		dst += 4;
+	}
 }
 
 
@@ -1374,7 +1368,7 @@ void D3D_VidInit (byte *palette)
 	vid.colormap = host_colormap;
 	PaletteFromColormap (palette, vid.colormap);
 	Check_Gamma (palette);
-	VID_SetPalette (palette);
+	VID_SetPalette (palette, (byte *) d_8to24table);
 
 	vid_canalttab = true;
 
@@ -1862,6 +1856,32 @@ void D3D_CheckSubdivideSize (void)
 }
 
 
+void D3D_CheckPixelShaders (void)
+{
+	// init this to force a check first time in
+	static bool oldUsingPixelShaders = !d3d_GlobalCaps.usingPixelShaders;
+
+	if (d3d_GlobalCaps.usingPixelShaders != oldUsingPixelShaders)
+	{
+		if (d3d_GlobalCaps.usingPixelShaders)
+		{
+			// Con_SafePrintf ("Enabled pixel shaders\n");
+		}
+		else
+		{
+			// switch shaders off and set fvf to something invalid to force an update
+			d3d_Device->SetPixelShader (NULL);
+			d3d_Device->SetVertexShader (NULL);
+			D3D_SetFVF (D3DFVF_XYZ | D3DFVF_XYZRHW);
+			// Con_SafePrintf ("Disabled pixel shaders\n");
+		}
+
+		// store back
+		oldUsingPixelShaders = d3d_GlobalCaps.usingPixelShaders;
+	}
+}
+
+
 void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 {
 	// if (NumFilteredStates) Con_Printf ("Filtered %i redundant state changes\n", NumFilteredStates);
@@ -1875,6 +1895,7 @@ void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 	D3D_CheckVidMode ();
 	D3D_CheckTextureFiltering ();
 	D3D_CheckSubdivideSize ();
+	D3D_CheckPixelShaders ();
 
 	*x = *y = 0;
 	*width = window_rect.right - window_rect.left;

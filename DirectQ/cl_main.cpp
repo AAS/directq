@@ -42,6 +42,9 @@ cvar_t	m_side ("m_side","0.8", CVAR_ARCHIVE);
 
 cvar_t	r_rapidfire ("r_rapidfire", "0", CVAR_ARCHIVE);
 
+// proquake nat fix
+cvar_t	cl_natfix ("cl_natfix", "1");
+
 extern cvar_t r_extradlight;
 
 client_static_t	cls;
@@ -171,14 +174,18 @@ void CL_EstablishConnection (char *host)
 	CL_Disconnect ();
 
 	cls.netcon = NET_Connect (host);
-	if (!cls.netcon)
-		Host_Error ("CL_Connect: connect failed\n");
+
+	if (!cls.netcon) Host_Error ("CL_Connect: connect failed\n");
+
 	Con_DPrintf ("CL_EstablishConnection: connected to %s\n", host);
 	
 	cls.demonum = -1;			// not in the demo loop now
 	cls.state = ca_connected;
 	cls.signon = 0;				// need all the signon messages before playing
+
+	if (cl_natfix.integer) MSG_WriteByte (&cls.message, clc_nop); // ProQuake NAT Fix
 }
+
 
 /*
 =====================
@@ -304,38 +311,6 @@ Debugging tool, just flashes the screen
 */
 void SetPal (int i)
 {
-#if 0
-	static int old;
-	byte	pal[768];
-	int		c;
-	
-	if (i == old)
-		return;
-	old = i;
-
-	if (i==0)
-		VID_SetPalette (host_basepal);
-	else if (i==1)
-	{
-		for (c=0 ; c<768 ; c+=3)
-		{
-			pal[c] = 0;
-			pal[c+1] = 255;
-			pal[c+2] = 0;
-		}
-		VID_SetPalette (pal);
-	}
-	else
-	{
-		for (c=0 ; c<768 ; c+=3)
-		{
-			pal[c] = 0;
-			pal[c+1] = 0;
-			pal[c+2] = 255;
-		}
-		VID_SetPalette (pal);
-	}
-#endif
 }
 
 
@@ -443,48 +418,42 @@ Determines the fraction between the last two messages that the objects
 should be put at.
 ===============
 */
-float	CL_LerpPoint (void)
+float CL_LerpPoint (void)
 {
 	float	f, frac;
 
 	f = cl.mtime[0] - cl.mtime[1];
-	
+
 	if (!f || cl_nolerp.value || cls.timedemo || sv.active)
 	{
 		cl.time = cl.mtime[0];
 		return 1;
 	}
-		
+
 	if (f > 0.1)
-	{	// dropped packet, or start of demo
+	{
+		// dropped packet, or start of demo
 		cl.mtime[1] = cl.mtime[0] - 0.1;
 		f = 0.1;
 	}
+
 	frac = (cl.time - cl.mtime[1]) / f;
-//Con_Printf ("frac: %f\n",frac);
+
 	if (frac < 0)
 	{
 		if (frac < -0.01)
-		{
-SetPal(1);
 			cl.time = cl.mtime[1];
-//				Con_Printf ("low frac\n");
-		}
+
 		frac = 0;
 	}
 	else if (frac > 1)
 	{
 		if (frac > 1.01)
-		{
-SetPal(2);
 			cl.time = cl.mtime[0];
-//				Con_Printf ("high frac\n");
-		}
+
 		frac = 1;
 	}
-	else
-		SetPal(0);
-		
+
 	return frac;
 }
 
@@ -899,20 +868,17 @@ int CL_ReadFromServer (void)
 	do
 	{
 		ret = CL_GetMessage ();
-		if (ret == -1)
-			Host_Error ("CL_ReadFromServer: lost server connection");
-		if (!ret)
-			break;
-		
+
+		if (ret == -1) Host_Error ("CL_ReadFromServer: lost server connection");
+		if (!ret) break;
+
 		cl.last_received_message = realtime;
 		CL_ParseServerMessage ();
 	} while (ret && cls.state == ca_connected);
 
-	if (cl_shownet.value)
-		Con_Printf ("\n");
+	if (cl_shownet.value) Con_Printf ("\n");
 
 	CL_RelinkEntities ();
-
 	CL_UpdateTEnts ();
 
 	// bring the links up to date

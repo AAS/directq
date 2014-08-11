@@ -24,10 +24,10 @@ class CD3DEffect
 public:
 	// setup and control
 	CD3DEffect (void);
-	void LoadEffect (char *name, int resourceid);
+	bool LoadEffect (char *name, int resourceid);
 
 	void SetMatrix (D3DXHANDLE hHandle, D3DXMATRIX *matrix);
-	void SetFloatArray (D3DXHANDLE hHandle, float *f);
+	void SetFloatArray (D3DXHANDLE hHandle, float *f, int len);
 	void SetFloat (D3DXHANDLE hHandle, float f);
 	void SetTexture (D3DXHANDLE hHandle, LPDIRECT3DTEXTURE9 texture);
 
@@ -57,13 +57,21 @@ private:
 	bool CommitPending;
 	D3DXHANDLE MainTechnique;
 
+	// state updates
 	void BeforeDraw (void);
+
+	// current active effect
+	static CD3DEffect *CurrentEffect;
 };
 
 
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_AliasDeclaration;
 extern LPDIRECT3DVERTEXDECLARATION9 d3d_LiquidDeclaration;
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_SkyDeclaration;
 
+extern CD3DEffect d3d_AliasFX;
 extern CD3DEffect d3d_LiquidFX;
+extern CD3DEffect d3d_SkyFX;
 
 void D3D_InitHLSL (void);
 void D3D_ShutdownHLSL (void);

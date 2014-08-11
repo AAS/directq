@@ -1536,7 +1536,7 @@ bool ValidateMap (char *mapname, int itemnum)
 		return false;
 	}
 
-	if (bsphead.version != BSPVERSION)
+	if (bsphead.version != Q1_BSPVERSION && bsphead.version != HL_BSPVERSION)
 	{
 		// don't add maps with a bad version number to the list
 		COM_FCloseFile (&fh);

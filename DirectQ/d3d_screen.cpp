@@ -969,16 +969,45 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	LPDIRECT3DSURFACE9 d3d_MapshotFinalSurf;
 
 	// store the current render target
-	d3d_Device->GetRenderTarget (0, &d3d_CurrentRenderTarget);
+	hr = d3d_Device->GetRenderTarget (0, &d3d_CurrentRenderTarget);
+
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_Mapshot_f: failed to get current render target surface\n");
+		return;
+	}
 
 	// create a surface for the mapshot to render to
-	d3d_Device->CreateRenderTarget (d3d_CurrentMode.Width, d3d_CurrentMode.Height, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &d3d_MapshotRenderSurf, NULL);
+	hr = d3d_Device->CreateRenderTarget (d3d_CurrentMode.Width, d3d_CurrentMode.Height, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &d3d_MapshotRenderSurf, NULL);
+
+	if (FAILED (hr))
+	{
+		SAFE_RELEASE (d3d_CurrentRenderTarget);
+		Con_Printf ("SCR_Mapshot_f: failed to create a render target surface\n");
+		return;
+	}
 
 	// create a surface for the final mapshot destination
 	d3d_Device->CreateRenderTarget (128, 128, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &d3d_MapshotFinalSurf, NULL);
 
+	if (FAILED (hr))
+	{
+		SAFE_RELEASE (d3d_CurrentRenderTarget);
+		SAFE_RELEASE (d3d_MapshotRenderSurf);
+		Con_Printf ("SCR_Mapshot_f: failed to create a render target surface\n");
+		return;
+	}
+
 	// set the render target for the mapshot
 	hr = d3d_Device->SetRenderTarget (0, d3d_MapshotRenderSurf);
+
+	if (FAILED (hr))
+	{
+		SAFE_RELEASE (d3d_CurrentRenderTarget);
+		SAFE_RELEASE (d3d_MapshotRenderSurf);
+		Con_Printf ("SCR_Mapshot_f: failed to set render target surface\n");
+		return;
+	}
 
 	// go into mapshot mode
 	scr_drawmapshot = true;
@@ -1021,12 +1050,21 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 		d3d_Device->StretchRect (d3d_MapshotRenderSurf, &srcrect, d3d_MapshotFinalSurf, NULL, D3DTEXF_LINEAR);
 	}
 
-	// save the surface out to file (use PNG)
+	// save the surface out to file (use TGA)
 	SCR_WriteSurfaceToTGA (workingname, d3d_MapshotFinalSurf);
-	//D3DXSaveSurfaceToFile (workingname, D3DXIFF_PNG, d3d_MapshotFinalSurf, NULL, NULL);
 
 	// reset to the original render target
-	d3d_Device->SetRenderTarget (0, d3d_CurrentRenderTarget);
+	hr = d3d_Device->SetRenderTarget (0, d3d_CurrentRenderTarget);
+
+	if (FAILED (hr))
+	{
+		// this is an error condition as we can't recover gracefully or just do nothing
+		SAFE_RELEASE (d3d_CurrentRenderTarget);
+		SAFE_RELEASE (d3d_MapshotFinalSurf);
+		SAFE_RELEASE (d3d_MapshotRenderSurf);
+		Sys_Error ("SCR_Mapshot_f: failed to restore render target surface\n");
+		return;
+	}
 
 	// not releasing is a memory leak!!!
 	d3d_CurrentRenderTarget->Release ();
@@ -1294,15 +1332,15 @@ Brings the console down and fades the palettes back to normal
 void SCR_BringDownConsole (void)
 {
 	int		i;
-	
+
 	scr_centertime_off = 0;
-	
-	for (i=0 ; i<20 && scr_conlines != scr_con_current ; i++)
+
+	for (i = 0; i < 20 && scr_conlines != scr_con_current; i++)
 		SCR_UpdateScreen ();
 
 	cl.cshifts[0].percent = 0;		// no area contents palette on next frame
-	VID_SetPalette (host_basepal);
 }
+
 
 void SCR_SetupToDrawHUD (void)
 {
@@ -1481,6 +1519,9 @@ void SCR_UpdateScreen (void)
 
 	// not initialized yet
 	if (!scr_initialized || !con_initialized || !d3d_Device) return;
+
+	// see if we are using pixel shaders
+	d3d_GlobalCaps.usingPixelShaders = (d3d_GlobalCaps.supportPixelShaders && r_hlsl.integer);
 
 	// begin rendering; get the size of the refresh window and set up for the render
 	// this is also used for lost device recovery mode

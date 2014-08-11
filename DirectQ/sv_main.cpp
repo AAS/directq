@@ -654,7 +654,7 @@ loc1:;
 
 	// NODE_MIXED
 	splitplane = node->plane;
-	sides = BOX_ON_PLANE_SIDE (ent->v.absmin, ent->v.absmax, splitplane);
+	sides = BoxOnPlaneSide (ent->v.absmin, ent->v.absmax, splitplane);
 
 	// recurse down the contacted sides, start dropping out if we hit anything
 	if ((sides & 1) && !ent->touchleaf && node->children[0]->contents != CONTENTS_SOLID)
@@ -1247,12 +1247,14 @@ void SV_CreateBaseline (void)
 
 		if (entnum > 0 && entnum <= svs.maxclients)
 		{
+			// player model
 			svent->baseline.colormap = entnum;
 			svent->baseline.modelindex = SV_ModelIndex ("progs/player.mdl");
 			svent->baseline.alpha = ENTALPHA_DEFAULT;
 		}
 		else
 		{
+			// other model
 			svent->baseline.colormap = 0;
 			svent->baseline.modelindex = SV_ModelIndex (pr_strings + svent->v.model);
 			svent->baseline.alpha = svent->alpha;

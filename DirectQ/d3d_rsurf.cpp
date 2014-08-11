@@ -503,12 +503,24 @@ void D3D_BuildSurfaceVertexBuffer (msurface_t *surf, model_t *mod, glpoly_t *pol
 		// check world extents
 		D3D_CheckSurfMinMaxs (surf, vec);
 
-		// build texcoords
-		v->st[0] = DotProduct (vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
-		v->st[0] /= surf->texinfo->texture->width;
+		if (surf->flags & SURF_DRAWSKY)
+		{
+			// build texcoords
+			v->st[0] = DotProduct (vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
+			v->st[0] /= 64;
 
-		v->st[1] = DotProduct (vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
-		v->st[1] /= surf->texinfo->texture->height;
+			v->st[1] = DotProduct (vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
+			v->st[1] /= 64;
+		}
+		else
+		{
+			// build texcoords
+			v->st[0] = DotProduct (vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
+			v->st[0] /= surf->texinfo->texture->width;
+
+			v->st[1] = DotProduct (vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
+			v->st[1] /= surf->texinfo->texture->height;
+		}
 
 		if (surf->d3d_Lightmap) surf->d3d_Lightmap->CalcLightmapTexCoords (surf, vec, v->lm);
 	}

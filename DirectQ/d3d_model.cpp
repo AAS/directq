@@ -413,19 +413,92 @@ byte	*mod_base;
 Mod_LoadTextures
 =================
 */
-void Mod_LoadTextures (lump_t *l)
+miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipdata);
+
+void Mod_LoadTextures (lump_t *l, lump_t *e)
 {
-	int		i, j, pixels, num, max, altmax;
+#define MAX_HL_WADS	64
+	int		i, j, num, max, altmax;
 	miptex_t	*mt;
 	texture_t	*tx, *tx2;
 	texture_t	*anims[10];
 	texture_t	*altanims[10];
 	dmiptexlump_t *m;
+	char *hlWADs[MAX_HL_WADS] = {NULL};
 
 	if (!l->filelen)
 	{
 		brushmodel->textures = NULL;
 		return;
+	}
+
+	// no wads yet
+	for (i = 0; i < MAX_HL_WADS; i++) hlWADs[i] = NULL;
+
+	// look for WADS in the entities lump
+	if (brushmodel->bspversion == HL_BSPVERSION && e->filelen)
+	{
+		// get a pointer to the start of the lump
+		char *data = (char *) mod_base + e->fileofs;
+		char key[40];
+
+		// parse the opening brace
+		data = COM_Parse (data);
+
+		if (com_token[0] == '{')
+		{
+			while (1)
+			{
+				// parse the key
+				data = COM_Parse (data);
+
+				// there is no key (end of worldspawn)
+				if (!data) break;
+				if (com_token[0] == '}') break;
+
+				// allow keys with a leading _
+				if (com_token[0] == '_')
+					strncpy (key, &com_token[1], 39);
+				else strncpy (key, com_token, 39);
+
+				// remove trailing spaces
+				while (key[strlen (key) - 1] == ' ') key[strlen (key) - 1] = 0;
+
+				// parse the value
+				data = COM_Parse (data);
+
+				// likewise should never happen (has already been successfully parsed server-side and any errors that
+				// were going to happen would have happened then; we only check to guard against pointer badness)
+				if (!data) break;
+
+				// check the key for a wad
+				if (!stricmp (key, "wad"))
+				{
+					// store out
+					hlWADs[0] = com_token;
+
+					// done
+					break;
+				}
+			}
+		}
+
+		// did we get any wads?
+		if (hlWADs[0])
+		{
+			for (i = 0, j = 1; ; i++)
+			{
+				// end of the list
+				if (!hlWADs[0][i]) break;
+
+				// semi-colon delimited
+				if (hlWADs[0][i] == ';')
+				{
+					hlWADs[j++] = &hlWADs[0][i + 1];
+					hlWADs[0][i] = 0;
+				}
+			}
+		}
 	}
 
 	m = (dmiptexlump_t *) (mod_base + l->fileofs);
@@ -434,10 +507,12 @@ void Mod_LoadTextures (lump_t *l)
 
 	brushmodel->numtextures = m->nummiptex;
 	brushmodel->textures = (texture_t **) Pool_Alloc (POOL_MAP, brushmodel->numtextures * sizeof (texture_t *));
-	texture_t *texes = (texture_t *) Pool_Alloc (POOL_MAP, sizeof (texture_t) * brushmodel->numtextures);
+	tx = (texture_t *) Pool_Alloc (POOL_MAP, sizeof (texture_t) * brushmodel->numtextures);
 
 	for (i = 0; i < m->nummiptex; i++)
 	{
+		miptex_t *hlmip = NULL;
+
 		m->dataofs[i] = LittleLong (m->dataofs[i]);
 
 		if (m->dataofs[i] == -1)
@@ -454,10 +529,7 @@ void Mod_LoadTextures (lump_t *l)
 		for (j = 0; j < MIPLEVELS; j++)
 			mt->offsets[j] = LittleLong (mt->offsets[j]);
 
-		pixels = mt->width * mt->height / 64 * 85;
-
-		tx = texes;
-		texes++;
+		// store out
 		brushmodel->textures[i] = tx;
 
 		// fix 16 char texture names
@@ -467,6 +539,31 @@ void Mod_LoadTextures (lump_t *l)
 		tx->width = mt->width;
 		tx->height = mt->height;
 
+		if (mt->offsets[0] == 0 && brushmodel->bspversion == HL_BSPVERSION)
+		{
+			// texture from a WAD
+			for (j = 0; j < MAX_HL_WADS; j++)
+			{
+				if (!hlWADs[j]) continue;
+				if (!hlWADs[j][0]) continue;
+
+				// did we get it
+				if (W_LoadTextureFromHLWAD (hlWADs[j], mt->name, &hlmip))
+				{
+					mt = hlmip;
+					break;
+				}
+			}
+		}
+
+		// switch water indicator for halflife
+		if (brushmodel->bspversion == HL_BSPVERSION && mt->name[0] == '!')
+		{
+			mt->name[0] = '*';
+			tx->name[0] = '*';
+		}
+
+		// check for water
 		if (mt->name[0] == '*')
 		{
 			tx->contentscolor[0] = 0;
@@ -498,9 +595,23 @@ void Mod_LoadTextures (lump_t *l)
 			R_InitSky (mt);
 		else
 		{
-			tx->d3d_Texture = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP);
-			tx->d3d_Fullbright = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA);
+			if (brushmodel->bspversion == Q1_BSPVERSION)
+			{
+				tx->d3d_Texture = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP);
+				tx->d3d_Fullbright = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA);
+			}
+			else
+			{
+				// no lumas in halflife
+				tx->d3d_Texture = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP | IMAGE_HALFLIFE);
+				tx->d3d_Fullbright = NULL;
+			}
 		}
+
+		if (hlmip) Zone_Free (hlmip);
+
+		// go to next texture
+		tx++;
 	}
 
 	// sequence the animations
@@ -638,6 +749,7 @@ extern cvar_t r_coloredlight;
 bool Mod_LoadLITFile (lump_t *l)
 {
 	if (!r_coloredlight.value) return false;
+	if (loadmodel->bh->bspversion != Q1_BSPVERSION) return false;
 
 	HANDLE lithandle = INVALID_HANDLE_VALUE;
 	char litname[128];
@@ -706,6 +818,14 @@ void Mod_LoadLighting (lump_t *l)
 	if (!l->filelen)
 	{
 		brushmodel->lightdata = NULL;
+		return;
+	}
+
+	if (brushmodel->bspversion == HL_BSPVERSION)
+	{
+		// read direct with no LIT file or no expansion
+		brushmodel->lightdata = (byte *) Pool_Alloc (POOL_MAP, l->filelen);
+		memcpy (brushmodel->lightdata, mod_base + l->fileofs, l->filelen);
 		return;
 	}
 
@@ -1030,10 +1150,20 @@ void Mod_LoadFaces (lump_t *l)
 
 		i = LittleLong (in->lightofs);
 
-		if (i < 0)
-			out->samples = NULL;
+		if (brushmodel->bspversion == Q1_BSPVERSION)
+		{
+			// expand offsets for pre-expanded light
+			if (i < 0)
+				out->samples = NULL;
+			else out->samples = brushmodel->lightdata + (i * 3);
+		}
 		else
-			out->samples = brushmodel->lightdata + (i * 3);
+		{
+			// already rgb
+			if (i < 0)
+				out->samples = NULL;
+			else out->samples = brushmodel->lightdata + i;
+		}
 
 		// fully opaque
 		out->alpha = 255;
@@ -1276,29 +1406,70 @@ void Mod_LoadClipnodes (lump_t *l)
 	brushmodel->clipnodes = out;
 	brushmodel->numclipnodes = count;
 
-	hull = &brushmodel->hulls[1];
-	hull->clipnodes = out;
-	hull->firstclipnode = 0;
-	hull->lastclipnode = count - 1;
-	hull->planes = brushmodel->planes;
-	hull->clip_mins[0] = -16;
-	hull->clip_mins[1] = -16;
-	hull->clip_mins[2] = -24;
-	hull->clip_maxs[0] = 16;
-	hull->clip_maxs[1] = 16;
-	hull->clip_maxs[2] = 32;
+	if (brushmodel->bspversion == Q1_BSPVERSION)
+	{
+		hull = &brushmodel->hulls[1];
+		hull->clipnodes = out;
+		hull->firstclipnode = 0;
+		hull->lastclipnode = count - 1;
+		hull->planes = brushmodel->planes;
+		hull->clip_mins[0] = -16;
+		hull->clip_mins[1] = -16;
+		hull->clip_mins[2] = -24;
+		hull->clip_maxs[0] = 16;
+		hull->clip_maxs[1] = 16;
+		hull->clip_maxs[2] = 32;
 
-	hull = &brushmodel->hulls[2];
-	hull->clipnodes = out;
-	hull->firstclipnode = 0;
-	hull->lastclipnode = count - 1;
-	hull->planes = brushmodel->planes;
-	hull->clip_mins[0] = -32;
-	hull->clip_mins[1] = -32;
-	hull->clip_mins[2] = -24;
-	hull->clip_maxs[0] = 32;
-	hull->clip_maxs[1] = 32;
-	hull->clip_maxs[2] = 64;
+		hull = &brushmodel->hulls[2];
+		hull->clipnodes = out;
+		hull->firstclipnode = 0;
+		hull->lastclipnode = count - 1;
+		hull->planes = brushmodel->planes;
+		hull->clip_mins[0] = -32;
+		hull->clip_mins[1] = -32;
+		hull->clip_mins[2] = -24;
+		hull->clip_maxs[0] = 32;
+		hull->clip_maxs[1] = 32;
+		hull->clip_maxs[2] = 64;
+	}
+	else
+	{
+		hull = &brushmodel->hulls[1];
+		hull->clipnodes = out;
+		hull->firstclipnode = 0;
+		hull->lastclipnode = count - 1;
+		hull->planes = brushmodel->planes;
+		hull->clip_mins[0] = -16;
+		hull->clip_mins[1] = -16;
+		hull->clip_mins[2] = -36;
+		hull->clip_maxs[0] = 16;
+		hull->clip_maxs[1] = 16;
+		hull->clip_maxs[2] = 36;
+
+		hull = &brushmodel->hulls[2];
+		hull->clipnodes = out;
+		hull->firstclipnode = 0;
+		hull->lastclipnode = count - 1;
+		hull->planes = brushmodel->planes;
+		hull->clip_mins[0] = -32;
+		hull->clip_mins[1] = -32;
+		hull->clip_mins[2] = -32;
+		hull->clip_maxs[0] = 32;
+		hull->clip_maxs[1] = 32;
+		hull->clip_maxs[2] = 32;
+
+		hull = &brushmodel->hulls[3];
+		hull->clipnodes = out;
+		hull->firstclipnode = 0;
+		hull->lastclipnode = count - 1;
+		hull->planes = brushmodel->planes;
+		hull->clip_mins[0] = -16;
+		hull->clip_mins[1] = -16;
+		hull->clip_mins[2] = -18;
+		hull->clip_maxs[0] = 16;
+		hull->clip_maxs[1] = 16;
+		hull->clip_maxs[2] = 18;
+	}
 
 	for (i = 0; i < count; i++, out++, in++)
 	{
@@ -1457,8 +1628,11 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	int i = LittleLong (header->version);
 
 	// drop to console
-	if (i != BSPVERSION)
-		Host_Error ("Mod_LoadBrushModel: %s has wrong version number\n(%i should be %i)", mod->name, i, BSPVERSION);
+	if (i != Q1_BSPVERSION && i != HL_BSPVERSION)
+	{
+		Host_Error ("Mod_LoadBrushModel: %s has wrong version number\n(%i should be %i or %i)", mod->name, i, Q1_BSPVERSION, HL_BSPVERSION);
+		return;
+	}
 
 	// swap all the lumps
 	mod_base = (byte *) header;
@@ -1470,11 +1644,14 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	mod->bh = (brushhdr_t *) Pool_Alloc (POOL_MAP, sizeof (brushhdr_t));
 	brushmodel = mod->bh;
 
+	// store the version for correct hull checking
+	brushmodel->bspversion = LittleLong (header->version);
+
 	// load into heap
 	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
 	Mod_LoadEdges (&header->lumps[LUMP_EDGES]);
 	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
-	Mod_LoadTextures (&header->lumps[LUMP_TEXTURES]);
+	Mod_LoadTextures (&header->lumps[LUMP_TEXTURES], &header->lumps[LUMP_ENTITIES]);
 	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
 	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
@@ -1822,6 +1999,7 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 			{
 				pheader->texels[i] = (byte *) Pool_Alloc (POOL_CACHE, s);
 				memcpy (pheader->texels[i], (byte *) (pskintype + 1), s);
+				loadmodel->flags |= EF_PLAYER;
 			}
 
 			_snprintf (name, 32, "%s_%i", loadmodel->name, i);
@@ -1871,6 +2049,7 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 				{
 					pheader->texels[i] = (byte *) Pool_Alloc (POOL_CACHE, s);
 					memcpy (pheader->texels[i], (byte *) (pskintype), s);
+					loadmodel->flags |= EF_PLAYER;
 				}
 
 				_snprintf (name, 32, "%s_%i_%i", loadmodel->name, i,j);

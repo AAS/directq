@@ -53,7 +53,8 @@ cvar_t	saved4 ("saved4", "0", CVAR_ARCHIVE);
 #define	MAX_FIELD_LEN	64
 #define GEFV_CACHESIZE	2
 
-typedef struct {
+typedef struct
+{
 	ddef_t	*pcache;
 	char	field[MAX_FIELD_LEN];
 } gefv_cache;

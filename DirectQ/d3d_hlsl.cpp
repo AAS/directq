@@ -28,7 +28,7 @@ cvar_t r_hlsl ("r_hlsl", "1", CVAR_ARCHIVE);
 
 // filtering of redundant shader state changes
 // let's give ourselves a bit more control over what's happening in our effects
-// this is also needed to keep the states in sync
+// this is also needed to keep the states in sync with the fixed path
 class CFXManager : ID3DXEffectStateManager
 {
 private:
@@ -178,10 +178,16 @@ char *vs_version;
 char *ps_version;
 
 // effects
+CD3DEffect d3d_AliasFX;
 CD3DEffect d3d_LiquidFX;
+CD3DEffect d3d_SkyFX;
+
+CD3DEffect *CD3DEffect::CurrentEffect = NULL;
 
 // vertex declarations
+LPDIRECT3DVERTEXDECLARATION9 d3d_AliasDeclaration = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_LiquidDeclaration = NULL;
+LPDIRECT3DVERTEXDECLARATION9 d3d_SkyDeclaration = NULL;
 
 void D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff)
 {
@@ -220,20 +226,22 @@ void D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff)
 		if (FAILED (hr))
 		{
 			char *errstr = (char *) errbuf->GetBufferPointer ();
+#ifdef _DEBUG
 			Con_Printf ("D3D_LoadEffect: Error compiling %s\n%s", name, errstr);
-			d3d_GlobalCaps.supportPixelShaders = false;
+#endif
 			errbuf->Release ();
 			return;
 		}
 
 		SAFE_RELEASE (errbuf);
-		if (!SilentLoad) Con_Printf ("Created effect \"%s\" OK\n", name);
+
+		// now that they're no longer user-replacable we don't need to report
+		//if (!SilentLoad) Con_Printf ("Created effect \"%s\" OK\n", name);
 	}
 	catch (...)
 	{
 		// oh well...
 		Con_Printf ("D3D_LoadEffect: General error\n");
-		d3d_GlobalCaps.supportPixelShaders = false;
 	}
 }
 
@@ -261,7 +269,6 @@ void D3D_InitHLSL (void)
 	if (ps_version)
 	{
 		if (!SilentLoad) Con_Printf ("Pixel Shader Version: %s\n", ps_version);
-		d3d_GlobalCaps.supportPixelShaders = true;
 	}
 	else
 	{
@@ -277,23 +284,22 @@ void D3D_InitHLSL (void)
 
 	if (vsvermaj < 2 || psvermaj < 2)
 	{
-		d3d_GlobalCaps.supportPixelShaders = false;
 		Con_Printf ("Vertex or Pixel Shaders version is too low.\n");
 		return;
 	}
 
 	// load effects - if we get this far we know that pixel shaders are available
-	d3d_LiquidFX.LoadEffect ("Liquid Shader", IDR_LIQUID);
+	if (!d3d_AliasFX.LoadEffect ("Alias Shader", IDR_ALIAS)) return;
+	if (!d3d_LiquidFX.LoadEffect ("Liquid Shader", IDR_LIQUID)) return;
+	if (!d3d_SkyFX.LoadEffect ("Sky Shader", IDR_SKY)) return;
 
 	// only display output on the first load
 	SilentLoad = true;
-
-	// if we failed to load we don't do anything more here
-	if (!d3d_GlobalCaps.supportPixelShaders) return;
+	d3d_GlobalCaps.supportPixelShaders = true;
 
 	// set up vertex declarations
 	// this needs to map to the layout of glwarpvert_t in gl_warp.cpp
-	D3DVERTEXELEMENT9 vd[] =
+	D3DVERTEXELEMENT9 vdliquid[] =
 	{
 		{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
 		{0, 12, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
@@ -302,17 +308,37 @@ void D3D_InitHLSL (void)
 		{0xff, 0, D3DDECLTYPE_UNUSED, 0, 0, 0}
 	};
 
-	d3d_Device->CreateVertexDeclaration (vd, &d3d_LiquidDeclaration);
+	d3d_Device->CreateVertexDeclaration (vdliquid, &d3d_LiquidDeclaration);
+
+	D3DVERTEXELEMENT9 vdalias[] =
+	{
+		{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+		{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+		{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+		{0xff, 0, D3DDECLTYPE_UNUSED, 0, 0, 0}
+	};
+
+	d3d_Device->CreateVertexDeclaration (vdalias, &d3d_AliasDeclaration);
+
+	D3DVERTEXELEMENT9 vdsky[] =
+	{
+		{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+		{0xff, 0, D3DDECLTYPE_UNUSED, 0, 0, 0}
+	};
+
+	d3d_Device->CreateVertexDeclaration (vdalias, &d3d_SkyDeclaration);
 }
 
 
 void D3D_ShutdownHLSL (void)
 {
 	// effects
+	d3d_AliasFX.Release ();
 	d3d_LiquidFX.Release ();
 
 	// declarations
 	SAFE_RELEASE (d3d_LiquidDeclaration);
+	SAFE_RELEASE (d3d_AliasDeclaration);
 }
 
 
@@ -320,10 +346,11 @@ CD3DEffect::CD3DEffect (void)
 {
 	this->TheEffect = NULL;
 	this->ValidFX = false;
+	this->CurrentEffect = NULL;
 }
 
 
-void CD3DEffect::LoadEffect (char *name, int resourceid)
+bool CD3DEffect::LoadEffect (char *name, int resourceid)
 {
 	this->Release ();
 	D3D_LoadEffect (name, resourceid, &this->TheEffect);
@@ -334,7 +361,7 @@ void CD3DEffect::LoadEffect (char *name, int resourceid)
 	{
 		this->ValidFX = false;
 		d3d_GlobalCaps.supportPixelShaders = false;
-		return;
+		return false;
 	}
 
 	// the effect state manager mostly just calls into our own state management functions in vidnt.
@@ -345,25 +372,30 @@ void CD3DEffect::LoadEffect (char *name, int resourceid)
 	if (!(this->MainTechnique = this->TheEffect->GetTechnique (0)))
 	{
 		Con_Printf ("Shader error in %s: Main Technique 0 not found!\n", name);
+		d3d_GlobalCaps.supportPixelShaders = false;
 		this->ValidFX = false;
 	}
+
+	return true;
 }
 
 
 void CD3DEffect::SetMatrix (D3DXHANDLE hHandle, D3DXMATRIX *matrix)
 {
 	if (!this->ValidFX) return;
+	if (!d3d_GlobalCaps.usingPixelShaders) return;
 
 	this->TheEffect->SetMatrix (hHandle, matrix);
 	this->CommitPending = true;
 }
 
 
-void CD3DEffect::SetFloatArray (D3DXHANDLE hHandle, float *f)
+void CD3DEffect::SetFloatArray (D3DXHANDLE hHandle, float *f, int len)
 {
 	if (!this->ValidFX) return;
+	if (!d3d_GlobalCaps.usingPixelShaders) return;
 
-	this->TheEffect->SetFloatArray (hHandle, f, 4);
+	this->TheEffect->SetFloatArray (hHandle, f, len);
 	this->CommitPending = true;
 }
 
@@ -371,6 +403,7 @@ void CD3DEffect::SetFloatArray (D3DXHANDLE hHandle, float *f)
 void CD3DEffect::SetFloat (D3DXHANDLE hHandle, float f)
 {
 	if (!this->ValidFX) return;
+	if (!d3d_GlobalCaps.usingPixelShaders) return;
 
 	this->TheEffect->SetFloat (hHandle, f);
 	this->CommitPending = true;
@@ -380,6 +413,7 @@ void CD3DEffect::SetFloat (D3DXHANDLE hHandle, float f)
 void CD3DEffect::SetTexture (D3DXHANDLE hHandle, LPDIRECT3DTEXTURE9 texture)
 {
 	if (!this->ValidFX) return;
+	if (!d3d_GlobalCaps.usingPixelShaders) return;
 
 	this->TheEffect->SetTexture (hHandle, texture);
 	this->CommitPending = true;
@@ -398,7 +432,15 @@ void CD3DEffect::Release (void)
 void CD3DEffect::BeginRender (void)
 {
 	if (!this->ValidFX) return;
+	if (!d3d_GlobalCaps.usingPixelShaders) return;
 
+	// if a current effect was not yet ended we must end it first
+	if (this->CurrentEffect) this->CurrentEffect->EndRender ();
+
+	// update current effect
+	this->CurrentEffect = this;
+
+	// set up this effect
 	this->TheEffect->SetTechnique (this->MainTechnique);
 	this->TheEffect->Begin ((UINT *) &this->NumPasses, D3DXFX_DONOTSAVESTATE);
 	this->PreviousPass = -1;
@@ -408,8 +450,26 @@ void CD3DEffect::BeginRender (void)
 }
 
 
+void D3D_CheckBeginScene (void);
+
 void CD3DEffect::BeforeDraw (void)
 {
+	// also need to check for a BeginScene call here
+	D3D_CheckBeginScene ();
+
+	// check for dirty matrixes (fixed path only)
+	if (!d3d_GlobalCaps.usingPixelShaders)
+	{
+		// update dirty transforms on the device
+		D3D_CheckDirtyMatrixes ();
+
+		// no need for the shader based path
+		return;
+	}
+
+	// this enables us to use the FX interface for non-HLSL rendering
+	if (!this->ValidFX) return;
+
 	if (this->CurrentPass != this->PreviousPass)
 	{
 		// if there was no valid previous pass we don't need to end it
@@ -464,20 +524,22 @@ void CD3DEffect::Draw (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT Pr
 void CD3DEffect::SwitchToPass (int passnum)
 {
 	if (!this->ValidFX) return;
+	if (!d3d_GlobalCaps.usingPixelShaders) return;
 
-	if (!this->RenderActive)
-		this->BeginRender ();
+	if (!this->RenderActive) this->BeginRender ();
 
 	// just store out the pass number, the actual switch doesn't happen until we come to draw something
 	this->CurrentPass = passnum;
 }
 
 
-void D3D_SetAllStates (void);
-
 void CD3DEffect::EndRender (void)
 {
+	// no current effect
+	this->CurrentEffect = NULL;
+
 	if (!this->ValidFX) return;
+	if (!d3d_GlobalCaps.usingPixelShaders) return;
 
 	if (this->RenderActive)
 	{
@@ -487,8 +549,14 @@ void CD3DEffect::EndRender (void)
 		this->TheEffect->End ();
 		this->RenderActive = false;
 
-		// take down shaders
+		// take down shaders (to do - remove these and move them to once per frame in SCR_UpdateScreen)
+		// (also move fvf below) (this needs to wait on a full shader implementation)
 		d3d_Device->SetPixelShader (NULL);
 		d3d_Device->SetVertexShader (NULL);
+
+		// set fvf to invalid to force an update next time it's used
+		D3D_SetFVF (D3DFVF_XYZ | D3DFVF_XYZRHW);
 	}
 }
+
+

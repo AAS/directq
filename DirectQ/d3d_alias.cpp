@@ -21,10 +21,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
+#include "d3d_hlsl.h"
 
 // r_lightmap 1 uses the grey texture on account of 2 x overbrighting
 extern LPDIRECT3DTEXTURE9 r_greytexture;
 extern cvar_t r_lightmap;
+extern cvar_t r_overbright;
 
 #define NUMVERTEXNORMALS	162
 
@@ -50,7 +52,6 @@ void R_LightPoint (entity_t *e, float *c);
 LPDIRECT3DTEXTURE9 d3d_PlayerSkins[256] = {NULL};
 
 void D3D_RotateForEntity (entity_t *e);
-extern DWORD D3D_OVERBRIGHT_MODULATE;
 
 /*
 =================================================================
@@ -627,31 +628,54 @@ void D3D_DrawAliasFrame (aliascache_t *ac)
 	// easier access
 	entity_t *e = ac->entity;
 
-	// set up texturing
-	if (ac->d3d_Fullbright)
-	{
-		D3D_SetTextureColorMode (0, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-		D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
-
-		// luma pass
-		D3D_SetTexture (0, ac->d3d_Fullbright);
-		D3D_SetTexture (1, ac->d3d_Texture);
-	}
-	else
-	{
-		// straight up modulation
-		D3D_SetTextureColorMode (0, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
-
-		// bind texture for baseline skin
-		D3D_SetTexture (0, ac->d3d_Texture);
-	}
-
 	// set up transforms
 	d3d_WorldMatrixStack->Push ();
 	D3D_RotateForEntity (e);
 	d3d_WorldMatrixStack->Translatev (e->model->ah->scale_origin);
 	d3d_WorldMatrixStack->Scalev (e->model->ah->scale);
+
+	if (d3d_GlobalCaps.usingPixelShaders && 0)
+	{
+		d3d_AliasFX.SetMatrix ("WorldMatrix", d3d_WorldMatrixStack->GetTop ());
+		d3d_AliasFX.SetMatrix ("ViewMatrix", d3d_ViewMatrixStack->GetTop ());
+		d3d_AliasFX.SetMatrix ("ProjMatrix", d3d_ProjMatrixStack->GetTop ());
+
+		d3d_AliasFX.SetFloat ("colourscale", d3d_OverbrightModulate);
+
+		if (ac->d3d_Fullbright)
+		{
+			d3d_AliasFX.SetTexture ("baseTexture", ac->d3d_Texture);
+			d3d_AliasFX.SetTexture ("lumaTexture", ac->d3d_Fullbright);
+			d3d_AliasFX.SwitchToPass (1);
+		}
+		else
+		{
+			d3d_AliasFX.SetTexture ("baseTexture", ac->d3d_Texture);
+			d3d_AliasFX.SwitchToPass (0);
+		}
+	}
+	else
+	{
+		// set up texturing
+		if (ac->d3d_Fullbright)
+		{
+			D3D_SetTextureColorMode (0, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+			D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+
+			// luma pass
+			D3D_SetTexture (0, ac->d3d_Fullbright);
+			D3D_SetTexture (1, ac->d3d_Texture);
+		}
+		else
+		{
+			// straight up modulation
+			D3D_SetTextureColorMode (0, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+			D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+
+			// bind texture for baseline skin
+			D3D_SetTexture (0, ac->d3d_Texture);
+		}
+	}
 
 	// set up the draw lists
 	drawvertx_t *verts1 = (drawvertx_t *) e->model->ah->posedata;
@@ -679,7 +703,7 @@ void D3D_DrawAliasFrame (aliascache_t *ac)
 		else PrimitiveType = D3DPT_TRIANGLESTRIP;
 
 		int numverts = 0;
-		float 	l1, l2, l, diff;
+		float l1, l2, l, diff;
 
 		do
 		{
@@ -756,7 +780,9 @@ void D3D_DrawAliasFrame (aliascache_t *ac)
 			framesize += sizeof (aliasverts_t);
 		} while (--count);
 
-		D3D_DrawPrimitive (PrimitiveType, numverts - 2, aliasverts, sizeof (aliasverts_t));
+		if (d3d_GlobalCaps.usingPixelShaders && 0)
+			d3d_AliasFX.Draw (PrimitiveType, numverts - 2, aliasverts, sizeof (aliasverts_t));
+		else D3D_DrawPrimitive (PrimitiveType, numverts - 2, aliasverts, sizeof (aliasverts_t));
 
 		// correct r_speeds count
 		d3d_RenderDef.alias_polys++;
@@ -846,20 +872,28 @@ void D3D_InitAliasModelState (void)
 	// set alias model state
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
-	D3D_SetTexCoordIndexes (0, 0);
+	if (d3d_GlobalCaps.usingPixelShaders && 0)
+	{
+		d3d_Device->SetVertexDeclaration (d3d_AliasDeclaration);
+		d3d_AliasFX.BeginRender ();
+	}
+	//else
+	{
+		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
+		D3D_SetTexCoordIndexes (0, 0);
+
+		// common texture states
+		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+		D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+		D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+	}
 
 	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 
 	// smooth shading
 	if (gl_smoothmodels.value) D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-
-	// common texture states
-	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
-	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
 }
 
 
@@ -927,9 +961,13 @@ bool D3D_PrepareAliasModel (entity_t *e, aliascache_t *c)
 	c->d3d_Texture = (LPDIRECT3DTEXTURE9) e->model->ah->texture[d3d_RenderDef.currententity->skinnum][anim];
 
 	// switch player skin (entnum - 1 is the same playernum as is used for calling into D3D_TranslatePlayerSkin so it's valid)
-	if (d3d_RenderDef.currententity->colormap != vid.colormap && !gl_nocolors.value)
-		if (d3d_RenderDef.currententity->entnum >= 1 && d3d_RenderDef.currententity->entnum <= cl.maxclients)
-			c->d3d_Texture = d3d_PlayerSkins[cl.scores[d3d_RenderDef.currententity->entnum - 1].colors];
+	// need to make sure that it actually *is* a player model in case a head model uses the same entity number
+	if (d3d_RenderDef.currententity->colormap != vid.colormap &&
+		!gl_nocolors.value &&
+		d3d_RenderDef.currententity->entnum >= 1 &&
+		d3d_RenderDef.currententity->entnum <= cl.maxclients &&
+		(e->model->flags & EF_PLAYER))
+		c->d3d_Texture = d3d_PlayerSkins[cl.scores[d3d_RenderDef.currententity->entnum - 1].colors];
 
 	// alias models should be affected by r_lightmap 1 too...
 	if (r_lightmap.integer) c->d3d_Texture = r_greytexture;
@@ -1033,6 +1071,8 @@ void D3D_DrawOpaqueAliasModels (void)
 		// back to flat shading
 		D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
 
+		if (d3d_GlobalCaps.usingPixelShaders && 0) d3d_AliasFX.EndRender ();
+
 		if (r_shadows.value > 0.0f)
 		{
 			bool shadestate = false;
@@ -1115,6 +1155,9 @@ void D3D_DrawTranslucentAliasModel (entity_t *ent)
 
 	// back to flat shading
 	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
+
+	// switch off shader
+	if (d3d_GlobalCaps.usingPixelShaders && 0) d3d_AliasFX.EndRender ();
 }
 
 
@@ -1215,6 +1258,9 @@ void D3D_DrawViewModel (void)
 
 	// back to flat shading
 	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
+
+	// switch off shader
+	if (d3d_GlobalCaps.usingPixelShaders && 0) d3d_AliasFX.EndRender ();
 }
 
 

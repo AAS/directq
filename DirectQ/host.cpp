@@ -618,8 +618,7 @@ void _Host_Frame (float time)
 	static float host_refreshtime = 666;
 
 	// something bad happened, or the server disconnected
-	if (setjmp (host_abortserver))
-		return;
+	if (setjmp (host_abortserver)) return;
 
 	// keep the random time dependent
 	rand ();
@@ -639,14 +638,19 @@ void _Host_Frame (float time)
 	NET_Poll ();
 
 	// if running the server locally, make intentions now
-	if (sv.active) CL_SendCmd ();
+	if (sv.active)
+	{
+		CL_SendCmd ();
 
-	// run the server
-	if (sv.active) Host_ServerFrame ();
-
-	// if running the server remotely, send intentions now after
-	// the incoming messages have been read
-	if (!sv.active) CL_SendCmd ();
+		// run a server frame (this can probably go in a separate thread)
+		Host_ServerFrame ();
+	}
+	else
+	{
+		// if running the server remotely, send intentions now after
+		// the incoming messages have been read
+		CL_SendCmd ();
+	}
 
 	host_time += host_frametime;
 	host_refreshtime += host_frametime;

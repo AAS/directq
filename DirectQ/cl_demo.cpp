@@ -130,8 +130,8 @@ int CL_GetMessage (void)
 	int	    r, i;
 	float	    f;
 	bool    Success;
-	
-	if	(cls.demoplayback)
+
+	if (cls.demoplayback)
 	{
 		// decide if it is time to grab the next message		
 		if (cls.signon == SIGNONS)	// allways grab until fully connected
@@ -148,7 +148,7 @@ int CL_GetMessage (void)
 			}
 			else if ( /* cl.time > 0 && */ cl.time <= cl.mtime[0])
 			{
-					return 0;		// don't need another message yet
+				return 0;		// don't need another message yet
 			}
 		}
 
@@ -190,15 +190,14 @@ int CL_GetMessage (void)
 	while (1)
 	{
 		r = NET_GetMessage (cls.netcon);
-		
+
 		if (r != 1 && r != 2)
 			return r;
-	
-	// discard nop keepalive message
+
+		// discard nop keepalive message
 		if (net_message.cursize == 1 && net_message.data[0] == svc_nop)
 			Con_Printf ("<-- server to client keepalive\n");
-		else
-			break;
+		else break;
 	}
 
 	if (cls.demorecording)
@@ -206,7 +205,7 @@ int CL_GetMessage (void)
 		if (!CL_WriteDemoMessage ())
 			return -1; // File write failure
 	}
-	
+
 	return r;
 }
 

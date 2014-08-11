@@ -404,6 +404,7 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 
 // mh - special flags
 #define EF_RMQRAIN	(1 << 20)	// remake quake rain
+#define EF_PLAYER	(1 << 21)
 
 // Quake uses 3 (count 'em!) different types of brush model and we need to distinguish between all of them
 #define MOD_BRUSH_WORLD		0
@@ -459,6 +460,9 @@ typedef struct brushheader_s
 
 	byte		*lightdata;
 	char		*entities;
+
+	// 29 (Q1) or 30 (HL)
+	int			bspversion;
 } brushhdr_t;
 
 

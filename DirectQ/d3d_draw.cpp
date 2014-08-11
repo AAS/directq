@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_quake.h"
 
-PALETTEENTRY texturepal[256];
 PALETTEENTRY lumapal[256];
 
 extern unsigned int lumatable[];
@@ -341,17 +340,10 @@ void Draw_Init (void)
 	int		start;
 	byte	*ncdata;
 
-	// copy out palette
+	// make palette for lumas
 	for (int i = 0; i < 256; i++)
 	{
-		byte *bgra = (byte *) &d_8to24table[i];
-
-		texturepal[i].peRed = bgra[2];
-		texturepal[i].peGreen = bgra[1];
-		texturepal[i].peBlue = bgra[0];
-		texturepal[i].peFlags = bgra[3];
-
-		bgra = (byte *) &lumatable[i];
+		byte *bgra = (byte *) &lumatable[i];
 
 		lumapal[i].peRed = bgra[2];
 		lumapal[i].peGreen = bgra[1];
@@ -1079,7 +1071,7 @@ void Draw_ConsoleBackground (int lines)
 	else Draw_Pic (0, lines - vid.height, conback);
 
 	Draw_StringOrange (vid.width - 84, (lines - vid.height) + vid.height - 30, "DirectQ");
-	Draw_StringOrange (vid.width - 88, (lines - vid.height) + vid.height - 22, "1.7.666b");
+	Draw_StringOrange (vid.width - 88, (lines - vid.height) + vid.height - 22, "1.7.666c");
 }
 
 

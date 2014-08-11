@@ -679,6 +679,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\fxAlias.fx"
+				>
+			</File>
+			<File
 				RelativePath=".\fxLiquid.fx"
 				>
 				<FileConfiguration
@@ -688,6 +692,10 @@
 						Name="VCCustomBuildTool"
 					/>
 				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\fxQ1Sky.fx"
+				>
 			</File>
 		</Filter>
 	</Files>

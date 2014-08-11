@@ -146,12 +146,28 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 		if (!model || model->type != mod_brush) goto dont_crash;
 
 		VectorSubtract (maxs, mins, size);
-		if (size[0] < 3)
-			hull = &model->bh->hulls[0];
-		else if (size[0] <= 32)
-			hull = &model->bh->hulls[1];
+
+		if (model->bh->bspversion == Q1_BSPVERSION)
+		{
+			if (size[0] < 3)
+				hull = &model->bh->hulls[0];
+			else if (size[0] <= 32)
+				hull = &model->bh->hulls[1];
+			else hull = &model->bh->hulls[2];
+		}
 		else
-			hull = &model->bh->hulls[2];
+		{
+			if (size[0] < 3)
+				hull = &model->bh->hulls[0]; // 0x0x0
+			else if (size[0] <= 32)
+			{
+				// pick the nearest of 36 or 72
+				if (size[2] < 54)
+					hull = &model->bh->hulls[3]; // 32x32x36
+				else hull = &model->bh->hulls[1]; // 32x32x72
+			}
+			else hull = &model->bh->hulls[2]; // 64x64x64
+		}
 
 		// calculate an offset value to center the origin
 		VectorSubtract (hull->clip_mins, mins, offset);

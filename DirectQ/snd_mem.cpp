@@ -57,20 +57,20 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 		sc->width = 1;
 	else
 		sc->width = inwidth;
+
 	sc->stereo = 0;
 
-// resample / decimate to the current source rate
-
+	// resample / decimate to the current source rate
 	if (stepscale == 1 && inwidth == 1 && sc->width == 1)
 	{
-// fast special case
+		// fast special case
 		for (i=0 ; i<outcount ; i++)
 			((signed char *)sc->data)[i]
 			= (int)( (unsigned char)(data[i]) - 128);
 	}
 	else
 	{
-// general case
+		// general case
 		samplefrac = 0;
 		fracstep = stepscale*256;
 		for (i=0 ; i<outcount ; i++)

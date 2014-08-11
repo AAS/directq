@@ -42,7 +42,7 @@ void W_CleanupName (char *in, char *out)
 {
 	int		i;
 	int		c;
-	
+
 	for (i=0 ; i<16 ; i++ )
 	{
 		c = in[i];
@@ -141,7 +141,7 @@ void *W_GetLumpNum (int num)
 
 	lump = wad_lumps + num;
 
-	return (void *)(wad_base + lump->filepos);
+	return (void *) (wad_base + lump->filepos);
 }
 
 /*
@@ -157,3 +157,104 @@ void SwapPic (qpic_t *pic)
 	pic->width = LittleLong(pic->width);
 	pic->height = LittleLong(pic->height);	
 }
+
+
+miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
+{
+	wadinfo_t header;
+	static miptex_t texmip;
+
+	// get the starting point of the wad so that we can get the correct lump position
+	int wadstart = SetFilePointer (fh, 0, NULL, FILE_CURRENT);
+
+	if (COM_FReadFile (fh, &header, sizeof (wadinfo_t)) != sizeof (wadinfo_t)) return NULL;
+	if (memcmp (header.identification, "WAD3", 4)) return NULL;
+
+	header.numlumps = LittleLong (header.numlumps);
+	header.infotableofs = LittleLong (header.infotableofs);
+
+	// seek to the info table (this is offset from the beginning of the file, NOT the current position)
+	// (do it this way so that it's PAK file friendly)
+	SetFilePointer (fh, header.infotableofs - sizeof (wadinfo_t), NULL, FILE_CURRENT);
+
+	for (int i = 0; i < header.numlumps; i++)
+	{
+		lumpinfo_t lump;
+
+		// if something went wrong with the read we don't bother checking any more
+		if (COM_FReadFile (fh, &lump, sizeof (lumpinfo_t)) != sizeof (lumpinfo_t)) return NULL;
+
+		// lump with no name
+		if (lump.name[0] == 0) continue;
+
+		// invalid attributes
+		if (lump.compression) continue;
+		if (lump.type != 'C') continue;
+
+		// clean the name/etc
+		W_CleanupName (lump.name, lump.name);
+		lump.filepos = LittleLong (lump.filepos);
+		lump.size = LittleLong (lump.size);
+
+		// check the name
+		if (!stricmp (lump.name, texname))
+		{
+			// found it; read in the miptex (if anything goes wrong during this procedure we need to return NULL
+			// as the pointer, infotable, etc are all out of whack)
+			SetFilePointer (fh, wadstart + lump.filepos, NULL, FILE_BEGIN);
+
+			if (COM_FReadFile (fh, &texmip, sizeof (miptex_t)) != sizeof (miptex_t)) return NULL;
+
+			return &texmip;
+		}
+	}
+
+	// found nothing
+	return NULL;
+}
+
+
+miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipdata)
+{
+	if (!mipdata) return NULL;
+
+	// hl WAD files contain an absolute path to the dev directory of whoever built it,
+	// which isn't much use for loading for real, so jump backwards through the path
+	// looking for one that does actually exist until we either find one or run out.
+	for (int i = strlen (wadname); i >= 0; i--)
+	{
+		if (wadname[i] == '/' || wadname[i] == '\\')
+		{
+			HANDLE fh = INVALID_HANDLE_VALUE;
+
+			COM_FOpenFile (&wadname[i + 1], &fh);
+
+			if (fh != INVALID_HANDLE_VALUE)
+			{
+				// found one; now look for the texture in it
+				miptex_t *texmip = W_ValidateHLWAD (fh, texname);
+
+				if (!texmip)
+				{
+					// didn't find the texture
+					COM_FCloseFile (&fh);
+					continue;
+				}
+
+				// found it!!!  alloc a buffer to hold the new texture - this must be big enough for 4
+				// miplevels plus the palette
+				mipdata[0] = (miptex_t *) Zone_Alloc (sizeof (miptex_t) + ((texmip->width * texmip->height * 85) >> 6) + 770);
+				memcpy (mipdata[0], texmip, sizeof (miptex_t));
+
+				// now read the rest of the data
+				COM_FReadFile (fh, (byte *) (mipdata[0] + 1), ((texmip->width * texmip->height * 85) >> 6) + 770);
+
+				COM_FCloseFile (&fh);
+				return mipdata[0];
+			}
+		}
+	}
+
+	return NULL;
+}
+

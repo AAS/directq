@@ -887,7 +887,7 @@ loc1:;
 	}
 
 	splitplane = node->plane;
-	sides = BOX_ON_PLANE_SIDE (absmins, absmaxs, splitplane);
+	sides = BoxOnPlaneSide (absmins, absmaxs, splitplane);
 
 	// recurse down the contacted sides
 	if ((sides & 1) && node->children[0]->contents != CONTENTS_SOLID)

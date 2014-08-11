@@ -18,7 +18,9 @@ IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
 IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
 
 // shaders
+IDR_ALIAS				RCDATA		"fxAlias.fx"
 IDR_LIQUID				RCDATA		"fxLiquid.fx"
+IDR_SKY					RCDATA		"fxQ1Sky.fx"
 
 // icons
 IDI_APPICON				ICON			"dq.ico"

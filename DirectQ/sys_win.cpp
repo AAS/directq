@@ -652,12 +652,14 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 
 
+void VID_DefaultMonitorGamma_f (void);
+
 int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-	quakeparms_t	parms;
-	float			time, oldtime, newtime;
-	static	char	cwd[MAX_PATH];
-	int				t;
+	quakeparms_t parms;
+	float time, oldtime, newtime;
+	char cwd[MAX_PATH];
+	int t;
 
 	// previous instances do not exist in Win32
 	// this is stupid as is can't be anothing but NULL...
@@ -687,8 +689,8 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if (!GetCurrentDirectory (sizeof (cwd), cwd))
 		Sys_Error ("Couldn't determine current directory");
 
-	if (cwd[strlen(cwd)-1] == '/' || cwd[strlen(cwd)-1] == '\\')
-		cwd[strlen(cwd)-1] = 0;
+	if (cwd[strlen (cwd) - 1] == '/' || cwd[strlen (cwd) - 1] == '\\')
+		cwd[strlen (cwd) - 1] = 0;
 
 	parms.basedir = cwd;
 	parms.cachedir = NULL;
@@ -724,20 +726,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	parms.argc = com_argc;
 	parms.argv = com_argv;
 
-	if (COM_CheckParm ("-dedicated") != 0)
-	{
-		// dedicated server is no longer supported
-		MessageBox
-		(
-			NULL,
-			"DirectQ can no longer run as a Dedicated Server.\nWhy would you want to anyway?\n\nUse another engine!",
-			"Error",
-			MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_SETFOREGROUND | MB_TOPMOST
-		);
-
-		return -1;
-	}
-
 	// initialize the splash screen
 	Splash_Init ();
 
@@ -748,7 +736,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	wc.lpfnWndProc = (WNDPROC) MainWndProc;
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
-	wc.hInstance = hInstance;
+	wc.hInstance = GetModuleHandle (NULL);
 	wc.hIcon = 0;
 	wc.hCursor = LoadCursor (NULL,IDC_ARROW);
 	wc.hbrBackground = NULL;
@@ -765,31 +753,40 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	Host_Init (&parms);
 	oldtime = Sys_FloatTime ();
 
-	// main window message loop
-	while (1)
+	// for catching crashes and restoring monitor gamma
+	try
 	{
-		// yield the CPU for a little while when paused, minimized, or not the focus
-		if (cl.paused || !ActiveApp || Minimized || block_drawing)
+		// main window message loop
+		while (1)
 		{
-			// no point in bothering to draw
-			scr_skipupdate = 1;
+			// yield the CPU for a little while when paused, minimized, or not the focus
+			if (cl.paused || !ActiveApp || Minimized || block_drawing)
+			{
+				// no point in bothering to draw
+				scr_skipupdate = 1;
 
-			if (cl.paused)
-				Sleep (PAUSE_SLEEP);
-			else Sleep (NOT_FOCUS_SLEEP);
+				if (cl.paused)
+					Sleep (PAUSE_SLEEP);
+				else Sleep (NOT_FOCUS_SLEEP);
+			}
+
+			newtime = Sys_FloatTime ();
+			time = newtime - oldtime;
+
+			Host_Frame (time);
+			oldtime = newtime;
+
+			// this doesn't really sleep, it just lets other threads spawned by the app do their thing
+			Sleep (0);
 		}
-
-		newtime = Sys_FloatTime ();
-		time = newtime - oldtime;
-
-		Host_Frame (time);
-		oldtime = newtime;
-
-		// this doesn't really sleep, it just lets other threads spawned by the app do their thing
-		Sleep (0);
+	}
+	catch (...)
+	{
+		// try to restore monitor gamma correctly if we crash
+		VID_DefaultMonitorGamma_f ();
 	}
 
-	// return success of application (never reached owing to use of an exit.
-	return TRUE;
+	// success of application
+	return 0;
 }
 

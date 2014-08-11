@@ -34,6 +34,8 @@ CQMenu menu_Search (m_other);
 CQMenu menu_SList (m_other);
 CQMenu menu_FunName (m_other);
 
+extern cvar_t cl_natfix;
+
 #define TAG_ID1OPTIONS			1
 #define TAG_HIPNOTICOPTIONS		2
 #define TAG_ROGUEOPTIONS		3
@@ -810,8 +812,11 @@ void Menu_InitMultiplayerMenu (void)
 	menu_TCPIPNewGame.AddOption (new CQMenuCustomEnter (Menu_TCPIPCustomEnter));
 	menu_TCPIPNewGame.AddOption (new CQMenuCustomDraw (Menu_TCPIPCustomDraw));
 	menu_TCPIPNewGame.AddOption (new CQMenuCvarTextbox ("Port", &dummy_port, TBFLAG_ALLOWNUMBERS));
+	menu_TCPIPNewGame.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_TCPIPNewGame.AddOption (new CQMenuSpinControl ("Protocol", &selected_protocol, protolist));
 	menu_TCPIPNewGame.AddOption (new CQMenuCustomDraw (Menu_TCPIPProtoDesc));
+	menu_TCPIPNewGame.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_TCPIPNewGame.AddOption (new CQMenuCvarToggle ("Use ProQuake NAT Fix", &cl_natfix, 0, 1));
 	menu_TCPIPNewGame.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_TCPIPNewGame.AddOption (new CQMenuCommand ("Continue to Game Options", Menu_TCPIPContinueToGameOptions));
 
@@ -821,6 +826,8 @@ void Menu_InitMultiplayerMenu (void)
 	menu_TCPIPJoinGame.AddOption (new CQMenuCustomEnter (Menu_TCPIPCustomEnter));
 	menu_TCPIPJoinGame.AddOption (new CQMenuCustomDraw (Menu_TCPIPCustomDraw));
 	menu_TCPIPJoinGame.AddOption (new CQMenuCvarTextbox ("Port", &dummy_port, TBFLAG_ALLOWNUMBERS));
+	menu_TCPIPJoinGame.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_TCPIPJoinGame.AddOption (new CQMenuCvarToggle ("Use ProQuake NAT Fix", &cl_natfix, 0, 1));
 	menu_TCPIPJoinGame.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_TCPIPJoinGame.AddOption (new CQMenuSubMenu ("Search for Local Games", &menu_Search));
 	menu_TCPIPJoinGame.AddOption (new CQMenuSpacer (DIVIDER_LINE));

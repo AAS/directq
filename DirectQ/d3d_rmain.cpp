@@ -50,6 +50,7 @@ void D3D_DrawTranslucentAliasModel (entity_t *ent);
 void D3D_DrawSpriteModel (entity_t *e);
 
 DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
+float d3d_OverbrightModulate = 2.0f;
 
 // render definition for this frame
 d3d_renderdef_t d3d_RenderDef;
@@ -480,10 +481,20 @@ void D3D_PrepareOverbright (void)
 	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
 
 	if (r_overbright.integer < 1)
+	{
 		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE;
+		d3d_OverbrightModulate = 1.0f;
+	}
 	else if (r_overbright.integer > 1)
+	{
 		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE4X;
-	else D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
+		d3d_OverbrightModulate = 4.0f;
+	}
+	else
+	{
+		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
+		d3d_OverbrightModulate = 2.0f;
+	}
 
 	D3D_RescaleLumas ();
 }
@@ -1187,9 +1198,6 @@ void R_RenderView (void)
 
 	if (r_norefresh.value) return;
 	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldbrush) return;
-
-	// see if we are using pixel shaders
-	d3d_GlobalCaps.usingPixelShaders = d3d_GlobalCaps.supportPixelShaders && r_hlsl.integer;
 
 	// always ensure this
 	cl.worldbrush->brushtype = MOD_BRUSH_WORLD;

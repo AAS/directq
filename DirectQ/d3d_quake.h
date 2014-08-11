@@ -120,7 +120,6 @@ typedef struct worldvert_s
 	DWORD dummy;
 } worldvert_t;
 
-extern DWORD d3d_VertexBufferUsage;
 
 // video
 void D3D_InitDirect3D (D3DDISPLAYMODE *mode);
@@ -144,6 +143,7 @@ extern D3DDISPLAYMODE d3d_CurrentMode;
 #define IMAGE_NOCOMPRESS	512
 #define IMAGE_RMQRAIN		1024
 #define IMAGE_NOEXTERN		2048
+#define IMAGE_HALFLIFE		4096
 
 
 typedef struct image_s
@@ -200,6 +200,10 @@ void D3D_Set2D (void);
 typedef struct d3d_global_caps_s
 {
 	D3DFORMAT DepthStencilFormat;
+	bool supportXRGB;
+	bool supportARGB;
+	bool supportL8;
+	bool supportA8L8;
 	bool supportDXT1;
 	bool supportDXT3;
 	bool supportDXT5;
@@ -334,6 +338,10 @@ void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts);
 
 // TRUE if IDirect3DDevice9::BeginScene has been called
 extern BOOL d3d_SceneBegun;
+
+// modulation factors for overbrights; the first is for fixed, the second for HLSL
+extern DWORD D3D_OVERBRIGHT_MODULATE;
+extern float d3d_OverbrightModulate;
 
 // enumeration to string conversion
 char *D3DTypeToString (D3DFORMAT enumval);

@@ -25,7 +25,7 @@ DIRECTQ 1.7.666b UPDATES
 * Enabled key auto-repeat for console and menus.
 * Reverted full scoreboard to old behaviour (releasing TAB hides it) in multiplayer games.
 * Enforced old ammo/health box lighting method in multiplayer games.
-* Reverted something similar to old alias model lighting range in multiplayer games.
+* Reverted something similar to old alias model lighting range in miltiplayer games.
 
 
 

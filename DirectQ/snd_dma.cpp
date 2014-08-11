@@ -522,6 +522,9 @@ void S_StopAllSoundsC (void)
 	S_StopAllSounds (true);
 }
 
+
+bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize, void **pbuf2, DWORD *dwSize2, DWORD dwFlags);
+
 void S_ClearBuffer (void)
 {
 	int		clear;
@@ -531,35 +534,15 @@ void S_ClearBuffer (void)
 
 	if (shm->samplebits == 8)
 		clear = 0x80;
-	else
-		clear = 0;
+	else clear = 0;
 
 	DWORD	dwSize;
 	DWORD	*pData;
-	int		reps;
 
-	reps = 0;
+	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &pData, &dwSize, NULL, NULL, 0)) return;
 
-	while ((hr = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pData, &dwSize, NULL, NULL, 0)) != DS_OK)
-	{
-		if (hr != DSERR_BUFFERLOST)
-		{
-			Con_Printf ("S_ClearBuffer: DS::Lock Sound Buffer Failed\n");
-			S_Shutdown ();
-			return;
-		}
-
-		if (++reps > 10000)
-		{
-			Con_Printf ("S_ClearBuffer: DS: couldn't restore buffer\n");
-			S_Shutdown ();
-			return;
-		}
-	}
-
-	memset(pData, clear, shm->samples * shm->samplebits/8);
-
-	ds_SecondaryBuffer8->Unlock(pData, dwSize, NULL, 0);
+	memset (pData, clear, shm->samples * shm->samplebits / 8);
+	ds_SecondaryBuffer8->Unlock (pData, dwSize, NULL, 0);
 }
 
 
@@ -678,8 +661,7 @@ void S_Update (vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 	channel_t	*ch;
 	channel_t	*combine;
 
-	if (!sound_started || (snd_blocked > 0))
-		return;
+	if (!sound_started || (snd_blocked > 0)) return;
 
 	VectorCopy (origin, listener_origin);
 	VectorCopy (forward, listener_forward);
@@ -703,7 +685,7 @@ void S_Update (vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 		SND_Spatialize (ch);
 
 		// no volume
-		if (!ch->leftvol && !ch->rightvol) continue;
+		if (ch->leftvol < 1 && ch->rightvol < 1) continue;
 
 		// try to combine static sounds with a previous channel of the same
 		// sound effect so we don't mix five torches every frame
@@ -749,9 +731,9 @@ void S_Update (vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 
 		for (i = 0; i < total_channels; i++, ch++)
 		{
-			if (ch->sfx && (ch->leftvol || ch->rightvol))
+			if (ch->sfx && (ch->leftvol > 0 || ch->rightvol > 0))
 			{
-				//Con_Printf ("%3i %3i %s\n", ch->leftvol, ch->rightvol, ch->sfx->name);
+				Con_Printf ("%3i %3i %s\n", ch->leftvol, ch->rightvol, ch->sfx->name);
 				total++;
 			}
 		}
@@ -807,9 +789,8 @@ void S_Update_(void)
 {
 	unsigned        endtime;
 	int				samps;
-	
-	if (!sound_started || (snd_blocked > 0))
-		return;
+
+	if (!sound_started || (snd_blocked > 0)) return;
 
 	// Updates DMA time
 	GetSoundtime ();
@@ -824,22 +805,18 @@ void S_Update_(void)
 	// mix ahead of current position
 	endtime = soundtime + _snd_mixahead.value * shm->speed;
 	samps = shm->samples >> (shm->channels-1);
+
 	if (endtime - soundtime > samps)
 		endtime = soundtime + samps;
 
 	// if the buffer was lost or stopped, restore it and/or restart it
-	DWORD	dwStatus;
+	DWORD dwStatus;
 
 	if (ds_SecondaryBuffer8)
 	{
-		if (ds_SecondaryBuffer8->GetStatus (&dwStatus) != DD_OK)
-			Con_Printf ("Couldn't get sound buffer status\n");
-		
-		if (dwStatus & DSBSTATUS_BUFFERLOST)
-			ds_SecondaryBuffer8->Restore ();
-		
-		if (!(dwStatus & DSBSTATUS_PLAYING))
-			ds_SecondaryBuffer8->Play(0, 0, DSBPLAY_LOOPING);
+		if (ds_SecondaryBuffer8->GetStatus (&dwStatus) != DD_OK) Con_Printf ("Couldn't get sound buffer status\n");
+		if (dwStatus & DSBSTATUS_BUFFERLOST) ds_SecondaryBuffer8->Restore ();
+		if (!(dwStatus & DSBSTATUS_PLAYING)) ds_SecondaryBuffer8->Play (0, 0, DSBPLAY_LOOPING);
 	}
 
 	S_PaintChannels (endtime);

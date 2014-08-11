@@ -46,7 +46,7 @@ extern LPDIRECT3DTEXTURE9 simpleskytexture;
 LPDIRECT3DTEXTURE9 yahtexture;
 
 // for palette hackery
-extern PALETTEENTRY texturepal[];
+PALETTEENTRY *texturepal = NULL;
 extern PALETTEENTRY lumapal[];
 
 // external textures directory - note - this should be registered before any textures are loaded, otherwise we will attempt to load
@@ -87,9 +87,14 @@ D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 {
 	// cut down on storage for luma textures.  we could just use L8 but we need the extra 8
 	// bits for storing the original value in so that we can refresh it properly if the overbright mode changes.
-	if (flags & IMAGE_LUMA) return D3DFMT_A8L8;
+	if (flags & IMAGE_LUMA)
+	{
+		if (d3d_GlobalCaps.supportA8L8)
+			return D3DFMT_A8L8;
+		else return D3DFMT_A8R8G8B8;
+	}
 
-	D3DFORMAT TextureFormat = D3DFMT_X8R8G8B8;
+	D3DFORMAT TextureFormat = d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
 
 	// disable compression
 	if (!gl_compressedtextures.value) flags |= IMAGE_NOCOMPRESS;
@@ -123,7 +128,7 @@ D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 	else
 	{
 		if (flags & IMAGE_NOCOMPRESS)
-			return D3DFMT_X8R8G8B8;
+			return d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
 
 		// prefer dxt1 but allow other compression formats if available
 		if (d3d_GlobalCaps.supportDXT1)
@@ -132,7 +137,9 @@ D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 			TextureFormat = D3DFMT_DXT3;
 		else if (d3d_GlobalCaps.supportDXT5)
 			TextureFormat = D3DFMT_DXT5;
-		else TextureFormat = D3DFMT_X8R8G8B8;
+		else if (d3d_GlobalCaps.supportXRGB)
+			TextureFormat = D3DFMT_X8R8G8B8;
+		else TextureFormat = D3DFMT_A8R8G8B8;
 	}
 
 	return TextureFormat;
@@ -488,10 +495,26 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 		if (image->flags & IMAGE_MIPMAP) FilterFlags |= (D3DX_FILTER_MIRROR_U | D3DX_FILTER_MIRROR_V);
 	}
 
+	if (!texturepal)
+	{
+		texturepal = (PALETTEENTRY *) Pool_Alloc (POOL_PERMANENT, 256 * sizeof (PALETTEENTRY));
+
+		for (int i = 0; i < 256; i++)
+		{
+			// per doc, peFlags is used for alpha
+			// invert again so that the layout will be correct
+			texturepal[i].peRed = ((byte *) &d_8to24table[i])[2];
+			texturepal[i].peGreen = ((byte *) &d_8to24table[i])[1];
+			texturepal[i].peBlue = ((byte *) &d_8to24table[i])[0];
+			texturepal[i].peFlags = ((byte *) &d_8to24table[i])[3];
+		}
+	}
+
 	// default to the standard palette
 	PALETTEENTRY *activepal = texturepal;
 
 	// switch the palette
+	if (image->flags & IMAGE_HALFLIFE) activepal = (PALETTEENTRY *) image->palette;
 	if (image->flags & IMAGE_LUMA) activepal = lumapal;
 
 	hr = D3DXLoadSurfaceFromMemory
@@ -565,19 +588,39 @@ bool D3D_MakeLumaTexture (LPDIRECT3DTEXTURE9 tex)
 
 	bool isrealluma = false;
 
-	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+	if (d3d_GlobalCaps.supportA8L8)
 	{
-		// A8L8 maps to unsigned short
-		byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
+		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+		{
+			// A8L8 maps to unsigned short
+			byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
 
-		// store the original value in the alpha channel
-		a8l8[1] = a8l8[0];
+			// store the original value in the alpha channel
+			a8l8[1] = a8l8[0];
 
-		// check for if it's really a luma
-		if (a8l8[1]) isrealluma = true;
+			// check for if it's really a luma
+			if (a8l8[1]) isrealluma = true;
 
-		// scale for overbrights
-		a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
+			// scale for overbrights
+			a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
+		}
+	}
+	else
+	{
+		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+		{
+			// A8R8G8B8 maps to unsigned int
+			byte *argb = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
+
+			// store the original value in the alpha channel
+			argb[3] = argb[0];
+
+			// check for if it's really a luma
+			if (argb[3]) isrealluma = true;
+
+			// scale for overbrights
+			argb[0] = argb[1] = argb[2] = D3D_ScaleLumaTexel (argb[3]);
+		}
 	}
 
 	// unlock and rebuild the mipmap chain
@@ -839,6 +882,31 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (char *identifier, int width, int height, byt
 }
 
 
+unsigned int *D3D_MakeTexturePalette (miptex_t *mt)
+{
+	static unsigned int hlPal[256];
+
+	// the palette follows the data for the last miplevel
+	byte *pal = ((byte *) mt) + mt->offsets[0] + ((mt->width * mt->height * 85) >> 6) + 2;
+
+	// now build a palette from the image data
+	// don't gamma-adjust this data
+	for (int i = 0; i < 256; i++)
+	{
+		((byte *) &hlPal[i])[0] = pal[0];
+		((byte *) &hlPal[i])[1] = pal[1];
+		((byte *) &hlPal[i])[2] = pal[2];
+		((byte *) &hlPal[i])[3] = 255;
+		pal += 3;
+	}
+
+	// check special texture types
+	if (mt->name[0] == '{') hlPal[255] = 0;
+
+	return hlPal;
+}
+
+
 LPDIRECT3DTEXTURE9 D3D_LoadTexture (miptex_t *mt, int flags)
 {
 	image_t image;
@@ -847,8 +915,13 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (miptex_t *mt, int flags)
 	image.flags = flags;
 	image.height = mt->height;
 	image.width = mt->width;
-	image.palette = d_8to24table;
 
+	// set the correct palette
+	if (flags & IMAGE_HALFLIFE)
+		image.palette = D3D_MakeTexturePalette (mt);
+	else image.palette = d_8to24table;
+
+	// this needs to come after the palette as the texture name may be modified
 	strcpy (image.identifier, mt->name);
 
 	return D3D_LoadTexture (&image);
@@ -1054,13 +1127,27 @@ void D3D_RescaleIndividualLuma (LPDIRECT3DTEXTURE9 tex)
 	tex->GetLevelDesc (0, &Level0Desc);
 	tex->LockRect (0, &Level0Rect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
 
-	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+	if (d3d_GlobalCaps.supportA8L8)
 	{
-		// A8L8 maps to unsigned short
-		byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
+		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+		{
+			// A8L8 maps to unsigned short
+			byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
 
-		// scale for overbrights
-		a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
+			// scale for overbrights
+			a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
+		}
+	}
+	else
+	{
+		for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+		{
+			// A8R8G8B8 maps to unsigned short
+			byte *argb = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
+
+			// scale for overbrights
+			argb[0] = argb[1] = argb[2] = D3D_ScaleLumaTexel (argb[3]);
+		}
 	}
 
 	// unlock and rebuild the mipmap chain
