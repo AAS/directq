@@ -71,6 +71,8 @@ int         hipweapons[4] = {HIT_LASER_CANNON_BIT, HIT_MJOLNIR_BIT, 4, HIT_PROXI
 //MED 01/04/97 added hipnotic items array
 qpic_t      *hsb_items[2];
 
+qpic_t		*ksb_ammo[1];
+
 bool	hud_showscores = false;
 bool	hud_showdemoscores = false;
 
@@ -219,6 +221,8 @@ void HUD_Init (void)
 		rsb_invbar[0] = Draw_LoadPic ("r_invbar1");
 		rsb_invbar[1] = Draw_LoadPic ("r_invbar2");
 	}
+
+	if (kurok) ksb_ammo[0] = Draw_LoadPic ("sb_50cal");
 }
 
 
@@ -270,8 +274,10 @@ HUD_Init
 cmd_t HUD_ShowScores_Cmd ("+showscores", HUD_ShowScores);
 cmd_t HUD_DontShowScores_Cmd ("-showscores", HUD_DontShowScores);
 
+void SCR_RefdefCvarChange (cvar_t *blah);
+
 // new names for compatibility with other engines
-cvar_t cl_sbar ("cl_sbar", "0", CVAR_ARCHIVE);
+cvar_t cl_sbar ("cl_sbar", "0", CVAR_ARCHIVE, SCR_RefdefCvarChange);
 cvar_t scr_sbaralpha ("scr_sbaralpha", "0.5f", CVAR_ARCHIVE);
 cvar_t scr_centersbar ("scr_centersbar", "1", CVAR_ARCHIVE);
 
@@ -362,7 +368,32 @@ void HUD_DrawNum (int x, int y, int num, int digits, int color = 0)
 	ptr = str;
 
 	if (l > digits) ptr += (l - digits);
-	if (l < digits) x += (digits - l) * 24;
+	if (l < digits) x += (digits - l) * (kurok ? 16 : 24);
+
+	while (*ptr)
+	{
+		if (*ptr == '-')
+			frame = STAT_MINUS;
+		else frame = *ptr - '0';
+
+		Draw_Pic (x, y, sb_nums[color][frame], 1, true);
+		x += (kurok ? 16 : 24);
+		ptr++;
+	}
+}
+
+
+void HUD_DrawNum2 (int x, int y, int num, int digits, int color)
+{
+	char str[12];
+	char *ptr;
+	int l, frame;
+
+	l = HUD_itoa (num, str);
+	ptr = str;
+
+	if (l > digits) ptr += (l - digits);
+	if (l < digits) x += (digits - l) * 0;
 
 	while (*ptr)
 	{
@@ -371,7 +402,7 @@ void HUD_DrawNum (int x, int y, int num, int digits, int color = 0)
 		else frame = *ptr - '0';
 
 		Draw_Pic (x, y, sb_nums[color][frame]);
-		x += 24;
+		x += 16;
 		ptr++;
 	}
 }
@@ -512,6 +543,12 @@ char *HUD_GetMapName (void)
 {
 	char *mapname = (char *) scratchbuf;
 
+	if (!cls.maprunning)
+	{
+		strcpy (mapname, "null");
+		return mapname;
+	}
+
 	strcpy (mapname, &cl.worldmodel->name[5]);
 
 	for (int i = strlen (mapname); i; i--)
@@ -626,7 +663,7 @@ void HUD_DeathmatchOverlay (void)
 	int top, bottom;
 	char num[12];
 
-	Draw_Pic ((vid.currsize->width - gfx_ranking_lmp->width) / 2, 32, gfx_ranking_lmp);
+	Draw_Pic ((vid.currsize->width - gfx_ranking_lmp->width) / 2, 32, gfx_ranking_lmp, 1, true);
 
 	// base X
 	x = vid.currsize->width / 2;
@@ -735,7 +772,7 @@ void HUD_SoloScoreboard (qpic_t *pic, float solotime)
 	int SBX;
 	int SBY;
 
-	Draw_Pic ((vid.currsize->width - pic->width) / 2, 48, pic);
+	Draw_Pic ((vid.currsize->width - pic->width) / 2, 48, pic, 1, true);
 
 	// base X
 	SBX = vid.currsize->width / 2;
@@ -839,7 +876,7 @@ void HUD_DrawFace (int ActiveItems, int HealthStat)
 		HealthStat = 200;
 	}
 
-	Draw_Pic (x, y, facepic);
+	Draw_Pic (x, y, facepic, 1, true);
 
 	x = HUD_GetX (&hud_faceval[cl_sbar.integer]);
 	y = HUD_GetY (&hud_faceval[cl_sbar.integer]);
@@ -864,7 +901,16 @@ void HUD_DrawArmor (int ActiveItems, int ArmorStat)
 	{
 		armorval = ArmorStat;
 
-		if (rogue)
+		if (kurok)
+		{
+			if (ActiveItems & KIT_ARMOR3)
+				armorpic = sb_armor[2];
+			else if (ActiveItems & KIT_ARMOR2)
+				armorpic = sb_armor[1];
+			else if (ActiveItems & KIT_ARMOR1)
+				armorpic = sb_armor[0];
+		}
+		else if (rogue)
 		{
 			// rogue hackery
 			if (ActiveItems & RIT_ARMOR3)
@@ -897,7 +943,7 @@ void HUD_DrawArmor (int ActiveItems, int ArmorStat)
 		x = HUD_GetX (&hud_armorpic[cl_sbar.integer]);
 		y = HUD_GetY (&hud_armorpic[cl_sbar.integer]);
 
-		Draw_Pic (x, y, armorpic);
+		Draw_Pic (x, y, armorpic, 1, true);
 	}
 
 	if (!armorval && (hud_armorval[cl_sbar.integer].flags & HUD_HIDEIF0)) return;
@@ -927,7 +973,20 @@ void HUD_DrawAmmo (int ActiveItems, int AmmoStat)
 	qpic_t *ammopic = NULL;
 
 	// ammo icon
-	if (rogue)
+	if (kurok)
+	{
+		if (ActiveItems & KIT_SHELLS)
+			ammopic = sb_ammo[0];
+		else if (ActiveItems & KIT_NAILS)
+			ammopic = sb_ammo[1];
+		else if (ActiveItems & KIT_ROCKETS)
+			ammopic = sb_ammo[2];
+		else if (ActiveItems & KIT_CELLS)
+			ammopic = sb_ammo[3];
+		else if (ActiveItems & KIT_50CAL)
+			ammopic = ksb_ammo[0];
+	}
+	else if (rogue)
 	{
 		// rogue hackery
 		if (ActiveItems & RIT_SHELLS)
@@ -969,7 +1028,7 @@ void HUD_DrawAmmo (int ActiveItems, int AmmoStat)
 		x = HUD_GetX (&hud_ammopic[cl_sbar.integer]);
 		y = HUD_GetY (&hud_ammopic[cl_sbar.integer]);
 
-		Draw_Pic (x, y, ammopic);
+		Draw_Pic (x, y, ammopic, 1, true);
 	}
 
 	if (!AmmoStat && (hud_ammoval[cl_sbar.integer].flags & HUD_HIDEIF0)) return;
@@ -999,7 +1058,7 @@ void HUD_DrawSigils (int ActiveItems)
 	for (int i = 0; i < 4; i++)
 	{
 		if ((ActiveItems & (1 << (28 + i))) || hud_drawfull)
-			Draw_Pic (x, y, sb_sigil[i]);
+			Draw_Pic (x, y, sb_sigil[i], 1, true);
 
 		x += hud_sigils[cl_sbar.integer].hx;
 		y += hud_sigils[cl_sbar.integer].hy;
@@ -1018,7 +1077,7 @@ void HUD_DrawKeys (int ActiveItems)
 		for (int i = 0; i < 2; i++)
 		{
 			if ((ActiveItems & (1 << (17 + i))) || hud_drawfull)
-				Draw_Pic (x, y, sb_items[i]);
+				Draw_Pic (x, y, sb_items[i], 1, true);
 
 			x += hud_hipnokeys[cl_sbar.integer].hx;
 			y += hud_hipnokeys[cl_sbar.integer].hy;
@@ -1033,7 +1092,7 @@ void HUD_DrawKeys (int ActiveItems)
 		for (int i = 0; i < 2; i++)
 		{
 			if ((ActiveItems & (1 << (17 + i))) || hud_drawfull)
-				Draw_Pic (x, y, sb_items[i]);
+				Draw_Pic (x, y, sb_items[i], 1, true);
 
 			x += hud_keys[cl_sbar.integer].hx;
 			y += hud_keys[cl_sbar.integer].hy;
@@ -1088,7 +1147,7 @@ void HUD_DrawItems (int ActiveItems)
 		int CurrentItem = 17 + i;
 
 		if (ActiveItems & (1 << CurrentItem))
-			Draw_Pic (x, y, sb_items[i]);
+			Draw_Pic (x, y, sb_items[i], 1, true);
 
 		x += hud_items[cl_sbar.integer].hx;
 		y += hud_items[cl_sbar.integer].hy;
@@ -1101,7 +1160,7 @@ void HUD_DrawItems (int ActiveItems)
 		for (int i = 0; i < 2; i++)
 		{
 			if ((ActiveItems & (1 << (24 + i))) || hud_drawfull)
-				Draw_Pic (x, y, hsb_items[i]);
+				Draw_Pic (x, y, hsb_items[i], 1, true);
 
 			x += hud_items[cl_sbar.integer].hx;
 			y += hud_items[cl_sbar.integer].hy;
@@ -1114,7 +1173,7 @@ void HUD_DrawItems (int ActiveItems)
 		for (int i = 0; i < 2; i++)
 		{
 			if ((ActiveItems & (1 << (29 + i))) || hud_drawfull)
-				Draw_Pic (x, y, rsb_items[i]);
+				Draw_Pic (x, y, rsb_items[i], 1, true);
 
 			x += hud_items[cl_sbar.integer].hx;
 			y += hud_items[cl_sbar.integer].hy;
@@ -1183,8 +1242,8 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 
 			// handle wider lightning gun pic
 			if (cl_sbar.value > 1)
-				Draw_Pic (x - sb_weapons[flashon][i]->width, y, sb_weapons[flashon][i]);
-			else Draw_Pic (x, y, sb_weapons[flashon][i]);
+				Draw_Pic (x - sb_weapons[flashon][i]->width, y, sb_weapons[flashon][i], 1, true);
+			else Draw_Pic (x, y, sb_weapons[flashon][i], 1, true);
 		}
 
 		x += hud_weapons[cl_sbar.integer].hx;
@@ -1267,8 +1326,8 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 				if (hipnopic)
 				{
 					if (cl_sbar.value > 1)
-						Draw_Pic (hipnox - hipnopic->width, hipnoy, hipnopic);
-					else Draw_Pic (hipnox, hipnoy, hipnopic);
+						Draw_Pic (hipnox - hipnopic->width, hipnoy, hipnopic, 1, true);
+					else Draw_Pic (hipnox, hipnoy, hipnopic, 1, true);
 				}
 			}
 
@@ -1289,8 +1348,8 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 				{
 					// handle pic widths
 					if (cl_sbar.value > 1)
-						Draw_Pic (savedx[i + 2] - rsb_weapons[i]->width, savedy[i + 2], rsb_weapons[i]);
-					else Draw_Pic (savedx[i + 2], savedy[i + 2], rsb_weapons[i]);
+						Draw_Pic (savedx[i + 2] - rsb_weapons[i]->width, savedy[i + 2], rsb_weapons[i], 1, true);
+					else Draw_Pic (savedx[i + 2], savedy[i + 2], rsb_weapons[i], 1, true);
 				}
 			}
 		}
@@ -1308,7 +1367,7 @@ void HUD_DrawTeamColors (void)
 
 	if (hud_drawfull)
 	{
-		Draw_Pic (x, y, rsb_teambord);
+		Draw_Pic (x, y, rsb_teambord, 1, true);
 		return;
 	}
 
@@ -1331,7 +1390,7 @@ void HUD_DrawTeamColors (void)
 	top = HUD_ColorForMap (top);
 	bottom = HUD_ColorForMap (bottom);
 
-	Draw_Pic (x, y, rsb_teambord);
+	Draw_Pic (x, y, rsb_teambord, 1, true);
 
 	Draw_Fill (x + 2, y + 2, 21, 10, top);
 	Draw_Fill (x + 2, y + 12, 21, 10, bottom);
@@ -1367,8 +1426,8 @@ void HUD_DrawSBar (void)
 		int y = HUD_GetY (&hud_sbar[cl_sbar.integer]);
 
 		if (cl_sbar.integer == 1)
-			Draw_Pic (x, y, sb_sbar, scr_sbaralpha.value);
-		else Draw_Pic (x, y, sb_sbar, 1.0f);
+			Draw_Pic (x, y, sb_sbar, scr_sbaralpha.value, true);
+		else Draw_Pic (x, y, sb_sbar, 1.0f, true);
 	}
 }
 
@@ -1392,8 +1451,8 @@ void HUD_DrawIBar (int ActiveWeapon, bool DrawFrags)
 		int y = HUD_GetY (&hud_ibar[cl_sbar.integer]);
 
 		if (cl_sbar.integer == 1)
-			Draw_Pic (x, y, ibarpic, scr_sbaralpha.value);
-		else Draw_Pic (x, y, ibarpic, 1.0f);
+			Draw_Pic (x, y, ibarpic, scr_sbaralpha.value, true);
+		else Draw_Pic (x, y, ibarpic, 1.0f, true);
 
 		// the 4 mini frag-lists are only drawn on this one
 		if (DrawFrags) HUD_DrawFrags ();
@@ -1466,7 +1525,6 @@ void HUD_MiniDeathmatchOverlay (void)
 			break;
 
 	if (i == hud_scoreboardlines) i = 0;
-
 	if (i < 0) i = 0;
 
 	// no more than 4 lines in the mini overlay
@@ -1492,13 +1550,10 @@ void HUD_DrawFPS (void)
 	static float	oldtime = 0;
 	static float	fps = 0;
 	static int		oldframecount = 0;
-	float			time;
-	int				x, y, frames;
 
-	time = realtime - oldtime;
-	frames = d3d_RenderDef.framecount - oldframecount;
+	float time = realtime - oldtime;
 
-	if (time < 0 || frames < 0)
+	if (time < 0)
 	{
 		oldtime = realtime;
 		oldframecount = d3d_RenderDef.framecount;
@@ -1507,7 +1562,7 @@ void HUD_DrawFPS (void)
 
 	if (time > 0.25f) // update value every 1/4 second
 	{
-		fps = (float) frames / time;
+		fps = (float) (d3d_RenderDef.framecount - oldframecount) / time;
 		oldtime = realtime;
 		oldframecount = d3d_RenderDef.framecount;
 	}
@@ -1521,7 +1576,10 @@ void HUD_DrawFPS (void)
 		int y1 = 40 + sb_lines;
 		int y2 = 11 + sb_lines;
 
-		_snprintf (str, 16, "%4i fps", (int) (fps + 0.5f));
+		// sometimes between level transitions we get a < 0 fps so don't let it happen
+		if (fps < 0)
+			_snprintf (str, 16, "0 fps");
+		else _snprintf (str, 16, "%i fps", (int) (fps + 0.5f));
 
 		int x = vid.currsize->width - (strlen (str) * 8 + 4);
 
@@ -1567,16 +1625,10 @@ void HUD_DrawOSDItems (void)
 void HUD_DrawHUD (void)
 {
 	// no HUD conditions
-	if (scr_con_current == 100) return;	// fixme - this is a pretty crap way of deciding if we're in a map
-	if (scr_viewsize.value > 111) return;
+	if (!cls.maprunning) return;
 	if (cl.intermission) return;
+	if (scr_viewsize.value > 111) return;
 	if (cls.state != ca_connected) return;
-
-	// don't draw with a NULL worldmodel primarily so that the HUD doesn't appear during a game change
-	if (!cl.worldmodel) return;
-
-	// hack (why?)
-	if (!cl.levelname) return;
 
 	// set our scaling factor here
 	D3DDraw_SetSize (&vid.sbarsize);
@@ -1585,14 +1637,17 @@ void HUD_DrawHUD (void)
 	if (cl_sbar.integer < 0) Cvar_Set (&cl_sbar, "0");
 	if (cl_sbar.integer > 3) Cvar_Set (&cl_sbar, "3");
 
-	// add crosshair drawing here because it's drawn over the main view (offset so it's correctly centered)
-	HUD_DrawCrossHair (vid.currsize->width / 2, (vid.currsize->height - sb_lines) / 2);
+	if (cl.stats[STAT_HEALTH] > 0)
+	{
+		// add crosshair drawing here because it's drawn over the main view (offset so it's correctly centered)
+		HUD_DrawCrossHair (vid.currsize->width / 2, (vid.currsize->height - sb_lines) / 2);
+	}
 
 	// OSD Items (always draw even if dead)
 	HUD_DrawOSDItems ();
 
 	// always draw the scoreboards if active
-	if ((hud_showscores && !cls.demoplayback) || (hud_showdemoscores && cls.demoplayback) || cl.stats[STAT_HEALTH] <= 0)
+	if ((hud_showscores && !cls.demoplayback) || (hud_showdemoscores && cls.demoplayback) || cl.stats[STAT_HEALTH] < 1)
 	{
 		// only show them in-game
 		if (key_dest == key_game)
@@ -1604,33 +1659,36 @@ void HUD_DrawHUD (void)
 		}
 	}
 
-	// the HUD always redraws every frame as doing so allows fast clears to work properly
-	Draw_TileClear ();
-
-	// draw elements
-	// note - team colors must be drawn after the face as they overlap in the default layout
-	HUD_DrawSBar ();
-	HUD_DrawFace (cl.items, cl.stats[STAT_HEALTH]);
-	HUD_DrawTeamColors ();
-	HUD_DrawArmor (cl.items, cl.stats[STAT_ARMOR]);
-	HUD_DrawAmmo (cl.items, cl.stats[STAT_AMMO]);
-
-	// no inventory
-	if (!(scr_viewsize.value > 101))
+	if (cl.stats[STAT_HEALTH] > 0)
 	{
-		// inventory
-		HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
-		HUD_DrawSigils (cl.items);
-		HUD_DrawKeys (cl.items);
-		HUD_DrawItems (cl.items);
-		HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
+		// the HUD always redraws every frame as doing so allows fast clears to work properly
+		Draw_TileClear ();
 
-		// ammocounts are left till last because they don't batch with everything else
-		HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
-		HUD_DrawPowerUpTimers (cl.items);
+		// draw elements
+		// note - team colors must be drawn after the face as they overlap in the default layout
+		if (!kurok) HUD_DrawSBar ();
+		HUD_DrawFace (cl.items, cl.stats[STAT_HEALTH]);
+		if (!kurok) HUD_DrawTeamColors ();
+		HUD_DrawArmor (cl.items, cl.stats[STAT_ARMOR]);
+		HUD_DrawAmmo (cl.items, cl.stats[STAT_AMMO]);
 
-		// deathmatch overlay
-		HUD_MiniDeathmatchOverlay ();
+		// no inventory
+		if (!(scr_viewsize.value > 101))
+		{
+			// inventory
+			if (!kurok) HUD_DrawIBar (cl.stats[STAT_ACTIVEWEAPON], true);
+			if (!kurok) HUD_DrawSigils (cl.items);
+			HUD_DrawKeys (cl.items);
+			HUD_DrawItems (cl.items);
+			if (!kurok) HUD_DrawWeapons (cl.items, cl.stats[STAT_ACTIVEWEAPON]);
+
+			// ammocounts are left till last because they don't batch with everything else
+			if (!kurok) HUD_DrawAmmoCounts (cl.stats[STAT_SHELLS], cl.stats[STAT_NAILS], cl.stats[STAT_ROCKETS], cl.stats[STAT_CELLS], cl.stats[STAT_ACTIVEWEAPON]);
+			if (!kurok) HUD_DrawPowerUpTimers (cl.items);
+
+			// deathmatch overlay
+			HUD_MiniDeathmatchOverlay ();
+		}
 	}
 }
 
@@ -1649,14 +1707,14 @@ void HUD_DrawStuffGotten (int x, int y, int numstuff, int totalstuff)
 
 		if (stuffstr[i] == '/')
 		{
-			Draw_Pic (x, y, sb_slash);
+			Draw_Pic (x, y, sb_slash, 1, true);
 			x += 16;
 		}
 		else if (stuffstr[i] == ' ')
 			x += 24;
 		else
 		{
-			Draw_Pic (x, y, sb_nums[0][stuffstr[i] - '0']);
+			Draw_Pic (x, y, sb_nums[0][stuffstr[i] - '0'], 1, true);
 			x += 24;
 		}
 	}
@@ -1665,6 +1723,8 @@ void HUD_DrawStuffGotten (int x, int y, int numstuff, int totalstuff)
 
 void HUD_IntermissionOverlay (void)
 {
+	if (!cls.maprunning) return;
+
 	D3DDraw_SetSize (&vid.sbarsize);
 
 #if 1
@@ -1682,7 +1742,7 @@ void HUD_IntermissionOverlay (void)
 	int basex = 192;
 	int basey = 24;
 
-	Draw_Pic (basex - 96, basey, gfx_complete_lmp);
+	Draw_Pic (basex - 96, basey, gfx_complete_lmp, 1, true);
 
 	// because the MP folks sometimes use the level name as a "server message" instead,
 	// containing additional info, etc, we need to take a copy of it, potentially truncate it, and tidy it up for display
@@ -1700,15 +1760,15 @@ void HUD_IntermissionOverlay (void)
 
 	Draw_String (basex - strlen (levelname) * 4, basey + 34, levelname);
 	Draw_String (basex - 56, basey + 49, DIVIDER_LINE);
-	Draw_Pic (basex - 160, basey + 64, gfx_inter_lmp);
+	Draw_Pic (basex - 160, basey + 64, gfx_inter_lmp, 1, true);
 
 	int dig = cl.completed_time / 60;
 	HUD_DrawStuffGotten (basex, basey + 72, dig, 0);
 	int num = cl.completed_time - dig * 60;
 
-	Draw_Pic (basex + 96, basey + 72, sb_colon);
-	Draw_Pic (basex + 112, basey + 72, sb_nums[0][num / 10]);
-	Draw_Pic (basex + 136, basey + 72, sb_nums[0][num % 10]);
+	Draw_Pic (basex + 96, basey + 72, sb_colon, 1, true);
+	Draw_Pic (basex + 112, basey + 72, sb_nums[0][num / 10], 1, true);
+	Draw_Pic (basex + 136, basey + 72, sb_nums[0][num % 10], 1, true);
 
 	HUD_DrawStuffGotten (basex, basey + 112, cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
 	HUD_DrawStuffGotten (basex, basey + 152, cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
@@ -1724,7 +1784,7 @@ void HUD_FinaleOverlay (int y)
 		HUD_DeathmatchOverlay ();
 	else
 	{
-		Draw_Pic ((vid.currsize->width - gfx_finale_lmp->width) / 2, y - gfx_finale_lmp->height - 16, gfx_finale_lmp);
+		Draw_Pic ((vid.currsize->width - gfx_finale_lmp->width) / 2, y - gfx_finale_lmp->height - 16, gfx_finale_lmp, 1, true);
 		HUD_DividerLine (y - 12, 16);
 	}
 }

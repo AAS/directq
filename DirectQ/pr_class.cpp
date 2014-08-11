@@ -30,24 +30,6 @@ cvar_t	pr_builtin_remap ("pr_builtin_remap", "0");
 // swimmonster_start
 dfunction_t *ED_FindFunction (char *name);
 
-dfunction_t *swimmonster_real = NULL;
-dfunction_t *swimmonster_start = NULL;
-dfunction_t *swimmonster_start_go = NULL;
-int fishcount;
-int realfish;
-
-void PR_FixupFish (void)
-{
-	// if we've counted fish twice we drop off the real number to get the correct total
-	if (fishcount == 2)
-	{
-		SVProgs->GlobalStruct->total_monsters -= realfish;
-		Con_DPrintf ("Fixing up fish (%i)\n", realfish);
-		fishcount = 0;
-	}
-}
-
-
 char *pr_opnames[] =
 {
 	"DONE", "MUL_F", "MUL_V", "MUL_FV", "MUL_VF", "DIV", "ADD_F", "ADD_V", "SUB_F", "SUB_V", "EQ_F", "EQ_V", "EQ_S",
@@ -93,12 +75,15 @@ CProgsDat::CProgsDat (void)
 }
 
 
+byte idprogs[] = {12, 62, 243, 98, 93, 245, 136, 53, 54, 248, 218, 66, 199, 139, 103, 58};
+
 void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 {
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 	int 	j;
 	int		funcno;
 	char	*funcname;
+	byte	progshash[16];
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	// this can't be in a constructor yet because we need the instance already created in order to do
@@ -117,6 +102,16 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	// CRC the progs
 	for (int i = 0; i < com_filesize; i++)
 		CRC_ProcessByte (&this->CRC, ((byte *) this->QC)[i]);
+
+	this->FishHack = false;
+	this->NumFish = 0;
+	COM_HashData (progshash, this->QC, com_filesize);
+
+	if (!memcmp (progshash, idprogs, 16))
+	{
+		this->FishHack = true;
+		Con_DPrintf ("hacking fish for ID progs\n");
+	}
 
 	// byte swap the header
 	for (int i = 0; i < sizeof (dprograms_t) / 4; i++)
@@ -243,13 +238,6 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	FindEdictFieldOffsets ();
-
-	swimmonster_real = ED_FindFunction ("swimmonster_start");
-	swimmonster_start = ED_FindFunction ("swimmonster_start");
-	swimmonster_start_go = ED_FindFunction ("swimmonster_start_go");
-
-	fishcount = 0;
-	realfish = 0;
 }
 
 
@@ -583,20 +571,6 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 int CProgsDat::EnterFunction (dfunction_t *f)
 {
 	int i, j, c, o;
-
-	// fish count fix
-	if (f == swimmonster_start_go)
-	{
-		fishcount++;
-		swimmonster_start_go = NULL;
-	}
-	else if (f == swimmonster_start)
-	{
-		fishcount++;
-		swimmonster_start = NULL;
-	}
-	else if (f == swimmonster_real)
-		realfish++;
 
 	this->Stack[this->StackDepth].s = this->XStatement;
 	this->Stack[this->StackDepth].f = this->XFunction;

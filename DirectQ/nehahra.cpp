@@ -159,7 +159,7 @@ void SHOWLMP_drawall (void)
 			if (!showlmp[i].qpic)
 				showlmp[i].qpic = Draw_LoadPic (showlmp[i].pic);
 
-			Draw_Pic (showlmp[i].x, showlmp[i].y, showlmp[i].qpic);
+			Draw_Pic (showlmp[i].x, showlmp[i].y, showlmp[i].qpic, 1, true);
 		}
 	}
 }

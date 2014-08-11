@@ -22,9 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "webdownload.h"
 
-void D3DOQ_CleanEntity (entity_t *ent);
-void D3DOQ_RegisterQuery (entity_t *ent);
-
 char *svc_strings[] =
 {
 	"svc_bad",
@@ -124,6 +121,21 @@ int CL_ReadByteShort (void)
 }
 
 
+int cl_entityallocs = 0;
+
+entity_t *CL_AllocEntity (void)
+{
+	entity_t *ent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
+
+	// set it's allocation number
+	// allocnumbers deliberately start at 1 as number 0 is used for signifying an entity that should not be occluded
+	cl_entityallocs++;
+	ent->allocnum = cl_entityallocs;
+
+	return ent;
+}
+
+
 /*
 ===============
 CL_EntityNum
@@ -143,10 +155,9 @@ entity_t *CL_EntityNum (int num)
 			if (!cl_entities[cl.num_entities])
 			{
 				// alloc a new entity and set it's number
-				cl_entities[cl.num_entities] = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
+				cl_entities[cl.num_entities] = CL_AllocEntity ();
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
 				cl_entities[cl.num_entities]->alphaval = 255;
-				D3DOQ_CleanEntity (cl_entities[cl.num_entities]);
 			}
 
 			// force cl.numentities up until it exceeds the number we're looking for
@@ -272,11 +283,10 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	SZ_Clear (&cls.message);
 }
 
-void Host_Frame (double time);
+void Host_Frame (DWORD time);
 
 static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 {
-	static double time, oldtime, newtime;
 	static int lastpercent = 666;
 	int thispercent = (PercentDown / 10);
 
@@ -292,9 +302,6 @@ static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 
 	cls.download.percent = PercentDown;
 
-	newtime = Sys_FloatTime ();
-	time = newtime - oldtime;
-
 	if (lastpercent != thispercent)
 	{
 		// give an indication of time
@@ -302,8 +309,8 @@ static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 		lastpercent = thispercent;
 	}
 
-	Host_Frame (time);
-	oldtime = newtime;
+	// simulate a 1 ms frame
+	Host_Frame (1);
 
 	// abort if we disconnect
 	return !cls.download.disconnect;
@@ -352,7 +359,7 @@ void CL_DoWebDownload (char *filename)
 	Con_Printf ("Downloading from %s%s\n\n", cl_web_download_url.string, filename);
 
 	// this needs a screen update
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// default download params
 	cls.download.web = true;
@@ -636,11 +643,23 @@ relinked.  Other attributes can change without relinking.
 void CL_ClearInterpolation (entity_t *ent, int clearflags)
 {
 	if (clearflags & CLEAR_POSES)
+		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = ent->lerppose[LERP_CURR];
+
+#if 0
+	if (clearflags & CLEAR_ORIGIN)
 	{
-		ent->framestarttime = 0;
-		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = -1;
+		VectorCopy2 (ent->lerporigin[LERP_LAST], ent->origin);
+		VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
+		VectorCopy2 (ent->moveorigin, ent->origin);
 	}
 
+	if (clearflags & CLEAR_ANGLES)
+	{
+		VectorCopy2 (ent->lerpangles[LERP_LAST], ent->angles);
+		VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
+		VectorCopy2 (ent->moveangles, ent->angles);
+	}
+#else
 	if (clearflags & CLEAR_ORIGIN)
 	{
 		ent->translatestarttime = 0;
@@ -654,6 +673,7 @@ void CL_ClearInterpolation (entity_t *ent, int clearflags)
 		ent->lerpangles[LERP_LAST][0] = ent->lerpangles[LERP_LAST][1] = ent->lerpangles[LERP_LAST][2] = 0;
 		ent->lerpangles[LERP_CURR][0] = ent->lerpangles[LERP_CURR][1] = ent->lerpangles[LERP_CURR][2] = 0;
 	}
+#endif
 }
 
 
@@ -667,10 +687,10 @@ void CL_ParseUpdate (int bits)
 	int			num;
 	int			skin;
 
-	if (cls.signon == SIGNONS - 1)
+	if (cls.signon == SIGNON_CONNECTED - 1)
 	{
 		// first update is the final signon stage
-		cls.signon = SIGNONS;
+		cls.signon = SIGNON_CONNECTED;
 		CL_SignonReply ();
 	}
 
@@ -697,7 +717,7 @@ void CL_ParseUpdate (int bits)
 	if (ent->msgtime != cl.mtime[1])
 	{
 		// entity was not present on the previous frame
-		D3DOQ_CleanEntity (ent);
+		ent->Occluded = false;
 		forcelink = true;
 	}
 	else forcelink = false;
@@ -804,14 +824,18 @@ void CL_ParseUpdate (int bits)
 		if (bits & U_FRAME2) ent->frame = (ent->frame & 0x00FF) | (MSG_ReadByte () << 8);
 		if (bits & U_MODEL2) modnum = (modnum & 0x00FF) | (MSG_ReadByte () << 8);
 
-		// directq doesn't do no fitzquake-style lerping so just silently read the byte
 #if 1
 		if (bits & U_LERPFINISH)
 		{
 			ent->lerpinterval = (float) (MSG_ReadByte()) / 255.0f;
 			ent->lerpflags |= LERP_FINISH;
+			// Con_Printf ("Got a lerpinterval of %f for %s\n", ent->lerpinterval, ent->model->name);
 		}
-		else ent->lerpflags &= ~LERP_FINISH;
+		else
+		{
+			ent->lerpinterval = 0.1f;
+			ent->lerpflags &= ~LERP_FINISH;
+		}
 #else
 		if (bits & U_LERPFINISH) MSG_ReadByte ();
 #endif
@@ -833,7 +857,19 @@ void CL_ParseUpdate (int bits)
 
 	// an alpha of 0 is equivalent to 255 (so that memset 0 will work correctly)
 	if (ent->alphaval < 1) ent->alphaval = 255;
-	if (bits & U_NOLERP) ent->forcelink = true;
+
+	if (bits & U_NOLERP)
+	{
+		// only interpolate orientation if we're not doing so on the server
+		if (sv.active)
+			ent->lerpflags &= ~LERP_MOVESTEP;
+		else
+		{
+			ent->lerpflags |= LERP_MOVESTEP;
+			ent->forcelink = true;
+		}
+	}
+	else ent->lerpflags &= ~LERP_MOVESTEP;
 
 	// this was moved down for protocol fitz messaqe ordering because the model num could be changed by extend bits
 	model = cl.model_precache[modnum];
@@ -862,7 +898,8 @@ void CL_ParseUpdate (int bits)
 		// if the model has changed we must also reset the interpolation data
 		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical as they might be pointing to invalid frames in the new model!!!
 		CL_ClearInterpolation (ent, CLEAR_POSES);
-		D3DOQ_CleanEntity (ent);
+
+		ent->Occluded = false;
 
 		// reset frame and skin too...!
 		if (!(bits & U_FRAME)) ent->frame = 0;
@@ -877,14 +914,14 @@ void CL_ParseUpdate (int bits)
 		VectorCopy2 (ent->msg_angles[1], ent->msg_angles[0]);
 		VectorCopy2 (ent->angles, ent->msg_angles[0]);
 
+		// update it's oldorg for particle spawning
+		VectorCopy2 (ent->oldorg, ent->origin);
+
 		ent->forcelink = true;
 
 		// fix "dying throes" interpolation bug - reset interpolation data if the entity wasn't updated
 		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical here; the rest is done for completeness sake.
 		CL_ClearInterpolation (ent, CLEAR_ALLLERP);
-
-		// register a new occlusion query for the entity
-		D3DOQ_RegisterQuery (ent);
 	}
 }
 
@@ -902,7 +939,7 @@ void CL_ParseBaseline (entity_t *ent, int version)
 	if (bits & B_LARGEMODEL)
 		ent->baseline.modelindex = MSG_ReadShort ();
 	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
-		ent->baseline.modelindex = MSG_ReadByte ();
+ 		ent->baseline.modelindex = MSG_ReadByte ();
 	else ent->baseline.modelindex = CL_ReadByteShort ();
 
 	ent->baseline.frame = (bits & B_LARGEFRAME) ? MSG_ReadShort () : MSG_ReadByte ();
@@ -928,6 +965,9 @@ CL_ParseClientdata
 Server information pertaining to this client only
 ==================
 */
+extern float deadangles[];
+extern float deadtime;
+
 void CL_ParseClientdata (void)
 {
 	int		i, j;
@@ -947,9 +987,8 @@ void CL_ParseClientdata (void)
 		cl.viewheight = MSG_ReadChar ();
 	else cl.viewheight = DEFAULT_VIEWHEIGHT;
 
-	if (bits & SU_IDEALPITCH)
-		cl.idealpitch = MSG_ReadChar ();
-	else cl.idealpitch = 0;
+	// DirectQ no longer does pitch drifting so just swallow the message
+	if (bits & SU_IDEALPITCH) MSG_ReadChar ();
 
 	VectorCopy2 (cl.mvelocity[1], cl.mvelocity[0]);
 
@@ -1015,11 +1054,23 @@ void CL_ParseClientdata (void)
 
 	if (cl.stats[STAT_HEALTH] > 0 && clnewstats[STAT_HEALTH] < 1)
 	{
+		// calc new roll angles every time we die
+		deadangles[0] = rand () % 360;
+		deadangles[1] = rand () % 360;
+		deadangles[2] = rand () % 360;
+
+		deadtime = cl.time;
+
 		// update death location
 		cl.death_location[0] = cl_entities[cl.viewentity]->origin[0];
 		cl.death_location[1] = cl_entities[cl.viewentity]->origin[1];
 		cl.death_location[2] = cl_entities[cl.viewentity]->origin[2];
+		vid.recalc_refdef = true;
 		Con_DPrintf ("updated death location\n");
+	}
+	else if (cl.stats[STAT_HEALTH] < 1 && clnewstats[STAT_HEALTH] > 0)
+	{
+		vid.recalc_refdef = true;
 	}
 
 	// now update the stats for real
@@ -1049,7 +1100,7 @@ void CL_ParseStatic (int version)
 	}
 
 	// just alloc in the map pool
-	entity_t *ent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
+	entity_t *ent = CL_AllocEntity ();
 
 	// read in baseline state
 	CL_ParseBaseline (ent, version);
@@ -1065,6 +1116,9 @@ void CL_ParseStatic (int version)
 	VectorCopy2 (ent->origin, ent->baseline.origin);
 	VectorCopy2 (ent->angles, ent->baseline.angles);
 
+	// clear the interpolation data to get a valid baseline
+	CL_ClearInterpolation (ent, CLEAR_ALLLERP);
+
 	// ST_RAND is not always set on animations that should be out of lockstep
 	ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
 	ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
@@ -1073,8 +1127,9 @@ void CL_ParseStatic (int version)
 	if (ent->model)
 	{
 		R_AddEfrags (ent);
+
+		// necessary to call this here???
 		D3DMain_BBoxForEnt (ent);
-		// D3DOQ_RegisterQuery (ent);
 	}
 }
 
@@ -1176,6 +1231,7 @@ void CL_ParseServerMessage (void)
 		case svc_time:
 			cl.mtime[1] = cl.mtime[0];
 			cl.mtime[0] = MSG_ReadFloat ();
+			// Con_Printf ("svc_time at %f\n", realtime);
 			break;
 
 		case svc_clientdata:
@@ -1255,7 +1311,7 @@ void CL_ParseServerMessage (void)
 		break;
 
 		case svc_damage:
-			V_ParseDamage (cl.time);
+			V_ParseDamage ();
 			break;
 
 		case svc_serverinfo:
@@ -1345,8 +1401,13 @@ void CL_ParseServerMessage (void)
 
 		case svc_spawnbaseline:
 			i = MSG_ReadShort ();
+
 			// must use CL_EntityNum() to force cl.num_entities up
 			CL_ParseBaseline (CL_EntityNum (i), 1);
+
+			// clear the interpolation data to get a valid baseline
+			CL_ClearInterpolation (CL_EntityNum (i), CLEAR_ALLLERP);
+
 			break;
 
 		case svc_spawnstatic:
@@ -1478,8 +1539,13 @@ void CL_ParseServerMessage (void)
 
 		case svc_spawnbaseline2:
 			i = MSG_ReadShort ();
+
 			// must use CL_EntityNum() to force cl.num_entities up
 			CL_ParseBaseline (CL_EntityNum (i), 2);
+
+			// clear the interpolation data to get a valid baseline
+			CL_ClearInterpolation (CL_EntityNum (i), CLEAR_ALLLERP);
+
 			break;
 
 		case svc_spawnstatic2:
@@ -1621,7 +1687,7 @@ void Q_Version (char *s)
 	{
 		if (!strncmp (t, ": q_version", 9))
 		{
-			Cbuf_AddText (va ("say DirectQ "DIRECTQ_VERSION")\n"));
+			Cbuf_AddText (va ("say DirectQ "DIRECTQ_VERSION"\n"));
 			Cbuf_Execute ();
 			q_version_reply_time = realtime;
 			break; // Baker: only do once per string

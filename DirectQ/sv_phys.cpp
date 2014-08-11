@@ -50,7 +50,7 @@ static	vec3_t	vec_origin = {0.0, 0.0, 0.0};
 
 #define	MOVE_EPSILON	0.01
 
-void SV_Physics_Toss (edict_t *ent);
+void SV_Physics_Toss (edict_t *ent, double frametime);
 
 /*
 ================
@@ -134,11 +134,11 @@ in a frame.  Not used for pushmove objects, because they must be exact.
 Returns false if the entity removed itself.
 =============
 */
-bool SV_RunThink (edict_t *ent)
+bool SV_RunThink (edict_t *ent, double frametime)
 {
 	float thinktime = ent->v.nextthink;
 
-	if (thinktime <= 0 || thinktime > (sv.time + sv.frametime)) return true;
+	if (thinktime <= 0 || thinktime > (sv.time + frametime)) return true;
 
 	// don't let things stay in the past.  it is possible to start that way by a trigger with a local time.
 	if (thinktime < sv.time) thinktime = sv.time;
@@ -354,11 +354,13 @@ int SV_FlyMove (edict_t *ent, float time, trace_t *steptrace)
 			ClipVelocity (original_velocity, planes[i], new_velocity, 1);
 
 			for (j = 0; j < numplanes; j++)
+			{
 				if (j != i)
 				{
 					if (DotProduct (new_velocity, planes[j]) < 0)
 						break;	// not ok
 				}
+			}
 
 			if (j == numplanes)
 				break;
@@ -402,7 +404,7 @@ SV_AddGravity
 
 ============
 */
-void SV_AddGravity (edict_t *ent)
+void SV_AddGravity (edict_t *ent, double frametime)
 {
 	float	ent_gravity;
 
@@ -412,7 +414,7 @@ void SV_AddGravity (edict_t *ent)
 		ent_gravity = val->_float;
 	else ent_gravity = 1.0;
 
-	ent->v.velocity[2] -= (ent_gravity * sv_gravity.value * sv.frametime);
+	ent->v.velocity[2] -= (ent_gravity * sv_gravity.value * frametime);
 }
 
 
@@ -441,10 +443,11 @@ trace_t SV_PushEntity (edict_t *ent, vec3_t push)
 	if (ent->v.movetype == MOVETYPE_FLYMISSILE)
 		trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, end, MOVE_MISSILE, ent);
 	else if (ent->v.solid == SOLID_TRIGGER || ent->v.solid == SOLID_NOT)
+	{
 		// only clip against bmodels
 		trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, end, MOVE_NOMONSTERS, ent);
-	else
-		trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, end, MOVE_NORMAL, ent);
+	}
+	else trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, end, MOVE_NORMAL, ent);
 
 	VectorCopy (trace.endpos, ent->v.origin);
 	SV_LinkEdict (ent, true);
@@ -540,9 +543,9 @@ void SV_PushMove (edict_t *pusher, float movetime)
 		if (check->free) continue;
 
 		if (check->v.movetype == MOVETYPE_PUSH ||
-				check->v.movetype == MOVETYPE_NONE ||
-				check->v.movetype == MOVETYPE_FOLLOW || // Nehahra
-				check->v.movetype == MOVETYPE_NOCLIP)
+			check->v.movetype == MOVETYPE_NONE ||
+			check->v.movetype == MOVETYPE_FOLLOW || // Nehahra
+			check->v.movetype == MOVETYPE_NOCLIP)
 			continue;
 
 		// if the entity is standing on the pusher, it will definately be moved
@@ -676,21 +679,21 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 		if (check->free)
 			continue;
 
-		if (check->v.movetype == MOVETYPE_PUSH
-				|| check->v.movetype == MOVETYPE_NONE
-				|| check->v.movetype == MOVETYPE_FOLLOW
-				|| check->v.movetype == MOVETYPE_NOCLIP)
+		if (check->v.movetype == MOVETYPE_PUSH ||
+			check->v.movetype == MOVETYPE_NONE ||
+			check->v.movetype == MOVETYPE_FOLLOW ||
+			check->v.movetype == MOVETYPE_NOCLIP)
 			continue;
 
 		// if the entity is standing on the pusher, it will definately be moved
 		if (!(((int) check->v.flags & FL_ONGROUND) && PROG_TO_EDICT (check->v.groundentity) == pusher))
 		{
-			if (check->v.absmin[0] >= pusher->v.absmax[0]
-					|| check->v.absmin[1] >= pusher->v.absmax[1]
-					|| check->v.absmin[2] >= pusher->v.absmax[2]
-					|| check->v.absmax[0] <= pusher->v.absmin[0]
-					|| check->v.absmax[1] <= pusher->v.absmin[1]
-					|| check->v.absmax[2] <= pusher->v.absmin[2])
+			if (check->v.absmin[0] >= pusher->v.absmax[0] ||
+				check->v.absmin[1] >= pusher->v.absmax[1] ||
+				check->v.absmin[2] >= pusher->v.absmax[2] ||
+				check->v.absmax[0] <= pusher->v.absmin[0] ||
+				check->v.absmax[1] <= pusher->v.absmin[1] ||
+				check->v.absmax[2] <= pusher->v.absmin[2])
 				continue;
 
 			// see if the ent's bbox is inside the pusher's final position
@@ -777,7 +780,7 @@ SV_Physics_Pusher
 
 ================
 */
-void SV_Physics_Pusher (edict_t *ent)
+void SV_Physics_Pusher (edict_t *ent, double frametime)
 {
 	float	thinktime;
 	float	oldltime;
@@ -786,14 +789,14 @@ void SV_Physics_Pusher (edict_t *ent)
 	oldltime = ent->v.ltime;
 	thinktime = ent->v.nextthink;
 
-	if (thinktime < ent->v.ltime + sv.frametime)
+	if (thinktime < ent->v.ltime + frametime)
 	{
 		movetime = thinktime - ent->v.ltime;
 
 		if (movetime < 0)
 			movetime = 0;
 	}
-	else movetime = sv.frametime;
+	else movetime = frametime;
 
 	// advances ent->v.ltime if not blocked
 #if 1
@@ -802,7 +805,7 @@ void SV_Physics_Pusher (edict_t *ent)
 	{
 		// hmmm - what solid does the end spiky ball use...?
 		if (ent->v.solid == SOLID_BSP && (ent->v.avelocity[0] || ent->v.avelocity[1] || ent->v.avelocity[2]) && ent != SVProgs->EdictPointers[0])
-			SV_PushRotate (ent, sv.frametime);
+			SV_PushRotate (ent, frametime);
 		else SV_PushMove (ent, movetime);
 	}
 #else
@@ -861,7 +864,9 @@ void SV_CheckStuck (edict_t *ent)
 	}
 
 	for (z = 0; z < 18; z++)
+	{
 		for (i = -1; i <= 1; i++)
+		{
 			for (j = -1; j <= 1; j++)
 			{
 				ent->v.origin[0] = org[0] + i;
@@ -875,6 +880,8 @@ void SV_CheckStuck (edict_t *ent)
 					return;
 				}
 			}
+		}
+	}
 
 	VectorCopy (org, ent->v.origin);
 	Con_DPrintf ("player is stuck.\n");
@@ -995,8 +1002,7 @@ int SV_TryUnstick (edict_t *ent, vec3_t oldvel)
 		ent->v.velocity[2] = 0;
 		clip = SV_FlyMove (ent, 0.1, &steptrace);
 
-		if (fabs (oldorg[1] - ent->v.origin[1]) > 4
-				|| fabs (oldorg[0] - ent->v.origin[0]) > 4)
+		if (fabs (oldorg[1] - ent->v.origin[1]) > 4 || fabs (oldorg[0] - ent->v.origin[0]) > 4)
 		{
 			//Con_DPrintf ("unstuck!\n");
 			return clip;
@@ -1018,7 +1024,7 @@ Only used by players
 ======================
 */
 #define	STEPSIZE	18
-void SV_WalkMove (edict_t *ent)
+void SV_WalkMove (edict_t *ent, double frametime)
 {
 	vec3_t		upmove, downmove;
 	vec3_t		oldorg, oldvel;
@@ -1034,22 +1040,13 @@ void SV_WalkMove (edict_t *ent)
 	VectorCopy (ent->v.origin, oldorg);
 	VectorCopy (ent->v.velocity, oldvel);
 
-	clip = SV_FlyMove (ent, sv.frametime, &steptrace);
+	clip = SV_FlyMove (ent, frametime, &steptrace);
 
-	if (!(clip & 2))
-		return;		// move didn't block on a step
-
-	if (!oldonground && ent->v.waterlevel == 0)
-		return;		// don't stair up while jumping
-
-	if (ent->v.movetype != MOVETYPE_WALK)
-		return;		// gibbed by a trigger
-
-	if (sv_nostep.value)
-		return;
-
-	if ((int) sv_player->v.flags & FL_WATERJUMP)
-		return;
+	if (!(clip & 2)) return;		// move didn't block on a step
+	if (!oldonground && ent->v.waterlevel == 0) return;		// don't stair up while jumping
+	if (ent->v.movetype != MOVETYPE_WALK) return;		// gibbed by a trigger
+	if (sv_nostep.value) return;
+	if ((int) sv_player->v.flags & FL_WATERJUMP) return;
 
 	VectorCopy (ent->v.origin, nosteporg);
 	VectorCopy (ent->v.velocity, nostepvel);
@@ -1060,23 +1057,22 @@ void SV_WalkMove (edict_t *ent)
 	VectorCopy (vec3_origin, upmove);
 	VectorCopy (vec3_origin, downmove);
 	upmove[2] = STEPSIZE;
-	downmove[2] = -STEPSIZE + oldvel[2] * sv.frametime;
+	downmove[2] = -STEPSIZE + oldvel[2] * frametime;
 
 	// move up
 	SV_PushEntity (ent, upmove);	// FIXME: don't link?
 
 	// move forward
 	ent->v.velocity[0] = oldvel[0];
-	ent->v. velocity[1] = oldvel[1];
-	ent->v. velocity[2] = 0;
-	clip = SV_FlyMove (ent, sv.frametime, &steptrace);
+	ent->v.velocity[1] = oldvel[1];
+	ent->v.velocity[2] = 0;
+	clip = SV_FlyMove (ent, frametime, &steptrace);
 
 	// check for stuckness, possibly due to the limited precision of floats
 	// in the clipping hulls
 	if (clip)
 	{
-		if (fabs (oldorg[1] - ent->v.origin[1]) < 0.03125
-				&& fabs (oldorg[0] - ent->v.origin[0]) < 0.03125)
+		if (fabs (oldorg[1] - ent->v.origin[1]) < 0.03125 && fabs (oldorg[0] - ent->v.origin[0]) < 0.03125)
 		{
 			// stepping up didn't make any progress
 			clip = SV_TryUnstick (ent, oldvel);
@@ -1116,7 +1112,7 @@ SV_Physics_Client
 Player character actions
 ================
 */
-void SV_Physics_Client (edict_t	*ent, int num)
+void SV_Physics_Client (edict_t	*ent, int num, double frametime)
 {
 	if (!svs.clients[num-1].active)
 		return;		// unconnected slot
@@ -1133,40 +1129,40 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	switch ((int) ent->v.movetype)
 	{
 	case MOVETYPE_NONE:
-		if (!SV_RunThink (ent))
+		if (!SV_RunThink (ent, frametime))
 			return;
 
 		break;
 
 	case MOVETYPE_WALK:
-		if (!SV_RunThink (ent))
+		if (!SV_RunThink (ent, frametime))
 			return;
 
 		if (!SV_CheckWater (ent) && !((int) ent->v.flags & FL_WATERJUMP))
-			SV_AddGravity (ent);
+			SV_AddGravity (ent, frametime);
 
 		SV_CheckStuck (ent);
-		SV_WalkMove (ent);
+		SV_WalkMove (ent, frametime);
 
 		break;
 
 	case MOVETYPE_TOSS:
 	case MOVETYPE_BOUNCE:
-		SV_Physics_Toss (ent);
+		SV_Physics_Toss (ent, frametime);
 		break;
 
 	case MOVETYPE_FLY:
-		if (!SV_RunThink (ent))
+		if (!SV_RunThink (ent, frametime))
 			return;
 
-		SV_FlyMove (ent, sv.frametime, NULL);
+		SV_FlyMove (ent, frametime, NULL);
 		break;
 
 	case MOVETYPE_NOCLIP:
-		if (!SV_RunThink (ent))
+		if (!SV_RunThink (ent, frametime))
 			return;
 
-		VectorMultiplyAdd (ent->v.origin, sv.frametime, ent->v.velocity, ent->v.origin);
+		VectorMad (ent->v.origin, frametime, ent->v.velocity, ent->v.origin);
 		break;
 
 	default:
@@ -1190,10 +1186,10 @@ SV_Physics_None
 Non moving objects can only think
 =============
 */
-void SV_Physics_None (edict_t *ent)
+void SV_Physics_None (edict_t *ent, double frametime)
 {
 	// regular thinking
-	SV_RunThink (ent);
+	SV_RunThink (ent, frametime);
 }
 
 
@@ -1205,14 +1201,14 @@ SV_Physics_Follow
 Entities that are "stuck" to another entity
 =============
 */
-void SV_Physics_Follow (edict_t *ent)
+void SV_Physics_Follow (edict_t *ent, double frametime)
 {
 	avectors_t av;
 	vec3_t  angles, v;
 	edict_t *e;
 
 	// regular thinking
-	if (!SV_RunThink (ent))
+	if (!SV_RunThink (ent, frametime))
 		return;
 
 	e = PROG_TO_EDICT (ent->v.aiment);
@@ -1257,14 +1253,14 @@ SV_Physics_Noclip
 A moving object that doesn't obey physics
 =============
 */
-void SV_Physics_Noclip (edict_t *ent)
+void SV_Physics_Noclip (edict_t *ent, double frametime)
 {
 	// regular thinking
-	if (!SV_RunThink (ent))
+	if (!SV_RunThink (ent, frametime))
 		return;
 
-	VectorMultiplyAdd (ent->v.angles, sv.frametime, ent->v.avelocity, ent->v.angles);
-	VectorMultiplyAdd (ent->v.origin, sv.frametime, ent->v.velocity, ent->v.origin);
+	VectorMad (ent->v.angles, frametime, ent->v.avelocity, ent->v.angles);
+	VectorMad (ent->v.origin, frametime, ent->v.velocity, ent->v.origin);
 
 	SV_LinkEdict (ent, false);
 }
@@ -1328,43 +1324,35 @@ SV_Physics_Toss
 Toss, bounce, and fly movement.  When onground, do nothing.
 =============
 */
-void SV_Physics_Toss (edict_t *ent)
+void SV_Physics_Toss (edict_t *ent, double frametime)
 {
 	trace_t	trace;
 	vec3_t	move;
 	float	backoff;
 
 	// regular thinking
-	if (!SV_RunThink (ent))
-		return;
-
-	// if onground, return without moving
-	if (((int) ent->v.flags & FL_ONGROUND))
-		return;
+	if (!SV_RunThink (ent, frametime)) return;
+	if (((int) ent->v.flags & FL_ONGROUND)) return;
 
 	SV_CheckVelocity (ent);
 
 	// add gravity
 	if (ent->v.movetype != MOVETYPE_FLY && ent->v.movetype != MOVETYPE_FLYMISSILE)
-		SV_AddGravity (ent);
+		SV_AddGravity (ent, frametime);
 
 	// move angles
-	VectorMultiplyAdd (ent->v.angles, sv.frametime, ent->v.avelocity, ent->v.angles);
+	VectorMad (ent->v.angles, frametime, ent->v.avelocity, ent->v.angles);
 
 	// move origin
-	VectorScale (ent->v.velocity, sv.frametime, move);
+	VectorScale (ent->v.velocity, frametime, move);
 	trace = SV_PushEntity (ent, move);
 
-	if (trace.fraction == 1)
-		return;
-
-	if (ent->free)
-		return;
+	if (trace.fraction == 1) return;
+	if (ent->free) return;
 
 	if (ent->v.movetype == MOVETYPE_BOUNCE)
 		backoff = 1.5;
-	else
-		backoff = 1;
+	else backoff = 1;
 
 	ClipVelocity (ent->v.velocity, trace.plane.normal, ent->v.velocity, backoff);
 
@@ -1403,21 +1391,20 @@ This is also used for objects that have become still on the ground, but
 will fall if the floor is pulled out from under them.
 =============
 */
-void SV_Physics_Step (edict_t *ent)
+void SV_Physics_Step (edict_t *ent, double frametime)
 {
-	bool	hitsound;
+	bool hitsound;
 
 	// freefall if not onground
 	if (!((int) ent->v.flags & (FL_ONGROUND | FL_FLY | FL_SWIM)))
 	{
 		if (ent->v.velocity[2] < sv_gravity.value * -0.1)
 			hitsound = true;
-		else
-			hitsound = false;
+		else hitsound = false;
 
-		SV_AddGravity (ent);
+		SV_AddGravity (ent, frametime);
 		SV_CheckVelocity (ent);
-		SV_FlyMove (ent, sv.frametime, NULL);
+		SV_FlyMove (ent, frametime, NULL);
 		SV_LinkEdict (ent, true);
 
 		if ((int) ent->v.flags & FL_ONGROUND)	// just hit ground
@@ -1428,7 +1415,7 @@ void SV_Physics_Step (edict_t *ent)
 	}
 
 	// regular thinking
-	SV_RunThink (ent);
+	SV_RunThink (ent, frametime);
 
 	SV_CheckWaterTransition (ent);
 }
@@ -1446,10 +1433,6 @@ void SV_Physics (double frametime)
 {
 	int		i;
 	edict_t	*ent;
-
-	// this one needs to be kept rock steady as it's the master timer for events on both the
-	// client and the server.  changing it to an event timer is a big no-no.
-	sv.frametime = frametime;
 
 	// let the progs know that a new frame has started
 	SVProgs->GlobalStruct->self = EDICT_TO_PROG (SVProgs->EdictPointers[0]);
@@ -1471,20 +1454,20 @@ void SV_Physics (double frametime)
 			SV_LinkEdict (ent, true);	// force retouch even for stationary
 
 		if (i > 0 && i <= svs.maxclients)
-			SV_Physics_Client (ent, i);
+			SV_Physics_Client (ent, i, frametime);
 		else if (ent->v.movetype == MOVETYPE_PUSH)
-			SV_Physics_Pusher (ent);
+			SV_Physics_Pusher (ent, frametime);
 		else if (ent->v.movetype == MOVETYPE_NONE)
-			SV_Physics_None (ent);
+			SV_Physics_None (ent, frametime);
 		else if (ent->v.movetype == MOVETYPE_FOLLOW) // Nehahra
-			SV_Physics_Follow (ent);
+			SV_Physics_Follow (ent, frametime);
 		else if (ent->v.movetype == MOVETYPE_NOCLIP)
-			SV_Physics_Noclip (ent);
+			SV_Physics_Noclip (ent, frametime);
 		else if (ent->v.movetype == MOVETYPE_STEP)
-			SV_Physics_Step (ent);
+			SV_Physics_Step (ent, frametime);
 		else if (ent->v.movetype == MOVETYPE_TOSS || ent->v.movetype == MOVETYPE_BOUNCE ||
 				 ent->v.movetype == MOVETYPE_FLY || ent->v.movetype == MOVETYPE_FLYMISSILE)
-			SV_Physics_Toss (ent);
+			SV_Physics_Toss (ent, frametime);
 		else Sys_Error ("SV_Physics: bad movetype %i", (int) ent->v.movetype);
 	}
 
@@ -1502,11 +1485,10 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	trace_t	trace;
 	vec3_t	move;
 	vec3_t	end;
-	float	save_frametime;
 
 	// needs to simulate different FPS because it comes from progs
-	save_frametime = sv.frametime;
-	sv.frametime = 0.05;
+	// (note - this is probably incorrect - should it be 0.1???)
+	double frametime = 0.05;
 
 	memcpy (&tempent, ent, sizeof (edict_t));
 	tent = &tempent;
@@ -1514,9 +1496,9 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	while (1)
 	{
 		SV_CheckVelocity (tent);
-		SV_AddGravity (tent);
-		VectorMultiplyAdd (tent->v.angles, sv.frametime, tent->v.avelocity, tent->v.angles);
-		VectorScale (tent->v.velocity, sv.frametime, move);
+		SV_AddGravity (tent, frametime);
+		VectorMad (tent->v.angles, frametime, tent->v.avelocity, tent->v.angles);
+		VectorScale (tent->v.velocity, frametime, move);
 		VectorAdd (tent->v.origin, move, end);
 		trace = SV_Move (tent->v.origin, tent->v.mins, tent->v.maxs, end, MOVE_NORMAL, tent);
 		VectorCopy (trace.endpos, tent->v.origin);
@@ -1526,6 +1508,5 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 				break;
 	}
 
-	sv.frametime = save_frametime;
 	return trace;
 }

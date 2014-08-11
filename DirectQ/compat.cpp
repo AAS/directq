@@ -57,7 +57,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *d_mipcap_compat = new cvar_t ("d_mipcap", "0", CVAR_COMPAT);
 	cvar_t *d_mipscale_compat = new cvar_t ("d_mipscale", "0", CVAR_COMPAT);
 	cvar_t *gl_nobind_compat = new cvar_t ("gl_nobind", "0", CVAR_COMPAT);
-	cvar_t *gl_picmip_compat = new cvar_t ("gl_picmip", "0", CVAR_COMPAT);
 	cvar_t *gl_subdivide_size_compat = new cvar_t ("gl_subdivide_size", "0", CVAR_COMPAT);
 	cvar_t *r_norefresh_compat = new cvar_t ("r_norefresh", "0", CVAR_COMPAT);
 	cvar_t *r_drawentities_compat = new cvar_t ("r_drawentities", "0", CVAR_COMPAT);
@@ -77,9 +76,7 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *gl_polyblend_compat = new cvar_t ("gl_polyblend", "0", CVAR_COMPAT);
 	cvar_t *gl_playermip_compat = new cvar_t ("gl_playermip", "0", CVAR_COMPAT);
 	cvar_t *gl_nocolors_compat = new cvar_t ("gl_nocolors", "0", CVAR_COMPAT);
-	cvar_t *gl_keeptjunctions_compat = new cvar_t ("gl_keeptjunctions", "0", CVAR_COMPAT);
 	cvar_t *gl_reporttjunctions_compat = new cvar_t ("gl_reporttjunctions", "0", CVAR_COMPAT);
-	cvar_t *scr_viewsize_compat = new cvar_t ("viewsize", "0", CVAR_COMPAT);
 	cvar_t *scr_fov_compat = new cvar_t ("fov", "0", CVAR_COMPAT);
 	cvar_t *scr_conspeed_compat = new cvar_t ("scr_conspeed", "0", CVAR_COMPAT);
 	cvar_t *scr_centertime_compat = new cvar_t ("scr_centertime", "0", CVAR_COMPAT);
@@ -377,3 +374,4 @@ void Cmd_MakeCompatLayer (void)
 	cmd_t *compatcmd_154 = new cmd_t ("centerview", NULL);
 	cmd_t *compatcmd_155 = new cmd_t ("hunk_report", NULL);
 }
+

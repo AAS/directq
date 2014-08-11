@@ -115,7 +115,7 @@ typedef struct miptex_s
 } miptex_t;
 
 
-typedef struct
+typedef struct dvertex_s
 {
 	float	point[3];
 } dvertex_t;

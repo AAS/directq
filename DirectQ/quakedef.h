@@ -40,6 +40,7 @@ typedef int (*sortfunc_t) (const void *, const void *);
 
 
 // disable unwanted warnings
+/*
 #pragma warning (disable: 4305)
 #pragma warning (disable: 4244)
 #pragma warning (disable: 4311)
@@ -49,11 +50,7 @@ typedef int (*sortfunc_t) (const void *, const void *);
 #pragma warning (disable: 4996)
 #pragma warning (disable: 4995)
 #pragma warning (disable: 4312)
-
-
-WCHAR *QASCIIToUnicode (char *strasc);
-char *QUnicodeToASCII (WCHAR *struni);
-
+*/
 
 typedef char quakepath[260];
 
@@ -179,6 +176,27 @@ extern int		sv_max_datagram;	// is default MAX_DATAGRAM
 #define IT_SIGIL3               (1<<30)
 #define IT_SIGIL4               (1<<31)
 
+// kurok stuff
+#define KIT_SHELLS              128
+#define KIT_NAILS               256
+#define KIT_ROCKETS             512
+#define KIT_CELLS               1024
+#define KIT_AXE                 2048
+#define KIT_TEKBOW			    4096
+#define KIT_UZI					8192
+#define KIT_M99					16384
+#define KIT_EXTRAW1		        32768
+#define KIT_EXTRAW2		        65536
+#define KIT_ARMOR1              8388608
+#define KIT_ARMOR2              16777216
+#define KIT_ARMOR3              33554432
+#define KIT_50CAL		        67108864
+#define KIT_60CAL		        134217728
+#define KIT_EXTRA1			    268435456
+#define KIT_EXTRA2              536870912
+#define KIT_EXTRA3              1073741824
+#define KIT_SUPERHEALTH         2147483648
+
 //===========================================
 //rogue changed and added defines
 
@@ -299,8 +317,6 @@ extern	cvar_t		developer;
 
 extern	bool	host_initialized;		// true if into command execution
 
-extern	int			host_framecount;	// incremented every frame, never reset
-
 extern	double		realtime;			// not bounded in any way, changed at
 										// start of every frame, never reset
 
@@ -367,3 +383,4 @@ int Sys_LoadResourceData (int resourceid, void **resbuf);
 
 void UpdateTitlebarText (char *mapname = NULL);
 
+void Host_DisableForLoading (bool disable);

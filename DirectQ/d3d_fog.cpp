@@ -169,6 +169,11 @@ void Fog_ParseServerMessage (void)
 
 void D3D_Fog_f (void)
 {
+	if (kurok)
+	{
+		return;
+	}
+
 	switch (Cmd_Argc ())
 	{
 	default:

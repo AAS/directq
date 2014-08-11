@@ -127,28 +127,15 @@ void D3DHLSL_SetAlpha (float alphaval)
 }
 
 
-void D3DHLSL_SetCurrLerp (float val)
+void D3DHLSL_SetLerp (float curr, float last)
 {
-	if (val != d3d_HLSLState.CurrLerp)
+	if (curr != d3d_HLSLState.CurrLerp || last != d3d_HLSLState.LastLerp)
 	{
-		// 1/200 is used here so that we can get -0.5..0.5 range preventing the normal from overbrighting/overdarking too much
-		float lerpval[2] = {val, val * 0.005f};
+		float lerpval[2] = {curr, last};
 
-		D3DHLSL_SetFloatArray ("currlerp", lerpval, 2);
-		d3d_HLSLState.CurrLerp = val;
-	}
-}
-
-
-void D3DHLSL_SetLastLerp (float val)
-{
-	if (val != d3d_HLSLState.LastLerp)
-	{
-		// 1/200 is used here so that we can get -0.5..0.5 range preventing the normal from overbrighting/overdarking too much
-		float lerpval[2] = {val, val * 0.005f};
-
-		D3DHLSL_SetFloatArray ("lastlerp", lerpval, 2);
-		d3d_HLSLState.LastLerp = val;
+		D3DHLSL_SetFloatArray ("aliaslerp", lerpval, 2);
+		d3d_HLSLState.CurrLerp = curr;
+		d3d_HLSLState.LastLerp = last;
 	}
 }
 
@@ -256,6 +243,13 @@ void D3DHLSL_SetFloatArray (D3DXHANDLE handle, float *fl, int len)
 }
 
 
+void D3DHLSL_SetVectorArray (D3DXHANDLE handle, D3DXVECTOR4 *vecs, int len)
+{
+	d3d_HLSLState.commitpending = true;
+	d3d_MasterFX->SetVectorArray (handle, vecs, len);
+}
+
+
 void D3DHLSL_EnableFog (bool enable)
 {
 	LPD3DXEFFECT d3d_DesiredFX = NULL;
@@ -336,7 +330,7 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 	if (FAILED (hr))
 	{
 		char *errstr = (char *) errbuf->GetBufferPointer ();
-		Con_Printf ("D3DHLSL_LoadEffect: Fatal error compiling %s\n%s", name, errstr);
+		Con_SafePrintf ("D3DHLSL_LoadEffect: Fatal error compiling %s\n%s", name, errstr);
 
 #ifdef _DEBUG
 		DebugBreak ();
@@ -347,7 +341,7 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 	else if (errbuf)
 	{
 		char *errstr = (char *) errbuf->GetBufferPointer ();
-		Con_Printf ("D3DHLSL_LoadEffect: Non-fatal error compiling %s\n%s", name, errstr);
+		Con_SafePrintf ("D3DHLSL_LoadEffect: Non-fatal error compiling %s\n%s", name, errstr);
 
 #ifdef _DEBUG
 		DebugBreak ();

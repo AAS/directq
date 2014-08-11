@@ -313,3 +313,21 @@ void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE texfilter, D3DTEXTU
 	D3D_SetTextureFilter (stage, D3DSAMP_MIPFILTER, mipfilter);
 }
 
+
+void D3DState_PicmipChange (cvar_t *var)
+{
+	float picmip = 0;
+
+	if (var->integer < 0)
+		picmip = 0;
+	else picmip = var->integer;
+
+	for (int i = 0; i < 8; i++)
+	{
+		D3D_SetSamplerState (i, D3DSAMP_MIPMAPLODBIAS, *((DWORD *) &picmip));
+	}
+}
+
+
+cvar_t gl_picmip ("gl_picmip", "0", 0, D3DState_PicmipChange);
+

@@ -20,15 +20,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <windows.h>
 #include "resource.h"
 
-IDR_PARTICLEDOT		RCDATA		"particledot.png"
-
 IDR_CROSSHAIR		RCDATA		"CrosshairFont.png"
-IDR_YOUAREHERE		RCDATA		"YouAreHere.png"
-IDR_UWWARP			RCDATA		"uwwarp_rgba.png"
 
 // shaders
 IDR_MASTERFX		RCDATA		"fxMaster.fx"
 
 // icons
 IDI_APPICON			ICON		"dq.ico"
+
 

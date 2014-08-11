@@ -38,8 +38,11 @@ typedef struct aliascache_s
 } aliasstate_t;
 
 
-// just for consistency although it's not protocol-dependent
-#define LERP_FINISH (1 << 4)
+#define LERP_MOVESTEP	(1 << 0) // this is a MOVETYPE_STEP entity, enable movement lerp
+#define LERP_RESETANIM	(1 << 1) // disable anim lerping until next anim frame
+#define LERP_RESETANIM2	(1 << 2) // set this and previous flag to disable anim lerping for two anim frames
+#define LERP_RESETMOVE	(1 << 3) // disable movement lerping until next origin/angles change
+#define LERP_FINISH		(1 << 4) // use lerpfinish time from server update instead of assuming interval of 0.1
 
 #define LERP_CURR	0
 #define LERP_LAST	1
@@ -56,7 +59,9 @@ typedef struct entity_s
 
 	entity_state_t			baseline;		// to fill in defaults in updates
 
-	float					msgtime;
+	double					msgtime;		// so binary comparison with cl.mtime[0] is valid
+
+	vec3_t					oldorg;			// for particle spawning
 
 	vec3_t					msg_origins[2];	// last two updates (0 is newest)
 	vec3_t					origin;
@@ -76,6 +81,9 @@ typedef struct entity_s
 
 	// occlusion queries
 	bool					Occluded;
+
+	// allocation sequence number in the current map
+	int						allocnum;
 
 	// player skins
 	int						playerskin;
@@ -134,6 +142,7 @@ typedef struct entity_s
 	// cached info about models
 	// these can't be in a union as the entity slot could be reused for a different model type
 	aliasstate_t		aliasstate;
+	struct mspriteframe_s *currspriteframe;
 } entity_t;
 
 

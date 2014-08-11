@@ -35,12 +35,27 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma comment (lib, "d3dx9.lib")
 #endif
 
+void D3DVid_CenterWindow (HWND hWnd);
+void D3DVid_SendToForeground (HWND hWnd);
+void D3DVid_SetWindowStyles (HWND hWnd, RECT *adjrect, D3DDISPLAYMODE *mode);
+
 #define VIDDRIVER_VERSION "1.8.7-no-16-bpp"
 cvar_t viddriver_version ("viddriver_version", "unknown", CVAR_ARCHIVE);
 
-void D3D_SetAllStates (void);
+void D3DVid_UpdateDriver (void)
+{
+}
 
-extern bool WinDWM;
+
+bool D3DVid_IsFullscreen (void)
+{
+	if (d3d_CurrentMode.RefreshRate)
+		return true;
+	else return false;
+}
+
+
+void D3D_SetAllStates (void);
 
 // declarations that don't really fit in anywhere else
 LPDIRECT3D9 d3d_Object = NULL;
@@ -77,8 +92,6 @@ void D3DRTT_CreateRTTTexture (void);
 
 // fixme - merge these two
 HWND d3d_Window;
-
-modestate_t	modestate = MS_UNINIT;
 
 void D3DVid_Restart_f (void);
 bool vid_queuerestart = false;
@@ -138,7 +151,7 @@ cvar_alias_t r_anisotropicfilter_alias ("r_anisotropicfilter", &r_anisotropicfil
 
 cvar_t gl_triplebuffer ("gl_triplebuffer", 1, CVAR_ARCHIVE);
 
-d3d_ModeDesc_t *d3d_ModeList = NULL;
+D3DDISPLAYMODE *d3d_ModeList = NULL;
 
 int d3d_NumModes = 0;
 int d3d_NumWindowedModes = 0;
@@ -146,13 +159,6 @@ int d3d_NumWindowedModes = 0;
 RECT WorkArea;
 D3DDISPLAYMODE d3d_DesktopMode;
 D3DDISPLAYMODE d3d_CurrentMode;
-
-d3d_ModeDesc_t d3d_BadMode = {{666, 666, 666, D3DFMT_UNKNOWN}, false, 0, -1, "Bad Mode"};
-
-
-// rather than having lots and lots and lots of globals all holding multiple instances of the same data, let's do
-// something radical, scary and potentially downright dangerous, and clean things up a bit.
-DWORD WindowStyle, ExWindowStyle;
 
 void ClearAllStates (void);
 void AppActivate (BOOL fActive, BOOL minimize);
@@ -170,6 +176,56 @@ void D3DVid_ClearScreen (void)
 }
 
 
+void D3DVid_ResetWindow (D3DDISPLAYMODE *mode);
+
+// let's cohabit more peacefully with fitz...
+// fixme - do this right (using vid_width and vid_height and mode 0 for a windowed mode)
+cvar_t vid_width ("d3d_width", 0.0f, CVAR_ARCHIVE, D3DVid_QueueRestart);
+cvar_t vid_height ("d3d_height", 0.0f, CVAR_ARCHIVE, D3DVid_QueueRestart);
+
+
+void D3DVid_SyncDimensions (D3DDISPLAYMODE *mode)
+{
+	Cvar_Set (&vid_width, mode->Width);
+	Cvar_Set (&vid_height, mode->Height);
+}
+
+
+void D3DVid_ResizeToDimension (int width, int height)
+{
+	// don't fire this if (a) we don't have a device or (b) we're not in a windowed mode
+	if (!d3d_Device) return;
+	if (d3d_CurrentMode.RefreshRate != 0) return;
+
+	// default 0 is to use the current mode
+	if (width < 1) width = d3d_CurrentMode.Width;
+	if (height < 1) height = d3d_CurrentMode.Height;
+
+	// upper bound
+	if (width > d3d_DesktopMode.Width) width = d3d_DesktopMode.Width;
+	if (height > d3d_DesktopMode.Height) height = d3d_DesktopMode.Height;
+
+	// prevent insanity
+	if (width < 640) width = 640;
+	if (height < 480) height = 480;
+
+	// no change
+	if (width == d3d_CurrentMode.Width && height == d3d_CurrentMode.Height) return;
+
+	d3d_PresentParams.BackBufferWidth = d3d_CurrentMode.Width = width;
+	d3d_PresentParams.BackBufferHeight = d3d_CurrentMode.Height = height;
+
+	vid.recalc_refdef = 1;
+	IN_UpdateClipCursor ();
+	D3DVid_ClearScreen ();
+	D3DVid_Restart_f ();
+
+	// note - this will recursively call this function but the checks above will catch it
+	D3DVid_ResetWindow (&d3d_CurrentMode);
+	D3DVid_SyncDimensions (&d3d_CurrentMode);
+}
+
+
 void D3DVid_ResizeWindow (HWND hWnd)
 {
 	if (!d3d_Device) return;
@@ -180,50 +236,18 @@ void D3DVid_ResizeWindow (HWND hWnd)
 	GetClientRect (hWnd, &clientrect);
 
 	// check the client rect dimensions to make sure it's valid
+	// (sometimes on minimize or show desktop we get a clientrect of 0/0)
 	if (clientrect.right - clientrect.left < 1) return;
 	if (clientrect.bottom - clientrect.top < 1) return;
 
-	d3d_CurrentMode.Width = clientrect.right - clientrect.left;
-	d3d_CurrentMode.Height = clientrect.bottom - clientrect.top;
-
-	d3d_PresentParams.BackBufferWidth = d3d_CurrentMode.Width;
-	d3d_PresentParams.BackBufferHeight = d3d_CurrentMode.Height;
-
-	vid.recalc_refdef = 1;
-	IN_UpdateClipCursor ();
-	D3DVid_Restart_f ();
-}
-
-
-void D3DVid_SetWindowStyles (D3DDISPLAYMODE *mode)
-{
-	if (mode->RefreshRate == 0)
-	{
-		// windowed mode
-		WindowStyle = WS_TILEDWINDOW;//WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-		ExWindowStyle = WS_EX_TOPMOST;
-	}
-	else
-	{
-		// fullscreen mode
-		WindowStyle = WS_POPUP;
-		ExWindowStyle = WS_EX_TOPMOST;
-	}
+	D3DVid_ResizeToDimension (clientrect.right - clientrect.left, clientrect.bottom - clientrect.top);
 }
 
 
 void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
 {
-	D3DVid_SetWindowStyles (mode);
-
 	RECT rect;
-	rect.left = 0;
-	rect.top = 0;
-	rect.right = mode->Width;
-	rect.bottom = mode->Height;
-
-	// evaluate the rect size for the style
-	AdjustWindowRectEx (&rect, WindowStyle, FALSE, 0);
+	D3DVid_SetWindowStyles (d3d_Window, &rect, mode);
 
 	int width = rect.right - rect.left;
 	int height = rect.bottom - rect.top;
@@ -231,38 +255,15 @@ void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
 	// resize the window
 	SetWindowPos (d3d_Window, HWND_TOP, 0, 0, width, height, SWP_NOMOVE | SWP_SHOWWINDOW);
 
-	// reset the styles
-	SetWindowLong (d3d_Window, GWL_EXSTYLE, ExWindowStyle);
-	SetWindowLong (d3d_Window, GWL_STYLE, WindowStyle);
-
 	// the style reset requires a SWP to update cached info
 	SetWindowPos (d3d_Window, HWND_TOP, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW);
 
 	// re-center it if windowed
-	if (mode->RefreshRate == 0)
-	{
-		modestate = MS_WINDOWED;
-
-		// center it properly in the working area
-		SetWindowPos
-		(
-			d3d_Window,
-			HWND_TOP,
-			((WorkArea.right - WorkArea.left) - width) / 2,
-			((WorkArea.bottom - WorkArea.top) - height) / 2,
-			0,
-			0,
-			SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW | SWP_DRAWFRAME
-		);
-	}
-	else
-	{
-		// fullscreen mode
-		modestate = MS_FULLDIB;
-	}
+	if (mode->RefreshRate == 0) D3DVid_CenterWindow (d3d_Window);
 
 	// update cursor clip region
 	IN_UpdateClipCursor ();
+	D3DVid_SyncDimensions (mode);
 }
 
 
@@ -362,16 +363,15 @@ void D3DVid_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 }
 
 
-void D3DVid_ModeDescription (d3d_ModeDesc_t *mode)
+void D3DVid_ModeDescription (int modenum, D3DDISPLAYMODE *mode)
 {
 	Con_Printf
 	(
-		"%2i: %ix%ix%i (%s)\n",
-		mode->ModeNum,
-		mode->d3d_Mode.Width,
-		mode->d3d_Mode.Height,
-		mode->BPP,
-		mode->ModeDesc
+		"%3i: %ix%i (%s)\n",
+		modenum,
+		mode->Width,
+		mode->Height,
+		mode->RefreshRate == 0 ? "Windowed" : D3DTypeToString (mode->Format)
 	);
 }
 
@@ -380,8 +380,8 @@ void D3DVid_DescribeModes_f (void)
 {
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		d3d_ModeDesc_t *mode = d3d_ModeList + i;
-		D3DVid_ModeDescription (mode);
+		D3DDISPLAYMODE *mode = d3d_ModeList + i;
+		D3DVid_ModeDescription (i, mode);
 	}
 }
 
@@ -394,20 +394,20 @@ void D3DVid_NumModes_f (void)
 }
 
 
-bool D3DVid_ModeIsCurrent (d3d_ModeDesc_t *mode)
+bool D3DVid_ModeIsCurrent (D3DDISPLAYMODE *mode)
 {
 	if (d3d_CurrentMode.RefreshRate)
 	{
-		if (mode->d3d_Mode.Format != d3d_CurrentMode.Format) return false;
-		if (mode->d3d_Mode.Height != d3d_CurrentMode.Height) return false;
-		if (mode->d3d_Mode.RefreshRate != d3d_CurrentMode.RefreshRate) return false;
-		if (mode->d3d_Mode.Width != d3d_CurrentMode.Width) return false;
+		if (mode->Format != d3d_CurrentMode.Format) return false;
+		if (mode->Height != d3d_CurrentMode.Height) return false;
+		if (mode->RefreshRate != d3d_CurrentMode.RefreshRate) return false;
+		if (mode->Width != d3d_CurrentMode.Width) return false;
 	}
 	else
 	{
-		if (!mode->AllowWindowed) return false;
-		if (mode->d3d_Mode.Height != d3d_CurrentMode.Height) return false;
-		if (mode->d3d_Mode.Width != d3d_CurrentMode.Width) return false;
+		if (mode->RefreshRate != 0) return false;
+		if (mode->Height != d3d_CurrentMode.Height) return false;
+		if (mode->Width != d3d_CurrentMode.Width) return false;
 	}
 
 	return true;
@@ -422,7 +422,7 @@ void D3DVid_SetVidMode (void)
 		if (D3DVid_ModeIsCurrent (&d3d_ModeList[i]))
 		{
 			// set the correct value
-			Cvar_Set (&d3d_mode, d3d_ModeList[i].ModeNum);
+			Cvar_Set (&d3d_mode, i);
 			return;
 		}
 	}
@@ -433,11 +433,11 @@ void D3DVid_DescribeCurrentMode_f (void)
 {
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+		D3DDISPLAYMODE *mode = d3d_ModeList + i;
 
 		if (!D3DVid_ModeIsCurrent (mode)) continue;
 
-		D3DVid_ModeDescription (mode);
+		D3DVid_ModeDescription (i, mode);
 		return;
 	}
 }
@@ -447,17 +447,9 @@ void D3DVid_DescribeMode_f (void)
 {
 	int modenum = atoi (Cmd_Argv (1));
 
-	for (int i = 0; i < d3d_NumModes; i++)
-	{
-		d3d_ModeDesc_t *mode = d3d_ModeList + i;
-
-		if (mode->ModeNum != modenum) continue;
-
-		D3DVid_ModeDescription (mode);
-		return;
-	}
-
-	Con_Printf ("Unknown video mode: %i\n", modenum);
+	if (modenum < 0 || modenum >= d3d_NumModes)
+		Con_Printf ("Unknown video mode: %i\n", modenum);
+	else D3DVid_ModeDescription (modenum, &d3d_ModeList[modenum]);
 }
 
 
@@ -598,57 +590,23 @@ void D3DVid_Restart_f (void)
 	// flag to skip this frame so that we update more robustly
 	vid_restarted = true;
 
+	D3DVid_SyncDimensions (&d3d_CurrentMode);
+
 	Cbuf_InsertText ("\n");
 	Cbuf_Execute ();
 }
 
 
-D3DFORMAT D3DVid_FindBPP (int bpp)
-{
-	// any matching bpp
-	D3DFORMAT AnyBPP = D3DFMT_UNKNOWN;
-
-	// attempt to find an exact match BPP in the mode list
-	for (int i = 0; i < d3d_NumModes; i++)
-	{
-		d3d_ModeDesc_t *mode = d3d_ModeList + i;
-
-		// bpp match
-		if (mode->BPP == bpp) return mode->d3d_Mode.Format;
-
-		// store any valid bpp
-		AnyBPP = mode->d3d_Mode.Format;
-	}
-
-	// return any bpp we got
-	if (AnyBPP != D3DFMT_UNKNOWN) return AnyBPP;
-
-	Sys_Error ("D3DVid_FindBPP: Failed to find matching BPP");
-
-	// shut up compiler
-	return D3DFMT_UNKNOWN;
-}
-
-
-int RRCompFunc (const void *a, const void *b)
-{
-	int ia = ((int *) a)[0];
-	int ib = ((int *) b)[0];
-
-	return ia - ib;
-}
-
-
-void Menu_VideoDecodeVideoModes (d3d_ModeDesc_t *modes, int totalnummodes, int numwindowed);
+void Menu_VideoDecodeVideoModes (D3DDISPLAYMODE *modes, int totalnummodes, int numwindowed);
 
 bool ExistingMode (D3DDISPLAYMODE *mode)
 {
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		if (d3d_ModeList[i].d3d_Mode.Format != mode->Format) continue;
-		if (d3d_ModeList[i].d3d_Mode.Height != mode->Height) continue;
-		if (d3d_ModeList[i].d3d_Mode.RefreshRate != mode->RefreshRate) continue;
-		if (d3d_ModeList[i].d3d_Mode.Width != mode->Width) continue;
+		if (d3d_ModeList[i].Format != mode->Format) continue;
+		if (d3d_ModeList[i].Height != mode->Height) continue;
+		if (d3d_ModeList[i].RefreshRate != mode->RefreshRate) continue;
+		if (d3d_ModeList[i].Width != mode->Width) continue;
 
 		// mode is already present
 		return true;
@@ -656,6 +614,18 @@ bool ExistingMode (D3DDISPLAYMODE *mode)
 
 	// mode is not 
 	return false;
+}
+
+
+int D3DVid_ModeSortFunc (D3DDISPLAYMODE *m1, D3DDISPLAYMODE *m2)
+{
+	if (m1->RefreshRate == m2->RefreshRate)
+	{
+		if (m1->Width == m2->Width)
+			return ((int) m1->Height - (int) m2->Height);
+		else return ((int) m1->Width - (int) m2->Width);
+	}
+	else return ((int) m1->RefreshRate - (int) m2->RefreshRate);
 }
 
 
@@ -673,38 +643,10 @@ void D3DVid_EnumerateVideoModes (void)
 	int MaxWindowHeight = WorkArea.bottom - WorkArea.top;
 
 	// get a valid pointer for the first mode in the list
-	d3d_ModeList = (d3d_ModeDesc_t *) MainHunk->Alloc (0);
-
-	// enumerate 32bpp modes in the adapter
-	// see can we support a fullscreen format with this mode format
-	hr = d3d_Object->CheckDeviceType (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DFMT_X8R8G8B8, FALSE);
-
-	if (FAILED (hr))
-	{
-		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
-		return;
-	}
-
-	// see can we create a standard texture on it
-	hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
-
-	if (FAILED (hr))
-	{
-		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
-		return;
-	}
-
-	// see can we create an alpha texture on it
-	hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
-
-	if (FAILED (hr))
-	{
-		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
-		return;
-	}
+	d3d_ModeList = (D3DDISPLAYMODE *) MainHunk->Alloc (0);
 
 	// get the count of modes for this format
-	int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8);
+	int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, d3d_DesktopMode.Format);
 
 	// no modes available for this format
 	if (!ModeCount)
@@ -713,133 +655,68 @@ void D3DVid_EnumerateVideoModes (void)
 		return;
 	}
 
+	d3d_ModeList = (D3DDISPLAYMODE *) scratchbuf;
+	d3d_NumModes = 0;
+	d3d_NumWindowedModes = 0;
+
+	int d3d_MaxDisplayModes = SCRATCHBUF_SIZE / sizeof (D3DDISPLAYMODE);
+
 	// enumerate them all
 	for (int i = 0; i < ModeCount; i++)
 	{
-		D3DDISPLAYMODE mode;
-
 		// get the mode description
-		d3d_Object->EnumAdapterModes (D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8, i, &mode);
-
-		DEVMODE dm;
-
-		memset (&dm, 0, sizeof (DEVMODE));
-		dm.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-		dm.dmBitsPerPel = 32;
-		dm.dmDisplayFrequency = mode.RefreshRate;
-		dm.dmPelsWidth = mode.Width;
-		dm.dmPelsHeight = mode.Height;
-
-		dm.dmSize = sizeof (DEVMODE);
-
-		// attempt to change to it
-		// (fixme - this still breaks on vmwares svga driver which allows huge virtual resolutions)
-		if (ChangeDisplaySettings (&dm, CDS_TEST | CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL) continue;
+		d3d_Object->EnumAdapterModes (D3DADAPTER_DEFAULT, d3d_DesktopMode.Format, i, &d3d_ModeList[d3d_NumModes]);
 
 		// we're only interested in modes that match the desktop refresh rate
-		if (mode.RefreshRate != d3d_DesktopMode.RefreshRate) continue;
+		if (d3d_ModeList[d3d_NumModes].RefreshRate != d3d_DesktopMode.RefreshRate) continue;
 
 		// don't allow modes < 640 x 480
-		if (mode.Width < 640) continue;
-		if (mode.Height < 480) continue;
+		if (d3d_ModeList[d3d_NumModes].Width < 640) continue;
+		if (d3d_ModeList[d3d_NumModes].Height < 480) continue;
 
 		// if the mode width is < height we assume that we have a monitor capable of rotating it's desktop
 		// and therefore we skip the mode
-		if (mode.Width < mode.Height) continue;
+		if (d3d_ModeList[d3d_NumModes].Width < d3d_ModeList[d3d_NumModes].Height) continue;
 
-		// if the mode is already present don't record it
-		if (ExistingMode (&mode)) continue;
+		// see does the mode already exist
+		bool existingmode = false;
 
-		// ensure that we have space to store it
-		MainHunk->Alloc (sizeof (d3d_ModeDesc_t));
-
-		// and store it in our master mode list
-		d3d_ModeDesc_t *newmode = &d3d_ModeList[d3d_NumModes];
-		newmode->ModeNum = d3d_NumModes;
-		d3d_NumModes++;
-
-		// copy out
-		newmode->d3d_Mode.Format = mode.Format;
-		newmode->d3d_Mode.Height = mode.Height;
-		newmode->d3d_Mode.RefreshRate = mode.RefreshRate;
-		newmode->d3d_Mode.Width = mode.Width;
-		newmode->BPP = 32;
-
-		// store the description
-		strcpy (newmode->ModeDesc, D3DTypeToString (D3DFMT_X8R8G8B8));
-
-		// see is it valid for windowed
-		newmode->AllowWindowed = true;
-
-		// valid windowed modes must be the same format as the desktop and less than it's resolution
-		if (newmode->d3d_Mode.Width >= MaxWindowWidth) newmode->AllowWindowed = false;
-		if (newmode->d3d_Mode.Height >= MaxWindowHeight) newmode->AllowWindowed = false;
-		if (newmode->d3d_Mode.Format != d3d_DesktopMode.Format) newmode->AllowWindowed = false;
-		if (newmode->AllowWindowed) d3d_NumWindowedModes++; else continue;
-		d3d_NumWindowedModes = d3d_NumWindowedModes;
-	}
-
-	if (!d3d_NumModes)
-	{
-		Sys_Error ("D3DVid_EnumerateVideoModes: No 32 BPP display modes available");
-		return;
-	}
-
-	// we must emulate WinQuake by putting the windowed modes at the start of the list
-	if (d3d_NumWindowedModes)
-	{
-		// allocare extra space for the windowed modes
-		MainHunk->Alloc (d3d_NumWindowedModes * sizeof (d3d_ModeDesc_t));
-
-		// move the fullscreen modes to the end of the list
-		for (int i = 0; i < d3d_NumModes; i++)
+		for (int j = 0; j < d3d_NumModes; j++)
 		{
-			d3d_ModeDesc_t *src = &d3d_ModeList[d3d_NumModes - (i + 1)];
-			d3d_ModeDesc_t *dst = &d3d_ModeList[d3d_NumModes + d3d_NumWindowedModes - (i + 1)];
+			if (d3d_ModeList[d3d_NumModes].Width != d3d_ModeList[j].Width) continue;
+			if (d3d_ModeList[d3d_NumModes].Height != d3d_ModeList[j].Height) continue;
 
-			memcpy (dst, src, sizeof (d3d_ModeDesc_t));
+			existingmode = true;
+			break;
 		}
 
-		// reset pointers and stuff so that we can start copying in the windowed modes
-		d3d_ModeDesc_t *fullmode = &d3d_ModeList[d3d_NumWindowedModes];
-		d3d_ModeDesc_t *winmode = d3d_ModeList;
-
-		// put windowed modes at the start of the list
-		for (int i = 0; i < d3d_NumModes; i++, fullmode++)
-		{
-			// not a valid windowed mode
-			if (!fullmode->AllowWindowed) continue;
-
-			// copy it in and update it
-			memcpy (winmode, fullmode, sizeof (d3d_ModeDesc_t));
-			strcpy (winmode->ModeDesc, "Windowed");
-
-			// ensure that it's recognized as a windowed mode
-			winmode->d3d_Mode.Format = D3DFMT_UNKNOWN;
-			winmode->d3d_Mode.RefreshRate = 0;
-			winmode->BPP = 0;
-
-			// this is no longer a windowed mode
-			fullmode->AllowWindowed = false;
-
-			// next windowed mode
-			winmode++;
-		}
-
-		// add the windowed modes to the total mode count
-		// (fixme: maintain separate pointers and counters for each too???)
-		d3d_NumModes += d3d_NumWindowedModes;
-
-		// fix up the mode numbers
-		for (int i = 0; i < d3d_NumModes; i++)
-			d3d_ModeList[i].ModeNum = i;
+		// if it's not a previously existing mode we advance the counter
+		if (!existingmode) d3d_NumModes++;
 	}
 
-	// finally copy from the mainhunk to the zone at the correct size
-	d3d_ModeDesc_t *modes = (d3d_ModeDesc_t *) MainZone->Alloc (d3d_NumModes * sizeof (d3d_ModeDesc_t));
-	memcpy (modes, d3d_ModeList, d3d_NumModes * sizeof (d3d_ModeDesc_t));
-	d3d_ModeList = modes;
-	MainHunk->Free ();
+	// now fill in windowed modes
+	for (int i = 0; i < d3d_NumModes; i++)
+	{
+		if (d3d_ModeList[i].Width >= MaxWindowWidth) continue;
+		if (d3d_ModeList[i].Height >= MaxWindowHeight) continue;
+
+		// add it as a windowed mode
+		d3d_ModeList[d3d_NumModes + d3d_NumWindowedModes].Width = d3d_ModeList[i].Width;
+		d3d_ModeList[d3d_NumModes + d3d_NumWindowedModes].Height = d3d_ModeList[i].Height;
+		d3d_ModeList[d3d_NumModes + d3d_NumWindowedModes].Format = D3DFMT_UNKNOWN;
+		d3d_ModeList[d3d_NumModes + d3d_NumWindowedModes].RefreshRate = 0;
+		d3d_NumWindowedModes++;
+	}
+
+	// add the windowed modes to the total mode count
+	d3d_NumModes += d3d_NumWindowedModes;
+
+	// sort the list to put them into proper order
+	qsort (d3d_ModeList, d3d_NumModes, sizeof (D3DDISPLAYMODE), (sortfunc_t) D3DVid_ModeSortFunc);
+
+	// copy them out to main memory
+	d3d_ModeList = (D3DDISPLAYMODE *) MainZone->Alloc (d3d_NumModes * sizeof (D3DDISPLAYMODE));
+	memcpy (d3d_ModeList, scratchbuf, d3d_NumModes * sizeof (D3DDISPLAYMODE));
 
 	Menu_VideoDecodeVideoModes (d3d_ModeList, d3d_NumModes, d3d_NumWindowedModes);
 
@@ -853,7 +730,7 @@ void D3DVid_EnumerateVideoModes (void)
 		// check for mode already set and return if it was a valid one already in our list
 		if (d3d_mode.integer >= 0 && d3d_mode.integer < d3d_NumModes)
 		{
-			d3d_ModeDesc_t *mode = d3d_ModeList + d3d_mode.integer;
+			D3DDISPLAYMODE *mode = d3d_ModeList + d3d_mode.integer;
 			return;
 		}
 	}
@@ -861,33 +738,31 @@ void D3DVid_EnumerateVideoModes (void)
 	// find a mode to start in; we start directq in a windowed mode at either 640x480 or 800x600, whichever is
 	// higher.  windowed modes are safer - they don't have exclusive ownership of your screen so if things go
 	// wrong on first run you can get out easier.
-	int windowedmode800 = -1;
-	int windowedmode640 = -1;
+	D3DDISPLAYMODE *windowedmode800 = NULL;
+	D3DDISPLAYMODE *windowedmode640 = NULL;
 
 	// now find a good default windowed mode - try to find either 800x600 or 640x480
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+		D3DDISPLAYMODE *mode = d3d_ModeList + i;
 
 		// not a windowed mode
-		if (!mode->AllowWindowed) continue;
-
-		if (mode->BPP > 0) continue;
-		if (mode->d3d_Mode.RefreshRate > 0) continue;
-		if (mode->d3d_Mode.Width == 800 && mode->d3d_Mode.Height == 600) windowedmode800 = mode->ModeNum;
-		if (mode->d3d_Mode.Width == 640 && mode->d3d_Mode.Height == 480) windowedmode640 = mode->ModeNum;
+		if (mode->Format != D3DFMT_UNKNOWN) continue;
+		if (mode->RefreshRate > 0) continue;
+		if (mode->Width == 800 && mode->Height == 600) windowedmode800 = mode;
+		if (mode->Width == 640 && mode->Height == 480) windowedmode640 = mode;
 	}
 
 	// use the best windowed mode we could find of 800x600 or 640x480, or mode 0 if none found
 	// (this will be a fullscreen mode at some crazy low resolution, so it probably won't work anyway...)
-	if (windowedmode800 >= 0)
+	if (windowedmode800)
 	{
 		d3d_CurrentMode.Width = 800;
 		d3d_CurrentMode.Height = 600;
 		d3d_CurrentMode.Format = D3DFMT_UNKNOWN;
 		d3d_CurrentMode.RefreshRate = 0;
 	}
-	else if (windowedmode640 >= 0)
+	else if (windowedmode640)
 	{
 		d3d_CurrentMode.Width = 640;
 		d3d_CurrentMode.Height = 480;
@@ -904,29 +779,18 @@ void D3DVid_EnumerateVideoModes (void)
 void D3DVid_FindModeForVidMode (D3DDISPLAYMODE *mode)
 {
 	// catch unspecified modes
-	if (d3d_mode.value < 0) return;
+	if (d3d_mode.integer < 0) return;
+	if (d3d_mode.integer >= d3d_NumModes) return;
 
-	for (int i = 0; i < d3d_NumModes; i++)
-	{
-		d3d_ModeDesc_t *findmode = d3d_ModeList + i;
+	D3DDISPLAYMODE *findmode = d3d_ModeList + d3d_mode.integer;
 
-		// look for a match
-		if (findmode->ModeNum == (int) d3d_mode.value)
-		{
-			// copy them out
-			mode->Width = findmode->d3d_Mode.Width;
-			mode->Height = findmode->d3d_Mode.Height;
+	// copy them out
+	mode->Width = findmode->Width;
+	mode->Height = findmode->Height;
 
-			// be certain to copy these out too so that we know they're valid for windowed or fullscreen
-			mode->Format = findmode->d3d_Mode.Format;
-			mode->RefreshRate = findmode->d3d_Mode.RefreshRate;
-
-			// done
-			return;
-		}
-	}
-
-	// didn't find a match so we'll just let it pass through
+	// be certain to copy these out too so that we know they're valid for windowed or fullscreen
+	mode->Format = findmode->Format;
+	mode->RefreshRate = findmode->RefreshRate;
 }
 
 
@@ -936,32 +800,32 @@ void D3DVid_FindBestWindowedMode (D3DDISPLAYMODE *mode)
 
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		d3d_ModeDesc_t *winmode = d3d_ModeList + i;
+		D3DDISPLAYMODE *winmode = d3d_ModeList + i;
 
 		// not valid for a windowed mode
-		if (!winmode->AllowWindowed) continue;
+		if (winmode->RefreshRate) continue;
+		if (winmode->Format != D3DFMT_UNKNOWN) continue;
 
 		if (!best)
 		{
 			// if we don't have a best mode set yet, the first one we find is it!
-			best = &winmode->d3d_Mode;
+			best = winmode;
 			continue;
 		}
 
-		if (winmode->d3d_Mode.Width == mode->Width && winmode->d3d_Mode.Height == mode->Height)
+		if (winmode->Width == mode->Width && winmode->Height == mode->Height)
 		{
 			// exact match
-			best = &winmode->d3d_Mode;
+			best = winmode;
 			break;
 		}
 
 		// if either of width or height were unspecified, take one that matches
-		if (winmode->d3d_Mode.Width == mode->Width && mode->Height == 0) best = &winmode->d3d_Mode;
-
-		if (winmode->d3d_Mode.Width == 0 && winmode->d3d_Mode.Height == mode->Height) best = &winmode->d3d_Mode;
+		if (winmode->Width == mode->Width && mode->Height == 0) best = winmode;
+		if (winmode->Width == 0 && winmode->Height == mode->Height) best = winmode;
 
 		// if both were unspecified we take the current windowed mode as the best
-		if (mode->Height == 0 && mode->Width == 0) best = &winmode->d3d_Mode;
+		if (mode->Height == 0 && mode->Width == 0) best = winmode;
 	}
 
 	if (!best)
@@ -983,32 +847,31 @@ void D3DVid_FindBestFullscreenMode (D3DDISPLAYMODE *mode)
 
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		d3d_ModeDesc_t *fsmode = d3d_ModeList + i;
+		D3DDISPLAYMODE *fsmode = d3d_ModeList + i;
 
 		// invalid format
-		if (fsmode->d3d_Mode.Format != mode->Format) continue;
+		if (fsmode->Format != mode->Format) continue;
 
 		if (!best)
 		{
 			// if we don't have a best mode set yet, the first one we find is it!
-			best = &fsmode->d3d_Mode;
+			best = fsmode;
 			continue;
 		}
 
-		if (fsmode->d3d_Mode.Width == mode->Width && fsmode->d3d_Mode.Height == mode->Height)
+		if (fsmode->Width == mode->Width && fsmode->Height == mode->Height)
 		{
 			// exact match
-			best = &fsmode->d3d_Mode;
+			best = fsmode;
 			break;
 		}
 
 		// if either of width or height were unspecified, take one that matches
-		if (fsmode->d3d_Mode.Width == mode->Width && mode->Height == 0) best = &fsmode->d3d_Mode;
-
-		if (fsmode->d3d_Mode.Width == 0 && fsmode->d3d_Mode.Height == mode->Height) best = &fsmode->d3d_Mode;
+		if (fsmode->Width == mode->Width && mode->Height == 0) best = fsmode;
+		if (fsmode->Width == 0 && fsmode->Height == mode->Height) best = fsmode;
 
 		// if both were unspecified we take the current fullscreen mode as the best
-		if (mode->Height == 0 && mode->Width == 0) best = &fsmode->d3d_Mode;
+		if (mode->Height == 0 && mode->Width == 0) best = fsmode;
 	}
 
 	if (!best)
@@ -1154,9 +1017,12 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	// attempt to create a hardware T&L device - we can ditch all of the extra flags now :)
 	// (Quark ETP needs D3DCREATE_FPU_PRESERVE - using _controlfp during texcoord gen doesn't work)
 	// here as the generated coords will also lose precision when being applied
-	SAFE_RELEASE (d3d_Device);
+
 	d3d_GlobalCaps.supportHardwareTandL = true;
 	d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
+
+	// ensure our device is validly gone
+	SAFE_RELEASE (d3d_Device);
 
 	hr = d3d_Object->CreateDevice
 	(
@@ -1168,7 +1034,36 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 		&d3d_Device
 	);
 
-	if (FAILED (hr))
+	if (SUCCEEDED (hr))
+	{
+		// now we test for stream offset before finally accepting the device; the capability bit is unreliable
+		// so we actually try it and see what happens (this is fun).  stream offset is always supported by a
+		// software T&L device so we fall back on that if we can't get it in hardware.
+		LPDIRECT3DVERTEXBUFFER9 sotest = NULL;
+		int sotestsize = 4096 * 1024;
+
+		hr = d3d_Device->CreateVertexBuffer (sotestsize, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &sotest, NULL);
+		if (FAILED (hr)) Sys_Error ("D3DVid_InitDirect3D : Failed to create a vertex buffer");
+
+		// set up for drawing at multiple offsets to establish whether or not this will work
+		for (int i = 0; i < 1024; i++)
+		{
+			hr = d3d_Device->SetStreamSource (0, sotest, i * 96, 32);
+
+			if (FAILED (hr))
+			{
+				// destroy the device so that it will recreate with software t&l
+				SAFE_RELEASE (sotest);
+				SAFE_RELEASE (d3d_Device);
+				break;
+			}
+		}
+
+		// don't leak memory
+		SAFE_RELEASE (sotest);
+	}
+
+	if (FAILED (hr) || !d3d_Device)
 	{
 		// we may still be able to create a software T&L device
 		SAFE_RELEASE (d3d_Device);
@@ -1193,8 +1088,17 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 
 	if (d3d_GlobalCaps.supportHardwareTandL)
+	{
 		Con_Printf ("Using Hardware Vertex Processing\n\n");
-	else Con_Printf ("Using Software Vertex Processing\n\n");
+		d3d_GlobalCaps.DiscardLock = D3DLOCK_DISCARD;
+		d3d_GlobalCaps.NoOverwriteLock = D3DLOCK_NOOVERWRITE;
+	}
+	else
+	{
+		Con_Printf ("Using Software Vertex Processing\n\n");
+		d3d_GlobalCaps.DiscardLock = 0;
+		d3d_GlobalCaps.NoOverwriteLock = 0;
+	}
 
 	// report some caps
 	Con_Printf ("Video mode %i (%ix%i) Initialized\n", d3d_mode.integer, mode->Width, mode->Height);
@@ -1300,7 +1204,7 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 		(
 			D3DADAPTER_DEFAULT,
 			D3DDEVTYPE_HAL,
-			D3DFMT_X8R8G8B8,
+			d3d_DesktopMode.Format,
 			0,
 			D3DRTYPE_SURFACE,
 			(D3DFORMAT) MAKEFOURCC ('I','N','S','T')
@@ -1333,60 +1237,6 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 		}
 	}
 
-	// (d3d_DeviceCaps.Caps2 & D3DDEVCAPS2_STREAMOFFSET) is unreliable; some devices don't set it but *do*
-	// support offset; and based on that i don't feel comfortable assuming that a device which sets it
-	// actually does support offset.  so instead let's test it for real...
-	// this also tests that we can create a vertex buffer OK which is a prime requisite.
-	// (i guess that these devices don't do hardware t&l, and therefore don't report any hardware t&l type caps,
-	// but are perfectly capable of doing it all in software)
-	LPDIRECT3DVERTEXBUFFER9 sotest = NULL;
-	int sotestsize = 4096 * 1024;
-
-	hr = d3d_Device->CreateVertexBuffer (sotestsize, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &sotest, NULL);
-	if (FAILED (hr)) Sys_Error ("D3DVid_InitDirect3D : Failed to create a vertex buffer");
-
-	// assume that it's supported and let's try to prove otherwise
-	d3d_GlobalCaps.supportStreamOffset = true;
-
-	// set up for drawing at multiple offsets to establish whether or not this will work
-	for (int i = 0; i < 1024; i++)
-	{
-		hr = d3d_Device->SetStreamSource (0, sotest, i * 96, 32);
-
-		if (FAILED (hr))
-		{
-			d3d_GlobalCaps.supportStreamOffset = false;
-			break;
-		}
-	}
-
-	if (d3d_GlobalCaps.supportStreamOffset)
-		Con_Printf ("Allowing Stream Offset\n");
-	else Con_Printf ("Stream Offset NOT Supported\n");
-
-	// don't leak memory
-	sotest->Release ();
-
-#if 0
-	LPDIRECT3DQUERY9 qTest = NULL;
-	hr = d3d_Device->CreateQuery (D3DQUERYTYPE_OCCLUSION, &qTest);
-
-	if (FAILED (hr))
-	{
-		Con_Printf ("Occlusion Queries NOT Supported\n");
-		d3d_GlobalCaps.supportOcclusion = false;
-	}
-	else
-	{
-		Con_Printf ("Allowing Occlusion Queries\n");
-		d3d_GlobalCaps.supportOcclusion = true;
-		qTest->Release ();
-	}
-#endif
-
-	// OK, now we disable them because they're still WIP and not 100% right yet
-	d3d_GlobalCaps.supportOcclusion = false;
-
 	// set up everything else
 	// (fixme - run through the on-recover code for the loss handlers here instead)
 	D3DHLSL_Init ();
@@ -1406,21 +1256,15 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	// begin at 1 so that any newly allocated model_t will be 0 and therefore must
 	// be explicitly set to be valid
 	d3d_RenderDef.RegistrationSequence = 1;
+
+	D3DVid_SyncDimensions (mode);
 }
 
 
 void D3DVid_CreateWindow (D3DDISPLAYMODE *mode)
 {
-	D3DVid_SetWindowStyles (mode);
-
-	// the window has already been created so all we need is to update it's properties
 	RECT rect;
-
-	rect.top = rect.left = 0;
-	rect.right = mode->Width;
-	rect.bottom = mode->Height;
-
-	AdjustWindowRectEx (&rect, WindowStyle, FALSE, 0);
+	D3DVid_SetWindowStyles (d3d_Window, &rect, mode);
 
 	int width = rect.right - rect.left;
 	int height = rect.bottom - rect.top;
@@ -1430,32 +1274,9 @@ void D3DVid_CreateWindow (D3DDISPLAYMODE *mode)
 	SetWindowPos (d3d_Window, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOCOPYBITS | SWP_FRAMECHANGED | SWP_HIDEWINDOW);
 
 	// switch window properties
-	SetWindowLong (d3d_Window, GWL_EXSTYLE, ExWindowStyle);
-	SetWindowLong (d3d_Window, GWL_STYLE, WindowStyle);
 	SetWindowLong (d3d_Window, GWL_WNDPROC, (LONG) MainWndProc);
 
-	if (mode->RefreshRate == 0)
-	{
-		// windowed mode
-		modestate = MS_WINDOWED;
-
-		// Center and show the DIB window
-		SetWindowPos
-		(
-			d3d_Window,
-			HWND_TOP,
-			((WorkArea.right - WorkArea.left) - width) / 2,
-			((WorkArea.bottom - WorkArea.top) - height) / 2,
-			0,
-			0,
-			SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW | SWP_DRAWFRAME
-		);
-	}
-	else
-	{
-		// fullscreen mode
-		modestate = MS_FULLDIB;
-	}
+	if (mode->RefreshRate == 0) D3DVid_CenterWindow (d3d_Window);
 
 	ShowWindow (d3d_Window, SW_SHOWDEFAULT);
 	UpdateWindow (d3d_Window);
@@ -1476,7 +1297,7 @@ void D3DVid_SetVideoMode (D3DDISPLAYMODE *mode)
 {
 	// suspend stuff that could mess us up while creating the window
 	bool temp = scr_disabled_for_loading;
-	scr_disabled_for_loading = true;
+	Host_DisableForLoading (true);
 	CDAudio_Pause ();
 
 	// much of this is now bullshit as we're now getting a 640x480 mode initially
@@ -1486,7 +1307,21 @@ void D3DVid_SetVideoMode (D3DDISPLAYMODE *mode)
 
 	// even if a mode is found we pass through here
 	if (mode->RefreshRate == 0)
+	{
 		D3DVid_FindBestWindowedMode (mode);
+
+		// override the selected mode with the width/height cvars
+		if (vid_width.value > 0) mode->Width = vid_width.value;
+		if (vid_height.value > 0) mode->Height = vid_height.value;
+
+		// upper bound
+		if (mode->Width > d3d_DesktopMode.Width) mode->Width = d3d_DesktopMode.Width;
+		if (mode->Height > d3d_DesktopMode.Height) mode->Height = d3d_DesktopMode.Height;
+
+		// prevent insanity
+		if (mode->Width < 640) mode->Width = 640;
+		if (mode->Height < 480) mode->Height = 480;
+	}
 	else D3DVid_FindBestFullscreenMode (mode);
 
 	// retrieve and store the gamma ramp for the desktop
@@ -1503,27 +1338,17 @@ void D3DVid_SetVideoMode (D3DDISPLAYMODE *mode)
 
 	// now resume the messy-uppy stuff
 	CDAudio_Resume ();
-	scr_disabled_for_loading = temp;
+	Host_DisableForLoading (temp);
 
 	// now we force the window to the top of the z-order and the foreground
-	SetWindowPos
-	(
-		d3d_Window,
-		HWND_TOP,
-		0,
-		0,
-		0,
-		0,
-		SWP_DRAWFRAME | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOCOPYBITS
-	);
-
-	SetForegroundWindow (d3d_Window);
+	D3DVid_SendToForeground (d3d_Window);
 
 	// fix the leftover Alt from any Alt-Tab or the like that switched us away
 	ClearAllStates ();
 
 	// force an immediate recalc of the refdef
 	vid.recalc_refdef = 1;
+	D3DVid_SyncDimensions (mode);
 }
 
 
@@ -1602,32 +1427,14 @@ void D3DVid_Init (void)
 
 		ReleaseDC (NULL, hdc);
 
-		// windowed modes use the same format as the desktop
+		// windowed modes use the same format as the desktop and refresh rate 0
 		d3d_CurrentMode.Format = D3DFMT_UNKNOWN;
-
-		// refresh rate 0
 		d3d_CurrentMode.RefreshRate = 0;
 	}
 	else
 	{
-		// check for bpp
-		if (COM_CheckParm ("-bpp"))
-		{
-			// retrieve the desired BPP
-			int bpp = atoi (com_argv[COM_CheckParm ("-bpp") + 1]);
-
-			// set the mode format according to the BPP
-			if (bpp == 32)
-				d3d_CurrentMode.Format = D3DVid_FindBPP (32);
-			else d3d_CurrentMode.Format = D3DVid_FindBPP (16);
-		}
-		else
-		{
-			// use the desktop format
-			d3d_CurrentMode.Format = d3d_DesktopMode.Format;
-		}
-
-		// refresh rate is always the same as the desktop
+		// use the desktop format and refresh rate
+		d3d_CurrentMode.Format = d3d_DesktopMode.Format;
 		d3d_CurrentMode.RefreshRate = d3d_DesktopMode.RefreshRate;
 	}
 
@@ -1799,6 +1606,8 @@ void D3DVid_CheckVidMode (void)
 	// 0 is a valid d3d_mode!
 	static int old_vidmode = -1;
 
+	if (d3d_mode.integer < 0) return;
+	if (d3d_mode.integer >= d3d_NumModes) return;
 	if (old_vidmode == d3d_mode.integer) return;
 
 	if (old_vidmode == -1)
@@ -1809,60 +1618,39 @@ void D3DVid_CheckVidMode (void)
 	}
 
 	// testing
-	Con_DPrintf ("mode is %i (was %i)...\n", (int) d3d_mode.value, old_vidmode);
+	Con_DPrintf ("mode is %i (was %i)...\n", d3d_mode.integer, old_vidmode);
 
 	// attempt to find the mode
-	d3d_ModeDesc_t *findmode = NULL;
+	D3DDISPLAYMODE *findmode = d3d_ModeList + d3d_mode.integer;
 
-	// find the supplied mode and see if it has REALLY changed
-	// (first time into this function it won't have)
-	for (int i = 0; i < d3d_NumModes; i++)
+	do
 	{
-		// this was also declared in loop scope; how did it ever work???
-		findmode = d3d_ModeList + i;
+		// look for differences
+		if (findmode->Format != d3d_CurrentMode.Format) break;
+		if (findmode->Width != d3d_CurrentMode.Width) break;
+		if (findmode->Height != d3d_CurrentMode.Height) break;
+		if (findmode->RefreshRate != d3d_CurrentMode.RefreshRate) break;
 
-		// look for a match
-		if (findmode->ModeNum == d3d_mode.integer)
-		{
-			// look for differences
-			if (findmode->d3d_Mode.Format != d3d_CurrentMode.Format) break;
-			if (findmode->d3d_Mode.Width != d3d_CurrentMode.Width) break;
-			if (findmode->d3d_Mode.Height != d3d_CurrentMode.Height) break;
-			if (findmode->d3d_Mode.RefreshRate != d3d_CurrentMode.RefreshRate) break;
+		// no differences found so it hasn't changed, just get out
+		Con_Printf ("Mode is unchanged\n");
 
-			// no differences found so it hasn't changed, just get out
-			Con_Printf ("Mode is unchanged\n");
-
-			// store back to prevent this from repeatedly occurring
-			old_vidmode = d3d_mode.integer;
-			return;
-		}
-	}
-
-	// ensure that the search found something
-	if (!findmode)
-	{
-		// didn't find the requested new mode
-		Con_Printf ("D3DVid_CheckVidMode: selected video mode not available\n");
-
-		// restore the previous value
-		Cvar_Set (&d3d_mode, old_vidmode);
-
-		// get out
+		// store back to prevent this from repeatedly occurring
+		old_vidmode = d3d_mode.integer;
 		return;
-	}
+	} while (0);
 
 	// store back (deferred to here so that we can restore the value if the mode isn't found)
 	old_vidmode = d3d_mode.integer;
 
 	// reset the window
-	D3DVid_ResetWindow (&findmode->d3d_Mode);
+	D3DVid_ResetWindow (findmode);
+	D3DVid_SyncDimensions (findmode);
 
 	// store to current mode
-	d3d_CurrentMode.Format = findmode->d3d_Mode.Format;
-	d3d_CurrentMode.Height = findmode->d3d_Mode.Height;
-	d3d_CurrentMode.RefreshRate = findmode->d3d_Mode.RefreshRate;
-	d3d_CurrentMode.Width = findmode->d3d_Mode.Width;
+	d3d_CurrentMode.Format = findmode->Format;
+	d3d_CurrentMode.Height = findmode->Height;
+	d3d_CurrentMode.RefreshRate = findmode->RefreshRate;
+	d3d_CurrentMode.Width = findmode->Width;
 }
 
 
@@ -1938,8 +1726,6 @@ void D3DVid_SetActiveGamma (cvar_t *var)
 }
 
 
-void Host_Frame (double time);
-
 void D3DVid_RecoverLostDevice (void)
 {
 	bool was_blocked = block_drawing;
@@ -1955,7 +1741,6 @@ void D3DVid_RecoverLostDevice (void)
 	{
 		// run a frame to keep everything ticking along
 		Sys_SendKeyEvents ();
-		Host_Frame (0.02);
 
 		// yield CPU for a while
 		Sleep (20);
@@ -2013,6 +1798,7 @@ void D3DVid_BeginRendering (void)
 		// fixme - move device creation to first time through here...?
 		vid_queuerestart = false;
 		vid.recalc_refdef = 1;
+		D3DVid_ResizeToDimension (vid_width.integer, vid_height.integer);
 		D3DVid_CheckVidMode ();
 		D3DVid_Restart_f ();
 		return;

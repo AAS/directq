@@ -21,9 +21,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 
+
 typedef struct tempent_s
 {
-	entity_t ent;
+	entity_t *ent;
 	struct tempent_s *next;
 } tempent_t;
 
@@ -36,6 +37,7 @@ typedef struct beam_s
 	struct model_s	*model;
 	float	endtime;
 	vec3_t	start, end;
+	int		type;
 	struct beam_s *next;
 } beam_t;
 
@@ -56,6 +58,8 @@ cvar_t r_extradlight ("r_extradlight", "1", CVAR_ARCHIVE);
 
 void D3D_AddVisEdict (entity_t *ent);
 
+float anglestable[1024];
+
 /*
 =================
 CL_InitTEnts
@@ -68,8 +72,9 @@ model_t *cl_beam_mod = NULL;
 
 void CL_InitTEnts (void)
 {
-	beam_t	*b;
-	int		i;
+	// set up the angles table
+	for (int i = 0; i < 1024; i++)
+		anglestable[i] = rand () % 360;
 
 	// we need to load these too as models are being cleared between maps
 	cl_bolt1_mod = Mod_ForName ("progs/bolt.mdl", true);
@@ -78,6 +83,12 @@ void CL_InitTEnts (void)
 
 	// don't crash as this isn't in ID1
 	cl_beam_mod = Mod_ForName ("progs/beam.mdl", false);
+
+	// these models never get occlusion queries
+	if (cl_bolt1_mod) cl_bolt1_mod->flags |= EF_NOOCCLUDE;
+	if (cl_bolt2_mod) cl_bolt2_mod->flags |= EF_NOOCCLUDE;
+	if (cl_bolt3_mod) cl_bolt3_mod->flags |= EF_NOOCCLUDE;
+	if (cl_beam_mod) cl_beam_mod->flags |= EF_NOOCCLUDE;
 
 	// sounds
 	cl_sfx_wizhit = S_PrecacheSound ("wizard/hit.wav");
@@ -101,7 +112,7 @@ void CL_InitTEnts (void)
 CL_ParseBeam
 =================
 */
-void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
+void CL_ParseBeam (model_t *m, int ent, int type, vec3_t start, vec3_t end)
 {
 	// if the model didn't load just ignore it
 	if (!m) return;
@@ -115,6 +126,7 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 		{
 			b->entity = ent;
 			b->model = m;
+			b->type = type;
 			b->endtime = cl.time + 0.2f;
 			VectorCopy (start, b->start);
 			VectorCopy (end, b->end);
@@ -145,6 +157,7 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 	// set it's properties
 	b->entity = ent;
 	b->model = m;
+	b->type = type;
 	b->endtime = cl.time + 0.2f;
 	VectorCopy (start, b->start);
 	VectorCopy (end, b->end);
@@ -267,7 +280,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
-		R_WallHitParticles (pos, vec3_origin, 0, 20);
+		if (!kurok) R_WallHitParticles (pos, vec3_origin, 0, 20);
 		break;
 
 	case TE_EXPLOSION:			// rocket explosion
@@ -282,7 +295,18 @@ void CL_ParseTEnt (void)
 		dl->die = cl.time + 0.5f;
 		dl->decay = 300;
 
-		R_ColourDLight (dl, 408, 242, 117);
+		if (kurok)
+		{
+			float tempcolor[3];
+
+        	tempcolor[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+			tempcolor[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+			tempcolor[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+			// directq scales dlights slightly different
+			R_ColourDLight (dl, tempcolor[0] * 384, tempcolor[1] * 384, tempcolor[2] * 384);
+		}
+		else R_ColourDLight (dl, 408, 242, 117);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
@@ -293,7 +317,24 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		R_BlobExplosion (pos);
 
-		if (r_extradlight.value)
+		if (kurok)
+		{
+			float tempcolor[3];
+
+			dl = CL_AllocDlight (0);
+			VectorCopy (pos, dl->origin);
+			dl->radius = 150;
+			dl->die = cl.time + 0.75;
+			dl->decay = 200;
+
+			tempcolor[0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+			tempcolor[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+			tempcolor[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
+
+			// directq scales dlights slightly different
+			R_ColourDLight (dl, tempcolor[0] * 384, tempcolor[1] * 384, tempcolor[2] * 384);
+		}
+		else if (r_extradlight.value)
 		{
 			dl = CL_AllocDlight (0);
 			VectorCopy (pos, dl->origin);
@@ -318,26 +359,7 @@ void CL_ParseTEnt (void)
 		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		if (r_extradlight.value)
-		{
-			dl = CL_AllocDlight (0);
-			VectorCopy (start, dl->origin);
-			dl->radius = 250;
-			dl->die = cl.time + 0.1f;
-			dl->decay = 300;
-
-			R_ColourDLight (dl, 65, 232, 470);
-
-			dl = CL_AllocDlight (0);
-			VectorCopy (end, dl->origin);
-			dl->radius = 250;
-			dl->die = cl.time + 0.1f;
-			dl->decay = 300;
-
-			R_ColourDLight (dl, 65, 232, 470);
-		}
-
-		CL_ParseBeam (cl_bolt1_mod, ent, start, end);
+		CL_ParseBeam (cl_bolt1_mod, ent, TE_LIGHTNING1, start, end);
 		break;
 
 	case TE_LIGHTNING2:				// lightning bolts
@@ -351,26 +373,7 @@ void CL_ParseTEnt (void)
 		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		if (r_extradlight.value)
-		{
-			dl = CL_AllocDlight (0);
-			VectorCopy (start, dl->origin);
-			dl->radius = 250;
-			dl->die = cl.time + 0.1f;
-			dl->decay = 300;
-
-			R_ColourDLight (dl, 65, 232, 470);
-
-			dl = CL_AllocDlight (0);
-			VectorCopy (end, dl->origin);
-			dl->radius = 250;
-			dl->die = cl.time + 0.1f;
-			dl->decay = 300;
-
-			R_ColourDLight (dl, 65, 232, 470);
-		}
-
-		CL_ParseBeam (cl_bolt2_mod, ent, start, end);
+		CL_ParseBeam (cl_bolt2_mod, ent, TE_LIGHTNING2, start, end);
 		break;
 
 	case TE_LIGHTNING3:				// lightning bolts
@@ -384,26 +387,7 @@ void CL_ParseTEnt (void)
 		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		if (r_extradlight.value)
-		{
-			dl = CL_AllocDlight (0);
-			VectorCopy (start, dl->origin);
-			dl->radius = 250;
-			dl->die = cl.time + 0.1f;
-			dl->decay = 300;
-
-			R_ColourDLight (dl, 65, 232, 470);
-
-			dl = CL_AllocDlight (0);
-			VectorCopy (end, dl->origin);
-			dl->radius = 250;
-			dl->die = cl.time + 0.1f;
-			dl->decay = 300;
-
-			R_ColourDLight (dl, 65, 232, 470);
-		}
-
-		CL_ParseBeam (cl_bolt3_mod, ent, start, end);
+		CL_ParseBeam (cl_bolt3_mod, ent, TE_LIGHTNING3, start, end);
 		break;
 
 		// PGM 01/21/97
@@ -418,7 +402,7 @@ void CL_ParseTEnt (void)
 		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		CL_ParseBeam (cl_beam_mod, ent, start, end);
+		CL_ParseBeam (cl_beam_mod, ent, TE_BEAM, start, end);
 		break;
 		// PGM 01/21/97
 
@@ -488,7 +472,7 @@ void CL_ParseTEnt (void)
 		end[1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 		end[2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 
-		CL_ParseBeam (Mod_ForName (modelname, true), ent, start, end);
+		CL_ParseBeam (Mod_ForName (modelname, true), ent, TE_LIGHTNING4, start, end);
 	}
 
 	break;
@@ -558,7 +542,7 @@ CL_NewTempEntity
 */
 entity_t *CL_NewTempEntity (void)
 {
-	tempent_t *ent;
+	tempent_t *tempent;
 
 	if (!cl_free_tempents)
 	{
@@ -572,18 +556,27 @@ entity_t *CL_NewTempEntity (void)
 	}
 
 	// unlink from free
-	ent = cl_free_tempents;
-	cl_free_tempents = ent->next;
+	tempent = cl_free_tempents;
+	cl_free_tempents = tempent->next;
 
 	// link to active
-	ent->next = cl_temp_entities;
-	cl_temp_entities = ent;
+	tempent->next = cl_temp_entities;
+	cl_temp_entities = tempent;
 
-	// init the new entity
-	memset (&ent->ent, 0, sizeof (entity_t));
+	if (!tempent->ent)
+	{
+		// alloc a new entity_t (tempents never get occlusion queries)
+		tempent->ent = CL_AllocEntity ();
+		tempent->ent->allocnum = 0;
+	}
+	else
+	{
+		// clear the entity (tempents never get occlusion queries)
+		memset (tempent->ent, 0, sizeof (entity_t));
+	}
 
 	// done
-	return &ent->ent;
+	return tempent->ent;
 }
 
 
@@ -696,24 +689,50 @@ void CL_UpdateTEnts (void)
 		// add new entities for the lightning
 		VectorCopy (b->start, org);
 		float d = VectorNormalize (dist);
+		int dlstep = 0;
+		dlight_t *dl;
 
 		while (d > 0)
 		{
 			if (!(ent = CL_NewTempEntity ()))
-				return;
+				break;
 
-			VectorCopy (org, ent->origin);
 			ent->model = b->model;
 			ent->alphaval = 255;
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
-			ent->angles[2] = rand () % 360;
+			ent->angles[2] = anglestable[(int) ((cl.time * 15) + d) & 1023];
 
 			// i is no longer on the outer loop
 			for (int i = 0; i < 3; i++)
 			{
 				org[i] += dist[i] * 30;
 				ent->origin[i] = org[i];
+			}
+
+			if (r_extradlight.value && ((++dlstep) > 8))
+			{
+				switch (b->type)
+				{
+				case TE_LIGHTNING1:
+				case TE_LIGHTNING2:
+				case TE_LIGHTNING3:
+				case TE_LIGHTNING4:
+					dl = CL_AllocDlight (0);
+
+					VectorCopy (org, dl->origin);
+					dl->radius = 250;
+					dl->die = cl.time + 0.1f;
+					dl->decay = 300;
+					dl->flags |= (DLF_NOCORONA | DLF_KILL);
+
+					R_ColourDLight (dl, 64, 256, 512);
+					break;
+
+				default: break;
+				}
+
+				dlstep = 0;
 			}
 
 			// add a visedict for it

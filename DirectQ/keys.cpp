@@ -415,7 +415,7 @@ void Key_Console (int key)
 		key_linepos = 1;
 
 		// force an update, because the command may take some time
-		if (cls.state != ca_connected) SCR_UpdateScreen ();
+		if (cls.state != ca_connected) SCR_UpdateScreen (0);
 
 		return;
 	}
@@ -1187,8 +1187,8 @@ void Key_Event (int key, bool down)
 
 	// if not a consolekey, send to the interpreter no matter what mode is
 	if ((key_dest == key_menu && menubound[key]) ||
-			(key_dest == key_console && !consolekeys[key]) ||
-			(key_dest == key_game && (!con_forcedup || !consolekeys[key])))
+		(key_dest == key_console && !consolekeys[key]) ||
+		(key_dest == key_game && (cls.maprunning || !consolekeys[key])))
 	{
 		kb = keybindings[key];
 

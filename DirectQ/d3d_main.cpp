@@ -24,124 +24,51 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 cvar_t gl_fullbrights ("gl_fullbrights", "1", CVAR_ARCHIVE);
 cvar_t r_draworder ("r_draworder", "1");
+cvar_t r_colorfilter ("r_colorfilter", "7");
 
 void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf)
 {
-	DWORD swprocflag = d3d_GlobalCaps.supportHardwareTandL ? 0 : D3DUSAGE_SOFTWAREPROCESSING;
+	if (d3d_GlobalCaps.supportHardwareTandL)
+		usage |= D3DUSAGE_WRITEONLY;
+	else usage |= (D3DUSAGE_WRITEONLY | D3DUSAGE_SOFTWAREPROCESSING);
 
-	// ensure
-	usage |= D3DUSAGE_WRITEONLY;
-	D3DPOOL defpool = d3d_GlobalCaps.supportHardwareTandL ? D3DPOOL_DEFAULT : D3DPOOL_SYSTEMMEM;
-
-	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
-	hr = d3d_Device->CreateVertexBuffer (length, usage | swprocflag, 0, defpool, buf, NULL);
+	hr = d3d_Device->CreateVertexBuffer (length, usage, 0, D3DPOOL_DEFAULT, buf, NULL);
 	if (SUCCEEDED (hr)) return;
 
-	hr = d3d_Device->CreateVertexBuffer (length, D3DUSAGE_WRITEONLY | swprocflag, 0, D3DPOOL_MANAGED, buf, NULL);
-	if (SUCCEEDED (hr)) return;
-
-	hr = d3d_Device->CreateVertexBuffer (length, swprocflag, 0, D3DPOOL_MANAGED, buf, NULL);
-	if (SUCCEEDED (hr)) return;
-
-	if (!d3d_GlobalCaps.supportHardwareTandL)
-	{
-		hr = d3d_Device->CreateVertexBuffer (length, usage, 0, defpool, buf, NULL);
-		if (SUCCEEDED (hr)) return;
-
-		hr = d3d_Device->CreateVertexBuffer (length, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, buf, NULL);
-		if (SUCCEEDED (hr)) return;
-
-		hr = d3d_Device->CreateVertexBuffer (length, 0, 0, D3DPOOL_MANAGED, buf, NULL);
-		if (SUCCEEDED (hr)) return;
-	}
-
-	// nope, can't do it
 	Sys_Error ("D3DMain_CreateVertexBuffer : IDirect3DDevice9::CreateVertexBuffer failed");
 }
 
 
 void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf)
 {
-	DWORD swprocflag = d3d_GlobalCaps.supportHardwareTandL ? 0 : D3DUSAGE_SOFTWAREPROCESSING;
 	UINT length = numindexes * sizeof (unsigned short);
 
-	// ensure
-	usage |= D3DUSAGE_WRITEONLY;
-	D3DPOOL defpool = d3d_GlobalCaps.supportHardwareTandL ? D3DPOOL_DEFAULT : D3DPOOL_SYSTEMMEM;
+	if (d3d_GlobalCaps.supportHardwareTandL)
+		usage |= D3DUSAGE_WRITEONLY;
+	else usage |= (D3DUSAGE_WRITEONLY | D3DUSAGE_SOFTWAREPROCESSING);
 
-	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
-	hr = d3d_Device->CreateIndexBuffer (length, usage | swprocflag, D3DFMT_INDEX16, defpool, buf, NULL);
+	hr = d3d_Device->CreateIndexBuffer (length, usage, D3DFMT_INDEX16, D3DPOOL_DEFAULT, buf, NULL);
 	if (SUCCEEDED (hr)) return;
 
-	hr = d3d_Device->CreateIndexBuffer (length, D3DUSAGE_WRITEONLY | swprocflag, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
-	if (SUCCEEDED (hr)) return;
-
-	hr = d3d_Device->CreateIndexBuffer (length, swprocflag, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
-	if (SUCCEEDED (hr)) return;
-
-	if (!d3d_GlobalCaps.supportHardwareTandL)
-	{
-		hr = d3d_Device->CreateIndexBuffer (length, usage, D3DFMT_INDEX16, defpool, buf, NULL);
-		if (SUCCEEDED (hr)) return;
-
-		hr = d3d_Device->CreateIndexBuffer (length, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
-		if (SUCCEEDED (hr)) return;
-
-		hr = d3d_Device->CreateIndexBuffer (length, 0, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
-		if (SUCCEEDED (hr)) return;
-	}
-
-	// nope, can't do it
 	Sys_Error ("D3DMain_CreateIndexBuffer : IDirect3DDevice9::CreateIndexBuffer failed");
 }
 
 
-// this must be big enough for the largest of draw, sprite or particles
-#define MAX_MAIN_INDEXES	90000
-
-LPDIRECT3DINDEXBUFFER9 d3d_MainIBO = NULL;
-
-void D3DMain_CreateBuffers (void)
-{
-	if (!d3d_MainIBO)
-	{
-		D3DMain_CreateIndexBuffer (MAX_MAIN_INDEXES, D3DUSAGE_WRITEONLY, &d3d_MainIBO);
-
-		// now we fill in the index buffer; this is a non-dynamic index buffer and it only needs to be set once
-		unsigned short *ndx = NULL;
-		int NumMainVerts = (MAX_MAIN_INDEXES / 6) * 4;
-
-		hr = d3d_MainIBO->Lock (0, 0, (void **) &ndx, 0);
-		if (FAILED (hr)) Sys_Error ("D3DMain_CreateBuffers: failed to lock index buffer");
-
-		for (int i = 0; i < NumMainVerts; i += 4, ndx += 6)
-		{
-			// index these as strips to help out certain hardware
-			ndx[0] = i + 0;
-			ndx[1] = i + 1;
-			ndx[2] = i + 2;
-
-			ndx[3] = i + 1;
-			ndx[4] = i + 3;
-			ndx[5] = i + 2;
-		}
-
-		hr = d3d_MainIBO->Unlock ();
-		if (FAILED (hr)) Sys_Error ("D3DMain_CreateBuffers: failed to unlock index buffer");
-	}
-}
-
-
-void D3DMain_ReleaseBuffers (void)
-{
-	SAFE_RELEASE (d3d_MainIBO);
-}
-
-
-CD3DDeviceLossHandler d3d_MainBuffersHandler (D3DMain_ReleaseBuffers, D3DMain_CreateBuffers);
-
-
 extern LPDIRECT3DTEXTURE9 char_texture;
+
+void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
+{
+	// check that all of our states are nice and correct
+	D3DHLSL_CheckCommit ();
+
+	// and now we can draw
+	if (PrimitiveCount > 1)
+		d3d_Device->DrawPrimitive (PrimitiveType, StartVertex, PrimitiveCount);
+	else d3d_Device->DrawPrimitive (D3DPT_TRIANGLELIST, StartVertex, 1);
+
+	d3d_RenderDef.numdrawprim++;
+}
+
 
 // this one wraps DIP so that I can check for commit and anything else i need to do before drawing
 void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumPrimitives)
@@ -159,7 +86,7 @@ void D3D_PrelockVertexBuffer (LPDIRECT3DVERTEXBUFFER9 vb)
 {
 	void *blah = NULL;
 
-	hr = vb->Lock (0, 0, &blah, D3DLOCK_DISCARD);
+	hr = vb->Lock (0, 0, &blah, d3d_GlobalCaps.DiscardLock);
 	if (FAILED (hr)) Sys_Error ("D3D_PrelockVertexBuffer: failed to lock vertex buffer");
 
 	hr = vb->Unlock ();
@@ -171,7 +98,7 @@ void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib)
 {
 	void *blah = NULL;
 
-	hr = ib->Lock (0, 0, &blah, D3DLOCK_DISCARD);
+	hr = ib->Lock (0, 0, &blah, d3d_GlobalCaps.DiscardLock);
 	if (FAILED (hr)) Sys_Error ("D3D_PrelockVertexBuffer: failed to lock index buffer");
 
 	hr = ib->Unlock ();
@@ -182,30 +109,31 @@ void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib)
 extern bool scr_drawmapshot;
 
 
-void D3DLight_SetCoronaState (void);
 void RotatePointAroundVector (vec3_t dst, const vec3_t dir, const vec3_t point, float degrees);
-void R_AnimateLight (void);
+void R_AnimateLight (float time);
 void V_CalcBlend (void);
 
+void D3D_SetupBrushModel (entity_t *ent);
 void D3D_BuildWorld (void);
 void D3D_AddWorldSurfacesToRender (void);
+void D3DSurf_DrawWorld (void);
 
 void D3DWarp_InitializeTurb (void);
 void D3D_DrawAlphaWaterSurfaces (void);
 void D3D_DrawOpaqueWaterSurfaces (void);
 
 void D3DAlias_DrawViewModel (void);
-
 void D3DAlias_RenderAliasModels (void);
-
 void D3D_PrepareAliasModel (entity_t *e);
+void D3DAlias_AddModelToList (entity_t *ent);
+
+void D3DLight_SetCoronaState (void);
 void D3DLight_AddCoronas (void);
 
 DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 float d3d_OverbrightModulate = 2.0f;
 
 void D3DOC_ShowBBoxes (void);
-void D3DOQ_RunQueries (void);
 
 D3DMATRIX d3d_ViewMatrix;
 D3DMATRIX d3d_WorldMatrix;
@@ -251,7 +179,7 @@ cvar_t gl_underwaterfog ("r_underwaterfog", 0.0f, CVAR_ARCHIVE);
 
 void R_ForceRecache (cvar_t *var)
 {
-	d3d_RenderDef.BuildSurfaces = true;
+	// force a rebuild of the PVS if any of the cvars attached to this change
 	d3d_RenderDef.oldviewleaf = NULL;
 }
 
@@ -315,11 +243,11 @@ void D3DMain_BBoxForEnt (entity_t *ent)
 	// compute a full bounding box
 	for (int i = 0; i < 8; i++)
 	{
-		// the bounding box is expanded by 1 unit in each direction so 
+		// the bounding box is expanded by 2 units in each direction so
 		// that it won't z-fight with the model (if it's a tight box)
-		bbox[i][0] = (i & 1) ? mins[0] - 1.0f : maxs[0] + 1.0f;
-		bbox[i][1] = (i & 2) ? mins[1] - 1.0f : maxs[1] + 1.0f;
-		bbox[i][2] = (i & 4) ? mins[2] - 1.0f : maxs[2] + 1.0f;
+		bbox[i][0] = (i & 1) ? mins[0] - 2.0f : maxs[0] + 2.0f;
+		bbox[i][1] = (i & 2) ? mins[1] - 2.0f : maxs[1] + 2.0f;
+		bbox[i][2] = (i & 4) ? mins[2] - 2.0f : maxs[2] + 2.0f;
 	}
 
 	// these factors hold valid for both MDLs and brush models; tested brush models with rmq rotate test
@@ -386,6 +314,10 @@ void D3D_AddVisEdict (entity_t *ent)
 	// check for entities with no models
 	if (!ent->model) return;
 
+	// prevent entities from being added twice (as static entities will be added every frame the renderer runs
+	// but the client may run less frequently)
+	if (ent->relinkframe == d3d_RenderDef.relinkframe) return;
+
 	// only add entities with supported model types
 	if (ent->model->type == mod_alias || ent->model->type == mod_brush || ent->model->type == mod_sprite)
 	{
@@ -396,14 +328,14 @@ void D3D_AddVisEdict (entity_t *ent)
 			ent->rotated = true;
 		else ent->rotated = false;
 
-		// evaluate the bbox in advance so that we can run occlusion queries properly on it
-		D3DMain_BBoxForEnt (ent);
-
 		if (d3d_RenderDef.numvisedicts < MAX_VISEDICTS)
 		{
 			d3d_RenderDef.visedicts[d3d_RenderDef.numvisedicts] = ent;
 			d3d_RenderDef.numvisedicts++;
 		}
+
+		// now mark that it's been added to the visedicts list for this client frame
+		ent->relinkframe = d3d_RenderDef.relinkframe;
 	}
 	else Con_DPrintf ("D3D_AddVisEdict: Unknown entity model type for %s\n", ent->model->name);
 }
@@ -426,19 +358,25 @@ bool R_CullBox (vec3_t emins, vec3_t emaxs, mplane_t *frustumplanes)
 }
 
 
+void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m, float *origin, float *angles)
+{
+	D3DMatrix_Translate (m, origin);
+
+	if (angles[1]) D3DMatrix_Rotate (m, 0, 0, 1, angles[1]);
+	if (angles[0]) D3DMatrix_Rotate (m, 0, 1, 0, -angles[0]);
+	if (angles[2]) D3DMatrix_Rotate (m, 1, 0, 0, angles[2]);
+}
+
+
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m)
 {
-	D3DMatrix_Translate (m, e->origin);
-
-	if (e->angles[1]) D3DMatrix_Rotate (m, 0, 0, 1, e->angles[1]);
-	if (e->angles[0]) D3DMatrix_Rotate (m, 0, 1, 0, -e->angles[0]);
-	if (e->angles[2]) D3DMatrix_Rotate (m, 1, 0, 0, e->angles[2]);
+	D3D_RotateForEntity (e, m, e->origin, e->angles);
 }
 
 
 void D3D_RotateForEntity (entity_t *e)
 {
-	D3D_RotateForEntity (e, &e->matrix);
+	D3D_RotateForEntity (e, &e->matrix, e->origin, e->angles);
 }
 
 
@@ -475,10 +413,9 @@ void R_SetupFrame (void)
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1) Cvar_Set ("r_fullbright", "0");
 
-	R_AnimateLight ();
+	R_AnimateLight (cl.time);
 
 	// current viewleaf
-	d3d_RenderDef.oldviewleaf = d3d_RenderDef.viewleaf;
 	d3d_RenderDef.viewleaf = Mod_PointInLeaf (r_refdef.vieworigin, cl.worldmodel);
 
 	d3d_RenderDef.fov_x = r_refdef.fov_x;
@@ -572,27 +509,28 @@ void D3D_ExtractFrustum (void)
 {
 	// retain the old frustum unless we're in the first few frames in which case we want one to be done
 	// as a baseline
-	if (r_lockfrustum.integer && d3d_RenderDef.framecount > 5) return;
+	if (!r_lockfrustum.integer || d3d_RenderDef.framecount < 5)
+	{
+		// frustum 0 (right plane)
+		frustum[0].normal[0] = d3d_ModelViewProjMatrix._14 - d3d_ModelViewProjMatrix._11;
+		frustum[0].normal[1] = d3d_ModelViewProjMatrix._24 - d3d_ModelViewProjMatrix._21;
+		frustum[0].normal[2] = d3d_ModelViewProjMatrix._34 - d3d_ModelViewProjMatrix._31;
 
-	// frustum 0 (right plane)
-	frustum[0].normal[0] = d3d_ModelViewProjMatrix._14 - d3d_ModelViewProjMatrix._11;
-	frustum[0].normal[1] = d3d_ModelViewProjMatrix._24 - d3d_ModelViewProjMatrix._21;
-	frustum[0].normal[2] = d3d_ModelViewProjMatrix._34 - d3d_ModelViewProjMatrix._31;
+		// frustum 1 (left plane)
+		frustum[1].normal[0] = d3d_ModelViewProjMatrix._14 + d3d_ModelViewProjMatrix._11;
+		frustum[1].normal[1] = d3d_ModelViewProjMatrix._24 + d3d_ModelViewProjMatrix._21;
+		frustum[1].normal[2] = d3d_ModelViewProjMatrix._34 + d3d_ModelViewProjMatrix._31;
 
-	// frustum 1 (left plane)
-	frustum[1].normal[0] = d3d_ModelViewProjMatrix._14 + d3d_ModelViewProjMatrix._11;
-	frustum[1].normal[1] = d3d_ModelViewProjMatrix._24 + d3d_ModelViewProjMatrix._21;
-	frustum[1].normal[2] = d3d_ModelViewProjMatrix._34 + d3d_ModelViewProjMatrix._31;
+		// frustum 2 (bottom plane)
+		frustum[2].normal[0] = d3d_ModelViewProjMatrix._14 + d3d_ModelViewProjMatrix._12;
+		frustum[2].normal[1] = d3d_ModelViewProjMatrix._24 + d3d_ModelViewProjMatrix._22;
+		frustum[2].normal[2] = d3d_ModelViewProjMatrix._34 + d3d_ModelViewProjMatrix._32;
 
-	// frustum 2 (bottom plane)
-	frustum[2].normal[0] = d3d_ModelViewProjMatrix._14 + d3d_ModelViewProjMatrix._12;
-	frustum[2].normal[1] = d3d_ModelViewProjMatrix._24 + d3d_ModelViewProjMatrix._22;
-	frustum[2].normal[2] = d3d_ModelViewProjMatrix._34 + d3d_ModelViewProjMatrix._32;
-
-	// frustum 3 (top plane)
-	frustum[3].normal[0] = d3d_ModelViewProjMatrix._14 - d3d_ModelViewProjMatrix._12;
-	frustum[3].normal[1] = d3d_ModelViewProjMatrix._24 - d3d_ModelViewProjMatrix._22;
-	frustum[3].normal[2] = d3d_ModelViewProjMatrix._34 - d3d_ModelViewProjMatrix._32;
+		// frustum 3 (top plane)
+		frustum[3].normal[0] = d3d_ModelViewProjMatrix._14 - d3d_ModelViewProjMatrix._12;
+		frustum[3].normal[1] = d3d_ModelViewProjMatrix._24 - d3d_ModelViewProjMatrix._22;
+		frustum[3].normal[2] = d3d_ModelViewProjMatrix._34 - d3d_ModelViewProjMatrix._32;
+	}
 
 	for (int i = 0; i < 4; i++)
 	{
@@ -612,18 +550,8 @@ D3D_PrepareRender
 */
 int D3DRTT_RescaleDimension (int dim);
 
-vec3_t r_oldorigin;
-vec3_t r_oldangles;
-
 void D3DMain_SetupD3D (void)
 {
-	if (memcmp (r_oldorigin, r_refdef.vieworigin, sizeof (vec3_t)) || memcmp (r_oldangles, r_refdef.viewangles, sizeof (vec3_t)))
-	{
-		memcpy (r_oldorigin, r_refdef.vieworigin, sizeof (vec3_t));
-		memcpy (r_oldangles, r_refdef.viewangles, sizeof (vec3_t));
-		d3d_RenderDef.BuildSurfaces = true;
-	}
-
 	// r_wireframe 1 is cheating in multiplayer
 	if (r_wireframe.integer)
 	{
@@ -669,6 +597,11 @@ void D3DMain_SetupD3D (void)
 		clearcolor = 0xff1f1f1f;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
 		// Con_Printf ("Clear to grey\n");
+	}
+	else if (r_colorfilter.integer != 7)
+	{
+		clearcolor = 0xff000000;
+		d3d_ClearFlags |= D3DCLEAR_TARGET;
 	}
 	else if (r_wireframe.integer)
 	{
@@ -762,76 +695,6 @@ void D3DMain_SetupD3D (void)
 }
 
 
-void D3D_PrepareFog (void)
-{
-}
-
-
-/*
-========================================================================================
-
-	BBB   L     OO    OO   DDD      AA   N  N  DDD     DDD   EEEE   AA  TTTTT  H  H
-	B  B  L    O  O  O  O  D  D    A  A  NN N  D  D    D  D  E     A  A   T    H  H
-	BBB   L    O  O  O  O  D  D    A  A  N NN  D  D    D  D  EEE   A  A   T    HHHH
-	B  B  L    O  O  O  O  D  D    AAAA  N  N  D  D    D  D  E     AAAA   T    H  H
-	BBB   LLLL  OO    OO   DDD     A  A  N  N  DDD     DDD   EEEE  A  A   T    H  H
-
-========================================================================================
-*/
-
-cvar_t cl_deathfade ("cl_deathfade", 0.1f, CVAR_ARCHIVE);
-
-void D3D_DeathBlend (void)
-{
-	// no death blend initially
-	cl.cshifts[CSHIFT_DEATH].percent = 0;
-
-	if (cls.state != ca_connected) return;
-	if (scr_con_current == 100) return;
-	if (cl.intermission) return;
-
-	// don't draw it in multiplayer as some people might like to take a good
-	// look around after they die, and god knows there's all sorts of folks in the world
-	if (cl.maxclients > 1) return;
-
-	if (cl_deathfade.value > 0.0f)
-	{
-		static float deathred = 0;
-		static float deathalpha = 0;
-		static bool wasalive = true;
-
-		// see if we're still alive
-		if (cl.stats[STAT_HEALTH] > 0)
-		{
-			// we're still alive
-			wasalive = true;
-			return;
-		}
-
-		// ok, we're dead - see did we just die or have we been dead for a while?
-		if (wasalive)
-		{
-			// init the color and blend
-			deathalpha = 0;
-			deathred = 0.666;
-
-			// signal that we've been dead before
-			wasalive = false;
-		}
-
-		// set up the death shift
-		cl.cshifts[CSHIFT_DEATH].destcolor[0] = (deathred * 255.0f);
-		cl.cshifts[CSHIFT_DEATH].destcolor[1] = 0;
-		cl.cshifts[CSHIFT_DEATH].destcolor[2] = 0;
-		cl.cshifts[CSHIFT_DEATH].percent = (deathalpha * 255.0f);
-
-		// update blend (attempt to get close to DP's scale)
-		deathalpha += (cl.frametime * 5.0f * cl_deathfade.value) / 3.0f;
-		deathred -= (cl.frametime * 5.0f * cl_deathfade.value) / 5.0f;
-	}
-}
-
-
 cvar_t r_truecontentscolour ("r_truecontentscolour", "1", CVAR_ARCHIVE);
 
 float r_underwaterfogcolours[4];
@@ -921,28 +784,8 @@ void D3D_UpdateContentsColor (void)
 	}
 	else r_underwaterfogcolours[3] = 0;
 
-	// add the death blend to the cshifts
-	D3D_DeathBlend ();
-
 	// and now calc the final blend
 	V_CalcBlend ();
-}
-
-
-void R_SetupSpriteModels (void)
-{
-	if (!r_drawentities.integer) return;
-
-	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
-	{
-		entity_t *ent = d3d_RenderDef.visedicts[i];
-
-		if (!ent->model) continue;
-		if (ent->model->type != mod_sprite) continue;
-
-		// sprites always have alpha
-		D3DAlpha_AddToList (ent);
-	}
 }
 
 
@@ -992,10 +835,6 @@ void R_ModParanoia (entity_t *ent)
 
 void R_SetupEntitiesOnList (void)
 {
-	// brush models include the world
-	D3D_BuildWorld ();
-	R_SetupSpriteModels ();
-
 	// deferred until after the world so that we get statics on the list too
 	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
 	{
@@ -1005,6 +844,29 @@ void R_SetupEntitiesOnList (void)
 
 		// fix up anything crazy mods might have set
 		R_ModParanoia (ent);
+
+		// set up it's bbox and frame interpolation here
+		D3DMain_BBoxForEnt (ent);
+
+		// add entities to the draw lists
+		if (!r_drawentities.integer) continue;
+		if (ent->Occluded) continue;
+
+		switch (ent->model->type)
+		{
+		case mod_alias:
+			D3DAlias_AddModelToList (ent);
+			break;
+
+		case mod_brush:
+			D3D_SetupBrushModel (ent);
+			break;
+
+		case mod_sprite:
+			if (R_CullBox (ent->mins, ent->maxs, frustum)) continue;
+			D3DAlpha_AddToList (ent);
+			break;
+		}
 	}
 }
 
@@ -1042,6 +904,10 @@ void D3DRMain_HLSLSetup (void)
 	D3DHLSL_SetFloat ("Overbright", d3d_OverbrightModulate);
 	D3DHLSL_SetFloatArray ("r_origin", r_refdef.vieworigin, 3);
 	D3DHLSL_SetFloatArray ("viewangles", r_refdef.viewangles, 3);
+
+	D3DHLSL_SetFloatArray ("viewforward", r_viewvectors.forward, 3);
+	D3DHLSL_SetFloatArray ("viewright", r_viewvectors.right, 3);
+	D3DHLSL_SetFloatArray ("viewup", r_viewvectors.up, 3);
 
 	if (r_underwaterfogcolours[3] > 0)
 	{
@@ -1087,7 +953,7 @@ void R_RenderView (void)
 {
 	double dTime1 = 0, dTime2 = 0;
 
-	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldmodel->brushhdr) return;
+	if (!cls.maprunning) return;
 
 	if (r_norefresh.value)
 	{
@@ -1108,14 +974,20 @@ void R_RenderView (void)
 	D3DMain_SetupD3D ();
 	D3DRMain_HLSLSetup ();
 
-	// setup everything we're going to draw
+	// build the world model
+	D3D_BuildWorld ();
+
+	// set up any entities for drawing
 	R_SetupEntitiesOnList ();
+
+	// enable simplistic colour filtering for night goggle/etc effects
+	if (r_colorfilter.integer != 7) D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 8 | (r_colorfilter.integer & 7));
+
+	// draw the world (including brush models)
+	D3DSurf_DrawWorld ();
 
 	// draw our alias models
 	D3DAlias_RenderAliasModels ();
-
-	// run our occlusion queries
-	D3DOQ_RunQueries ();
 
 	// add coronas to the alpha list
 	D3DLight_AddCoronas ();
@@ -1129,6 +1001,8 @@ void R_RenderView (void)
 	// the viewmodel comes last
 	// note - the gun model code assumes that it's the last thing drawn in the 3D view
 	D3DAlias_DrawViewModel ();
+
+	if (r_colorfilter.integer != 7) D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0xf);
 
 	// ensure
 	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);

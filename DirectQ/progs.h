@@ -65,6 +65,14 @@ typedef struct edict_s
 	bool			sendinterval;
 	int				ednum;
 	int				Prog;
+
+	// LordHavoc: for MOVETYPE_STEP interpolation
+	vec3_t		steporigin;
+	vec3_t		stepangles;
+	vec3_t		stepoldorigin;
+	vec3_t		stepoldangles;
+	double		steplerptime;
+
 	entvars_t		v;				// C exported fields from progs
 
 	// DO NOT ADD ANY MEMBERS BEYOND THIS POINT - other fields from progs come immediately after

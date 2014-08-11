@@ -711,7 +711,7 @@ void Menu_SaveLoadOnDelete (int itemnum)
 
 		if (!DeleteFile (delfile))
 		{
-			SCR_UpdateScreen ();
+			SCR_UpdateScreen (0);
 			SCR_ModalMessage ("Delete file failed\n", "Error", MB_OK);
 			return;
 		}

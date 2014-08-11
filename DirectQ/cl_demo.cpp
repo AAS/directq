@@ -18,11 +18,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "d3d_model.h"
+#include "d3d_quake.h"
 
 // JPG 1.05 - support for recording demos after connecting to the server
 byte	demo_head[3][MAX_MSGLEN];
 int		demo_head_size[2];
 
+static int td_frames = 0;
 
 static HANDLE demohandle = INVALID_HANDLE_VALUE;
 
@@ -131,23 +134,26 @@ int CL_GetMessage (void)
 	int	    r, i;
 	float	    f;
 	bool    Success;
+	static double td_oldrealtime = 0;
 
 	if (cls.demoplayback)
 	{
 		// decide if it is time to grab the next message
-		if (cls.signon == SIGNONS)	// allways grab until fully connected
+		if (cls.signon == SIGNON_CONNECTED)	// allways grab until fully connected
 		{
 			if (cls.timedemo)
 			{
-				if (host_framecount == cls.td_lastframe)
-					return 0;		// allready read this frame's message
+				// allready read this frame's message
+				if (d3d_RenderDef.framecount == cls.td_currframe) return 0;
 
-				cls.td_lastframe = host_framecount;
+				cls.td_currframe = d3d_RenderDef.framecount;
 
-				// if this is the second frame, grab the real td_starttime
+				// if this is the third frame, grab the real td_starttime
 				// so the bogus time on the first frame doesn't count
-				if (host_framecount == cls.td_startframe + 1)
-					cls.td_starttime = realtime;
+				if (td_frames == 2) cls.td_starttime = realtime;
+
+				td_oldrealtime = realtime;
+				td_frames++;
 			}
 			else
 			{
@@ -172,8 +178,6 @@ int CL_GetMessage (void)
 
 		if (Success)
 		{
-			net_message.cursize = net_message.cursize;
-
 			if (net_message.cursize > MAX_MSGLEN)
 				Host_Error ("Demo message %d > MAX_MSGLEN (%d)", net_message.cursize, MAX_MSGLEN);
 
@@ -222,12 +226,12 @@ int CL_GetMessage (void)
 			*ch++ = svc_print;
 
 			ch += 1 + sprintf
-				  (
-					  ch,
-					  "\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n"
-					  "\nRecorded on DirectQ Release "DIRECTQ_VERSION"\n"
-					  "\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n"
-				  );
+			(
+				ch,
+				"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n"
+				"\nRecorded on DirectQ Release "DIRECTQ_VERSION"\n"
+				"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n"
+			);
 
 			demo_head_size[0] = ch - (char *) demo_head[0];
 		}
@@ -424,6 +428,8 @@ void CL_Record_f (void)
 }
 
 
+void Host_InitTimers (void);
+
 bool CL_DoPlayDemo (void)
 {
 	char name[MAX_PATH];
@@ -478,6 +484,17 @@ bool CL_DoPlayDemo (void)
 
 	if (neg) cls.forcetrack = -cls.forcetrack;
 
+	unsigned int demoseed = 0;
+
+	// keep demo effects reproducible between playbacks ;)
+	// cls.demoname is guaranteed to be at least 4 chars as it includes the .dem extension so this is valid
+	// (this will normally be 1869440356, or "demo"...
+	memcpy (&demoseed, cls.demoname, sizeof (unsigned int));
+	srand (demoseed);
+
+	// reinit the timers to keep fx consistent
+	Host_InitTimers ();
+
 	// success
 	return true;
 }
@@ -508,15 +525,20 @@ void CL_FinishTimeDemo (void)
 
 	cls.timedemo = false;
 
-	// the first frame didn't count
-	frames = (host_framecount - cls.td_startframe) - 1;
+	// the first two frames didn't count
+	frames = td_frames - 2;
 	time = realtime - cls.td_starttime;
+	td_frames = 0;
 
 	if (!time) time = 1;
 
+	// recalibrate to match ID Quake and stop people from complaining
+	time = (time / frames) * (frames + 1);
+	frames++;
+
 	float fps = (float) frames / time;
 
-	Con_Printf ("%i frames %5.1f seconds %5.1f fps\n", frames, time, fps);
+	Con_Printf ("%i frames %0.1f seconds %0.1f fps\n", frames, time, fps);
 }
 
 /*
@@ -543,8 +565,8 @@ void CL_TimeDemo_f (void)
 	// cls.td_starttime will be grabbed at the second frame of the demo, so
 	// all the loading time doesn't get counted
 	cls.timedemo = true;
-	cls.td_startframe = host_framecount;
-	cls.td_lastframe = -1;		// get a new message this frame
+	cls.td_currframe = -1;		// get a new message this frame
+	td_frames = 0;
 }
 
 

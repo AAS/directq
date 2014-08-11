@@ -23,7 +23,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
+void D3DTexture_MipChange (cvar_t *var);
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
+cvar_t gl_softwarequakemipmaps ("gl_softwarequakemipmaps", "0", 0, D3DTexture_MipChange);
 
 LPDIRECT3DTEXTURE9 d3d_CurrentTexture[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 bool texturelist_dirty = false;
@@ -37,6 +39,76 @@ typedef struct d3d_texture_s
 
 d3d_texture_t *d3d_TextureList = NULL;
 int d3d_NumTextures = 0;
+
+
+void D3DTexture_MipChange (cvar_t *var)
+{
+	if (!d3d_Device) return;
+
+	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
+	{
+		if (!tex) continue;
+		if (!tex->texture) continue;
+		if (!tex->texture->d3d_Texture) continue;
+		if (!(tex->texture->flags & IMAGE_MIPMAP)) continue;
+		if (!(tex->texture->flags & IMAGE_BSP)) continue;
+
+		D3DLOCKED_RECT lockrect_old;
+		D3DLOCKED_RECT lockrect_new;
+		D3DSURFACE_DESC surfdesc;
+		LPDIRECT3DTEXTURE9 newtex = NULL;
+
+		hr = tex->texture->d3d_Texture->GetLevelDesc (0, &surfdesc);
+		if (FAILED (hr)) continue;
+
+		// ensure
+		if (surfdesc.Format != D3DFMT_X8R8G8B8 && surfdesc.Format != D3DFMT_A8R8G8B8) continue;
+
+		int miplevels = 0;
+
+		if (!(tex->texture->flags & IMAGE_MIPMAP))
+			miplevels = 1;
+		else if (gl_softwarequakemipmaps.value)
+		{
+			if (tex->texture->flags & IMAGE_LIQUID)
+				miplevels = 1;
+			else if (surfdesc.Width > 8 && surfdesc.Height > 8)
+				miplevels = 4;
+			else miplevels = 0;
+		}
+
+		hr = d3d_Device->CreateTexture (surfdesc.Width, surfdesc.Height, miplevels, surfdesc.Usage, surfdesc.Format, surfdesc.Pool, &newtex, NULL);
+		if (FAILED (hr)) continue;
+
+		hr = newtex->LockRect (0, &lockrect_new, NULL, 0);
+
+		if (FAILED (hr))
+		{
+			newtex->Release ();
+			continue;
+		}
+
+		hr = tex->texture->d3d_Texture->LockRect (0, &lockrect_old, NULL, 0);
+
+		if (FAILED (hr))
+		{
+			newtex->UnlockRect (0);
+			newtex->Release ();
+			continue;
+		}
+
+		memcpy (lockrect_new.pBits, lockrect_old.pBits, surfdesc.Width * surfdesc.Height * 4);
+
+		tex->texture->d3d_Texture->UnlockRect (0);
+		newtex->UnlockRect (0);
+
+		D3DXFilterTexture (newtex, NULL, 0, D3DX_FILTER_BOX);
+
+		SAFE_RELEASE (tex->texture->d3d_Texture);
+		tex->texture->d3d_Texture = newtex;
+	}
+}
+
 
 // other textures we use
 extern LPDIRECT3DTEXTURE9 char_texture;
@@ -104,6 +176,11 @@ void D3D_MakeQuakePalettes (byte *palette)
 		p2->peFlags = alpha;
 
 		d3d_QuakePalette.standard32[i] = D3DCOLOR_XRGB (rgb[0], rgb[1], rgb[2]);
+
+		d3d_QuakePalette.colorfloat[i][0] = (float) rgb[0] / 255.0f;
+		d3d_QuakePalette.colorfloat[i][1] = (float) rgb[1] / 255.0f;
+		d3d_QuakePalette.colorfloat[i][2] = (float) rgb[2] / 255.0f;
+		d3d_QuakePalette.colorfloat[i][3] = (float) alpha / 255.0f;
 	}
 
 	// correct alpha colour
@@ -380,8 +457,10 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 
 	// sky has flags & IMAGE_32BIT so it doesn't get paletteized
 	// (not always - solid sky goes up as 8 bits.  it doesn't have IMAGE_BSP however so all is good
-	// nehahra assumes that fullbrights are not available in the engine
-	if (((flags & IMAGE_BSP) || (flags & IMAGE_ALIAS)) && !nehahra)
+	// nehahra assumes that fullbrights are not available in the engine (so does kurok)
+	if (nehahra || kurok)
+		activepal = d3d_QuakePalette.standard;
+	else if ((flags & IMAGE_BSP) || (flags & IMAGE_ALIAS))
 	{
 		if (flags & IMAGE_LIQUID)
 			activepal = d3d_QuakePalette.standard;
@@ -470,19 +549,37 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 		scaled_width = D3D_PowerOf2Size (width);
 		scaled_height = D3D_PowerOf2Size (height);
 	}
+	else
+	{
+		scaled_width = (width + 3) & ~3;
+		scaled_height = (height + 3) & ~3;
+	}
 
 	// clamp to max texture size (remove pad flag if it needs to clamp)
 	if (scaled_width > d3d_DeviceCaps.MaxTextureWidth) {scaled_width = d3d_DeviceCaps.MaxTextureWidth; flags &= ~IMAGE_PADDABLE;}
 	if (scaled_height > d3d_DeviceCaps.MaxTextureHeight) {scaled_height = d3d_DeviceCaps.MaxTextureHeight; flags &= ~IMAGE_PADDABLE;}
+
+	int miplevels = 0;
+
+	if (!(flags & IMAGE_MIPMAP))
+		miplevels = 1;
+	else if (gl_softwarequakemipmaps.value)
+	{
+		if (flags & IMAGE_LIQUID)
+			miplevels = 1;
+		else if (scaled_width > 8 && scaled_height > 8)
+			miplevels = 4;
+		else miplevels = 0;
+	}
 
 	// create the texture at the scaled size
 	hr = d3d_Device->CreateTexture
 	(
 		scaled_width,
 		scaled_height,
-		(flags & IMAGE_MIPMAP) ? 0 : 1,
+		miplevels,
 		0,
-		((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE)) ? D3DFMT_A8R8G8B8 : D3DFMT_X8R8G8B8,
+		((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE) || kurok) ? D3DFMT_A8R8G8B8 : D3DFMT_X8R8G8B8,
 		(flags & IMAGE_SYSMEM) ? D3DPOOL_SYSTEMMEM : D3DPOOL_MANAGED,
 		texture,
 		NULL
@@ -534,8 +631,8 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 		data = nulldata;
 	}
 
-	// nehahra assumes that fullbrights are not available in the engine
-	if ((flags & IMAGE_LUMA) && nehahra) return NULL;
+	// nehahra assumes that fullbrights are not available in the engine (kurok too)
+	if ((flags & IMAGE_LUMA) && (nehahra || kurok)) return NULL;
 
 	// detect water textures
 	if (identifier[0] == '*')
@@ -863,17 +960,8 @@ bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
 
 	// check for compressed texture formats
 	// rather than using CheckDeviceFormat we actually try to create one and see what happens
-	hr = d3d_Device->CreateTexture
-		 (
-			 64,
-			 64,
-			 1,
-			 0,
-			 textureformat,
-			 D3DPOOL_MANAGED,
-			 &tex,
-			 NULL
-		 );
+	// (using the default pool so that we ensure it's in hardware)
+	hr = d3d_Device->CreateTexture (256, 256, 1, 0, textureformat, D3DPOOL_DEFAULT, &tex, NULL);
 
 	if (SUCCEEDED (hr))
 	{

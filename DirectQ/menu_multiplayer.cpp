@@ -132,7 +132,7 @@ int Menu_SetupCustomDraw (int y)
 	extern qpic_t *gfx_bigbox_lmp;
 	extern qpic_t *gfx_menuplyr_lmp;
 
-	Draw_Pic ((vid.currsize->width - gfx_bigbox_lmp->width) / 2, y, gfx_bigbox_lmp);
+	Draw_Pic ((vid.currsize->width - gfx_bigbox_lmp->width) / 2, y, gfx_bigbox_lmp, 1, true);
 	newy += gfx_bigbox_lmp->height + 5;
 
 	M_BuildTranslationTable (setup_shirt * 16, setup_pants * 16);

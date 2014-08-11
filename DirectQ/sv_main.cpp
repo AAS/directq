@@ -407,8 +407,8 @@ void SV_SendServerinfo (client_t *client)
 		if (!stricmp (sv.sound_precache[i], Damage2Hack)) break;
 	}
 
-	for (s = sv.sound_precache + 1; *s; s++)
-		MSG_WriteString (&client->message, *s);
+	for (s = sv.sound_precache + 1; s[0]; s++)
+		MSG_WriteString (&client->message, s[0]);
 
 	MSG_WriteByte (&client->message, 0);
 
@@ -654,29 +654,116 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (ent != clent)	// clent is ALLWAYS sent
 		{
 			// ignore ents without visible models
-			if (!ent->v.modelindex || !SVProgs->Strings[ent->v.model]) continue;
+			if (!ent->v.modelindex || !SVProgs->Strings[ent->v.model])
+			{
+				ent->steplerptime = 0;
+				continue;
+			}
 
-			// ignore if not touching a PV leaf
-			for (i = 0; i < ent->num_leafs; i++)
-				if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i] & 7)))
-					break;
+			// reversion to the old way to combat excessive CPU load
+			// fixme - implement the new RMQ way
+			if (!sv_novis.value)
+			{
+				// ignore if not touching a PV leaf
+				for (i = 0; i < ent->num_leafs; i++)
+					if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i] & 7)))
+						break;
 
-			// not visible
-			if (i == ent->num_leafs) continue;
+				// not visible
+				if (i == ent->num_leafs)
+				{
+					ent->steplerptime = 0;
+					continue;
+				}
+			}
 		}
 
 		// send an update
 		bits = 0;
 
+		float origin[3];
+		float angles[3];
+		extern cvar_t r_lerporient;
+
+		// darkplaces 1.05 server-side interpolation code
+		// this replaces client-side transform interpolation if connected to a server locally; if connected remotely
+		// we still use the old client-side system
+		if (ent->v.movetype == MOVETYPE_STEP && ((int) ent->v.flags & (FL_ONGROUND | FL_FLY | FL_SWIM)) && r_lerporient.integer)
+		{
+			// monsters have smoothed walking/flying/swimming movement
+			if (!ent->steplerptime || ent->steplerptime > sv.time) // when the level just started...
+			{
+				ent->steplerptime = sv.time;
+				VectorCopy (ent->v.origin, ent->stepoldorigin);
+				VectorCopy (ent->v.angles, ent->stepoldangles);
+				VectorCopy (ent->v.origin, ent->steporigin);
+				VectorCopy (ent->v.angles, ent->stepangles);
+			}
+
+			VectorSubtract (ent->v.origin, ent->steporigin, origin);
+			VectorSubtract (ent->v.angles, ent->stepangles, angles);
+
+			if (DotProduct (origin, origin) >= 0.125 || DotProduct (angles, angles) >= 1.4)
+			{
+				// update lerp positions
+				ent->steplerptime = sv.time;
+				VectorCopy (ent->steporigin, ent->stepoldorigin);
+				VectorCopy (ent->stepangles, ent->stepoldangles);
+				VectorCopy (ent->v.origin, ent->steporigin);
+				VectorCopy (ent->v.angles, ent->stepangles);
+			}
+
+			float movelerp = (sv.time - ent->steplerptime) * 10.0;
+
+			if (movelerp > 1) movelerp = 1;
+
+			float moveilerp = 1 - movelerp;
+
+			origin[0] = ent->stepoldorigin[0] * moveilerp + ent->steporigin[0] * movelerp;
+			origin[1] = ent->stepoldorigin[1] * moveilerp + ent->steporigin[1] * movelerp;
+			origin[2] = ent->stepoldorigin[2] * moveilerp + ent->steporigin[2] * movelerp;
+
+#if 1
+			NonEulerInterpolateAngles (ent->stepangles, ent->stepoldangles, movelerp, angles);
+#else
+			// choose shortest rotate (to avoid 'spin around' situations)
+			VectorSubtract (ent->stepangles, ent->stepoldangles, angles);
+
+			if (angles[0] < -180) angles[0] += 360; if (angles[0] >= 180) angles[0] -= 360;
+			if (angles[1] < -180) angles[1] += 360; if (angles[1] >= 180) angles[1] -= 360;
+			if (angles[2] < -180) angles[2] += 360; if (angles[2] >= 180) angles[2] -= 360;
+
+			angles[0] = angles[0] * movelerp + ent->stepoldangles[0];
+			angles[1] = angles[1] * movelerp + ent->stepoldangles[1];
+			angles[2] = angles[2] * movelerp + ent->stepoldangles[2];
+#endif
+		}
+		else
+		{
+			// copy as they are
+			VectorCopy (ent->v.origin, origin);
+			VectorCopy (ent->v.angles, angles);
+
+			if (ent->v.movetype == MOVETYPE_STEP)
+			{
+				// monster, but airborn, update lerp info
+				ent->steplerptime = sv.time;
+				VectorCopy (ent->v.origin, ent->stepoldorigin);
+				VectorCopy (ent->v.angles, ent->stepoldangles);
+				VectorCopy (ent->v.origin, ent->steporigin);
+				VectorCopy (ent->v.angles, ent->stepangles);
+			}
+		}
+
 		// only transmit origin if changed from the baseline
-		if (ent->v.origin[0] != ent->baseline.origin[0]) bits |= U_ORIGIN1;
-		if (ent->v.origin[1] != ent->baseline.origin[1]) bits |= U_ORIGIN2;
-		if (ent->v.origin[2] != ent->baseline.origin[2]) bits |= U_ORIGIN3;
+		if (origin[0] != ent->baseline.origin[0]) bits |= U_ORIGIN1;
+		if (origin[1] != ent->baseline.origin[1]) bits |= U_ORIGIN2;
+		if (origin[2] != ent->baseline.origin[2]) bits |= U_ORIGIN3;
 
 		// only transmit angles if changed from the baseline
-		if (ent->v.angles[0] != ent->baseline.angles[0]) bits |= U_ANGLES1;
-		if (ent->v.angles[1] != ent->baseline.angles[1]) bits |= U_ANGLES2;
-		if (ent->v.angles[2] != ent->baseline.angles[2]) bits |= U_ANGLES3;
+		if (angles[0] != ent->baseline.angles[0]) bits |= U_ANGLES1;
+		if (angles[1] != ent->baseline.angles[1]) bits |= U_ANGLES2;
+		if (angles[2] != ent->baseline.angles[2]) bits |= U_ANGLES3;
 
 		// check everything else
 		if (ent->v.movetype == MOVETYPE_STEP) bits |= U_NOLERP;
@@ -735,8 +822,8 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		{
 			// certain FQ protocol messages are not yet implemented
 			// if (ent->baseline.alpha != alpha) bits |= U_ALPHA;
-			if (bits & U_FRAME && (int) ent->v.frame & 0xFF00) bits |= U_FRAME2;
-			if (bits & U_MODEL && (int) ent->v.modelindex & 0xFF00) bits |= U_MODEL2;
+			if ((bits & U_FRAME) && (int) ent->v.frame & 0xFF00) bits |= U_FRAME2;
+			if ((bits & U_MODEL) && (int) ent->v.modelindex & 0xFF00) bits |= U_MODEL2;
 			if (ent->sendinterval) bits |= U_LERPFINISH;
 			if (bits >= 65536) bits |= U_EXTEND1;
 			if (bits >= 16777216) bits |= U_EXTEND2;
@@ -774,18 +861,19 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (bits & U_COLORMAP) MSG_WriteByte (msg, ent->v.colormap);
 		if (bits & U_SKIN) MSG_WriteByte (msg, ent->v.skin);
 		if (bits & U_EFFECTS) MSG_WriteByte (msg, ent->v.effects);
-		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, ent->v.origin[0], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLES1) MSG_WriteAngle (msg, ent->v.angles[0], sv.Protocol, sv.PrototcolFlags, 0);
-		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, ent->v.origin[1], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLES2) MSG_WriteAngle (msg, ent->v.angles[1], sv.Protocol, sv.PrototcolFlags, 1);
-		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, ent->v.origin[2], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLES3) MSG_WriteAngle (msg, ent->v.angles[2], sv.Protocol, sv.PrototcolFlags, 2);
+		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, origin[0], sv.Protocol, sv.PrototcolFlags);
+		if (bits & U_ANGLES1) MSG_WriteAngle (msg, angles[0], sv.Protocol, sv.PrototcolFlags, 0);
+		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, origin[1], sv.Protocol, sv.PrototcolFlags);
+		if (bits & U_ANGLES2) MSG_WriteAngle (msg, angles[1], sv.Protocol, sv.PrototcolFlags, 1);
+		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, origin[2], sv.Protocol, sv.PrototcolFlags);
+		if (bits & U_ANGLES3) MSG_WriteAngle (msg, angles[2], sv.Protocol, sv.PrototcolFlags, 2);
 		if (bits & U_ALPHA) MSG_WriteByte (msg, alpha);
 		if (bits & U_FRAME2) MSG_WriteByte (msg, (int) ent->v.frame >> 8);
 		if (bits & U_MODEL2) MSG_WriteByte (msg, (int) ent->v.modelindex >> 8);
+		if (bits & U_LERPFINISH) MSG_WriteByte (msg, (byte) (Q_rint ((ent->v.nextthink - sv.time) * 255)));
 
-		if (bits & U_LERPFINISH)
-			MSG_WriteByte (msg, (byte) (Q_rint ((ent->v.nextthink - sv.time) * 255)));
+//		if (((bits & U_ORIGIN1) || (bits & U_ORIGIN2) || (bits & U_ORIGIN3)) && ent != clent)
+//		Con_Printf ("sending %s\n", sv.model_precache[(int) ent->v.modelindex]);
 
 		/*
 		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION_NQ) && (sv.Protocol != PROTOCOL_VERSION_FITZ) && (sv.Protocol != PROTOCOL_VERSION_RMQ))
@@ -799,16 +887,18 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 	}
 
 	// if (NumCulledEnts) Con_Printf ("Culled %i entities\n", NumCulledEnts);
+
+	return;
 }
 
 
 /*
 =============
-SV_CleanupEnts
+SV_ClearMuzzleFlashes
 
 =============
 */
-void SV_CleanupEnts (void)
+void SV_ClearMuzzleFlashes (void)
 {
 	int		e;
 	edict_t	*ent;
@@ -983,8 +1073,11 @@ SV_SendClientDatagram
 */
 bool SV_SendClientDatagram (client_t *client)
 {
-	byte		buf[MAX_DATAGRAM];
+	static byte *buf = NULL;
 	sizebuf_t	msg;
+
+	// the memory fragmentation weenies would have a collective heart attack if it allocated and deallocated this each frame
+	if (!buf) buf = (byte *) MainZone->Alloc (MAX_DATAGRAM);
 
 	msg.data = buf;
 	msg.maxsize = MAX_DATAGRAM2;
@@ -1002,6 +1095,8 @@ bool SV_SendClientDatagram (client_t *client)
 	// copy the server datagram if there is space
 	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
 		SZ_Write (&msg, sv.datagram.data, sv.datagram.cursize);
+
+	// Con_Printf ("sending %i\n", msg.cursize);
 
 	// send the datagram
 	if (NET_SendUnreliableMessage (client->netconnection, &msg) == -1)
@@ -1176,7 +1271,31 @@ void SV_SendClientMessages (void)
 	}
 
 	// clear muzzle flashes
-	SV_CleanupEnts ();
+	SV_ClearMuzzleFlashes ();
+}
+
+
+void SV_UpdateServer (double frametime)
+{
+	// in case anything here needs to reference it
+	SVProgs->GlobalStruct->frametime = frametime;
+
+	// wipe the server datagram
+	SV_ClearDatagram ();
+
+	// check for new clients
+	SV_CheckForNewClients ();
+
+	// read client messages
+	SV_RunClients (frametime);
+
+	// move things around and think
+	// always pause in single player if in console or menus
+	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
+		SV_Physics (frametime);
+
+	// send all messages to the clients
+	SV_SendClientMessages ();
 }
 
 
@@ -1230,6 +1349,20 @@ void SV_CreateBaseline (void)
 	{
 		// get the current server version
 		svent = GetEdictForNumber (entnum);
+
+		// clear all states, not just those in use, even if the ent is not going to get a baseline
+		svent->baseline.alpha = 0;
+		svent->baseline.angles[0] = 0;
+		svent->baseline.angles[1] = 0;
+		svent->baseline.angles[2] = 0;
+		svent->baseline.colormap = 0;
+		svent->baseline.effects = 0;
+		svent->baseline.frame = 0;
+		svent->baseline.modelindex = 0;
+		svent->baseline.origin[0] = 0;
+		svent->baseline.origin[1] = 0;
+		svent->baseline.origin[2] = 0;
+		svent->baseline.skin = 0;
 
 		if (svent->free) continue;
 		if (entnum > svs.maxclients && !svent->v.modelindex) continue;
@@ -1371,9 +1504,9 @@ SV_SpawnServer
 This is called at the start of each level
 ================
 */
-extern float ScrCenterTimeOff;
 void CL_WipeParticles (void);
 void Mod_InitForMap (model_t *mod);
+void Host_InitTimers (void);
 
 void SV_SpawnServer (char *server)
 {
@@ -1383,7 +1516,7 @@ void SV_SpawnServer (char *server)
 	// let's not have any servers with no name
 	if (hostname.string[0] == 0) Cvar_Set ("hostname", "UNNAMED");
 
-	ScrCenterTimeOff = 0;
+	SCR_ClearCenterString ();
 	CL_WipeParticles ();
 
 	Con_DPrintf ("SpawnServer: %s\n", server);
@@ -1527,6 +1660,9 @@ void SV_SpawnServer (char *server)
 	// run two frames to allow everything to settle
 	SV_Physics (0.1);
 	SV_Physics (0.1);
+
+	// set up host timers
+	Host_InitTimers ();
 
 	// create a baseline for more efficient communications
 	SV_CreateBaseline ();

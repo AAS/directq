@@ -17,6 +17,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+void D3D_RotateForEntity (entity_t *e);
+void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
+void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m, float *origin, float *angles);
+
 void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf);
 void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf);
 
@@ -34,6 +38,7 @@ typedef struct palettedef_s
 	PALETTEENTRY standard[256];
 
 	D3DCOLOR standard32[256];
+	float colorfloat[256][4];
 	int darkindex;
 } palettedef_t;
 
@@ -90,8 +95,8 @@ void D3DHLSL_EndFrame (void);
 void D3DHLSL_SetFloat (D3DXHANDLE handle, float fl);
 void D3DHLSL_SetFloatArray (D3DXHANDLE handle, float *fl, int len);
 void D3DHLSL_SetInt (D3DXHANDLE handle, int n);
-void D3DHLSL_SetCurrLerp (float val);
-void D3DHLSL_SetLastLerp (float val);
+void D3DHLSL_SetLerp (float curr, float last);
+void D3DHLSL_SetVectorArray (D3DXHANDLE handle, D3DXVECTOR4 *vecs, int len);
 
 #define FX_PASS_NOTBEGUN					-1
 #define FX_PASS_ALIAS_NOLUMA				0
@@ -107,7 +112,7 @@ void D3DHLSL_SetLastLerp (float val);
 #define FX_PASS_PARTICLES					10
 #define FX_PASS_WORLD_NOLUMA_ALPHA			11
 #define FX_PASS_WORLD_LUMA_ALPHA			12
-#define FX_PASS_PARTICLES_INSTANCED			13
+#define FX_PASS_SPRITE						13
 #define FX_PASS_UNDERWATER					14
 #define FX_PASS_ALIAS_LUMA_NOLUMA			15
 #define FX_PASS_WORLD_LUMA_NOLUMA			16
@@ -121,6 +126,8 @@ void D3DHLSL_SetLastLerp (float val);
 #define FX_PASS_CORONA						24
 #define FX_PASS_BBOXES						25
 #define FX_PASS_LIQUID_RIPPLE				26
+#define FX_PASS_PARTICLE_SQUARE				27
+#define FX_PASS_ALIAS_KUROK					28
 
 
 void D3DHLSL_Init (void);
@@ -131,13 +138,14 @@ extern cvar_t gl_fullbrights;
 
 // this one wraps DIP so that I can check for commit and anything else i need to do before drawing
 void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumPrimitives);
+void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount);
 
 
 // crap from the old glquake.h
 #define ALIAS_BASE_SIZE_RATIO (1.0 / 11.0)
 #define BACKFACE_EPSILON	0.01
 
-texture_t *R_TextureAnimation (entity_t *ent, texture_t *base);
+struct texture_s *R_TextureAnimation (entity_t *ent, texture_t *base);
 void R_ReadPointFile_f (void);
 
 // screen size info
@@ -207,6 +215,8 @@ void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf);
 #define IMAGE_SYSMEM		(1 << 16)
 #define IMAGE_SCRAP			(1 << 17)
 #define IMAGE_FENCE			(1 << 18)
+#define IMAGE_SCALE2X		(1 << 19)
+#define IMAGE_SKYBOX		(1 << 20)
 
 int D3D_PowerOf2Size (int size);
 
@@ -228,7 +238,7 @@ typedef struct image_s
 
 bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags);
 void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags);
-image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, int flags);
+image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, int flags = 0);
 void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags);
 
 
@@ -254,9 +264,10 @@ typedef struct d3d_global_caps_s
 	bool supportHardwareTandL;
 	bool supportNonPow2;
 	bool supportInstancing;
-	bool supportStreamOffset;
-	bool supportOcclusion;
 	DWORD deviceCreateFlags;
+	DWORD DiscardLock;
+	DWORD NoOverwriteLock;
+	int MaxExtents;
 	int NumTMUs;
 } d3d_global_caps_t;
 
@@ -266,6 +277,7 @@ typedef struct d3d_renderdef_s
 {
 	int framecount;
 	int visframecount;
+	int entframecount;
 
 	// r_speeds counts
 	int	brush_polys;
@@ -273,6 +285,8 @@ typedef struct d3d_renderdef_s
 	int numsss;
 	int numdrawprim;
 	int numlock;
+	int numnode;
+	int numleaf;
 
 	mleaf_t *viewleaf;
 	mleaf_t *oldviewleaf;
@@ -284,6 +298,7 @@ typedef struct d3d_renderdef_s
 	int relinkframe;
 
 	bool RTT;
+	bool WorldModelLoaded;
 
 	entity_t worldentity;
 
@@ -293,9 +308,6 @@ typedef struct d3d_renderdef_s
 	// actual fov used for rendering
 	float fov_x;
 	float fov_y;
-
-	// true of the surfaces list needs rebuilding
-	bool BuildSurfaces;
 } d3d_renderdef_t;
 
 extern d3d_renderdef_t d3d_RenderDef;
@@ -329,16 +341,6 @@ bool R_CullBox (vec3_t mins, vec3_t maxs, mplane_t *frustumplanes);
 extern mplane_t	frustum[];
 
 float Lerp (float l1, float l2, float lerpfactor);
-
-typedef struct d3d_ModeDesc_s
-{
-	D3DDISPLAYMODE d3d_Mode;
-	bool AllowWindowed;
-	int BPP;
-	int ModeNum;
-
-	char ModeDesc[64];
-} d3d_ModeDesc_t;
 
 bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory);
 

@@ -111,7 +111,7 @@ void S_StaticSound (sfx_t *sfx, vec3_t origin, float vol, float attenuation);
 void S_StopSound (int entnum, int entchannel);
 void S_StopAllSounds (bool clear);
 void S_ClearBuffer (void);
-void S_Update (vec3_t origin, vec3_t v_forward, vec3_t v_right, vec3_t v_up);
+void S_Update (double frametime, vec3_t origin, vec3_t v_forward, vec3_t v_right, vec3_t v_up);
 
 sfx_t *S_PrecacheSound (char *sample);
 void S_TouchSound (char *sample);
@@ -144,10 +144,11 @@ void SNDDMA_Shutdown (void);
 #define	MAX_DYNAMIC_CHANNELS	512
 
 
-extern	channel_t   channels[MAX_CHANNELS];
-// 0 to MAX_DYNAMIC_CHANNELS-1	= normal entity sounds
-// MAX_DYNAMIC_CHANNELS to MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS -1 = water, etc
+// 0 to NUM_AMBIENTS -1 = water, etc
+// NUM_AMBIENTS to MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS - 1	= normal entity sounds
 // MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS to total_channels = static sounds
+
+extern	channel_t   channels[MAX_CHANNELS];
 
 extern	int			total_channels;
 

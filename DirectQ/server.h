@@ -34,6 +34,8 @@ float SV_PlaneDist (struct mplane_s *plane, float *org);
 
 typedef enum {ss_loading, ss_active} server_state_t;
 
+#define sv_deltatime (1.0 / 72.0)
+
 typedef struct
 {
 	bool	active;				// false if only a net client
@@ -67,8 +69,6 @@ typedef struct
 
 	sizebuf_t	signon;
 	byte		signon_buf[MAX_MSGLEN - 2]; //8192
-
-	double frametime;
 
 	int		signondiff;		// Track extra bytes due to >256 model support, kludge
 	int		Protocol;
@@ -170,6 +170,9 @@ void Host_SafeWipeClient (client_t *client);
 #define	FL_PARTIALGROUND		1024	// not all corners are valid
 #define	FL_WATERJUMP			2048	// player jumping out of water
 #define	FL_JUMPRELEASED			4096	// for jump debouncing
+
+#define	FL_MONSTERCLIP			8192	// Only solid to entities with FL_MONSTER				
+
 #ifdef QUAKE2
 #define FL_FLASHLIGHT			8192
 #define FL_ARCHIVE_OVERRIDE		1048576
@@ -181,6 +184,9 @@ void Host_SafeWipeClient (client_t *client);
 #define	EF_MUZZLEFLASH 			2
 #define	EF_BRIGHTLIGHT 			4
 #define	EF_DIMLIGHT 			8
+#define	EF_REDLIGHT 			16
+#define	EF_BLUELIGHT 			32
+
 #ifdef QUAKE2
 #define EF_DARKLIGHT			16
 #define EF_DARKFIELD			32
@@ -235,6 +241,7 @@ void SV_DropClient (bool crash);
 
 void SV_SendClientMessages (void);
 void SV_ClearDatagram (void);
+void SV_UpdateServer (double frametime);
 
 int SV_ModelIndex (char *name);
 
@@ -242,7 +249,7 @@ void SV_SetIdealPitch (void);
 
 void SV_AddUpdates (void);
 
-void SV_ClientThink (void);
+void SV_ClientThink (double frametime);
 void SV_AddClientToServer (struct qsocket_s	*ret);
 
 void SV_ClientPrintf (char *fmt, ...);

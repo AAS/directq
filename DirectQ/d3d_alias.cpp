@@ -27,8 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // up to 16 color translated skins
 image_t d3d_PlayerSkins[256];
 
-void D3D_RotateForEntity (entity_t *e);
-void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
 void D3DLight_LightPoint (entity_t *e, float *c);
 
 cvar_t r_aliaslightscale ("r_aliaslightscale", "1", CVAR_ARCHIVE);
@@ -52,17 +50,11 @@ ALIAS MODEL DISPLAY LIST GENERATION
 
 typedef struct aliasbuffers_s
 {
-	LPDIRECT3DVERTEXBUFFER9 *VertexStreams;
-	int *StreamOffsets;
-	int NumVertexStreams;
-
-	// this one is optional and is only used for the view model
-	// it will be created on demand when you switch to such a model
-	LPDIRECT3DVERTEXBUFFER9 BlendStream;
-
+	LPDIRECT3DVERTEXBUFFER9 VertexStream;
 	LPDIRECT3DVERTEXBUFFER9 TexCoordStream;
 	LPDIRECT3DINDEXBUFFER9 Indexes;
 
+	int *StreamOffsets;
 	int BufferSize;
 } aliasbuffers_t;
 
@@ -397,19 +389,19 @@ typedef struct aliasvertexstream_s
 	// positions are sent as bytes to save on bandwidth and storage
 	// also keep the names consistent with drawvertx_t
 	DWORD xyz;
-	DWORD normal;
+	float normal[3];
 } aliasvertexstream_t;
 
 typedef struct aliastexcoordstream_s
 {
 	float st[2];
+	float blendindex;
 } aliastexcoordstream_t;
 
 
 aliasbuffers_t d3d_AliasBuffers[MAX_MOD_KNOWN];
 
 LPDIRECT3DVERTEXDECLARATION9 d3d_AliasDecl = NULL;
-LPDIRECT3DVERTEXDECLARATION9 d3d_ViewModelDecl = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_ShadowDecl = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_InstanceDecl = NULL;
 
@@ -418,7 +410,7 @@ LPDIRECT3DVERTEXDECLARATION9 d3d_InstanceDecl = NULL;
 typedef struct aliasinstance_s
 {
 	D3DMATRIX matrix;
-	float lerps[4];
+	float lerps[2];
 	float svec[3];
 	float rgba[4];
 } aliasinstance_t;
@@ -430,72 +422,39 @@ typedef struct aliasinstance_s
 LPDIRECT3DVERTEXBUFFER9 d3d_AliasInstances[MAX_INSTANCE_BUFFERS] = {NULL};
 int d3d_InstBuffer = 0;
 
+extern float r_avertexnormals[162][3];
+
 void D3DAlias_CreateVertexStreamBuffer (aliashdr_t *hdr, aliasbuffers_t *buf)
 {
-	if (d3d_GlobalCaps.supportStreamOffset)
+	buf->StreamOffsets = (int *) MainZone->Alloc (hdr->nummeshframes * sizeof (int));
+
+	aliasvertexstream_t *xyz = NULL;
+	int ofs = 0;
+
+	D3DMain_CreateVertexBuffer (hdr->nummesh * hdr->nummeshframes * sizeof (aliasvertexstream_t), D3DUSAGE_WRITEONLY, &buf->VertexStream);
+	hr = buf->VertexStream->Lock (0, 0, (void **) &xyz, 0);
+	if (FAILED (hr)) Sys_Error ("D3DAlias_CreateVertexStreamBuffer : failed to lock vertex buffer");
+
+	for (int i = 0; i < hdr->nummeshframes; i++)
 	{
-		buf->VertexStreams = (LPDIRECT3DVERTEXBUFFER9 *) MainZone->Alloc (sizeof (LPDIRECT3DVERTEXBUFFER9));
-		buf->StreamOffsets = (int *) MainZone->Alloc (hdr->nummeshframes * sizeof (int));
-		buf->NumVertexStreams = 1;
+		aliasmesh_t *src = hdr->meshverts;
+		drawvertx_t *verts = hdr->vertexes[i];
 
-		aliasvertexstream_t *xyz = NULL;
-		int ofs = 0;
-
-		D3DMain_CreateVertexBuffer (hdr->nummesh * hdr->nummeshframes * sizeof (aliasvertexstream_t), D3DUSAGE_WRITEONLY, &buf->VertexStreams[0]);
-		hr = buf->VertexStreams[0]->Lock (0, 0, (void **) &xyz, 0);
-		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateVertexStreamBuffer : failed to lock vertex buffer");
-
-		for (int i = 0; i < hdr->nummeshframes; i++)
+		for (int v = 0; v < hdr->nummesh; v++, src++, xyz++)
 		{
-			aliasmesh_t *src = hdr->meshverts;
-			drawvertx_t *verts = hdr->vertexes[i];
-
-			for (int v = 0; v < hdr->nummesh; v++, src++, xyz++)
-			{
-				// positions and normals are sent as bytes to save on bandwidth and storage
-				xyz->xyz = verts[src->vertindex].xyz;
-				xyz->normal = verts[src->vertindex].normal1dw;
-			}
-
-			buf->StreamOffsets[i] = ofs;
-			ofs += hdr->nummesh * sizeof (aliasvertexstream_t);
+			// positions and normals are sent as bytes to save on bandwidth and storage
+			xyz->xyz = verts[src->vertindex].xyz;
+			xyz->normal[0] = r_avertexnormals[verts[src->vertindex].lightnormalindex][0];
+			xyz->normal[1] = r_avertexnormals[verts[src->vertindex].lightnormalindex][1];
+			xyz->normal[2] = r_avertexnormals[verts[src->vertindex].lightnormalindex][2];
 		}
 
-		hr = buf->VertexStreams[0]->Unlock ();
-		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateVertexStreamBuffer : failed to unlock vertex buffer");
+		buf->StreamOffsets[i] = ofs;
+		ofs += hdr->nummesh * sizeof (aliasvertexstream_t);
 	}
-	else
-	{
-		// multiple VBOs case
-		buf->VertexStreams = (LPDIRECT3DVERTEXBUFFER9 *) MainZone->Alloc (hdr->nummeshframes * sizeof (LPDIRECT3DVERTEXBUFFER9));
-		buf->NumVertexStreams = hdr->nummeshframes;
 
-		// we can't rely on stream offset being universally available so instead we need to create lots of
-		// small vertex buffers - YUCK!  probably need to add a cap for when stream offset *is* available.
-		// in general however if offset is *not* available we're in software T&L land...
-		for (int i = 0; i < buf->NumVertexStreams; i++)
-		{
-			D3DMain_CreateVertexBuffer (hdr->nummesh * sizeof (aliasvertexstream_t),
-				D3DUSAGE_WRITEONLY, &buf->VertexStreams[i]);
-
-			aliasvertexstream_t *xyz = NULL;
-			aliasmesh_t *src = hdr->meshverts;
-			drawvertx_t *verts = hdr->vertexes[i];
-
-			hr = buf->VertexStreams[i]->Lock (0, 0, (void **) &xyz, 0);
-			if (FAILED (hr)) Sys_Error ("D3DAlias_CreateVertexStreamBuffer : failed to lock vertex buffer");
-
-			for (int v = 0; v < hdr->nummesh; v++, src++, xyz++)
-			{
-				// positions and normals are sent as bytes to save on bandwidth and storage
-				xyz->xyz = verts[src->vertindex].xyz;
-				xyz->normal = verts[src->vertindex].normal1dw;
-			}
-
-			hr = buf->VertexStreams[i]->Unlock ();
-			if (FAILED (hr)) Sys_Error ("D3DAlias_CreateVertexStreamBuffer : failed to unlock vertex buffer");
-		}
-	}
+	hr = buf->VertexStream->Unlock ();
+	if (FAILED (hr)) Sys_Error ("D3DAlias_CreateVertexStreamBuffer : failed to unlock vertex buffer");
 }
 
 
@@ -514,6 +473,12 @@ void D3DAlias_CreateTexCoordStreamBuffer (aliashdr_t *hdr, aliasbuffers_t *buf)
 		// convert back to floating point and store out
 		st->st[0] = (float) src->st[0] / (float) hdr->skinwidth;
 		st->st[1] = (float) src->st[1] / (float) hdr->skinheight;
+
+		// blendindexes for the viewmodel piggyback on the texcoord stream
+		// we might find something to use them for with other models sometime...
+		if (hdr->vertexes[0][src->vertindex].lerpvert)
+			st->blendindex = 0;
+		else st->blendindex = 1;
 	}
 
 	hr = buf->TexCoordStream->Unlock ();
@@ -540,24 +505,13 @@ void D3DAlias_CreateIndexBuffer (aliashdr_t *hdr, aliasbuffers_t *buf)
 
 void D3DAlias_ReleaseBuffers (aliasbuffers_t *buf)
 {
-	if (buf->VertexStreams)
-	{
-		for (int i = 0; i < buf->NumVertexStreams; i++)
-			SAFE_RELEASE (buf->VertexStreams[i]);
-
-		MainZone->Free (buf->VertexStreams);
-		buf->VertexStreams = NULL;
-	}
-
 	if (buf->StreamOffsets)
 	{
 		MainZone->Free (buf->StreamOffsets);
 		buf->StreamOffsets = NULL;
 	}
 
-	buf->NumVertexStreams = 0;
-
-	SAFE_RELEASE (buf->BlendStream);
+	SAFE_RELEASE (buf->VertexStream);
 	SAFE_RELEASE (buf->TexCoordStream);
 	SAFE_RELEASE (buf->Indexes);
 }
@@ -573,7 +527,7 @@ void D3DAlias_CreateBuffers (aliashdr_t *hdr)
 {
 	// this one is just to keep the memory weenies from having fits
 	d3d_AliasBuffers[hdr->buffernum].BufferSize = hdr->nummesh * hdr->nummeshframes * sizeof (aliasvertexstream_t) +
-		hdr->nummesh * sizeof (aliastexcoordstream_t) +
+		hdr->nummesh * sizeof (aliastexcoordstream_t) + 
 		hdr->numindexes * sizeof (unsigned short);
 
 	D3DAlias_CreateIndexBuffer (hdr, &d3d_AliasBuffers[hdr->buffernum]);
@@ -601,6 +555,9 @@ void D3DAlias_CreateBuffers (void)
 		if (!(mod = mod_known[i])) continue;
 		if (mod->type != mod_alias) continue;
 
+		// we don't yet know if this mdl is going to be a viewmodel so we take no chances and just do it
+		DelerpMuzzleFlashes (mod->aliashdr);
+
 		// and create them again
 		mod->aliashdr->buffernum = i;
 		D3DAlias_CreateBuffers (mod->aliashdr);
@@ -608,7 +565,7 @@ void D3DAlias_CreateBuffers (void)
 	}
 
 	// this just exists so that I can track how much memory I'm using for MDLs and keep the memory weenies from panicking
-	// Con_Printf ("%i k in MDL vertex buffers\n", (BufferSize + 1023) / 1024);
+	Con_DPrintf ("%i k in MDL vertex buffers\n", (BufferSize + 1023) / 1024);
 
 	// create everything else we need
 	if (!d3d_AliasDecl)
@@ -618,33 +575,14 @@ void D3DAlias_CreateBuffers (void)
 			// positions are sent as bytes to save on bandwidth and storage
 			// position 0 can't be d3dcolor as it fucks with fog (why???)
 			{0, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
+			{0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
 			{1, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
-			{1, 4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
-			{2, 0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
+			{1, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
+			{2, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
 			D3DDECL_END ()
 		};
 
 		hr = d3d_Device->CreateVertexDeclaration (d3d_aliaslayout, &d3d_AliasDecl);
-		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateBuffers: d3d_Device->CreateVertexDeclaration failed");
-	}
-
-	if (!d3d_ViewModelDecl)
-	{
-		D3DVERTEXELEMENT9 d3d_viewmodellayout[] =
-		{
-			// positions are sent as bytes to save on bandwidth and storage
-			// position 0 can't be d3dcolor as it fucks with fog (why???)
-			{0, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
-			{1, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
-			{1, 4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
-			{2, 0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
-			{3, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 3},	// lerp factors for the view model
-			D3DDECL_END ()
-		};
-
-		hr = d3d_Device->CreateVertexDeclaration (d3d_viewmodellayout, &d3d_ViewModelDecl);
 		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateBuffers: d3d_Device->CreateVertexDeclaration failed");
 	}
 
@@ -669,17 +607,17 @@ void D3DAlias_CreateBuffers (void)
 			// positions are sent as bytes to save on bandwidth and storage
 			// position 0 can't be d3dcolor as it fucks with fog (why???)
 			{0,  0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0,  4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
+			{0,  4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
 			{1,  0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
-			{1,  4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
+			{1,  4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
 			{2,  0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
 			{3,  0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 3},	// matrix row 1
 			{3, 16, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 4},	// matrix row 2
 			{3, 32, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 5},	// matrix row 3
 			{3, 48, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 6},	// matrix row 4
-			{3, 64, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 7},	// blend[LERP_CURR] and blend[LERP_LAST] combined
-			{3, 80, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 8},	// shadevector
-			{3, 92, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 9},	// shadelight and alpha combined
+			{3, 64, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 7},	// blend[LERP_CURR] and blend[LERP_LAST] combined
+			{3, 72, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 8},	// shadevector
+			{3, 84, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 9},	// shadelight and alpha combined
 			D3DDECL_END ()
 		};
 
@@ -694,9 +632,9 @@ void D3DAlias_CreateBuffers (void)
 			// positions are sent as bytes to save on bandwidth and storage
 			// position 0 can't be d3dcolor as it fucks with fog (why???)
 			{0, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
+			{0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},	// this is really a normal
 			{1, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 1},
-			{1, 4, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
+			{1, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},	// and so is this
 			D3DDECL_END ()
 		};
 
@@ -714,7 +652,6 @@ void D3DAlias_ReleaseBuffers (void)
 	for (int i = 0; i < MAX_INSTANCE_BUFFERS; i++)
 		SAFE_RELEASE (d3d_AliasInstances[i]);
 
-	SAFE_RELEASE (d3d_ViewModelDecl);
 	SAFE_RELEASE (d3d_InstanceDecl);
 	SAFE_RELEASE (d3d_AliasDecl);
 	SAFE_RELEASE (d3d_ShadowDecl);
@@ -733,9 +670,6 @@ typedef struct d3d_aliasstate_s
 
 d3d_aliasstate_t d3d_AliasState;
 
-
-cvar_t cl_itembobheight ("cl_itembobheight", 0.0f);
-cvar_t cl_itembobspeed ("cl_itembobspeed", 0.5f);
 
 void D3DAlias_SetupLighting (entity_t *ent, float *shadevector, float *shadelight)
 {
@@ -798,20 +732,7 @@ void D3DAlias_TransformStandard (entity_t *ent, aliashdr_t *hdr)
 	D3DMatrix_Identity (&ent->matrix);
 
 	// build the transformation for this entity.  the full model gets a full rotation
-	// allow bouncing items for those who like them
-	if (cl_itembobheight.value > 0.0f && (ent->model->flags & EF_ROTATE))
-	{
-		// store out the original origin so that we can put it back the way it was for shadows
-		float org2 = ent->origin[2];
-
-		// come back to my place, bouncy bouncy!
-		ent->origin[2] += (cos ((cl.time + ent->entnum) * cl_itembobspeed.value * (2.0f * D3DX_PI)) + 1.0f) * 0.5f * cl_itembobheight.value;
-		D3D_RotateForEntity (ent, &ent->matrix);
-
-		// restore the origin for any later use
-		ent->origin[2] = org2;
-	}
-	else D3D_RotateForEntity (ent, &ent->matrix);
+	D3D_RotateForEntity (ent, &ent->matrix, ent->origin, ent->angles);
 
 	// run the final transform for scaling
 	D3DAlias_TransformFinal (ent, hdr);
@@ -842,18 +763,9 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, int flags = 0)
 
 	// vertex streams
 	// streams 0, 1 and indexes are common whether or not we're doing shadows
-	if (d3d_GlobalCaps.supportStreamOffset)
-	{
-		Streams[LERP_CURR] = Streams[LERP_LAST] = buf->VertexStreams[0];
-		Offsets[LERP_CURR] = buf->StreamOffsets[ent->lerppose[LERP_CURR]];
-		Offsets[LERP_LAST] = buf->StreamOffsets[ent->lerppose[LERP_LAST]];
-	}
-	else
-	{
-		Streams[LERP_CURR] = buf->VertexStreams[ent->lerppose[LERP_CURR]];
-		Streams[LERP_LAST] = buf->VertexStreams[ent->lerppose[LERP_LAST]];
-		Offsets[LERP_CURR] = Offsets[LERP_LAST] = 0;
-	}
+	Streams[LERP_CURR] = Streams[LERP_LAST] = buf->VertexStream;
+	Offsets[LERP_CURR] = buf->StreamOffsets[ent->lerppose[LERP_CURR]];
+	Offsets[LERP_LAST] = buf->StreamOffsets[ent->lerppose[LERP_LAST]];
 
 	D3D_SetStreamSource (0, Streams[LERP_CURR], Offsets[LERP_CURR], sizeof (aliasvertexstream_t));
 	D3D_SetStreamSource (1, Streams[LERP_LAST], Offsets[LERP_LAST], sizeof (aliasvertexstream_t));
@@ -894,77 +806,25 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, int flags = 0)
 		D3DHLSL_SetFloatArray ("ShadeLight", shadelight, 3);
 	}
 
+	// stream 3 is never used outside of MDLs and needs nulling here in case the previous batch was instanced
+	D3D_SetStreamSource (3, NULL, 0, 0);
+
 	if (flags & AM_VIEWMODEL)
 	{
-		// create the vertex buffer for the blend stream if it doesn't already exist
-		// (this might be slow in timedemos but it's OK in regular gameplay -- i hope!!!
-		if (!buf->BlendStream)
-		{
-			// create the buffer and force an immediate update the first time it's seen
-			// (this might be momentarily slow but we have no 100% reliable way of identifying a view model aside from when the model is drawn)
-			D3DMain_CreateVertexBuffer (hdr->nummesh * sizeof (float) * 4, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &buf->BlendStream);
-			hdr->lastblends[LERP_CURR] = hdr->lastblends[LERP_LAST] = 999999;
-			hdr->mfdelerp = false;
-		}
+		// set up the blend factors; vmblends[0] is indexed if a vertex should interpolate, vmblends[1] is indexed if it should not
+		D3DXVECTOR4 vmblends[2];
 
-		if (!hdr->mfdelerp)
-		{
-			// set up additional info about the viewmodel the first time it's seen
-			// again, the only reliable way to identify a viewmodel is when it's drawn, so it has to wait until we draw it before we can do this
-			DelerpMuzzleFlashes (hdr);
-			hdr->mfdelerp = true;
-		}
+		vmblends[0].x = state->blend[LERP_CURR];
+		vmblends[0].y = state->blend[LERP_LAST];
 
-		// if the blends change then we need to rebuild the blending buffer.
-		// we could in theory look for an optimization by swapping the blends but in practice they're never swappable
-		if (state->blend[LERP_CURR] != hdr->lastblends[LERP_CURR] || state->blend[LERP_LAST] != hdr->lastblends[LERP_LAST])
-		{
-			float *blends = NULL;
-			aliasmesh_t *src = hdr->meshverts;
-			drawvertx_t *verts = hdr->vertexes[ent->lerppose[LERP_CURR]];
+		vmblends[1].x = 1;
+		vmblends[1].y = 0;
 
-			hr = buf->BlendStream->Lock (0, 0, (void **) &blends, D3DLOCK_DISCARD);
-			if (FAILED (hr)) Sys_Error ("D3DAlias_DrawModel : failed to lock vertex buffer");
-
-			for (int i = 0; i < hdr->nummesh; i++, src++, blends += 4)
-			{
-				if (verts[src->vertindex].lerpvert)
-				{
-					// use standard blends if this vertex should interpolate
-					blends[0] = state->blend[LERP_CURR];
-					blends[1] = state->blend[LERP_CURR] * 0.005f;
-					blends[2] = state->blend[LERP_LAST];
-					blends[3] = state->blend[LERP_LAST] * 0.005f;
-				}
-				else
-				{
-					// override the blend if this vertex should not interpolate
-					blends[0] = 1.0f;
-					blends[1] = 0.005f;
-					blends[2] = 0.0f;
-					blends[3] = 0.0f;
-				}
-			}
-
-			hr = buf->BlendStream->Unlock ();
-			if (FAILED (hr)) Sys_Error ("D3DAlias_DrawModel : failed to unlock vertex buffer");
-			d3d_RenderDef.numlock++;
-
-			// cache them back so that we only need to update if they change
-			hdr->lastblends[LERP_CURR] = state->blend[LERP_CURR];
-			hdr->lastblends[LERP_LAST] = state->blend[LERP_LAST];
-		}
-
-		// for the viewmodel the blendstream is separate because it can vary for muzzleflash delerping
-		D3D_SetStreamSource (3, buf->BlendStream, 0, sizeof (float) * 4);
+		D3DHLSL_SetVectorArray ("vmblends", vmblends, 2);
 	}
 	else
 	{
-		// stream 3 is never used outside of MDLs and needs nulling here in case the previous batch was instanced
-		D3D_SetStreamSource (3, NULL, 0, 0);
-
-		D3DHLSL_SetCurrLerp (state->blend[LERP_CURR]);
-		D3DHLSL_SetLastLerp (state->blend[LERP_LAST]);
+		D3DHLSL_SetLerp (state->blend[LERP_CURR], state->blend[LERP_LAST]);
 	}
 
 	D3DHLSL_SetEntMatrix (&ent->matrix);
@@ -1091,9 +951,6 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 {
 	// blend is on a coarser scale (0-10 integer instead of 0-1 float) so that we get better cache hits
 	// and can do better comparison/etc for cache checking; this still gives 10 x smoothing so it's OK
-	int pose, numposes;
-	float interval;
-	bool lerpmdl = true;
 	float lerpblend;
 	float frame_interval;
 	aliasstate_t *state = &ent->aliasstate;
@@ -1101,13 +958,27 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 	// silently revert to frame 0
 	if ((ent->frame >= hdr->numframes) || (ent->frame < 0)) ent->frame = 0;
 
-	pose = hdr->frames[ent->frame].firstpose;
-	numposes = hdr->frames[ent->frame].numposes;
+	int pose = hdr->frames[ent->frame].firstpose;
+	int numposes = hdr->frames[ent->frame].numposes;
 
 	if (numposes > 1)
 	{
+#if 0
+		float fullinterval = hdr->frames[ent->frame].intervals[numposes - 1];
+		float time = cl.time + ent->posebase;
+		float targettime = time - ((int) (time / fullinterval)) * fullinterval;
+		int poseadd = 0;
+
+		for (poseadd = 0; poseadd < (numposes - 1); poseadd++)
+			if (hdr->frames[ent->frame].intervals[poseadd] > targettime)
+				break;
+
+		// we stored an extra interval so that we can do (intervals[pose + 1] - intervals[pose]) as a frame interval
+		frame_interval = hdr->frames[ent->frame].intervals[poseadd + 1] - hdr->frames[ent->frame].intervals[poseadd];
+		pose += poseadd;
+#else
 		// client-side animations
-		interval = hdr->frames[ent->frame].interval;
+		float interval = hdr->frames[ent->frame].intervals[0];
 
 		// software quake adds syncbase here so that animations using the same model aren't in lockstep
 		// trouble is that syncbase is always 0 for them so we provide new fields for it instead...
@@ -1115,10 +986,13 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 
 		// not really needed for non-interpolated mdls, but does no harm
 		frame_interval = interval;
+#endif
 	}
 	else if (ent->lerpflags & LERP_FINISH)
 		frame_interval = ent->lerpinterval;
 	else frame_interval = 0.1;
+
+	bool lerpmdl = true;
 
 	// conditions for turning lerping off (the SNG bug is no longer an issue)
 	if (hdr->nummeshframes == 1) lerpmdl = false;			// only one pose
@@ -1143,7 +1017,8 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 	}
 	else if (pose == 0 && ent == &cl.viewent)
 	{
-		// don't interpolate from previous pose on frame 0 of the viewent
+		// don't interpolate from previous pose on frame 0 of the viewent (frame 0 is the idle animation, not the shooting animation,
+		// so it's really part of a different animation frame sequence - this should be a fixme as a general rule for all MDLs)
 		ent->framestarttime = cl.time;
 		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = pose;
 		lerpblend = 0;
@@ -1159,7 +1034,6 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 	else
 	{
 		// standard interpolation between two frames which already exist
-		// (should this use cl.time????)
 		lerpblend = (cl.time - ent->framestarttime) / frame_interval;
 	}
 
@@ -1180,15 +1054,7 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 	if (cl.paused) lerpblend = 0;
 	if (lerpblend > 1) lerpblend = 1;
 
-	// coarsen the scale a little for the viewmodel if we're in a flash frame to prevent excessive buffer updates
-	// this still interpolates at 50 FPS (or 5 x the default) so it should be more than ample anyway
-	if (ent == &cl.viewent && (ent->lerppose[LERP_CURR] > 0 || ent->lerppose[LERP_LAST] > 0))
-	{
-		lerpblend = (int) (lerpblend * 5.0f);
-		lerpblend *= 0.2f;
-	}
-
-	// use cubic interpolation
+	// and store out the factors
 	state->blend[LERP_LAST] = 1.0f - lerpblend;
 	state->blend[LERP_CURR] = lerpblend;
 }
@@ -1200,6 +1066,7 @@ void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 // no, because we're not creating a colormap for the entity any more.  in fact storing the colormap in the ent
 // and the translation in cl.scores is now largely redundant...
 // also no because working on the skin directly will break with instanced models
+// alternative - take the main skin to white, eval shirt and pants colours, multiply them by the skin in a pixel shader
 bool D3DAlias_TranslateAliasSkin (entity_t *ent)
 {
 	// no translation
@@ -1415,7 +1282,12 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 		// update textures if necessary
 		if ((state->teximage != d3d_AliasState.lasttexture) || (state->lumaimage != d3d_AliasState.lastluma))
 		{
-			if (state->lumaimage)
+			if (kurok)
+			{
+				D3DHLSL_SetPass (FX_PASS_ALIAS_KUROK);
+				D3DHLSL_SetTexture (0, state->teximage->d3d_Texture);
+			}
+			else if (state->lumaimage)
 			{
 				if (gl_fullbrights.integer)
 					D3DHLSL_SetPass (FX_PASS_ALIAS_LUMA);
@@ -1455,17 +1327,17 @@ int D3DAlias_ModelSortFunc (entity_t **e1, entity_t **e2)
 
 void D3DAlias_DrawInstances (entity_t **ents, int numents, int firstent, int numinstances)
 {
-	// Con_Printf ("D3DAlias_DrawInstances : %3i %3i\n", firstent, numinstances);
-
 	if (d3d_GlobalCaps.supportInstancing && numinstances > 1 && d3d_usinginstancing.value)
 	{
+		// Con_Printf ("D3DAlias_DrawInstances : %3i %3i\n", firstent, numinstances);
+
 		// here we rotate the instance buffer which may be a performance optimization on some hardware
 		// this only comes out as ~168k so memory-saving weenies needn't have a fit over it.
 		LPDIRECT3DVERTEXBUFFER9 d3d_CurrentInstBuffer = d3d_AliasInstances[(++d3d_InstBuffer) & (MAX_INSTANCE_BUFFERS - 1)];
 		aliasinstance_t *instances = NULL;
 
 		// set up the per-instance data
-		hr = d3d_CurrentInstBuffer->Lock (0, 0, (void **) &instances, D3DLOCK_DISCARD);
+		hr = d3d_CurrentInstBuffer->Lock (0, 0, (void **) &instances, d3d_GlobalCaps.DiscardLock);
 		if (FAILED (hr)) Sys_Error ("D3DAlias_DrawInstances : failed to lock vertex buffer");
 
 		for (int i = 0; i < numinstances; i++, instances++)
@@ -1476,9 +1348,7 @@ void D3DAlias_DrawInstances (entity_t **ents, int numents, int firstent, int num
 			memcpy (&instances->matrix, &ent->matrix, sizeof (D3DMATRIX));
 
 			instances->lerps[0] = ent->aliasstate.blend[LERP_CURR];
-			instances->lerps[1] = ent->aliasstate.blend[LERP_CURR] * 0.005f;
-			instances->lerps[2] = ent->aliasstate.blend[LERP_LAST];
-			instances->lerps[3] = ent->aliasstate.blend[LERP_LAST] * 0.005f;
+			instances->lerps[1] = ent->aliasstate.blend[LERP_LAST];
 
 			D3DAlias_SetupLighting (ent, instances->svec, instances->rgba);
 			instances->rgba[3] = (float) ent->alphaval / 255.0f;
@@ -1519,18 +1389,9 @@ void D3DAlias_DrawInstances (entity_t **ents, int numents, int firstent, int num
 		// vertex streams
 		// streams zero and one are the model and their frequency is the number of models to draw
 		// stream two is the per-instance data and advances to the next value after each instance is drawn
-		if (d3d_GlobalCaps.supportStreamOffset)
-		{
-			Streams[LERP_CURR] = Streams[LERP_LAST] = buf->VertexStreams[0];
-			Offsets[LERP_CURR] = buf->StreamOffsets[ents[firstent]->lerppose[LERP_CURR]];
-			Offsets[LERP_LAST] = buf->StreamOffsets[ents[firstent]->lerppose[LERP_LAST]];
-		}
-		else
-		{
-			Streams[LERP_CURR] = buf->VertexStreams[ents[firstent]->lerppose[LERP_CURR]];
-			Streams[LERP_LAST] = buf->VertexStreams[ents[firstent]->lerppose[LERP_LAST]];
-			Offsets[LERP_CURR] = Offsets[LERP_LAST] = 0;
-		}
+		Streams[LERP_CURR] = Streams[LERP_LAST] = buf->VertexStream;
+		Offsets[LERP_CURR] = buf->StreamOffsets[ents[firstent]->lerppose[LERP_CURR]];
+		Offsets[LERP_LAST] = buf->StreamOffsets[ents[firstent]->lerppose[LERP_LAST]];
 
 		D3D_SetStreamSource (0, Streams[LERP_CURR], Offsets[LERP_CURR], sizeof (aliasvertexstream_t), D3DSTREAMSOURCE_INDEXEDDATA | numinstances);
 		D3D_SetStreamSource (1, Streams[LERP_LAST], Offsets[LERP_LAST], sizeof (aliasvertexstream_t), D3DSTREAMSOURCE_INDEXEDDATA | numinstances);
@@ -1618,51 +1479,55 @@ void D3DAlias_DrawInstanced (entity_t **ents, int numents)
 
 void D3DAlias_RenderAliasModels (void)
 {
-	if (!r_drawentities.integer) return;
-	if (!d3d_AliasEdicts) d3d_AliasEdicts = (entity_t **) Zone_Alloc (sizeof (entity_t *) * MAX_VISEDICTS);
-
-	d3d_NumAliasEdicts = 0;
-	int NumOccluded = 0;
-
-	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
-	{
-		entity_t *ent = d3d_RenderDef.visedicts[i];
-
-		if (!ent->model) continue;
-		if (ent->model->type != mod_alias) continue;
-
-		// initial setup
-		D3DAlias_SetupAliasModel (ent);
-
-		if (ent->visframe != d3d_RenderDef.framecount) continue;
-		if (ent->Occluded) {NumOccluded++; continue;}
-
-		if (ent->alphaval < 255)
-			D3DAlpha_AddToList (ent);
-		else d3d_AliasEdicts[d3d_NumAliasEdicts++] = ent;
-	}
-
 	// if (NumOccluded) Con_Printf ("occluded %i\n", NumOccluded);
 	if (!d3d_NumAliasEdicts) return;
 
-	// sort the alias edicts by model
+	// sort the alias edicts by model and poses
 	// (to do - chain these in a list instead to save memory, remove limits and run faster...)
 	qsort (d3d_AliasEdicts, d3d_NumAliasEdicts, sizeof (entity_t *), (sortfunc_t) D3DAlias_ModelSortFunc);
 
+	if (kurok)
+	{
+		D3D_SetRenderState (D3DRS_ALPHATESTENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+		D3D_SetRenderState (D3DRS_ALPHAREF, (DWORD) 0x000000aa);
+	}
+
 	// draw in two passes to prevent excessive shader switching
-	if (d3d_GlobalCaps.supportInstancing && d3d_usinginstancing.value)
+	if (d3d_GlobalCaps.supportInstancing && d3d_usinginstancing.value && !kurok)
 		D3DAlias_DrawInstanced (d3d_AliasEdicts, d3d_NumAliasEdicts);
 	else D3DAlias_DrawAliasBatch (d3d_AliasEdicts, d3d_NumAliasEdicts);
 
+	if (kurok) D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
+
 	// don't bother instancing shadows for now; we might later on if it ever becomes a problem
 	D3DAlias_DrawAliasShadows (d3d_AliasEdicts, d3d_NumAliasEdicts);
+
+	// clear for next frame
+	d3d_NumAliasEdicts = 0;
+}
+
+
+void D3DAlias_AddModelToList (entity_t *ent)
+{
+	if (!d3d_AliasEdicts) d3d_AliasEdicts = (entity_t **) Zone_Alloc (sizeof (entity_t *) * MAX_VISEDICTS);
+
+	D3DAlias_SetupAliasModel (ent);
+
+	if (ent->visframe != d3d_RenderDef.framecount) return;
+
+	if (ent->alphaval < 255 && !kurok)
+		D3DAlpha_AddToList (ent);
+	else d3d_AliasEdicts[d3d_NumAliasEdicts++] = ent;
 }
 
 
 void D3D_SetupProjection (float fovx, float fovy, float zn, float zf);
 float SCR_CalcFovX (float fov_y, float width, float height);
 float SCR_CalcFovY (float fov_x, float width, float height);
+void SCR_SetFOV (float *fovx, float *fovy, float fovvar, int width, int height, bool guncalc);
 
+// fixme - shouldn't this be the first thing drawn in the frame so that a lot of geometry can get early-z???
 void D3DAlias_DrawViewModel (void)
 {
 	// conditions for switching off view model
@@ -1705,16 +1570,19 @@ void D3DAlias_DrawViewModel (void)
 		// D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 	}
 
+	// recalculate the FOV here because the gun model might need different handling
 	extern cvar_t scr_fov;
-	extern cvar_t scr_fovcompat;
-	float aspect = (float) vid.ref3dsize.width / (float) vid.ref3dsize.height;
 
-	if ((scr_fov.value > 90 && !scr_fovcompat.integer) || aspect < (4.0f / 3.0f))
+	float fov_x = 0;
+	float fov_y = 0;
+
+	if (scr_fov.value > 90)
+		SCR_SetFOV (&fov_x, &fov_y, 90.0f, vid.ref3dsize.width, vid.ref3dsize.height, true);
+	else SCR_SetFOV (&fov_x, &fov_y, scr_fov.value, vid.ref3dsize.width, vid.ref3dsize.height, true);
+
+	// only update if it actually changes...!
+	if (fov_x != r_refdef.fov_x || fov_y != r_refdef.fov_y)
 	{
-		// recalculate the correct fov for displaying the gun model as if fov was 90
-		float fov_y = SCR_CalcFovY (90, 640, 432);
-		float fov_x = SCR_CalcFovX (fov_y, vid.ref3dsize.width, vid.ref3dsize.height);
-
 		// adjust projection to a constant y fov for wide-angle views
 		// don't need to worry over much about the far clipping plane here
 		D3D_SetupProjection (fov_x, fov_y, 4, 4096);
@@ -1741,7 +1609,7 @@ void D3DAlias_DrawViewModel (void)
 	D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
 	D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
 
-	D3D_SetVertexDeclaration (d3d_ViewModelDecl);
+	D3D_SetVertexDeclaration (d3d_AliasDecl);
 
 	// interpolation clearing gets this
 	if (ent->lerppose[LERP_CURR] < 0) ent->lerppose[LERP_CURR] = 0;

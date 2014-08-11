@@ -1,0 +1,4 @@
+This is a test release of DirectQ 1.8.8, the primary purpose of which is to get the recent changes out to the
+public and start getting feedback on performance and stability.
+
+While little may seem to have changed on the surface, a LOT has changed behind the scenes.

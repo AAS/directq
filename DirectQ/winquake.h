@@ -36,10 +36,7 @@ extern HRESULT hr;
 extern	int			global_nCmdShow;
 
 void S_ClearSounds (void);
-
-typedef enum {MS_WINDOWED, MS_FULLSCREEN, MS_FULLDIB, MS_UNINIT} modestate_t;
-
-extern modestate_t	modestate;
+bool D3DVid_IsFullscreen (void);
 
 extern HWND			d3d_Window;
 extern bool		ActiveApp, Minimized;

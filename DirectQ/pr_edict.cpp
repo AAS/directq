@@ -103,6 +103,7 @@ void ED_ClearEdict (CProgsDat *Progs, edict_t *e)
 {
 	memset (&e->v, 0, SVProgs->QC->entityfields * 4);
 	e->tracetimer = -1;
+	e->steplerptime = 0;
 	e->free = false;
 }
 
@@ -1293,6 +1294,12 @@ void ED_LoadFromFile (char *data)
 				ED_Free (ent);
 				continue;
 			}
+		}
+
+		if (!strcmp (classname, "monster_fish") && SVProgs->FishHack)
+		{
+			SVProgs->NumFish++;
+			Con_DPrintf ("hacking fish for ID progs\n");
 		}
 
 		SVProgs->GlobalStruct->self = EDICT_TO_PROG (ent);

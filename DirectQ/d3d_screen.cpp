@@ -98,7 +98,7 @@ extern cvar_t scr_conscale;
 
 cvar_t		scr_viewsize ("viewsize", 100, CVAR_ARCHIVE, SCR_RefdefCvarChange);
 cvar_t		scr_fov ("fov", 90, 0, SCR_RefdefCvarChange);	// 10 - 170
-cvar_t		scr_fovcompat ("fov_compatible", 0.0f, CVAR_ARCHIVE);
+cvar_t		scr_fovcompat ("fov_compatible", 0.0f, CVAR_ARCHIVE, SCR_RefdefCvarChange);
 cvar_t		scr_conspeed ("scr_conspeed", 3000);
 cvar_t		scr_centertime ("scr_centertime", 2);
 cvar_t		scr_centerlog ("scr_centerlog", 1, CVAR_ARCHIVE);
@@ -168,7 +168,7 @@ void SCR_CenterPrint (char *str)
 	if (!str[0])
 	{
 		// an empty print is sometimes used to explicitly clear the previous centerprint
-		ScrCenterTimeOff = 0;
+		SCR_ClearCenterString ();
 		return;
 	}
 
@@ -300,28 +300,35 @@ void SCR_CheckDrawCenterString (void)
 	// (cl.time for timedemo compat)
 	if (ScrCenterTimeOff <= cl.time && !cl.intermission)
 	{
-		scr_centerstring[0] = 0;
+		SCR_ClearCenterString ();
 		return;
 	}
 
 	if (key_dest != key_game)
 	{
 		// ensure it's off
-		scr_centerstring[0] = 0;
-		ScrCenterTimeOff = 0;
+		SCR_ClearCenterString ();
 		return;
 	}
 
 	// should never happen
 	if (!scr_centerstring[0])
 	{
-		ScrCenterTimeOff = 0;
+		SCR_ClearCenterString ();
 		return;
 	}
 
 	D3DDraw_SetSize (&vid.sbarsize);
 	SCR_DrawCenterString ();
 }
+
+
+void SCR_ClearCenterString (void)
+{
+	scr_centerstring[0] = 0;
+	ScrCenterTimeOff = -1;
+}
+
 
 //=============================================================================
 
@@ -393,10 +400,43 @@ void SCR_CalcGUIScaleFactor (cvar_t *var, sizedef_t *sizedef, sizedef_t *basesiz
 }
 
 
+void SCR_SetFOV (float *fovx, float *fovy, float fovvar, int width, int height, bool guncalc)
+{
+	float aspect = (float) height / (float) width;
+
+#define BASELINE_W	640.0f
+#define BASELINE_H	432.0f
+
+	// http://www.gamedev.net/topic/431111-perspective-math-calculating-horisontal-fov-from-vertical/
+	// horizontalFov = atan( tan(verticalFov) * aspectratio )
+	// verticalFov = atan( tan(horizontalFov) / aspectratio )
+	if ((scr_fovcompat.integer || aspect > (BASELINE_H / BASELINE_W)) && !guncalc)
+	{
+		// use the same calculation as GLQuake did
+		// (horizontal is constant, vertical varies)
+		fovx[0] = fovvar;
+		fovy[0] = SCR_CalcFovY (fovx[0], width, height);
+	}
+	else
+	{
+		// alternate calculation (vertical is constant, horizontal varies)
+		// consistent with http://www.emsai.net/projects/widescreen/fovcalc/
+		// note that the gun always uses this calculation irrespective of the aspect)
+		fovy[0] = SCR_CalcFovY (fovvar, BASELINE_W, BASELINE_H);
+		fovx[0] = SCR_CalcFovX (fovy[0], width, height);
+	}
+}
+
+
+extern cvar_t cl_sbar;
+
 static void SCR_CalcRefdef (void)
 {
 	// don't need a recalc
 	vid.recalc_refdef = 0;
+
+	// yeah, and fuck you too
+	if (kurok) Cvar_Set (&scr_viewsize, scr_viewsize.value - 10);
 
 	// bound viewsize
 	if (scr_viewsize.value < 100) Cvar_Set ("viewsize", "100");
@@ -407,16 +447,14 @@ static void SCR_CalcRefdef (void)
 	if (scr_fov.value > 170) Cvar_Set ("fov", "170");
 
 	// conditions for switching off the HUD - viewsize 120 always switches it off, period
-	if (cl.intermission || scr_viewsize.value > 110)
+	if (cl.intermission || scr_viewsize.value > 110 || cl.stats[STAT_HEALTH] < 1)
 		sb_lines = 0;
 	else if (scr_viewsize.value > 100)
 		sb_lines = 24;
 	else sb_lines = 48;
 
-	Cvar_Get (hudstyle, "cl_sbar");
-
 	// only the classic hud uses lines
-	if (hudstyle->integer) sb_lines = 0;
+	if (cl_sbar.integer) sb_lines = 0;
 
 	// bound console scale
 	if (gl_conscale.value < 0) Cvar_Set (&gl_conscale, "0");
@@ -465,6 +503,10 @@ static void SCR_CalcRefdef (void)
 	vid.ref3dsize.width = d3d_CurrentMode.Width;
 	vid.ref3dsize.height = d3d_CurrentMode.Height - vid.sbar_lines;
 
+#if 1
+	SCR_SetFOV (&r_refdef.fov_x, &r_refdef.fov_y, scr_fov.value, vid.ref3dsize.width, vid.ref3dsize.height, false);
+	// Con_Printf ("aspect %ix%i  fovx %f  fovy %f\n", vid.ref3dsize.width, vid.ref3dsize.height, r_refdef.fov_x, r_refdef.fov_y);
+#else
 	// x fov is initially the selected value
 	r_refdef.fov_x = scr_fov.value;
 
@@ -500,23 +542,7 @@ static void SCR_CalcRefdef (void)
 		// consistent with GLQuake and other engines
 		r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, vid.ref3dsize.width, vid.ref3dsize.height);
 	}
-}
-
-
-void SCR_CheckSBarRefdef (void)
-{
-	bool modified = false;
-
-	static int old_clsbar = -1;
-
-	Cvar_Get (hudstyle, "cl_sbar");
-
-	if (hudstyle->integer != old_clsbar) modified = true;
-
-	old_clsbar = hudstyle->integer;
-
-	// toggle refdef recalc
-	vid.recalc_refdef = (vid.recalc_refdef || modified);
+#endif
 }
 
 
@@ -574,14 +600,14 @@ void SCR_Init (void)
 SCR_DrawTurtle
 ==============
 */
-void SCR_DrawTurtle (void)
+void SCR_DrawTurtle (double frametime)
 {
 	static int	count = 0;
 
 	if (!scr_showturtle.value)
 		return;
 
-	if (cl.frametime < 0.1f)
+	if (frametime < 0.1f)
 	{
 		count = 0;
 		return;
@@ -593,7 +619,7 @@ void SCR_DrawTurtle (void)
 		return;
 
 	D3DDraw_SetSize (&vid.sbarsize);
-	Draw_Pic (vid.currsize->width - 132, 4, scr_turtle);
+	Draw_Pic (vid.currsize->width - 132, 4, scr_turtle, 1, true);
 }
 
 /*
@@ -608,7 +634,7 @@ void SCR_DrawNet (void)
 	if (sv.active) return;
 
 	D3DDraw_SetSize (&vid.sbarsize);
-	Draw_Pic (vid.currsize->width - 168, 4, scr_net);
+	Draw_Pic (vid.currsize->width - 168, 4, scr_net, 1, true);
 }
 
 /*
@@ -625,7 +651,7 @@ void SCR_DrawPause (void)
 	if (!cl.paused) return;
 
 	D3DDraw_SetSize (&vid.sbarsize);
-	Draw_Pic ((vid.currsize->width - gfx_pause_lmp->width) / 2, (vid.currsize->height - 48 - gfx_pause_lmp->height) / 2, gfx_pause_lmp);
+	Draw_Pic ((vid.currsize->width - gfx_pause_lmp->width) / 2, (vid.currsize->height - 48 - gfx_pause_lmp->height) / 2, gfx_pause_lmp, 1, true);
 }
 
 
@@ -634,30 +660,29 @@ void SCR_DrawPause (void)
 SCR_SetUpToDrawConsole
 ==================
 */
-CDQEventTimer *scr_ConsoleTimer = NULL;
-
 void SCR_SetUpToDrawConsole (void)
 {
+	// console timings are based on a delta between current realtime and previous realtime
+	// so that they can be independent of changes made to host_framerate or host_timescale.
+	// scr_conlines and scr_con_current are now percentages of the full screen size instead
+	// of line counts so that they are independent of resolution.  the old architecture was evil.
+
 	float scr_conlines = 0;
+	static double oldcontime = realtime;
+	double frametime = realtime - oldcontime;
+
+	oldcontime = realtime;
 
 	Con_CheckResize ();
 
-	if (!scr_ConsoleTimer)
-		scr_ConsoleTimer = new CDQEventTimer (realtime);
-
-	float frametime = scr_ConsoleTimer->GetElapsedTime (realtime);
-
-	// decide on the height of the console
-	con_forcedup = !cl.worldmodel || cls.signon != SIGNONS;
-
-	if (con_forcedup)
+	if (cls.signon != SIGNON_CONNECTED || !cls.maprunning)
 	{
-		scr_conlines = 100;		// full screen
+		scr_conlines = 100;	// full screen
 		scr_con_current = scr_conlines;
 	}
 	else if (key_dest == key_console)
 		scr_conlines = 50;	// half screen
-	else scr_conlines = 0;				// none visible
+	else scr_conlines = 0;	// none visible
 
 	if (scr_conlines < scr_con_current)
 	{
@@ -953,7 +978,7 @@ void SCR_ScreenShot_f (void)
 	}
 
 	// run a screen refresh
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// the surface we'll use
 	LPDIRECT3DSURFACE9 Surf = NULL;
@@ -1085,7 +1110,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	scr_drawmapshot = true;
 
 	// do a screen refresh to get rid of any UI/etc
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// sample the rendered surf down to 128 * 128 for the correct mapshot sise
 	if (d3d_CurrentMode.Width > d3d_CurrentMode.Height)
@@ -1159,8 +1184,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 
 void SCR_Mapshot_cmd (void)
 {
-	if (!cl.worldmodel) return;
-
+	if (!cls.maprunning) return;
 	if (cls.state != ca_connected) return;
 
 	// first ensure we have a "maps" directory
@@ -1198,7 +1222,7 @@ void SCR_DrawLoading (void)
 	extern qpic_t *gfx_loading_lmp;
 
 	D3DDraw_SetSize (&vid.sbarsize);
-	Draw_Pic ((vid.currsize->width - gfx_loading_lmp->width) / 2, (vid.currsize->height - 48 - gfx_loading_lmp->height) / 2, gfx_loading_lmp);
+	Draw_Pic ((vid.currsize->width - gfx_loading_lmp->width) / 2, (vid.currsize->height - 48 - gfx_loading_lmp->height) / 2, gfx_loading_lmp, 1, true);
 }
 
 
@@ -1207,20 +1231,18 @@ void SCR_BeginLoadingPlaque (void)
 	S_StopAllSounds (true);
 
 	if (cls.state != ca_connected) return;
-
-	if (cls.signon != SIGNONS) return;
+	if (cls.signon != SIGNON_CONNECTED) return;
 
 	// redraw with no console and no center text
 	Con_ClearNotify ();
-	scr_centerstring[0] = 0;
-	ScrCenterTimeOff = 0;
+	SCR_ClearCenterString ();
 	scr_con_current = 0;
 
 	scr_drawloading = true;
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 	scr_drawloading = false;
 
-	scr_disabled_for_loading = true;
+	Host_DisableForLoading (true);
 	scr_disabled_time = realtime;
 	SCR_SetTimeout (SCR_DEFTIMEOUT);
 }
@@ -1234,7 +1256,7 @@ SCR_EndLoadingPlaque
 */
 void SCR_EndLoadingPlaque (void)
 {
-	scr_disabled_for_loading = false;
+	Host_DisableForLoading (false);
 	Con_ClearNotify ();
 }
 
@@ -1363,10 +1385,10 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 
 	// force a screen update
 	scr_modalmessage = true;
-	SCR_UpdateScreen ();
-	SCR_UpdateScreen ();
-	SCR_UpdateScreen ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
+	SCR_UpdateScreen (0);
+	SCR_UpdateScreen (0);
+	SCR_UpdateScreen (0);
 	scr_modalmessage = false;
 
 	do
@@ -1437,7 +1459,47 @@ extern bool vid_restarted;
 
 void D3DDraw_End2D (void);
 
-void SCR_UpdateScreen (void)
+extern cvar_t host_speeds;
+extern int r_speedstime;
+
+int scr_hostspeeds1;
+int scr_hostspeeds2;
+int scr_hostspeeds3;
+
+int scr_hostspeedstot1;
+int scr_hostspeedstot2;
+int scr_hostspeedstot3;
+int scr_hostspeedsframes;
+
+double host_speedstime;
+
+void SCR_SetHostSpeeds (double frametime, int pass1, int pass2, int pass3)
+{
+	if (key_dest != key_game) return;
+
+	host_speedstime += frametime;
+	scr_hostspeedstot1 += pass1;
+	scr_hostspeedstot2 += pass2;
+	scr_hostspeedstot3 += pass3;
+	scr_hostspeedsframes++;
+
+	if (host_speedstime >= 0.1)
+	{
+		scr_hostspeeds1 = (scr_hostspeedstot1 + (scr_hostspeedsframes - 1)) / scr_hostspeedsframes;
+		scr_hostspeeds2 = (scr_hostspeedstot2 + (scr_hostspeedsframes - 1)) / scr_hostspeedsframes;
+		scr_hostspeeds3 = (scr_hostspeedstot3 + (scr_hostspeedsframes - 1)) / scr_hostspeedsframes;
+
+		host_speedstime = 0;
+
+		scr_hostspeedstot1 = 0;
+		scr_hostspeedstot2 = 0;
+		scr_hostspeedstot3 = 0;
+		scr_hostspeedsframes = 0;
+	}
+}
+
+
+void SCR_UpdateScreen (double frametime)
 {
 	// ensure that everything needed is up
 	if (!d3d_Device) return;
@@ -1454,7 +1516,7 @@ void SCR_UpdateScreen (void)
 	{
 		if (realtime - scr_disabled_time > scr_timeout)
 		{
-			scr_disabled_for_loading = false;
+			Host_DisableForLoading (false);
 
 			if (scr_timeout >= SCR_DEFTIMEOUT) Con_Printf ("load failed.\n");
 		}
@@ -1474,15 +1536,20 @@ void SCR_UpdateScreen (void)
 	// if we needed to restart video skip updating this frame
 	if (vid_restarted) return;
 
-	// check for status bar modifications
-	SCR_CheckSBarRefdef ();
-
 	// determine size of refresh window
 	if (vid.recalc_refdef) SCR_CalcRefdef ();
 
 	D3DHLSL_BeginFrame ();
 
-	R_RenderView ();
+	SCR_SetUpToDrawConsole ();
+
+	if (cls.maprunning && cl.worldmodel && cls.signon == SIGNON_CONNECTED)
+	{
+		// unfortunate note - there is fps-dependent code in cl_view - the "smooth out stair step-ups" thing
+		V_RenderView ();
+		R_RenderView ();
+		V_UpdateCShifts ();
+	}
 
 	D3DDraw_Begin2D ();
 
@@ -1490,11 +1557,11 @@ void SCR_UpdateScreen (void)
 	{
 		SCR_DrawLoading ();
 	}
-	else if (cl.intermission == 1 && key_dest == key_game)
+	else if (cl.intermission == 1 && key_dest == key_game && cls.maprunning)
 	{
 		HUD_IntermissionOverlay ();
 	}
-	else if (cl.intermission == 2 && key_dest == key_game)
+	else if (cl.intermission == 2 && key_dest == key_game && cls.maprunning)
 	{
 		finaley = 16;
 		SCR_CheckDrawCenterString ();
@@ -1502,40 +1569,52 @@ void SCR_UpdateScreen (void)
 	}
 	else if (!scr_drawmapshot)
 	{
-		if (!scr_drawloading)
+		SCR_DrawNet ();
+		SCR_DrawTurtle (frametime);
+		SCR_DrawPause ();
+
+		if (cls.maprunning)
 		{
-			SCR_DrawNet ();
-			SCR_DrawTurtle ();
-			SCR_DrawPause ();
 			SCR_CheckDrawCenterString ();
-		}
-
-		HUD_DrawHUD ();
-		SCR_DrawConsole ();
-
-		if (!scr_drawloading)
+			HUD_DrawHUD ();
+			SCR_DrawConsole ();
 			SHOWLMP_drawall ();
 
-		extern int r_speedstime;
+			if (host_speeds.value && key_dest == key_game)
+			{
+				D3DDraw_SetSize (&vid.sbarsize);
+				Draw_String (vid.currsize->width - 100, 20, "Host Speeds");
+				Draw_String (vid.currsize->width - 124, 30, va ("%5i total", scr_hostspeeds1 + scr_hostspeeds2 + scr_hostspeeds3));
+				Draw_String (vid.currsize->width - 124, 40, va ("%5i server", scr_hostspeeds1));
+				Draw_String (vid.currsize->width - 124, 50, va ("%5i graphics", scr_hostspeeds2));
+				Draw_String (vid.currsize->width - 124, 60, va ("%5i sound", scr_hostspeeds3));
+			}
+			else if (r_speeds.value)
+			{
+				D3DDraw_SetSize (&vid.sbarsize);
+				Draw_String (vid.currsize->width - 100, 20, va ("%5i ms   ", r_speedstime));
+				Draw_String (vid.currsize->width - 100, 30, va ("%5i surf", d3d_RenderDef.brush_polys));
+				Draw_String (vid.currsize->width - 100, 40, va ("%5i mdl", d3d_RenderDef.alias_polys));
+				Draw_String (vid.currsize->width - 100, 50, va ("%5i node", d3d_RenderDef.numnode));
+				Draw_String (vid.currsize->width - 100, 60, va ("%5i leaf", d3d_RenderDef.numleaf));
+				Draw_String (vid.currsize->width - 100, 70, va ("%5i stream", d3d_RenderDef.numsss));
+				Draw_String (vid.currsize->width - 100, 80, va ("%5i lock", d3d_RenderDef.numlock));
+				Draw_String (vid.currsize->width - 100, 90, va ("%5i draw", d3d_RenderDef.numdrawprim));
+			}
 
-		if (r_speeds.value && r_speedstime >= 0 && !con_forcedup)
+			if (scr_showcoords.integer)
+			{
+				D3DDraw_SetSize (&vid.sbarsize);
+				Draw_String (10, 10, va ("%0.3f %0.3f %0.3f", r_refdef.vieworigin[0], r_refdef.vieworigin[1], r_refdef.vieworigin[2]));
+			}
+		}
+		else
 		{
-			D3DDraw_SetSize (&vid.sbarsize);
-			Draw_String (vid.currsize->width - 100, 20, va ("%5i ms   ", r_speedstime));
-			Draw_String (vid.currsize->width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
-			Draw_String (vid.currsize->width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
-			Draw_String (vid.currsize->width - 100, 50, va ("%5i stream", d3d_RenderDef.numsss));
-			Draw_String (vid.currsize->width - 100, 60, va ("%5i lock", d3d_RenderDef.numlock));
-			Draw_String (vid.currsize->width - 100, 70, va ("%5i draw", d3d_RenderDef.numdrawprim));
+			SCR_ClearCenterString ();
+			SCR_DrawConsole ();
 		}
 
-		if (scr_showcoords.integer && !con_forcedup)
-		{
-			D3DDraw_SetSize (&vid.sbarsize);
-			Draw_String (10, 10, va ("%0.3f %0.3f %0.3f", r_refdef.vieworigin[0], r_refdef.vieworigin[1], r_refdef.vieworigin[2]));
-		}
-
-		if (!scr_drawloading) M_Draw ();
+		M_Draw ();
 	}
 
 	if (scr_modalmessage)
@@ -1553,9 +1632,9 @@ void SCR_UpdateScreen (void)
 	D3DHLSL_EndFrame ();
 	D3DVid_EndRendering ();
 
-	// take a mapshot on entry to the map, unless one already exists
+	// take a mapshot on entry to the map
 	// unless we're already in mapshot mode, in which case we'll have an infinite loop!!!
-	if (r_automapshot.value && d3d_RenderDef.framecount == 5 && !scr_drawmapshot)
+	if (r_automapshot.value && d3d_RenderDef.framecount == 5 && !scr_drawmapshot && cls.maprunning)
 	{
 		// first ensure we have a "maps" directory
 		CreateDirectory (va ("%s/maps", com_gamedir), NULL);
@@ -1564,8 +1643,13 @@ void SCR_UpdateScreen (void)
 		SCR_Mapshot_f (va ("%s/%s", com_gamedir, cl.worldmodel->name), false, false);
 	}
 
-	V_UpdateCShifts ();
 	D3D_GenerateTextureList ();
+
+	if (cls.signon == SIGNON_CONNECTED)
+	{
+		// particle updating has been moved back to draw time to preserve cache friendliness
+		CL_DecayLights ();
+	}
 }
 
 
@@ -1614,7 +1698,7 @@ void SCR_QuakeIsLoading (int stage, int maxstage)
 	int x = (vid.currsize->width - gfx_loading_lmp->width) / 2;
 	int y = (vid.currsize->height - 48 - gfx_loading_lmp->height) / 2;
 
-	Draw_Pic (x, y, gfx_loading_lmp);
+	Draw_Pic (x, y, gfx_loading_lmp, 1, true);
 
 	SCR_DrawSlider (x + 8, y + gfx_loading_lmp->height + 8, gfx_loading_lmp->width - 16, stage, maxstage);
 

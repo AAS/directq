@@ -42,7 +42,7 @@ extern	int nanmask;
 #define VectorCopy2(dst,src) {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];}
 #define VectorClear(vec) {(vec)[0] = (vec)[1] = (vec)[2] = 0.0f;}
 
-void VectorMultiplyAdd (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
+void VectorMad (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
 
 vec_t _DotProduct (vec3_t v1, vec3_t v2);
 void _VectorSubtract (vec3_t veca, vec3_t vecb, vec3_t out);
@@ -98,3 +98,4 @@ float	anglemod (float a);
 
 #define Q_Random(MIN,MAX) ((rand() & 32767) * (((MAX) - (MIN)) * (1.0f / 32767.0f)) + (MIN))
 
+void NonEulerInterpolateAngles (float *currangles, float *lastangles, float lerp, float *outangles);

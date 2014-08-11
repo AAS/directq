@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 
 extern HWND d3d_Window;
-void R_AnimateLight (void);
 
 /*
 ============================================================================================================
@@ -41,8 +40,6 @@ void D3DSky_LoadSkyBox (char *basename, bool feedback);
 
 LPDIRECT3DTEXTURE9 r_notexture = NULL;
 extern LPDIRECT3DTEXTURE9 crosshairtexture;
-LPDIRECT3DTEXTURE9 yahtexture;
-extern LPDIRECT3DTEXTURE9 d3d_WaterWarpTexture;
 
 
 /*
@@ -70,19 +67,13 @@ void R_InitTextures (void)
 }
 
 
-// textures to load from resources
-extern LPDIRECT3DTEXTURE9 particledottexture;
-extern LPDIRECT3DTEXTURE9 particlesquaretexture;
-
 void Draw_FreeCrosshairs (void);
+void D3DWarp_WWTexOnRecover (void);
+void D3DPart_OnRecover (void);
 
 void R_ReleaseResourceTextures (void)
 {
-	SAFE_RELEASE (particlesquaretexture);
-	SAFE_RELEASE (particledottexture);
 	SAFE_RELEASE (crosshairtexture);
-	SAFE_RELEASE (d3d_WaterWarpTexture);
-	SAFE_RELEASE (yahtexture);
 	SAFE_RELEASE (r_notexture);
 
 	// and replacement crosshairs too
@@ -92,15 +83,11 @@ void R_ReleaseResourceTextures (void)
 
 void R_InitResourceTextures (void)
 {
-	// load any textures contained in exe resources
-	D3D_LoadResourceTexture ("particledot", &particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, 0);
-	D3D_LoadResourceTexture ("YAH", &yahtexture, IDR_YOUAREHERE, 0);
-	D3D_LoadResourceTexture ("IDR_UWWARP", &d3d_WaterWarpTexture, IDR_UWWARP, 0);
+	D3DPart_OnRecover ();
+	D3DWarp_WWTexOnRecover ();
 
-	// because this is just a square we can upload it as a 1x1 texture and save a lot of performance
-	unsigned int squaredata = 0xffffffff;
-	D3D_UploadTexture (&particlesquaretexture, &squaredata, 1, 1, IMAGE_32BIT);
+	// load any textures contained in exe resources
+	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, 0);
 
 	// load the notexture properly
 	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->size[0], r_notexture_mip->size[1], IMAGE_MIPMAP);
@@ -239,15 +226,11 @@ void IN_ClearMouseState (void);
 void D3DAlias_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
 void Mod_InitForMap (model_t *mod);
-void R_SetDefaultLightStyles (void);
-void D3DSKy_NewMap (void);
 void D3DTexture_RegisterChains (void);
 void D3DBrush_CreateVBOs (void);
-
-void R_ParseForNehahra (void)
-{
-}
-
+void D3DLight_EndBuildingLightmaps (void);
+void D3DBrush_BuildBModelVBOs (void);
+void Host_InitTimers (void);
 
 void R_NewMap (void)
 {
@@ -257,8 +240,6 @@ void R_NewMap (void)
 	// init frame counters
 	d3d_RenderDef.framecount = 1;
 	d3d_RenderDef.visframecount = 0;
-
-	R_SetDefaultLightStyles ();
 
 	// clear out efrags (one short???)
 	for (int i = 0; i < cl.worldmodel->brushhdr->numleafs; i++)
@@ -284,7 +265,10 @@ void R_NewMap (void)
 	// setup stuff
 	R_ClearParticles ();
 
-	D3DLight_BuildAllLightmaps ();
+	// finish building lightmaps for this map
+	D3DLight_EndBuildingLightmaps ();
+	d3d_RenderDef.WorldModelLoaded = false;
+
 	D3D_FlushTextures ();
 	R_SetLeafContents ();
 	D3DSky_ParseWorldSpawn ();
@@ -292,7 +276,6 @@ void R_NewMap (void)
 	D3DAlpha_NewMap ();
 	Fog_ParseWorldspawn ();
 	D3DAlias_CreateBuffers ();
-	D3DSKy_NewMap ();
 
 	// release cached skins to save memory
 	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);
@@ -305,6 +288,7 @@ void R_NewMap (void)
 	LOC_LoadLocations ();
 	D3DTexture_RegisterChains ();
 	D3DBrush_CreateVBOs ();
+	D3DBrush_BuildBModelVBOs ();
 
 	// see do we need to switch off the menus or console
 	if (key_dest != key_game && (cls.demoplayback || cls.demorecording || cls.timedemo))
@@ -323,9 +307,6 @@ void R_NewMap (void)
 	// revalidate the skybox in case the last one was cleared
 	D3DSky_RevalidateSkybox ();
 
-	// load nehahra hacky crap
-	if (nehahra) R_ParseForNehahra ();
-
 	// reset these again here as they can be changed during load processing
 	d3d_RenderDef.framecount = 1;
 	d3d_RenderDef.visframecount = 0;
@@ -336,8 +317,11 @@ void R_NewMap (void)
 	// go to the next registration sequence
 	d3d_RenderDef.RegistrationSequence++;
 
-	// force a surface build on the first frame
-	d3d_RenderDef.BuildSurfaces = true;
+	// reinit the timers to keep fx consistent
+	Host_InitTimers ();
+
+	// we're running a map now
+	cls.maprunning = true;
 }
 
 

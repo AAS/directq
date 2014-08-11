@@ -42,9 +42,14 @@ float SkyFog;
 float3 Scale;
 float3 r_origin;
 float3 viewangles;
+float3 viewforward;
+float3 viewright;
+float3 viewup;
 
 float4 FogColor;
 float FogDensity;
+
+float genericscale;
 
 // ps2.0 guarantees 8 samplers min
 sampler tmu0Sampler : register(s0) = sampler_state {Texture = <tmu0Texture>;};
@@ -104,12 +109,14 @@ struct DrawVert
 
 float4 PSDrawTextured (DrawVert Input) : COLOR0
 {
+	clip (Input.Color.a + 0.003922f);
 	return tex2D (tmu0Sampler, Input.Tex0) * Input.Color;
 }
 
 
 float4 PSDrawColored (DrawVert Input) : COLOR0
 {
+	clip (Input.Color.a + 0.003922f);
 	return Input.Color;
 }
 
@@ -144,18 +151,6 @@ DrawVert VSDrawBBoxes (DrawVert Input)
 	DrawVert Output;
 
 	Output.Position = mul (mul (Input.Position, EntMatrix), WorldMatrix);
-	Output.Color = Input.Color;
-	Output.Tex0 = Input.Tex0;	// hack for hlsl compiler...
-
-	return (Output);
-}
-
-
-DrawVert VSDrawCorona (DrawVert Input)
-{
-	DrawVert Output;
-
-	Output.Position = mul (Input.Position, WorldMatrix);
 	Output.Color = Input.Color;
 	Output.Tex0 = Input.Tex0;	// hack for hlsl compiler...
 
@@ -221,29 +216,19 @@ PSUnderwaterVert VSDrawUnderwater (VSUnderwaterVert Input)
 ALIAS MODELS
 ====================
 */
-float2 currlerp;
-float2 lastlerp;
+float2 aliaslerp;
 float3 ShadeVector;
 float3 ShadeLight;
 
 struct VertAliasVS
 {
 	float4 CurrPosition : POSITION0;
-	float4 CurrNormal : TEXCOORD0;
+	float3 CurrNormal : TEXCOORD0;
 	float4 LastPosition : POSITION1;
-	float4 LastNormal : TEXCOORD1;
-	float2 Tex0 : TEXCOORD2;
+	float3 LastNormal : TEXCOORD1;
+	float3 Tex0 : TEXCOORD2;
 };
 
-struct VertAliasVSViewModel
-{
-	float4 CurrPosition : POSITION0;
-	float4 CurrNormal : TEXCOORD0;
-	float4 LastPosition : POSITION1;
-	float4 LastNormal : TEXCOORD1;
-	float2 Tex0 : TEXCOORD2;
-	float4 Lerps : TEXCOORD3;
-};
 
 struct VertAliasPS
 {
@@ -302,18 +287,36 @@ float4 PSAliasNoLuma (VertAliasPS Input) : COLOR0
 }
 
 
-VertAliasPS VSAliasVSViewModel (VertAliasVSViewModel Input)
+float4 PSAliasKurok (VertAliasPS Input) : COLOR0
+{
+	float4 texcolor = tex2D (tmu0Sampler, Input.Tex0);
+	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = FogCalc (texcolor * (Shade * Overbright), Input.FogPosition);
+#else
+	float4 color = texcolor * (Shade * Overbright);
+#endif
+
+	color.a = texcolor.a;
+	return color;
+}
+
+
+// lerp factors for viewmodel
+// [0] is lerped and [1] is delerped
+float4 vmblends[2];
+
+VertAliasPS VSAliasVSCommon (VertAliasVS Input, float2 blend, float zhack)
 {
 	VertAliasPS Output;
 
-	float4 BasePosition = mul (Input.LastPosition * Input.Lerps.z + Input.CurrPosition * Input.Lerps.x, EntMatrix);
+	// retrieve the correct blend lerps to use for this vertex
+	float4 BasePosition = mul (Input.LastPosition * blend.y + Input.CurrPosition * blend.x, EntMatrix);
 
 	// this is friendlier for preshaders
 	Output.Position = mul (BasePosition, WorldMatrix);
-
-	// the view model needs a depth range hack and this is the easiest way of doing it
-	// (must find out how software quake did this)
-	Output.Position.z *= 0.15f;
+	Output.Position.z *= zhack;
 
 #ifdef hlsl_fog
 	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
@@ -322,49 +325,32 @@ VertAliasPS VSAliasVSViewModel (VertAliasVSViewModel Input)
 	// scale, bias and interpolate the normals in the vertex shader for speed
 	// full range normals overbright/overdark too much so we scale it down by half
 	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
-	Output.Normal = ((Input.CurrNormal.xyz * Input.Lerps.y) - 0.5f) + ((Input.LastNormal.xyz * Input.Lerps.w) - 0.5f);
-	Output.Tex0 = Input.Tex0;
+	Output.Normal = Input.CurrNormal * blend.x + Input.LastNormal * blend.y;
+	Output.Tex0 = Input.Tex0.xy;
 
 	return Output;
 }
 
 
-VertAliasPS VSAliasVS (VertAliasVS Input)
-{
-	VertAliasPS Output;
-
-	float4 BasePosition = mul (Input.LastPosition * lastlerp.x + Input.CurrPosition * currlerp.x, EntMatrix);
-
-	// this is friendlier for preshaders
-	Output.Position = mul (BasePosition, WorldMatrix);
-
-#ifdef hlsl_fog
-	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
-#endif
-
-	// scale, bias and interpolate the normals in the vertex shader for speed
-	// full range normals overbright/overdark too much so we scale it down by half
-	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
-	Output.Normal = ((Input.CurrNormal.xyz * currlerp.y) - 0.5f) + ((Input.LastNormal.xyz * lastlerp.y) - 0.5f);
-	Output.Tex0 = Input.Tex0;
-
-	return Output;
-}
+// the view model needs a depth range hack and this is the easiest way of doing it
+// (must find out how software quake did this)
+VertAliasPS VSAliasVSViewModel (VertAliasVS Input) {return VSAliasVSCommon (Input, vmblends[Input.Tex0.z].xy, 0.15f);}
+VertAliasPS VSAliasVS (VertAliasVS Input) {return VSAliasVSCommon (Input, aliaslerp, 1.0f);}
 
 
 struct VertInstancedVS
 {
 	// ps2.0 guarantees up to 16 texcoord sets
 	float4 CurrPosition : POSITION0;
-	float4 CurrNormal : TEXCOORD0;
+	float3 CurrNormal : TEXCOORD0;
 	float4 LastPosition : POSITION1;
-	float4 LastNormal : TEXCOORD1;
-	float2 Tex0 : TEXCOORD2;
+	float3 LastNormal : TEXCOORD1;
+	float3 Tex0 : TEXCOORD2;
 	float4 MRow1 : TEXCOORD3;
 	float4 MRow2 : TEXCOORD4;
 	float4 MRow3 : TEXCOORD5;
 	float4 MRow4 : TEXCOORD6;
-	float4 Lerps : TEXCOORD7;
+	float2 Lerps : TEXCOORD7;
 	float3 SVector : TEXCOORD8;
 	float4 ColorAlpha : TEXCOORD9;
 };
@@ -434,7 +420,7 @@ VertInstancedPS VSAliasVSInstanced (VertInstancedVS Input)
 	VertInstancedPS Output;
 	float4x4 EntMatrixInstanced = float4x4 (Input.MRow1, Input.MRow2, Input.MRow3, Input.MRow4);
 
-	float4 BasePosition = mul (Input.LastPosition * Input.Lerps.z + Input.CurrPosition * Input.Lerps.x, EntMatrixInstanced);
+	float4 BasePosition = mul (Input.LastPosition * Input.Lerps.y + Input.CurrPosition * Input.Lerps.x, EntMatrixInstanced);
 
 	// this is friendlier for preshaders
 	Output.Position = mul (BasePosition, WorldMatrix);
@@ -446,8 +432,8 @@ VertInstancedPS VSAliasVSInstanced (VertInstancedVS Input)
 	// scale, bias and interpolate the normals in the vertex shader for speed
 	// full range normals overbright/overdark too much so we scale it down by half
 	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
-	Output.Normal = ((Input.CurrNormal.xyz * Input.Lerps.y) - 0.5f) + ((Input.LastNormal.xyz * Input.Lerps.w) - 0.5f);
-	Output.Tex0 = Input.Tex0;
+	Output.Normal = Input.CurrNormal * Input.Lerps.x + Input.LastNormal * Input.Lerps.y;
+	Output.Tex0 = Input.Tex0.xy;
 	Output.SVector = Input.SVector;
 	Output.ColorAlpha = Input.ColorAlpha;
 
@@ -458,9 +444,9 @@ VertInstancedPS VSAliasVSInstanced (VertInstancedVS Input)
 struct VertShadowVS
 {
 	float4 CurrPosition : POSITION0;
-	float4 CurrNormal : TEXCOORD0;
+	float3 CurrNormal : TEXCOORD0;
 	float4 LastPosition : POSITION1;
-	float4 LastNormal : TEXCOORD1;
+	float3 LastNormal : TEXCOORD1;
 };
 
 
@@ -479,7 +465,7 @@ VertShadowPS ShadowVS (VertShadowVS Input)
 {
 	VertShadowPS Output;
 
-	float4 BasePosition = mul (Input.LastPosition * lastlerp.x + Input.CurrPosition * currlerp.x, EntMatrix);
+	float4 BasePosition = mul (Input.LastPosition * aliaslerp.y + Input.CurrPosition * aliaslerp.x, EntMatrix);
 
 	// the lightspot comes after the baseline matrix multiplication and is just stored in ShadeVector for convenience
 	BasePosition.z = ShadeVector.z + 0.1f;
@@ -516,7 +502,12 @@ PARTICLES (AND SPRITES)
 ====================
 */
 
-struct VertParticleNonInstanced
+struct VertParticle
+{
+	float4 Data : POSITION0;
+};
+
+struct VertSprite
 {
 	float4 Position : POSITION0;
 	float4 Color : COLOR0;
@@ -535,7 +526,7 @@ struct PSParticleVert
 };
 
 
-float4 PSParticles (PSParticleVert Input) : COLOR0
+float4 PSSprite (PSParticleVert Input) : COLOR0
 {
 #ifdef hlsl_fog
 	float4 texcolor = tex2D (tmu0Sampler, Input.Tex0);
@@ -545,12 +536,43 @@ float4 PSParticles (PSParticleVert Input) : COLOR0
 	float4 color = texcolor * Input.Color;
 #endif
 
+	clip (texcolor.a + 0.003922f);
+
 	color.a = texcolor.a;
 	return color;
 }
 
 
-PSParticleVert VSParticles (VertParticleNonInstanced Input)
+float4 PSParticlesSquare (PSParticleVert Input) : COLOR0
+{
+#ifdef hlsl_fog
+	float4 color = FogCalc (Input.Color, Input.FogPosition);
+#else
+	float4 color = Input.Color;
+#endif
+
+	// procedurally generate the particle square for good speed and per-pixel accuracy at any scale
+	color.a = 1;
+	return color;
+}
+
+
+float4 PSParticles (PSParticleVert Input) : COLOR0
+{
+#ifdef hlsl_fog
+	float4 color = FogCalc (Input.Color, Input.FogPosition);
+#else
+	float4 color = Input.Color;
+#endif
+
+	// procedurally generate the particle dot for good speed and per-pixel accuracy at any scale
+	color.a = (1.0f - ((Input.Tex0.x * Input.Tex0.x) + (Input.Tex0.y * Input.Tex0.y))) * 1.5f;
+	clip (color.a);
+	return color;
+}
+
+
+PSParticleVert VSSprite (VertSprite Input)
 {
 	PSParticleVert Output;
 
@@ -568,39 +590,72 @@ PSParticleVert VSParticles (VertParticleNonInstanced Input)
 }
 
 
-struct VertParticleInstanced
-{
-	float4 BasePosition : POSITION0;
-	float2 Tex0 : TEXCOORD0;
-	float3 Position : TEXCOORD1;
-	float Scale : BLENDWEIGHT0;
-	float4 Color : COLOR0;
-};
+// only used for vs_2_0 Shader instancing
+#define NumBatchInstances 120
 
-float3 upvec;
-float3 rightvec;
+float4 PartInstancePosition[NumBatchInstances] : PARTINSTANCEPOSITION : register(c9);
+float4 PartInstanceColor[NumBatchInstances] : PARTINSTANCECOLOR : register(c129);
 
-PSParticleVert VSParticlesInstanced (VertParticleInstanced Input)
+PSParticleVert VSParticles (VertParticle Input)
 {
 	PSParticleVert Output;
 
-	float4 NewPosition = float4
-	(
-		(Input.Position + 
-		rightvec * Input.Scale * Input.BasePosition.x + 
-		upvec * Input.Scale * Input.BasePosition.y),
-		Input.BasePosition.w
-	);
-	
-	// this is friendlier for preshaders
+	// hack a scale up to keep particles from disappearing
+	float2 Base = Input.Data.xy *
+		(1 + dot (PartInstancePosition[Input.Data.z].xyz - r_origin, viewforward) *
+		genericscale) * PartInstancePosition[Input.Data.z].w;
+
+	float4 NewPosition = float4 (float3 (PartInstancePosition[Input.Data.z].xyz + viewup * Base.y + viewright * Base.x), 1);
+
 	Output.Position = mul (NewPosition, WorldMatrix);
+	Output.Color = PartInstanceColor[Input.Data.z];
+	Output.Tex0 = Input.Data.xy;
 
 #ifdef hlsl_fog
 	Output.FogPosition = mul (NewPosition, ModelViewMatrix);
 #endif
 
-	Output.Color = Input.Color;
-	Output.Tex0 = Input.Tex0;
+	return Output;
+}
+
+
+float4 coronacolour;
+float3 dlorg;
+
+struct PSCoronaVert
+{
+	float4 Position : POSITION0;
+	float4 Color : COLOR0;
+	float2 Tex0 : TEXCOORD0;
+};
+
+
+struct VSCoronaVert
+{
+	float4 Data : POSITION0;
+};
+
+float4 PSDrawCorona (PSCoronaVert Input) : COLOR0
+{
+	float4 color = Input.Color;
+	color.a = 1.0f - ((Input.Tex0.x * Input.Tex0.x) + (Input.Tex0.y * Input.Tex0.y));
+	clip (color.a);
+	color.a = pow (color.a, 3.0f);
+	return color;
+}
+
+
+PSCoronaVert VSDrawCorona (VSCoronaVert Input)
+{
+	PSCoronaVert Output;
+
+	// hack a scale up to keep particles from disappearing
+	float2 Base = Input.Data.xy * PartInstancePosition[Input.Data.z].w;
+	float4 NewPosition = float4 (float3 (PartInstancePosition[Input.Data.z].xyz + viewup * Base.y + viewright * Base.x), 1);
+
+	Output.Position = mul (NewPosition, WorldMatrix);
+	Output.Color = PartInstanceColor[Input.Data.z];
+	Output.Tex0 = Input.Data.xy;
 
 	return Output;
 }
@@ -797,7 +852,7 @@ PSWorldVert VSWorldCommon (VSWorldVert Input)
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
-	
+
 #ifdef hlsl_fog
 	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
 #endif
@@ -974,10 +1029,10 @@ technique MasterRefresh
 		PixelShader = compile ps_2_0 PSWorldLumaAlpha ();
 	}
 
-	pass FX_PASS_PARTICLES_INSTANCED
+	pass FX_PASS_SPRITE
 	{
-		VertexShader = compile vs_2_0 VSParticlesInstanced ();
-		PixelShader = compile ps_2_0 PSParticles ();
+		VertexShader = compile vs_2_0 VSSprite ();
+		PixelShader = compile ps_2_0 PSSprite ();
 	}
 	
 	pass FX_PASS_UNDERWATER
@@ -1043,7 +1098,7 @@ technique MasterRefresh
 	pass FX_PASS_CORONA
 	{
 		VertexShader = compile vs_2_0 VSDrawCorona ();
-		PixelShader = compile ps_2_0 PSDrawColored ();
+		PixelShader = compile ps_2_0 PSDrawCorona ();
 	}
 
 	pass FX_PASS_BBOXES
@@ -1056,6 +1111,18 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 LiquidVSRipple ();
 		PixelShader = compile ps_2_0 LiquidPS ();
+	}
+
+	pass FX_PASS_PARTICLE_SQUARE
+	{
+		VertexShader = compile vs_2_0 VSParticles ();
+		PixelShader = compile ps_2_0 PSParticlesSquare ();
+	}
+
+	pass FX_PASS_ALIAS_KUROK
+	{
+		VertexShader = compile vs_2_0 VSAliasVS ();
+		PixelShader = compile ps_2_0 PSAliasKurok ();
 	}
 }
 

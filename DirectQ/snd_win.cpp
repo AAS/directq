@@ -232,6 +232,23 @@ sndinitstat SNDDMA_InitDirect (void)
 	shm->samplebits = 16;
 	shm->speed = 11025;
 
+	// people like higher sampling rates even though Quake's resampling is actually lower quality...
+	// oh well
+	int rc = COM_CheckParm ("-sspeed");
+
+	if (rc) shm->speed = atoi (com_argv[rc + 1]);
+
+	// qrack users expect this
+	if (COM_CheckParm ("-44khz")) shm->speed = 44100;
+	if (COM_CheckParm ("-22khz")) shm->speed = 22050;
+
+	// now we need to tidy up the speed as users may provide invalid values...
+	if (shm->speed <= 11025)
+		shm->speed = 11025;
+	else if (shm->speed <= 22050)
+		shm->speed = 22050;
+	else shm->speed = 44100;
+
 	memset (&format, 0, sizeof(format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
     format.nChannels = shm->channels;

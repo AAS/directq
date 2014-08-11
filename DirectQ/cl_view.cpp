@@ -117,8 +117,9 @@ V_CalcBob
 float V_CalcBob (void)
 {
 	// prevent division by 0 weirdness
-	if (!cl_bobcycle.value) return 0;
+	if (!cl_bob.value) return 0;
 	if (!cl_bobup.value) return 0;
+	if (!cl_bobcycle.value) return 0;
 
 	// this prevents the bob cycle from constantly repeating if you bring the console down while mid-bob
 	if (key_dest != key_game) return 0;
@@ -126,10 +127,9 @@ float V_CalcBob (void)
 	// bound bob up
 	if (cl_bobup.value >= 0.99f) Cvar_Set (&cl_bobup, 0.99f);
 
-	float	bob;
-	float	cycle;
-
-	cycle = cl.time - (int) (cl.time / cl_bobcycle.value) * cl_bobcycle.value;
+	// WARNING - don't try anything sexy with time in here or you'll
+	// screw things up and make the engine appear to run jerky
+	float cycle = cl.time - (int) (cl.time / cl_bobcycle.value) * cl_bobcycle.value;
 	cycle /= cl_bobcycle.value;
 
 	if (cycle < cl_bobup.value)
@@ -138,7 +138,7 @@ float V_CalcBob (void)
 
 	// bob is proportional to velocity in the xy plane
 	// (don't count Z, or jumping messes it up)
-	bob = sqrt (cl.velocity[0] * cl.velocity[0] + cl.velocity[1] * cl.velocity[1]) * cl_bob.value;
+	float bob = sqrt (cl.velocity[0] * cl.velocity[0] + cl.velocity[1] * cl.velocity[1]) * cl_bob.value;
 	bob = bob * 0.3 + bob * 0.7 * sin (cycle);
 
 	if (bob > 4)
@@ -177,7 +177,7 @@ cvar_t cl_damagered ("cl_damagered", "3", CVAR_ARCHIVE);
 V_ParseDamage
 ===============
 */
-void V_ParseDamage (float time)
+void V_ParseDamage (void)
 {
 	int		armor, blood;
 	vec3_t	from;
@@ -197,7 +197,7 @@ void V_ParseDamage (float time)
 
 	if (count < 10) count = 10;
 
-	cl.faceanimtime = time + 0.2f;
+	cl.faceanimtime = cl.time + 0.2f;
 	cl.cshifts[CSHIFT_DAMAGE].percent += cl_damagered.value * count;
 
 	if (cl.cshifts[CSHIFT_DAMAGE].percent < 0) cl.cshifts[CSHIFT_DAMAGE].percent = 0;
@@ -296,6 +296,23 @@ void V_SetContentsColor (int contents)
 	}
 }
 
+
+void V_CalcIndividualBlend (float *rgba, float r, float g, float b, float a)
+{
+	// calc alpha amount
+	float a2 = a / 255.0;
+
+	// evaluate blends
+	rgba[3] = rgba[3] + a2 * (1 - rgba[3]);
+	a2 = a2 / rgba[3];
+
+	// blend it in
+	rgba[0] = rgba[0] * (1 - a2) + r * a2;
+	rgba[1] = rgba[1] * (1 - a2) + g * a2;
+	rgba[2] = rgba[2] * (1 - a2) + b * a2;
+}
+
+
 /*
 =============
 V_CalcPowerupCshift
@@ -303,36 +320,22 @@ V_CalcPowerupCshift
 */
 void V_CalcPowerupCshift (void)
 {
-	if (cl.items & IT_QUAD)
-	{
-		cl.cshifts[CSHIFT_POWERUP].destcolor[0] = 0;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[1] = 0;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[2] = 255;
-		cl.cshifts[CSHIFT_POWERUP].percent = 30;
-	}
-	else if (cl.items & IT_SUIT)
-	{
-		cl.cshifts[CSHIFT_POWERUP].destcolor[0] = 0;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[1] = 255;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[2] = 0;
-		cl.cshifts[CSHIFT_POWERUP].percent = 20;
-	}
-	else if (cl.items & IT_INVISIBILITY)
-	{
-		cl.cshifts[CSHIFT_POWERUP].destcolor[0] = 100;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[1] = 100;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[2] = 100;
-		cl.cshifts[CSHIFT_POWERUP].percent = 100;
-	}
-	else if (cl.items & IT_INVULNERABILITY)
-	{
-		cl.cshifts[CSHIFT_POWERUP].destcolor[0] = 255;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[1] = 255;
-		cl.cshifts[CSHIFT_POWERUP].destcolor[2] = 0;
-		cl.cshifts[CSHIFT_POWERUP].percent = 30;
-	}
-	else cl.cshifts[CSHIFT_POWERUP].percent = 0;
+	// default is no shift for no powerups
+	float rgba[4]= {0, 0, 0, 0};
+
+	// now let's see what we've got
+	if (cl.items & IT_QUAD) V_CalcIndividualBlend (rgba, 0, 0, 255, 30);
+	if (cl.items & IT_SUIT) V_CalcIndividualBlend (rgba, 0, 255, 0, 20);
+	if (cl.items & IT_INVISIBILITY) V_CalcIndividualBlend (rgba, 100, 100, 100, 100);
+	if (cl.items & IT_INVULNERABILITY) V_CalcIndividualBlend (rgba, 255, 255, 0, 30);
+
+	// clamp blend 0-255 and store out
+	cl.cshifts[CSHIFT_POWERUP].destcolor[0] = BYTE_CLAMP (rgba[0]);
+	cl.cshifts[CSHIFT_POWERUP].destcolor[1] = BYTE_CLAMP (rgba[1]);
+	cl.cshifts[CSHIFT_POWERUP].destcolor[2] = BYTE_CLAMP (rgba[2]);
+	cl.cshifts[CSHIFT_POWERUP].percent = BYTE_CLAMPF (rgba[3]);
 }
+
 
 /*
 =============
@@ -341,43 +344,25 @@ V_CalcBlend
 */
 void V_CalcBlend (void)
 {
-	float	r, g, b, a, a2;
-	int		j;
+	float rgba[4]= {0, 0, 0, 0};
 
-	r = 0;
-	g = 0;
-	b = 0;
-	a = 0;
-
-	for (j = 0; j < NUM_CSHIFTS; j++)
+	for (int j = 0; j < NUM_CSHIFTS; j++)
 	{
 		// no shift
 		if (!cl.cshifts[j].percent) continue;
 
-		// calc alpha amount
-		a2 = (float) cl.cshifts[j].percent / 255.0;
-
-		// evaluate blends
-		a = a + a2 * (1 - a);
-		a2 = a2 / a;
-
-		// blend it in
-		r = r * (1 - a2) + cl.cshifts[j].destcolor[0] * a2;
-		g = g * (1 - a2) + cl.cshifts[j].destcolor[1] * a2;
-		b = b * (1 - a2) + cl.cshifts[j].destcolor[2] * a2;
+		V_CalcIndividualBlend (rgba,
+			cl.cshifts[j].destcolor[0],
+			cl.cshifts[j].destcolor[1],
+			cl.cshifts[j].destcolor[2],
+			cl.cshifts[j].percent);
 	}
 
 	// set final amounts
-	v_blend[0] = r;
-	v_blend[1] = g;
-	v_blend[2] = b;
-	v_blend[3] = a * 255.0f;
-
-	// clamp blend 0-255
-	if (v_blend[0] > 255) v_blend[0] = 255; else if (v_blend[0] < 0) v_blend[0] = 0;
-	if (v_blend[1] > 255) v_blend[1] = 255; else if (v_blend[1] < 0) v_blend[1] = 0;
-	if (v_blend[2] > 255) v_blend[2] = 255; else if (v_blend[2] < 0) v_blend[2] = 0;
-	if (v_blend[3] > 255) v_blend[3] = 255; else if (v_blend[3] < 0) v_blend[3] = 0;
+	v_blend[0] = BYTE_CLAMP (rgba[0]);
+	v_blend[1] = BYTE_CLAMP (rgba[1]);
+	v_blend[2] = BYTE_CLAMP (rgba[2]);
+	v_blend[3] = BYTE_CLAMPF (rgba[3]);
 }
 
 
@@ -388,17 +373,10 @@ V_UpdatePalette
 a lot of this can go away with a non-sw renderer
 =============
 */
-CDQEventTimer *v_CShiftTimer = NULL;
-
 void V_UpdateCShifts (void)
 {
 	int		i, j;
 	bool	force;
-
-	if (!v_CShiftTimer)
-		v_CShiftTimer = new CDQEventTimer (cl.time);
-
-	float frametime = v_CShiftTimer->GetElapsedTime (cl.time);
 
 	V_CalcPowerupCshift ();
 
@@ -424,13 +402,13 @@ void V_UpdateCShifts (void)
 	}
 
 	// drop the damage value
-	cl.cshifts[CSHIFT_DAMAGE].percent -= frametime * 150;
+	cl.cshifts[CSHIFT_DAMAGE].percent -= cl.frametime * 150;
 
 	if (cl.cshifts[CSHIFT_DAMAGE].percent <= 0)
 		cl.cshifts[CSHIFT_DAMAGE].percent = 0;
 
 	// drop the bonus value
-	cl.cshifts[CSHIFT_BONUS].percent -= frametime * 100;
+	cl.cshifts[CSHIFT_BONUS].percent -= cl.frametime * 100;
 
 	if (cl.cshifts[CSHIFT_BONUS].percent <= 0)
 		cl.cshifts[CSHIFT_BONUS].percent = 0;
@@ -464,39 +442,26 @@ float angledelta (float a)
 CalcGunAngle
 ==================
 */
-CDQEventTimer *v_AngleTimer = NULL;
-
 void CalcGunAngle (void)
 {
 	float	yaw, pitch, move;
 	static float oldyaw = 0;
 	static float oldpitch = 0;
 
-	if (!v_AngleTimer)
-		v_AngleTimer = new CDQEventTimer (cl.time);
-
-	float frametime = v_AngleTimer->GetElapsedTime (cl.time);
-
 	yaw = r_refdef.viewangles[YAW];
 	pitch = -r_refdef.viewangles[PITCH];
 
 	yaw = angledelta (yaw - r_refdef.viewangles[YAW]) * 0.4;
 
-	if (yaw > 10)
-		yaw = 10;
-
-	if (yaw < -10)
-		yaw = -10;
+	if (yaw > 10) yaw = 10;
+	if (yaw < -10) yaw = -10;
 
 	pitch = angledelta (-pitch - r_refdef.viewangles[PITCH]) * 0.4;
 
-	if (pitch > 10)
-		pitch = 10;
+	if (pitch > 10) pitch = 10;
+	if (pitch < -10) pitch = -10;
 
-	if (pitch < -10)
-		pitch = -10;
-
-	move = frametime * 20;
+	move = cl.frametime * 20;
 
 	if (yaw > oldyaw)
 	{
@@ -524,8 +489,10 @@ void CalcGunAngle (void)
 	oldpitch = pitch;
 
 	cl.viewent.angles[YAW] = r_refdef.viewangles[YAW] + yaw;
-	cl.viewent.angles[PITCH] = - (r_refdef.viewangles[PITCH] + pitch);
+	cl.viewent.angles[PITCH] = -(r_refdef.viewangles[PITCH] + pitch);
 
+	// WARNING - don't try anything sexy with time in here or you'll
+	// screw things up and make the engine appear to run jerky
 	cl.viewent.angles[ROLL] -= v_idlescale.value * sin (cl.time * v_iroll_cycle.value) * v_iroll_level.value;
 	cl.viewent.angles[PITCH] -= v_idlescale.value * sin (cl.time * v_ipitch_cycle.value) * v_ipitch_level.value;
 	cl.viewent.angles[YAW] -= v_idlescale.value * sin (cl.time * v_iyaw_cycle.value) * v_iyaw_level.value;
@@ -538,27 +505,23 @@ V_BoundOffsets
 */
 void V_BoundOffsets (void)
 {
-	entity_t	*ent;
+	entity_t *ent;
+	float mins[3] = {-14, -14, -22};
+	float maxs[3] = {14, 14, 30};
 
 	ent = cl_entities[cl.viewentity];
 
 	// absolutely bound refresh reletive to entity clipping hull
 	// so the view can never be inside a solid wall
-	if (r_refdef.vieworigin[0] < ent->origin[0] - 14)
-		r_refdef.vieworigin[0] = ent->origin[0] - 14;
-	else if (r_refdef.vieworigin[0] > ent->origin[0] + 14)
-		r_refdef.vieworigin[0] = ent->origin[0] + 14;
-
-	if (r_refdef.vieworigin[1] < ent->origin[1] - 14)
-		r_refdef.vieworigin[1] = ent->origin[1] - 14;
-	else if (r_refdef.vieworigin[1] > ent->origin[1] + 14)
-		r_refdef.vieworigin[1] = ent->origin[1] + 14;
-
-	if (r_refdef.vieworigin[2] < ent->origin[2] - 22)
-		r_refdef.vieworigin[2] = ent->origin[2] - 22;
-	else if (r_refdef.vieworigin[2] > ent->origin[2] + 30)
-		r_refdef.vieworigin[2] = ent->origin[2] + 30;
+	for (int i = 0; i < 3; i++)
+	{
+		if (r_refdef.vieworigin[i] < ent->origin[i] + mins[i])
+			r_refdef.vieworigin[i] = ent->origin[i] + mins[i];
+		else if (r_refdef.vieworigin[i] > ent->origin[i] + maxs[i])
+			r_refdef.vieworigin[i] = ent->origin[i] + maxs[i];
+	}
 }
+
 
 /*
 ==============
@@ -569,6 +532,8 @@ Idle swaying
 */
 void V_AddIdle (void)
 {
+	// WARNING - don't try anything sexy with time in here or you'll
+	// screw things up and make the engine appear to run jerky
 	r_refdef.viewangles[ROLL] += v_idlescale.value * sin (cl.time * v_iroll_cycle.value) * v_iroll_level.value;
 	r_refdef.viewangles[PITCH] += v_idlescale.value * sin (cl.time * v_ipitch_cycle.value) * v_ipitch_level.value;
 	r_refdef.viewangles[YAW] += v_idlescale.value * sin (cl.time * v_iyaw_cycle.value) * v_iyaw_level.value;
@@ -582,16 +547,12 @@ V_CalcViewRoll
 Roll is induced by movement and damage
 ==============
 */
-CDQEventTimer *v_ViewRollTimer = NULL;
+float deadangles[3] = {0, 0, 80};
+float deadtime;
 
 void V_CalcViewRoll (void)
 {
 	float side;
-
-	if (!v_ViewRollTimer)
-		v_ViewRollTimer = new CDQEventTimer (cl.time);
-
-	float frametime = v_ViewRollTimer->GetElapsedTime (cl.time);
 
 	side = V_CalcRoll (cl_entities[cl.viewentity]->angles, cl.velocity);
 	r_refdef.viewangles[ROLL] += side;
@@ -600,12 +561,21 @@ void V_CalcViewRoll (void)
 	{
 		r_refdef.viewangles[ROLL] += v_dmg_time / v_kicktime.value * v_dmg_roll;
 		r_refdef.viewangles[PITCH] += v_dmg_time / v_kicktime.value * v_dmg_pitch;
-		v_dmg_time -= frametime;
+		v_dmg_time -= cl.frametime;
 	}
 
 	if (cl.stats[STAT_HEALTH] <= 0)
 	{
-		r_refdef.viewangles[ROLL] = 80;	// dead view angle
+		float deadlerp = (cl.time - deadtime) * 5.0f;
+		float ang[3];
+
+		if (deadlerp > 1) deadlerp = 1;
+		NonEulerInterpolateAngles (deadangles, r_refdef.viewangles, deadlerp, ang);
+
+		// only 2 should be updated so that we can still look around when dead
+		//r_refdef.viewangles[0] = deadangles[0];	// dead view angle
+		//r_refdef.viewangles[1] = deadangles[1];	// dead view angle
+		r_refdef.viewangles[2] = ang[2];	// dead view angle
 		return;
 	}
 
@@ -653,7 +623,7 @@ void V_CalcRefdef (void)
 	int			i;
 	avectors_t	av;
 	vec3_t		angles;
-	float		bob;
+	float		bob = 0;
 	static float oldz = 0;
 
 	// ent is the player model (visible when out of body)
@@ -723,21 +693,19 @@ void V_CalcRefdef (void)
 
 	if (v_gunkick.value) VectorAdd (r_refdef.viewangles, kickangle, r_refdef.viewangles);
 
-	static CDQEventTimer *v_StepTimer = NULL;
-
-	if (!v_StepTimer)
-		v_StepTimer = new CDQEventTimer (cl.time);
-
-	float steptime = v_StepTimer->GetElapsedTime (cl.time);
-
 	// smooth out stair step ups
 	if (cl.onground && ent->origin[2] - oldz > 0)
 	{
+		// WARNING - don't try anything sexy with time in here or you'll
+		// screw things up and make the engine appear to run jerky
+		float steptime = cl.frametime;
+
 #define STEP_DELTA	12.0f
 		if (steptime < 0) steptime = 0;
 
 		// ???? what does this magic number signify anyway ????
-		oldz += steptime * 80;
+		// looks like it should really be 72...?
+		oldz += steptime * 80.0f;
 
 		if (oldz > ent->origin[2]) oldz = ent->origin[2];
 		if (ent->origin[2] - oldz > STEP_DELTA) oldz = ent->origin[2] - STEP_DELTA;
@@ -762,9 +730,10 @@ the entity origin, so any view position inside that will be valid
 */
 void V_RenderView (void)
 {
-	if (con_forcedup) return;
-	if (cls.state != ca_connected) return;
-	if (!cl.model_precache) return;
+	if (!cls.maprunning) return;
+
+	// ent is the player model (visible when out of body)
+	entity_t *ent = cl_entities[cl.viewentity];
 
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1)
@@ -796,7 +765,6 @@ V_Init
 */
 cmd_t V_cshift_f_Cmd ("v_cshift", V_cshift_f);
 cmd_t V_BonusFlash_f_Cmd ("bf", V_BonusFlash_f);
-cmd_t CL_StartPitchDrift_Cmd ("centerview", CL_StartPitchDrift);
 
 void V_Init (void)
 {

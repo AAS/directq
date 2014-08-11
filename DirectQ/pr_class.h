@@ -86,6 +86,9 @@ public:
 	void Profile (void);
 	void CProgsDat::StackTrace (void);
 
+	bool	FishHack;
+	int		NumFish;
+
 	// the edicts more properly belong to the progs than to the server
 	// edict_t *Edicts;
 	edict_t **EdictPointers;

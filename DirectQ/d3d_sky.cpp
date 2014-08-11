@@ -49,40 +49,7 @@ cvar_t r_skybackscroll ("r_skybackscroll", 8, CVAR_ARCHIVE);
 cvar_t r_skyfrontscroll ("r_skyfrontscroll", 16, CVAR_ARCHIVE);
 cvar_t r_skyalpha ("r_skyalpha", 1, CVAR_ARCHIVE);
 
-#define MAX_SKY_SURFACES 65536
-
-d3d_modelsurf_t *r_skysurfaces[MAX_SKY_SURFACES];
 int r_numskysurfaces = 0;
-int r_worldsky = 0;
-
-void D3DSKy_NewMap (void)
-{
-	for (int i = 0; i < MAX_SKY_SURFACES; i++)
-	{
-		if (i < 4096)
-			r_skysurfaces[i] = (d3d_modelsurf_t *) MainHunk->Alloc (sizeof (d3d_modelsurf_t));
-		else r_skysurfaces[i] = NULL;
-	}
-}
-
-
-void D3DSky_Clear (void)
-{
-	r_numskysurfaces = 0;
-}
-
-
-void D3DSky_MarkWorld (void)
-{
-	r_worldsky = r_numskysurfaces;
-}
-
-
-void D3DSky_SetEntities (void)
-{
-	r_numskysurfaces = r_worldsky;
-}
-
 
 void D3DSky_Begin (void)
 {
@@ -131,17 +98,12 @@ void D3DSky_AddSurfaceToRender (msurface_t *surf, entity_t *ent)
 		// initialize sky for the frame
 		if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
 		if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
+
+		D3DBrush_Begin ();
+		D3DSky_Begin ();
 	}
 
-	if (r_numskysurfaces >= MAX_SKY_SURFACES) return;
-
-	if (!r_skysurfaces[r_numskysurfaces])
-		r_skysurfaces[r_numskysurfaces] = (d3d_modelsurf_t *) MainHunk->Alloc (sizeof (d3d_modelsurf_t));
-
-	// because the far clipping plane of the final projection matrix is dependent on the surface
-	// dists we can't actually draw sky just yet, so instead we gather the surfs together and draw later
-	r_skysurfaces[r_numskysurfaces]->surf = surf;
-	r_skysurfaces[r_numskysurfaces]->ent = ent;
+	D3DBrush_SubmitSurface (surf, ent);
 	r_numskysurfaces++;
 }
 
@@ -150,16 +112,9 @@ void D3DSky_FinalizeSky (void)
 {
 	if (r_numskysurfaces)
 	{
-		// this is always done even if the relevant modes are not selected so that things will be correct
-		D3DBrush_Begin ();
-		D3DSky_Begin ();
-
-		// now that we've got everything fixed up and set right we can draw the sky
-		for (int i = 0; i < r_numskysurfaces; i++)
-			D3DBrush_SubmitSurface (r_skysurfaces[i]->surf, r_skysurfaces[i]->ent);
-
 		// draw anything left over
 		D3DBrush_End ();
+		r_numskysurfaces = 0;
 	}
 }
 
@@ -194,6 +149,11 @@ void D3DSky_LoadTexture (LPDIRECT3DTEXTURE9 *tex, void *data, int width, int hei
 	{
 		scaled_width = D3D_PowerOf2Size (width);
 		scaled_height = D3D_PowerOf2Size (height);
+	}
+	else
+	{
+		scaled_width = (width + 3) & ~3;
+		scaled_height = (height + 3) & ~3;
 	}
 
 	// clamp to max texture size
@@ -451,24 +411,109 @@ void D3DSky_MakeSkyboxCubeMap (void)
 }
 
 
+typedef struct texlmp_s
+{
+	int width;
+	int height;
+	byte data[1];	// variable size
+} texlmp_t;
+
+void D3D_FlipTexels (unsigned int *texels, int width, int height);
+void D3D_Resample32BitTexture (unsigned *in, int inwidth, int inheight, unsigned *out, int outwidth, int outheight);
+
+bool D3DSky_LoadKurokSkyboxSide (LPDIRECT3DTEXTURE9 *tex, char *name, byte *palette)
+{
+	SAFE_RELEASE (tex[0]);
+
+	HANDLE fh = INVALID_HANDLE_VALUE;
+	int skysize = COM_FOpenFile (name, &fh);
+
+	if (fh != INVALID_HANDLE_VALUE)
+	{
+		byte *boxdata = (byte *) MainZone->Alloc (skysize);
+
+		COM_FReadFile (fh, boxdata, skysize);
+		CloseHandle (fh);
+
+		texlmp_t *boxlump = (texlmp_t *) boxdata;
+		unsigned int *image_rgba = (unsigned int *) MainZone->Alloc (boxlump->width * boxlump->height * 4);
+
+		if (palette)
+		{
+			byte *pbuf = (byte *) image_rgba;
+
+			for (int i = 0; i < boxlump->width * boxlump->height; i++, pbuf += 4)
+			{
+				int p = boxlump->data[i];
+
+				pbuf[2] = palette[p * 3 + 0];
+				pbuf[1] = palette[p * 3 + 1];
+				pbuf[0] = palette[p * 3 + 2];
+				pbuf[3] = 255;
+			}
+		}
+		else
+		{
+			for (int i = 0; i < boxlump->width * boxlump->height; i++)
+				image_rgba[i] = (unsigned int) d3d_QuakePalette.standard32[boxlump->data[i]];
+		}
+
+		D3D_FlipTexels (image_rgba, boxlump->width, boxlump->height);
+		D3D_UploadTexture (tex, image_rgba, boxlump->width, boxlump->height, IMAGE_32BIT | IMAGE_SYSMEM | IMAGE_SKYBOX);
+
+		MainZone->Free (boxdata);
+		MainZone->Free (image_rgba);
+
+		return true;
+	}
+
+	return false;
+}
+
+
 void D3DSky_LoadSkyBox (char *basename, bool feedback)
 {
 	// force an unload of the current skybox
 	D3DSky_UnloadSkybox ();
 
 	int numloaded = 0;
+	byte *kurokskypal = NULL;
+
+	if (kurok)
+	{
+		HANDLE fh = INVALID_HANDLE_VALUE;
+		int palsize = COM_FOpenFile (va ("gfx/env/%s_palette.lmp", basename), &fh);
+
+		if (fh != INVALID_HANDLE_VALUE)
+		{
+			kurokskypal = (byte *) MainZone->Alloc (palsize);
+			COM_FReadFile (fh, kurokskypal, palsize);
+			CloseHandle (fh);
+		}
+	}
 
 	for (int sb = 0; sb < 6; sb++)
 	{
+		if (kurok)
+		{
+			if (D3DSky_LoadKurokSkyboxSide (&skyboxtextures[sb], va ("gfx/env/%s_%s.lmp", basename, suf[sb]), kurokskypal))
+			{
+				numloaded++;
+				continue;
+			}
+		}
+
 		// attempt to load it (sometimes an underscore is expected)
 		// don't compress these because we're going to copy them later on
-		if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM))
-			if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s_%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM))
+		if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM | IMAGE_SKYBOX))
+			if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s_%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM | IMAGE_SKYBOX))
 				continue;
 
 		// loaded OK
 		numloaded++;
 	}
+
+	if (kurokskypal) MainZone->Free (kurokskypal);
 
 	if (numloaded)
 	{

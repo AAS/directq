@@ -17,17 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-// particle images
-#define IDR_PARTICLEDOT				200
-
 // shaders
 #define IDR_MASTERFX				400
-#define IDR_DRAWFX					410
 
 // bitmaps and other images
 #define IDR_CROSSHAIR				620
-#define IDR_YOUAREHERE				630
-#define IDR_UWWARP					640
 
 // icons
 #define IDI_APPICON					900

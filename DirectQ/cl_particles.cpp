@@ -33,11 +33,6 @@ int		ramp1[] = {0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61, -1, -1, -1, -1, 
 int		ramp2[] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66, -1, -1, -1, -1, -1};
 int		ramp3[] = {0x6d, 0x6b, 6, 5, 4, 3, -1, -1, -1, -1, -1};
 
-// default particle texture
-LPDIRECT3DTEXTURE9 particledottexture = NULL;
-LPDIRECT3DTEXTURE9 particlesquaretexture = NULL;
-extern cvar_t r_particlestyle;
-
 int	r_numparticles;
 int r_numallocations;
 
@@ -51,7 +46,6 @@ float r_avertexnormals[NUMVERTEXNORMALS][3] =
 #include "anorms.h"
 };
 
-cvar_t cl_maxparticles ("cl_maxparticles", "65536", CVAR_ARCHIVE);
 extern cvar_t sv_gravity;
 
 /*
@@ -65,10 +59,9 @@ void R_InitParticles (void)
 	// we need to explicitly set stuff to 0 as memsetting to 0 doesn't
 	// actually equate to a value of 0 with floating point
 	r_defaultparticle.scale = 2.666f;
-	r_defaultparticle.alpha = 255;
+	r_defaultparticle.alpha = 1.0f;
 	r_defaultparticle.fade = 0;
 	r_defaultparticle.growth = 0;
-	r_defaultparticle.scalemod = 0.004;
 
 	// default flags
 	r_defaultparticle.flags = PT_STATIC;
@@ -118,9 +111,6 @@ void R_ClearParticles (void)
 
 	// no allocations have been done yet
 	r_numallocations = 0;
-
-	// particledottexture didn't exist when r_defaultparticle was created
-	r_defaultparticle.tex = particledottexture;
 }
 
 
@@ -170,25 +160,14 @@ particle_t *R_NewParticle (particle_type_t *pt)
 	particle_t *p;
 	int i;
 
-	// 4096 is the initial batch size so never go lower than that
-	if (cl_maxparticles.integer < 1024) Cvar_Set (&cl_maxparticles, 1024);
-
 	if (free_particles)
 	{
-		// no more particles
-		if (r_numparticles >= cl_maxparticles.integer) return NULL;
-
 		// just take from the free list
 		p = free_particles;
 		free_particles = p->next;
 
 		// set default drawing parms (may be overwritten as desired)
 		memcpy (p, &r_defaultparticle, sizeof (particle_t));
-
-		// set the correct texture
-		if (r_particlestyle.integer)
-			p->tex = particlesquaretexture;
-		else p->tex = particledottexture;
 
 		// link it in
 		p->next = pt->particles;
@@ -268,6 +247,7 @@ void R_EntityParticles (entity_t *ent)
 
 		if (!(p = R_NewParticle (pt))) return;
 
+		// fixme - these particles should be automatically killed after 1 frame
 		p->die = cl.time + 0.01f;
 		p->color = 0x6f;
 		p->colorramp = ramp1;
@@ -899,65 +879,6 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 }
 
 
-// update particles after drawing
-CDQEventTimer *cl_ParticlesTimer = NULL;
-
-void R_UpdateParticles (void)
-{
-	if (!cl_ParticlesTimer)
-		cl_ParticlesTimer = new CDQEventTimer (cl.time);
-
-	float time = cl_ParticlesTimer->GetElapsedTime (cl.time);
-	float grav = time * sv_gravity.value * 0.05f;
-
-	for (particle_type_t *pt = active_particle_types; pt; pt = pt->next)
-	{
-		for (particle_t *p = pt->particles; p; p = p->next)
-		{
-			// fade alpha and increase size
-			p->alpha -= (p->fade * time);
-			p->scale += (p->growth * time);
-
-			// kill if fully faded or too small
-			if (p->alpha <= 0 || p->scale <= 0)
-			{
-				// no further adjustments needed
-				p->die = -1;
-				continue;
-			}
-
-			if (p->colorramp)
-			{
-				// colour ramps
-				p->ramp += p->ramptime * time;
-
-				// adjust color for ramp
-				if (p->colorramp[(int) p->ramp] < 0)
-				{
-					// no further adjustments needed
-					p->die = -1;
-					continue;
-				}
-				else p->color = p->colorramp[(int) p->ramp];
-			}
-
-			// update origin
-			p->org[0] += p->vel[0] * time;
-			p->org[1] += p->vel[1] * time;
-			p->org[2] += p->vel[2] * time;
-
-			// adjust for gravity
-			p->vel[2] += grav * p->grav;
-
-			// adjust for velocity change
-			p->vel[0] += p->dvel[0] * time;
-			p->vel[1] += p->dvel[1] * time;
-			p->vel[2] += p->dvel[2] * time;
-		}
-	}
-}
-
-
 void CL_WipeParticles (void)
 {
 	// these need to be wiped immediately on going to a new server
@@ -965,4 +886,132 @@ void CL_WipeParticles (void)
 	free_particle_types = NULL;
 	free_particles = NULL;
 }
+
+
+void R_SetupParticleType (particle_type_t *pt)
+{
+	// no particles at all!
+	if (!pt->particles) return;
+
+	// removes expired particles from the active particles list
+	particle_t *p;
+	particle_t *kill;
+
+	// this is the count of particles that will be drawn this frame
+	pt->numactiveparticles = 0;
+
+	// remove from the head of the list
+	for (;;)
+	{
+		kill = pt->particles;
+
+		// note - client time is correct here
+		if (kill && kill->die < cl.time)
+		{
+			pt->particles = kill->next;
+			kill->next = free_particles;
+			free_particles = kill;
+			r_numparticles--;
+			pt->numparticles--;
+
+			continue;
+		}
+
+		break;
+	}
+
+	for (p = pt->particles; p; p = p->next)
+	{
+		// remove from a mid-point in the list
+		for (;;)
+		{
+			kill = p->next;
+
+			// note - client time is correct here
+			if (kill && kill->die < cl.time)
+			{
+				p->next = kill->next;
+				kill->next = free_particles;
+				free_particles = kill;
+				r_numparticles--;
+				pt->numparticles--;
+
+				continue;
+			}
+
+			break;
+		}
+
+		// sanity check on colour to avoid array bounds errors
+		if (p->color < 0) p->color = 0;
+		if (p->color > 255) p->color = 255;
+
+		// count the active particles for this type
+		pt->numactiveparticles++;
+	}
+}
+
+
+void D3D_AddParticesToAlphaList (void)
+{
+	// nothing to draw
+	if (!active_particle_types) return;
+
+	// removes expired particles from the active particles list
+	particle_type_t *pt;
+	particle_type_t *kill;
+
+	// remove from the head of the list
+	for (;;)
+	{
+		kill = active_particle_types;
+
+		if (kill && !kill->particles)
+		{
+			// return to the free list
+			active_particle_types = kill->next;
+			kill->next = free_particle_types;
+			kill->numparticles = 0;
+			free_particle_types = kill;
+
+			continue;
+		}
+
+		break;
+	}
+
+	// no types currently active
+	if (!active_particle_types) return;
+
+	for (pt = active_particle_types; pt; pt = pt->next)
+	{
+		// remove from a mid-point in the list
+		for (;;)
+		{
+			kill = pt->next;
+
+			if (kill && !kill->particles)
+			{
+				pt->next = kill->next;
+				kill->next = free_particle_types;
+				kill->numparticles = 0;
+				free_particle_types = kill;
+
+				continue;
+			}
+
+			break;
+		}
+
+		// prepare this type for rendering
+		R_SetupParticleType (pt);
+
+		if (pt->numactiveparticles)
+		{
+			// add to the draw list (only if there's something to draw)
+			D3DAlpha_AddToList (pt);
+		}
+	}
+}
+
 

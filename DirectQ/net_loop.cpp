@@ -207,7 +207,7 @@ int Loop_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	if (!sock->driverdata)
 		return -1;
 
-	bufferLength = & ((qsocket_t *) sock->driverdata)->receiveMessageLength;
+	bufferLength = &((qsocket_t *) sock->driverdata)->receiveMessageLength;
 
 	if ((*bufferLength + data->cursize + sizeof (byte) + sizeof (short)) > NET_MAXMESSAGE)
 		return 0;

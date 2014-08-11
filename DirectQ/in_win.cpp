@@ -150,13 +150,11 @@ typedef struct ri_mousebutton_s
 typedef struct in_mousestate_s
 {
 	mousepos_t currpos;
-	mousepos_t lastpos;
 	ri_mousebutton_t buttons[5];
 } in_mousestate_t;
 
 in_mousestate_t in_mousestate =
 {
-	{0, 0},
 	{0, 0},
 	{
 		{RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, K_MOUSE1, false},
@@ -168,30 +166,40 @@ in_mousestate_t in_mousestate =
 };
 
 
-bool IN_DoMouseMove (usercmd_t *cmd, float movetime)
+void CL_ClearCmd (usercmd_t *cmd);
+void CL_RebalanceMove (usercmd_t *basecmd, usercmd_t *newcmd, double frametime);
+
+void IN_MouseMove (usercmd_t *cmd, double movetime)
 {
 	if (ActiveApp && !Minimized)
 	{
 		// if the mouse isn't active or there was no movement accumulated we don't run this
-		if (!in_mouseacquired) return false;
+		if (!in_mouseacquired) return;
 
 		// always eval movement even if it's 0 so that we can set the last factors correctly
 		float mx = in_mousestate.currpos.x * sensitivity.value * 2.0f;
 		float my = in_mousestate.currpos.y * sensitivity.value * 2.0f;
 
-		// smooth out mouse movement
-		in_mousestate.lastpos.x = mx = ((mx * 2.0f) + in_mousestate.lastpos.x) / 3.0f;
-		in_mousestate.lastpos.y = my = ((my * 2.0f) + in_mousestate.lastpos.y) / 3.0f;
+		extern cvar_t scr_fov;
+		usercmd_t basecmd;
+
+		CL_ClearCmd (&basecmd);
+
+		if (scr_fov.value <= 75 && kurok)
+		{
+			float fovscale = ((100 - scr_fov.value) / 25.0f) + 1;
+
+			mx /= fovscale;
+			my /= fovscale;
+		}
 
 		if (in_mousestate.currpos.x || in_mousestate.currpos.y)
 		{
 			mouselooking = freelook.integer || (in_mlook.state & 1);
 
 			if ((in_strafe.state & 1) || (lookstrafe.value && mouselooking))
-				cmd->sidemove += m_side.value * mx;
+				basecmd.sidemove += m_side.value * mx;
 			else cl.viewangles[YAW] -= m_yaw.value * mx;
-
-			if (mouselooking) CL_StopPitchDrift ();
 
 			if (mouselooking && !(in_strafe.state & 1))
 			{
@@ -201,29 +209,17 @@ bool IN_DoMouseMove (usercmd_t *cmd, float movetime)
 			else
 			{
 				if ((in_strafe.state & 1) && noclip_anglehack)
-					cmd->upmove -= m_forward.value * my;
-				else cmd->forwardmove -= m_forward.value * my;
+					basecmd.upmove -= m_forward.value * my;
+				else basecmd.forwardmove -= m_forward.value * my;
 			}
 		}
+
+		// rebalance the move to 72 FPS
+		CL_RebalanceMove (cmd, &basecmd, movetime);
 
 		// reset the accumulated positions
 		in_mousestate.currpos.x = 0;
 		in_mousestate.currpos.y = 0;
-
-		return true;
-	}
-
-	return false;
-}
-
-
-void IN_MouseMove (usercmd_t *cmd, float movetime)
-{
-	if (!IN_DoMouseMove (cmd, movetime))
-	{
-		// if we're not recording mouse moves we reset the accumulated moves
-		in_mousestate.lastpos.x = 0;
-		in_mousestate.lastpos.y = 0;
 	}
 }
 
@@ -239,8 +235,8 @@ void IN_ClearMouseState (void)
 		}
 	}
 
-	in_mousestate.currpos.x = in_mousestate.lastpos.x = 0;
-	in_mousestate.currpos.y = in_mousestate.lastpos.y = 0;
+	in_mousestate.currpos.x = 0;
+	in_mousestate.currpos.y = 0;
 }
 
 
@@ -647,24 +643,13 @@ PDWORD RawValuePointer (int axis)
 {
 	switch (axis)
 	{
-	case JOY_AXIS_X:
-		return &ji.dwXpos;
-
-	case JOY_AXIS_Y:
-		return &ji.dwYpos;
-
-	case JOY_AXIS_Z:
-		return &ji.dwZpos;
-
-	case JOY_AXIS_R:
-		return &ji.dwRpos;
-
-	case JOY_AXIS_U:
-		return &ji.dwUpos;
-
-	case JOY_AXIS_V:
-	default:
-		return &ji.dwVpos;
+	case JOY_AXIS_X: return &ji.dwXpos;
+	case JOY_AXIS_Y: return &ji.dwYpos;
+	case JOY_AXIS_Z: return &ji.dwZpos;
+	case JOY_AXIS_R: return &ji.dwRpos;
+	case JOY_AXIS_U: return &ji.dwUpos;
+	case JOY_AXIS_V: return &ji.dwVpos;
+	default: return 0;
 	}
 }
 
@@ -837,7 +822,7 @@ bool IN_ReadJoystick (void)
 IN_JoyMove
 ===========
 */
-void IN_JoyMove (usercmd_t *cmd, float movetime)
+void IN_JoyMove (usercmd_t *cmd, double movetime)
 {
 	float	speed, aspeed;
 	float	fAxisValue, fTemp;
@@ -865,6 +850,9 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 
 	aspeed = speed * movetime;
 	mouselooking = freelook.integer || (in_mlook.state & 1);
+
+	usercmd_t basecmd;
+	CL_ClearCmd (&basecmd);
 
 	// loop through the axes
 	for (i = 0; i < JOY_MAX_AXES; i++)
@@ -909,30 +897,20 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 					if (m_pitch.value < 0.0)
 						cl.viewangles[PITCH] -= (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
 					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
-
-					CL_StopPitchDrift ();
-				}
-				else
-				{
-					// no pitch movement
-					// disable pitch return-to-center unless requested by user
-					// *** this code can be removed when the lookspring bug is fixed
-					// *** the bug always has the lookspring feature on
-					if (!lookspring.value == 0.0) CL_StopPitchDrift ();
 				}
 			}
 			else
 			{
 				// user wants forward control to be forward control
 				if (fabs (fAxisValue) > joy_forwardthreshold.value)
-					cmd->forwardmove += (fAxisValue * joy_forwardsensitivity.value) * speed * cl_forwardspeed.value;
+					basecmd.forwardmove += (fAxisValue * joy_forwardsensitivity.value) * speed * cl_forwardspeed.value;
 			}
 
 			break;
 
 		case AxisSide:
 			if (fabs (fAxisValue) > joy_sidethreshold.value)
-				cmd->sidemove += (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
+				basecmd.sidemove += (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
 
 			break;
 
@@ -941,7 +919,7 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 			{
 				// user wants turn control to become side control
 				if (fabs (fAxisValue) > joy_sidethreshold.value)
-					cmd->sidemove -= (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
+					basecmd.sidemove -= (fAxisValue * joy_sidesensitivity.value) * speed * cl_sidespeed.value;
 			}
 			else
 			{
@@ -965,16 +943,6 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 					if (dwControlMap[i] == JOY_ABSOLUTE_AXIS)
 						cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
 					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * speed * 180.0;
-
-					CL_StopPitchDrift ();
-				}
-				else
-				{
-					// no pitch movement
-					// disable pitch return-to-center unless requested by user
-					// *** this code can be removed when the lookspring bug is fixed
-					// *** the bug always has the lookspring feature on
-					if (!lookspring.value) CL_StopPitchDrift ();
 				}
 			}
 
@@ -984,6 +952,9 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 			break;
 		}
 	}
+
+	// rebalance the move to 72 FPS
+	CL_RebalanceMove (cmd, &basecmd, movetime);
 
 	// bounds check pitch
 	CL_BoundViewPitch (cl.viewangles);

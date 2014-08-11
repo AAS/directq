@@ -122,7 +122,7 @@ SV_UserFriction
 
 ==================
 */
-void SV_UserFriction (void)
+void SV_UserFriction (double frametime)
 {
 	float	*vel;
 	float	speed, newspeed, control;
@@ -151,7 +151,7 @@ void SV_UserFriction (void)
 
 	// apply friction
 	control = speed < sv_stopspeed.value ? sv_stopspeed.value : speed;
-	newspeed = speed - sv.frametime * control * friction;
+	newspeed = speed - frametime * control * friction;
 
 	if (newspeed < 0)
 		newspeed = 0;
@@ -173,29 +173,7 @@ cvar_t	sv_maxspeed ("sv_maxspeed", "320", CVAR_SERVER);
 cvar_t	sv_accelerate ("sv_accelerate", "10");
 
 
-#if 0
-void SV_Accelerate (vec3_t wishvel)
-{
-	int			i;
-	float		addspeed, accelspeed;
-	vec3_t		pushvec;
-
-	if (wishspeed == 0)
-		return;
-
-	VectorSubtract (wishvel, velocity, pushvec);
-	addspeed = VectorNormalize (pushvec);
-
-	accelspeed = sv_accelerate.value * sv.frametime * addspeed;
-
-	if (accelspeed > addspeed)
-		accelspeed = addspeed;
-
-	for (i = 0; i < 3; i++)
-		velocity[i] += accelspeed * pushvec[i];
-}
-#endif
-void SV_Accelerate (void)
+void SV_Accelerate (double frametime)
 {
 	int			i;
 	float		addspeed, accelspeed, currentspeed;
@@ -206,7 +184,7 @@ void SV_Accelerate (void)
 	if (addspeed <= 0)
 		return;
 
-	accelspeed = sv_accelerate.value * sv.frametime * wishspeed;
+	accelspeed = sv_accelerate.value * frametime * wishspeed;
 
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
@@ -215,7 +193,7 @@ void SV_Accelerate (void)
 		velocity[i] += accelspeed * wishdir[i];
 }
 
-void SV_AirAccelerate (vec3_t wishveloc)
+void SV_AirAccelerate (vec3_t wishveloc, double frametime)
 {
 	int			i;
 	float		addspeed, wishspd, accelspeed, currentspeed;
@@ -231,8 +209,8 @@ void SV_AirAccelerate (vec3_t wishveloc)
 	if (addspeed <= 0)
 		return;
 
-	//	accelspeed = sv_accelerate.value * sv.frametime;
-	accelspeed = sv_accelerate.value * wishspeed * sv.frametime;
+	//	accelspeed = sv_accelerate.value * frametime;
+	accelspeed = sv_accelerate.value * wishspeed * frametime;
 
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
@@ -242,13 +220,15 @@ void SV_AirAccelerate (vec3_t wishveloc)
 }
 
 
-void DropPunchAngle (void)
+void DropPunchAngle (double frametime)
 {
 	float	len;
 
 	len = VectorNormalize (sv_player->v.punchangle);
 
-	len -= 10 * sv.frametime;
+	if (kurok)
+		len -= 25 * frametime;
+	else len -= 10 * frametime;
 
 	if (len < 0)
 		len = 0;
@@ -262,7 +242,7 @@ SV_WaterMove
 
 ===================
 */
-void SV_WaterMove (void)
+void SV_WaterMove (double frametime)
 {
 	int		i;
 	vec3_t	wishvel;
@@ -275,7 +255,9 @@ void SV_WaterMove (void)
 		wishvel[i] = userav.forward[i] * cmd.forwardmove + userav.right[i] * cmd.sidemove;
 
 	if (!cmd.forwardmove && !cmd.sidemove && !cmd.upmove)
-		wishvel[2] -= 60;		// drift towards bottom
+	{
+		if (!kurok) wishvel[2] -= 60;		// drift towards bottom
+	}
 	else
 		wishvel[2] += cmd.upmove;
 
@@ -294,7 +276,7 @@ void SV_WaterMove (void)
 
 	if (speed)
 	{
-		newspeed = speed - sv.frametime * speed * sv_friction.value;
+		newspeed = speed - frametime * speed * sv_friction.value;
 
 		if (newspeed < 0)
 			newspeed = 0;
@@ -314,7 +296,7 @@ void SV_WaterMove (void)
 		return;
 
 	VectorNormalize (wishvel);
-	accelspeed = sv_accelerate.value * wishspeed * sv.frametime;
+	accelspeed = sv_accelerate.value * wishspeed * frametime;
 
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
@@ -342,7 +324,7 @@ SV_AirMove
 
 ===================
 */
-void SV_AirMove (void)
+void SV_AirMove (double frametime)
 {
 	int			i;
 	vec3_t		wishvel;
@@ -381,13 +363,13 @@ void SV_AirMove (void)
 	}
 	else if (onground)
 	{
-		SV_UserFriction ();
-		SV_Accelerate ();
+		SV_UserFriction (frametime);
+		SV_Accelerate (frametime);
 	}
 	else
 	{
 		// not on ground, so little effect on velocity
-		SV_AirAccelerate (wishvel);
+		SV_AirAccelerate (wishvel, frametime);
 	}
 }
 
@@ -426,7 +408,7 @@ the move fields specify an intended velocity in pix/sec
 the angle fields specify an exact angular motion in degrees
 ===================
 */
-void SV_ClientThink (void)
+void SV_ClientThink (double frametime)
 {
 	vec3_t		v_angle;
 
@@ -438,7 +420,7 @@ void SV_ClientThink (void)
 	origin = sv_player->v.origin;
 	velocity = sv_player->v.velocity;
 
-	DropPunchAngle ();
+	DropPunchAngle (frametime);
 
 	// if dead, behave differently
 	if (sv_player->v.health <= 0)
@@ -468,8 +450,8 @@ void SV_ClientThink (void)
 	if (sv_player->v.movetype == MOVETYPE_NOCLIP)
 		SV_NoClipMove ();
 	else if (sv_player->v.waterlevel >= 2)
-		SV_WaterMove ();
-	else SV_AirMove ();
+		SV_WaterMove (frametime);
+	else SV_AirMove (frametime);
 }
 
 
@@ -641,9 +623,7 @@ SV_RunClients
 */
 void SV_RunClients (float frametime)
 {
-	int				i;
-
-	sv.frametime = frametime;
+	int i;
 
 	for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 	{
@@ -667,7 +647,7 @@ void SV_RunClients (float frametime)
 
 		// always pause in single player if in console or menus
 		if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
-			SV_ClientThink ();
+			SV_ClientThink (frametime);
 	}
 }
 

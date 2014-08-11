@@ -35,8 +35,6 @@ int 		con_linewidth;
 
 #define		CON_TEXTSIZE	0x40000
 
-bool 	con_forcedup;		// because no entities to refresh
-
 int			con_totallines;		// total lines in console scrollback
 int			con_backscroll;		// lines up from bottom to display
 int			con_current;		// where next message will be printed
@@ -525,16 +523,15 @@ void Con_SafePrintf (char *fmt, ...)
 {
 	va_list		argptr;
 	char		msg[1024];
-	int			temp;
 
 	va_start (argptr, fmt);
 	_vsnprintf (msg, 1024, fmt, argptr);
 	va_end (argptr);
 
-	temp = scr_disabled_for_loading;
-	scr_disabled_for_loading = true;
+	bool temp = scr_disabled_for_loading;
+	Host_DisableForLoading (true);
 	Con_Printf ("%s", msg);
-	scr_disabled_for_loading = temp;
+	Host_DisableForLoading (temp);
 }
 
 
@@ -562,7 +559,7 @@ void Con_DrawInput (void)
 	char *text;
 
 	// don't draw anything
-	if (key_dest != key_console && !con_forcedup) return;
+	if (key_dest != key_console && cls.maprunning) return;
 
 	// fill out remainder with spaces (those of a nervous disposition should look away now)
 	for (i = strlen ((text = Q_strncpy (editlinecopy, key_lines[edit_line], 255))); i < 256; text[i++] = ' ');

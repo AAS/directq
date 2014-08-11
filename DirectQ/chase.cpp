@@ -110,7 +110,7 @@ bool Chase_Check (vec3_t checkpoint, int viewcontents)
 	// check against world model - going into different contents
 	if ((Mod_PointInLeaf (checkpoint, cl.worldmodel))->contents != viewcontents) return false;
 
-	// check visedicts - this happens *after* CL_ReadFromServer so the list will be valid
+	// check visedicts - this happens *after* CL_UpdateClient so the list will be valid
 	// (may not include static entities) (but only checks brush models)
 	for (i = 0; i < d3d_RenderDef.numvisedicts; i++)
 		if (!Chase_CheckBrushEdict (d3d_RenderDef.visedicts[i], checkpoint, viewcontents)) return false;
@@ -238,7 +238,7 @@ void Chase_Update (void)
 	cl_entities[cl.viewentity]->alphaval = chase_alpha;
 
 	// find the spot the player is looking at
-	VectorMultiplyAdd (r_refdef.vieworigin, 4096, av.forward, dest);
+	VectorMad (r_refdef.vieworigin, 4096, av.forward, dest);
 	TraceLine (r_refdef.vieworigin, dest, stop);
 
 	// calculate pitch to look at the same spot from camera

@@ -407,6 +407,49 @@ loc0:;
 }
 
 
+void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins, float *rmaxs)
+{
+	int i, j;
+	vec3_t bbox[8];
+	avectors_t av;
+	float angles[3];
+
+	// compute a full bounding box
+	for (i = 0; i < 8; i++)
+	{
+		bbox[i][0] = (i & 1) ? bbmin[0] : bbmax[0];
+		bbox[i][1] = (i & 2) ? bbmin[1] : bbmax[1];
+		bbox[i][2] = (i & 4) ? bbmin[2] : bbmax[2];
+	}
+
+	// derive forward/right/up vectors from the angles
+	AngleVectors (ent->v.angles, &av);
+
+	// compute the rotated bbox corners
+	rmins[0] = rmins[1] = rmins[2] = 9999999;
+	rmaxs[0] = rmaxs[1] = rmaxs[2] = -9999999;
+
+	// and rotate the bounding box
+	for (i = 0; i < 8; i++)
+	{
+		vec3_t tmp;
+
+		VectorCopy (bbox[i], tmp);
+
+		bbox[i][0] = DotProduct (av.forward, tmp);
+		bbox[i][1] = -DotProduct (av.right, tmp);
+		bbox[i][2] = DotProduct (av.up, tmp);
+
+		// and convert them to mins and maxs
+		for (j = 0; j < 3; j++)
+		{
+			if (bbox[i][j] < rmins[j]) rmins[j] = bbox[i][j];
+			if (bbox[i][j] > rmaxs[j]) rmaxs[j] = bbox[i][j];
+		}
+	}
+}
+
+
 void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 {
 	int i, j;
@@ -931,7 +974,7 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 		if (clip->type == MOVE_NOMONSTERS && touch->v.solid != SOLID_BSP) continue;
 
 		if (clip->boxmins[0] > touch->v.absmax[0] || clip->boxmins[1] > touch->v.absmax[1] || clip->boxmins[2] > touch->v.absmax[2] ||
-				clip->boxmaxs[0] < touch->v.absmin[0] || clip->boxmaxs[1] < touch->v.absmin[1] || clip->boxmaxs[2] < touch->v.absmin[2])
+			clip->boxmaxs[0] < touch->v.absmin[0] || clip->boxmaxs[1] < touch->v.absmin[1] || clip->boxmaxs[2] < touch->v.absmin[2])
 			continue;
 
 		if (clip->passedict && clip->passedict->v.size[0] && !touch->v.size[0]) continue;	// points never interact
@@ -941,6 +984,15 @@ void SV_ClipToLinks (areanode_t *node, moveclip_t *clip)
 		{
 			if (PROG_TO_EDICT (touch->v.owner) == clip->passedict) continue;	// don't clip against own missiles
 			if (PROG_TO_EDICT (clip->passedict->v.owner) == touch) continue;	// don't clip against owner
+
+			if (kurok)
+			{
+				// Preach - monsterclip
+		 		if (((int) touch->v.flags & FL_MONSTERCLIP) && !((int) clip->passedict->v.flags & FL_MONSTER))
+					continue;	// don't clip if touched entity is monsterclip and you aren't a monster
+				if (((int) clip->passedict->v.flags & FL_MONSTERCLIP) && !((int) touch->v.flags & FL_MONSTER))
+					continue;	// don't clip if you are monsterclip and touched entity aren't a monster
+			}
 		}
 
 		if ((int) touch->v.flags & FL_MONSTER)

@@ -141,14 +141,7 @@ void KeyUp (kbutton_t *b)
 void IN_KLookDown (void) {KeyDown (&in_klook);}
 void IN_KLookUp (void) {KeyUp (&in_klook);}
 void IN_MLookDown (void) {KeyDown (&in_mlook);}
-void IN_MLookUp (void)
-{
-	KeyUp (&in_mlook);
-	extern cvar_t freelook;
-
-	if (!((in_mlook.state & 1) || freelook.integer) && lookspring.value)
-		CL_StartPitchDrift();
-}
+void IN_MLookUp (void) {KeyUp (&in_mlook);}
 void IN_UpDown (void) {KeyDown (&in_up);}
 void IN_UpUp (void) {KeyUp (&in_up);}
 void IN_DownDown (void) {KeyDown (&in_down);}
@@ -357,21 +350,11 @@ CL_AdjustAngles
 Moves the local angle positions
 ================
 */
-CDQEventTimer *cl_AnglesTimer = NULL;
-
-void CL_AdjustAngles (void)
+void CL_AdjustAngles (double frametime)
 {
 	float	speed;
 	float	up, down;
 	extern cvar_t freelook;
-
-	// based on realtime so that the timing is always correct; this will be filtered anyway
-	// (fixme : what if the client pauses?  there may be a discrepancy...)  OK, cl.time it is then!
-	// fixme - this happens before cl.time is updated for the current frame...
-	if (!cl_AnglesTimer)
-		cl_AnglesTimer = new CDQEventTimer (realtime);
-
-	float frametime = cl_AnglesTimer->GetElapsedTime (realtime);
 
 	if (in_speed.state & 1)
 		speed = frametime * cl_anglespeedkey.value;
@@ -386,13 +369,9 @@ void CL_AdjustAngles (void)
 
 	if (in_klook.state & 1)
 	{
-		CL_StopPitchDrift ();
 		cl.viewangles[PITCH] -= speed * cl_pitchspeed.value * CL_KeyState (&in_forward);
 		cl.viewangles[PITCH] += speed * cl_pitchspeed.value * CL_KeyState (&in_back);
 	}
-
-	if (freelook.integer || (in_mlook.state & 1))
-		CL_StopPitchDrift ();
 
 	if (in_lookup.state & 1) up = CL_KeyState (&in_lookup); else up = 0;
 	if (in_lookdown.state & 1) down = CL_KeyState (&in_lookdown); else down = 0;
@@ -401,178 +380,12 @@ void CL_AdjustAngles (void)
 	{
 		cl.viewangles[PITCH] -= speed * cl_pitchspeed.value * up;
 		cl.viewangles[PITCH] += speed * cl_pitchspeed.value * down;
-		CL_StopPitchDrift ();
 	}
 
 	CL_BoundViewPitch (cl.viewangles);
 
 	if (cl.viewangles[ROLL] > 50) cl.viewangles[ROLL] = 50;
 	if (cl.viewangles[ROLL] < -50) cl.viewangles[ROLL] = -50;
-}
-
-
-/*
-=======================================================================================================================================
-
-	PITCH DRIFTING
-
-	This properly should run on the client to keep timings completely consistent with input
-
-=======================================================================================================================================
-*/
-
-cvar_t	v_centermove ("v_centermove", "0.15");
-cvar_t	v_centerspeed ("v_centerspeed", "500");
-
-
-void CL_StartPitchDrift (void)
-{
-	if (cl.laststop >= cl.time)
-	{
-		// something else is keeping it from drifting
-		return;
-	}
-
-	if (cl.nodrift || !cl.pitchvel)
-	{
-		cl.pitchvel = v_centerspeed.value;
-		cl.nodrift = false;
-		cl.driftmove = 0;
-	}
-}
-
-void CL_StopPitchDrift (void)
-{
-	cl.laststop = cl.time + 1;
-	cl.nodrift = true;
-	cl.pitchvel = 0;
-}
-
-/*
-===============
-CL_DriftPitch
-
-Moves the client pitch angle towards cl.idealpitch sent by the server.
-
-If the user is adjusting pitch manually, either with lookup/lookdown,
-mlook and mouse, or klook and keyboard, pitch drifting is constantly stopped.
-
-Drifting is enabled when the center view key is hit, mlook is released and
-lookspring is non 0, or when
-===============
-*/
-void CL_DriftPitch (float time)
-{
-	float delta, move;
-	extern cvar_t freelook;
-
-	if (noclip_anglehack || !cl.onground || cls.demoplayback)
-	{
-		cl.driftmove = 0;
-		cl.pitchvel = 0;
-		return;
-	}
-
-	if (freelook.value || (in_mlook.state & 1))
-	{
-		// it seems more reliable to have this check here rather than having multiple calls to CL_StopPitchDrift scattered all over the engine code
-		// (especially if different subsystems can be running at different framerates nowadays)
-		cl.laststop = cl.time + 1;
-		cl.nodrift = true;
-		cl.pitchvel = 0;
-		return;
-	}
-
-	// don't count small mouse motion
-	if (cl.nodrift)
-	{
-		if (fabs (cl.cmd.forwardmove) < cl_forwardspeed.value)
-			cl.driftmove = 0;
-		else cl.driftmove += time;
-
-		if (cl.driftmove > v_centermove.value)
-			CL_StartPitchDrift ();
-
-		return;
-	}
-
-	delta = cl.idealpitch - cl.viewangles[PITCH];
-
-	if (!delta)
-	{
-		cl.pitchvel = 0;
-		return;
-	}
-
-	move = time * cl.pitchvel;
-	cl.pitchvel += time * v_centerspeed.value;
-
-	//Con_Printf ("move: %f (%f)\n", move, time);
-
-	if (delta > 0)
-	{
-		if (move > delta)
-		{
-			cl.pitchvel = 0;
-			move = delta;
-		}
-
-		cl.viewangles[PITCH] += move;
-	}
-	else if (delta < 0)
-	{
-		if (move > -delta)
-		{
-			cl.pitchvel = 0;
-			move = -delta;
-		}
-
-		cl.viewangles[PITCH] -= move;
-	}
-}
-
-
-/*
-================
-CL_BaseMove
-
-Send the intended movement message to the server
-================
-*/
-
-void CL_BaseMove (usercmd_t *cmd)
-{
-	if (cls.signon != SIGNONS)
-		return;
-
-	CL_AdjustAngles ();
-
-	// fixme - adjust these speeds for frametime?
-	if (in_strafe.state & 1)
-	{
-		cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_right);
-		cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_left);
-	}
-
-	cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_moveright);
-	cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_moveleft);
-
-	cmd->upmove += cl_upspeed.value * CL_KeyState (&in_up);
-	cmd->upmove -= cl_upspeed.value * CL_KeyState (&in_down);
-
-	if (!(in_klook.state & 1))
-	{
-		cmd->forwardmove += cl_forwardspeed.value * CL_KeyState (&in_forward);
-		cmd->forwardmove -= cl_backspeed.value * CL_KeyState (&in_back);
-	}
-
-	// adjust for speed key
-	if (in_speed.state & 1)
-	{
-		cmd->forwardmove *= cl_movespeedkey.value;
-		cmd->sidemove *= cl_movespeedkey.value;
-		cmd->upmove *= cl_movespeedkey.value;
-	}
 }
 
 
@@ -586,7 +399,7 @@ cvar_t	pq_lag ("pq_lag", "0");
 
 void CL_SendLagMove (void)
 {
-	if (cls.demoplayback || cls.state != ca_connected || cls.signon != SIGNONS) return;
+	if (cls.demoplayback || cls.state != ca_connected || cls.signon != SIGNON_CONNECTED) return;
 
 	while ((lag_tail < lag_head) && (lag_sendtime[lag_tail & 31] <= realtime))
 	{
@@ -606,6 +419,15 @@ void CL_SendLagMove (void)
 
 		// Con_Printf ("sent %i\n", lag_buff[(lag_tail - 1) & 31].cursize);
 	}
+}
+
+
+short CL_BoundMoveToShort (float move)
+{
+	if (move > 32760) return 32760;
+	if (move < -32760) return -32760;
+
+	return (short) move;
 }
 
 
@@ -652,9 +474,9 @@ void CL_SendMove (usercmd_t *cmd)
 		MSG_WriteAngle (buf, cl.viewangles[2], cl.Protocol, cl.PrototcolFlags, 2);
 	}
 
-	MSG_WriteShort (buf, cmd->forwardmove);
-	MSG_WriteShort (buf, cmd->sidemove);
-	MSG_WriteShort (buf, cmd->upmove);
+	MSG_WriteShort (buf, CL_BoundMoveToShort (cmd->forwardmove));
+	MSG_WriteShort (buf, CL_BoundMoveToShort (cmd->sidemove));
+	MSG_WriteShort (buf, CL_BoundMoveToShort (cmd->upmove));
 
 	// send button bits
 	bits = 0;
@@ -728,5 +550,181 @@ cmd_t IN_MLookUp_Cmd ("-mlook", IN_MLookUp);
 
 void CL_InitInput (void)
 {
+}
+
+
+void CL_ClearCmd (usercmd_t *cmd)
+{
+	cmd->forwardmove = 0;
+	cmd->sidemove = 0;
+	cmd->upmove = 0;
+}
+
+
+bool cl_pingqueued = false;
+bool cl_statusqueued = false;
+
+void CL_QueuePingCommand (void) {cl_pingqueued = true;}
+void CL_QueueStatusCommand (void) {cl_statusqueued = true;}
+
+void CL_CheckQueuedCommands (void)
+{
+	if (cl_statusqueued)
+	{
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		SZ_Print (&cls.message, "status\n");
+		cl_statusqueued = false;
+	}
+
+	if (cl_pingqueued)
+	{
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		SZ_Print (&cls.message, "ping\n");
+		cl_pingqueued = false;
+	}
+}
+
+
+cvar_t cl_moverebalance ("cl_moverebalance", 72.0f);
+
+void CL_RebalanceMove (usercmd_t *basecmd, usercmd_t *newcmd, double frametime)
+{
+	// rebalance movement to 72 FPS (fixme - make this user-configurable) (done)
+	double moveadjust = frametime * cl_moverebalance.value;
+
+	basecmd->forwardmove += newcmd->forwardmove * moveadjust;
+	basecmd->sidemove += newcmd->sidemove * moveadjust;
+	basecmd->upmove += newcmd->upmove * moveadjust;
+}
+
+
+/*
+================
+CL_BaseMove
+
+Send the intended movement message to the server
+================
+*/
+
+void CL_BaseMove (usercmd_t *cmd, double frametime)
+{
+	if (cls.signon != SIGNON_CONNECTED)
+		return;
+
+	CL_AdjustAngles (frametime);
+
+	// just accumulating to cmd causes differences in acceleration so instead we accumulate to 
+	// a new usercmd_t, adjust that for frametime, then add the adjusted move to the original move
+	usercmd_t basecmd;
+	CL_ClearCmd (&basecmd);
+
+	// fixme - adjust these speeds for frametime?
+	if (in_strafe.state & 1)
+	{
+		basecmd.sidemove += cl_sidespeed.value * CL_KeyState (&in_right);
+		basecmd.sidemove -= cl_sidespeed.value * CL_KeyState (&in_left);
+	}
+
+	basecmd.sidemove += cl_sidespeed.value * CL_KeyState (&in_moveright);
+	basecmd.sidemove -= cl_sidespeed.value * CL_KeyState (&in_moveleft);
+
+	basecmd.upmove += cl_upspeed.value * CL_KeyState (&in_up);
+	basecmd.upmove -= cl_upspeed.value * CL_KeyState (&in_down);
+
+	if (!(in_klook.state & 1))
+	{
+		basecmd.forwardmove += cl_forwardspeed.value * CL_KeyState (&in_forward);
+		basecmd.forwardmove -= cl_backspeed.value * CL_KeyState (&in_back);
+	}
+
+	// adjust for speed key
+	if (in_speed.state & 1)
+	{
+		basecmd.forwardmove *= cl_movespeedkey.value;
+		basecmd.sidemove *= cl_movespeedkey.value;
+		basecmd.upmove *= cl_movespeedkey.value;
+	}
+
+	// rebalance the move to 72 FPS
+	CL_RebalanceMove (cmd, &basecmd, frametime);
+}
+
+
+/*
+=================
+CL_SendCmd
+
+the functions called by this are misnamed as all that they do is send previously buffered commands
+=================
+*/
+usercmd_t cl_usercommand;
+
+
+void CL_AccumulateCmd (void)
+{
+	// note - this uses the time from the previous frame because movements will be in respect of the previous frame
+	if (cls.state != ca_connected)
+	{
+		CL_ClearCmd (&cl_usercommand);
+		return;
+	}
+
+	if (cls.signon == SIGNON_CONNECTED)
+	{
+		// get basic movement from keyboard
+		CL_BaseMove (&cl_usercommand, cl.frametime);
+
+		// allow mice or other external controllers to add to the move
+		IN_MouseMove (&cl_usercommand, cl.frametime);
+		IN_JoyMove (&cl_usercommand, cl.frametime);
+
+		return;
+	}
+
+	CL_ClearCmd (&cl_usercommand);
+}
+
+
+void CL_SendCmd (void)
+{
+	if (cls.state != ca_connected)
+	{
+		CL_ClearCmd (&cl_usercommand);
+		return;
+	}
+
+	if (cls.signon == SIGNON_CONNECTED)
+	{
+		// send the unreliable message
+		CL_SendMove (&cl_usercommand);
+	}
+
+	// clear the command after sending (or if we're not sending)
+	CL_ClearCmd (&cl_usercommand);
+
+	if (cls.demoplayback)
+	{
+		SZ_Clear (&cls.message);
+		return;
+	}
+
+	// check any commands which were queued by the client
+	// done before the message size check so that it won't prevent it from happening
+	CL_CheckQueuedCommands ();
+
+	// send the reliable message
+	if (!cls.message.cursize)
+		return;		// no message at all
+
+	if (!NET_CanSendMessage (cls.netcon))
+	{
+		Con_DPrintf ("CL_WriteToServer: can't send\n");
+		return;
+	}
+
+	if (NET_SendMessage (cls.netcon, &cls.message) == -1)
+		Host_Error ("CL_WriteToServer: lost server connection");
+
+	SZ_Clear (&cls.message);
 }
 

@@ -41,7 +41,7 @@ typedef struct sizebuf_s
 void SZ_Init (sizebuf_t *buf, void *data, int len);
 void SZ_Alloc (sizebuf_t *buf, int startsize);
 void SZ_Clear (sizebuf_t *buf);
-void *SZ_GetSpace (sizebuf_t *buf, int length);
+void *SZ_GetSpace (sizebuf_t *buf, int length, char *caller);
 void SZ_Write (sizebuf_t *buf, void *data, int length);
 void SZ_Print (sizebuf_t *buf, char *data);	// strcats onto the sizebuf
 
@@ -167,7 +167,7 @@ byte *COM_LoadFile (char *path);
 
 void COM_ExecQuakeRC (void);
 
-extern bool		standard_quake, rogue, hipnotic, quoth, nehahra;
+extern bool		standard_quake, rogue, hipnotic, quoth, nehahra, kurok;
 
 void COM_HashData (byte *hash, const void *data, int size);
 #define COM_CheckHash(h1, h2) !(memcmp ((h1), (h2), 16))
@@ -235,16 +235,4 @@ extern searchpath_t    *com_searchpaths;
 
 bool COM_ValidateContentFolderCvar (class cvar_t *var);
 void COM_ValidateUserSettableDir (class cvar_t *var);
-
-
-class CDQEventTimer
-{
-public:
-	CDQEventTimer (float BaseTime);
-	float GetElapsedTime (float NewTime);
-
-private:
-	float OldTime;
-};
-
 

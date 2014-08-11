@@ -95,6 +95,42 @@ byte *D3D_LoadWAL (byte *f, int *loadsize)
 }
 
 
+byte *D3D_LoadLMP (byte *f, int *loadsize)
+{
+	sizedef_t *sd = (sizedef_t *) f;
+	byte *mip0data = (byte *) (sd + 1);
+
+	byte *image_rgba = (byte *) MainZone->Alloc (sd->width * sd->height * 4 + 18);
+
+	if (!image_rgba)
+	{
+		MainZone->Free (f);
+		return NULL;
+	}
+
+	unsigned int *pbuf = (unsigned int *) (image_rgba + 18);
+
+	for (int i = 0; i < sd->width * sd->height; i++)
+		pbuf[i] = (unsigned int) d3d_QuakePalette.standard32[mip0data[i]];
+
+	// now fill in our fake tga header
+	memset (image_rgba, 0, 18);
+	image_rgba[2] = 2;
+	image_rgba[12] = sd->width & 255;
+	image_rgba[13] = sd->width >> 8;
+	image_rgba[14] = sd->height & 255;
+	image_rgba[15] = sd->height >> 8;
+	image_rgba[16] = 32;
+	image_rgba[17] = 0;	// fixme - Kurok skyboxes are pre-inverted, other Kurok LMPs are not...
+
+	// need to modify the len also
+	loadsize[0] = sd->width * sd->height * 4 + 18;
+
+	MainZone->Free (f);
+	return image_rgba;
+}
+
+
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
 {
 	SAFE_RELEASE (tex[0]);
@@ -727,6 +763,11 @@ ext_tex_load:;
 	// ditto for .wal
 	if (!strcmp (texext, ".wal"))
 		if (!(filebuf = D3D_LoadWAL (filebuf, &filelen)))
+			return NULL;
+
+	// ditto for .lmp
+	if (!strcmp (texext, ".lmp") && (flags & IMAGE_SKYBOX))
+		if (!(filebuf = D3D_LoadLMP (filebuf, &filelen)))
 			return NULL;
 
 	// attempt to load it (this will generate miplevels for us too)

@@ -53,12 +53,14 @@ typedef struct d3d_alphalist_s
 } d3d_alphalist_t;
 
 
-#define D3D_ALPHATYPE_ENTITY		1
 #define D3D_ALPHATYPE_PARTICLE		2
 #define D3D_ALPHATYPE_WATERWARP		3
 #define D3D_ALPHATYPE_SURFACE		4
 #define D3D_ALPHATYPE_FENCE			5
 #define D3D_ALPHATYPE_CORONA		6
+#define D3D_ALPHATYPE_ALIAS			7
+#define D3D_ALPHATYPE_BRUSH			8
+#define D3D_ALPHATYPE_SPRITE		9
 
 d3d_alphalist_t **d3d_AlphaList = NULL;
 int d3d_NumAlphaList = 0;
@@ -98,7 +100,13 @@ void D3DAlpha_AddToList (int type, void *data, float dist)
 
 void D3DAlpha_AddToList (entity_t *ent)
 {
-	D3DAlpha_AddToList (D3D_ALPHATYPE_ENTITY, ent, D3DAlpha_GetDist (ent->origin));
+	if (ent->model->type == mod_alias)
+		D3DAlpha_AddToList (D3D_ALPHATYPE_ALIAS, ent, D3DAlpha_GetDist (ent->origin));
+	else if (ent->model->type == mod_brush)
+		D3DAlpha_AddToList (D3D_ALPHATYPE_BRUSH, ent, D3DAlpha_GetDist (ent->origin));
+	else if (ent->model->type == mod_sprite)
+		D3DAlpha_AddToList (D3D_ALPHATYPE_SPRITE, ent, D3DAlpha_GetDist (ent->origin));
+	else;
 }
 
 
@@ -173,8 +181,6 @@ void D3DAlpha_NoCull (void)
 
 void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 {
-	extern LPDIRECT3DTEXTURE9 cachedparticletexture;
-
 	// fixme - these should be callback functions
 	if (oldone)
 	{
@@ -184,8 +190,10 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 			D3DPart_EndParticles ();
 			break;
 
-		case D3D_ALPHATYPE_ENTITY:
+		case D3D_ALPHATYPE_SPRITE:
 			D3DSprite_End ();
+		case D3D_ALPHATYPE_ALIAS:
+		case D3D_ALPHATYPE_BRUSH:
 			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 			break;
 
@@ -221,9 +229,11 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 			D3DLight_BeginCoronas ();
 			break;
 
-		case D3D_ALPHATYPE_ENTITY:
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+		case D3D_ALPHATYPE_SPRITE:
 			D3DSprite_Begin ();
+		case D3D_ALPHATYPE_ALIAS:
+		case D3D_ALPHATYPE_BRUSH:
+			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 			break;
 
 		case D3D_ALPHATYPE_FENCE:
@@ -306,10 +316,7 @@ void D3DAlpha_RenderList (void)
 	}
 
 	d3d_alphalist_t *previous = NULL;
-	extern LPDIRECT3DTEXTURE9 cachedparticletexture;
-
 	D3DAlpha_Setup ();
-	cachedparticletexture = NULL;
 
 	// now add all the items in it to the alpha buffer
 	for (int i = 0; i < d3d_NumAlphaList; i++)
@@ -327,12 +334,16 @@ void D3DAlpha_RenderList (void)
 
 		switch (d3d_AlphaList[i]->Type)
 		{
-		case D3D_ALPHATYPE_ENTITY:
-			if (d3d_AlphaList[i]->Entity->model->type == mod_alias)
-				D3DAlias_DrawAliasBatch (&d3d_AlphaList[i]->Entity, 1);
-			else if (d3d_AlphaList[i]->Entity->model->type == mod_sprite)
-				D3D_SetupSpriteModel (d3d_AlphaList[i]->Entity);
+		case D3D_ALPHATYPE_ALIAS:
+			D3DAlias_DrawAliasBatch (&d3d_AlphaList[i]->Entity, 1);
+			break;
 
+		case D3D_ALPHATYPE_BRUSH:
+			// not implemented - bmodels are added and sorted per-surface
+			break;
+
+		case D3D_ALPHATYPE_SPRITE:
+			D3D_SetupSpriteModel (d3d_AlphaList[i]->Entity);
 			break;
 
 		case D3D_ALPHATYPE_PARTICLE:

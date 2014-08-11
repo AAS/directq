@@ -27,6 +27,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void D3DSky_InitTextures (miptex_t *mt);
 void D3DAlias_MakeAliasMesh (char *name, byte *hash, aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles);
+void D3DLight_BeginBuildingLightmaps (void);
+void D3DLight_CreateSurfaceLightmaps (model_t *mod);
+void D3DLight_BumpLightmaps (void);
 
 void Mod_LoadSpriteModel (model_t *mod, void *buffer);
 void Mod_LoadBrushModel (model_t *mod, void *buffer);
@@ -625,6 +628,8 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 				int texflags = IMAGE_MIPMAP | IMAGE_BSP;
 				int lumaflags = IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA;
 
+				if (mt->name[0] == '*') texflags |= IMAGE_LIQUID;
+
 				// load the luma first so that we know if we have it (remind me again of why we need to know that)
 				tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, lumaflags);
 				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, texflags);
@@ -1037,15 +1042,17 @@ Mod_LoadSurfaceVertexes
 
 =================
 */
-int MaxExtents[2] = {0, 0};
+// use a tighter factor for colinear point removal
+#define COLINEAR_EPSILON 0.0001
+int nColinElim = 0;
+cvar_t gl_keeptjunctions ("gl_keeptjunctions", "1", CVAR_MAP);
+int d3d_MaxSurfVerts = 0;
 
-void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *verts, unsigned short *ndx)
+void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *verts, unsigned short *indexes)
 {
 	// just set these up for now, we generate them in the next step
 	surf->verts = verts;
-	surf->indexes = ndx;
-
-	VectorClear (surf->midpoint);
+	surf->indexes = indexes;
 
 	// let's calc bounds and extents here too...!
 	float mins[2] = {99999999, 99999999};
@@ -1054,15 +1061,9 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 	surf->mins[0] = surf->mins[1] = surf->mins[2] = 99999999;
 	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -99999999;
 
-	// removing colinear points does *nothing* for performance with this engine.  i know, i tested it.
-	for (int i = 0, j = surf->numverts; i < surf->numverts; i++, j--)
+	for (int i = 0; i < surf->numverts; i++, verts++)
 	{
 		int lindex = d_bspmodel.surfedges[surf->firstedge + i];
-		int stripdst = i ? (i * 2 - 1) : 0;
-
-		if (stripdst >= surf->numverts) stripdst = j * 2;
-
-		verts = &surf->verts[stripdst];
 
 		if (lindex > 0)
 		{
@@ -1084,9 +1085,6 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 		if (surf->maxs[0] < verts->xyz[0]) surf->maxs[0] = verts->xyz[0];
 		if (surf->maxs[1] < verts->xyz[1]) surf->maxs[1] = verts->xyz[1];
 		if (surf->maxs[2] < verts->xyz[2]) surf->maxs[2] = verts->xyz[2];
-
-		// accumulate into midpoint
-		VectorAdd (surf->midpoint, verts->xyz, surf->midpoint);
 
 		// extents
 		// (can we not just cache this and reuse it below???) (done)
@@ -1113,14 +1111,64 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 	}
 
 	// get final mindpoint
-	VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
+	surf->midpoint[0] = surf->mins[0] + (surf->maxs[0] - surf->mins[0]) * 0.5f;
+	surf->midpoint[1] = surf->mins[1] + (surf->maxs[1] - surf->mins[1]) * 0.5f;
+	surf->midpoint[2] = surf->mins[2] + (surf->maxs[2] - surf->mins[2]) * 0.5f;
 
-	// convert the polygon to a triangle strip layout which may be faster on some hardware
-	for (int i = 2; i < surf->numverts; i++, ndx += 3)
+	if (!gl_keeptjunctions.value)
 	{
-		ndx[0] = i - 2;
-		ndx[1] = (i & 1) ? i : (i - 1);
-		ndx[2] = (i & 1) ? (i - 1) : i;
+		int lnumverts = surf->numverts;
+
+		for (int i = 0; i < lnumverts; i++)
+		{
+			vec3_t v1, v2;
+			float *v_prev, *v_this, *v_next;
+
+			v_prev = surf->verts[(i + lnumverts - 1) % lnumverts].xyz;
+			v_this = surf->verts[i].xyz;
+			v_next = surf->verts[(i + 1) % lnumverts].xyz;
+
+			VectorSubtract (v_this, v_prev, v1);
+			VectorNormalize (v1);
+			VectorSubtract (v_next, v_prev, v2);
+			VectorNormalize (v2);
+
+			if ((fabs (v1[0] - v2[0]) <= COLINEAR_EPSILON) &&
+				(fabs (v1[1] - v2[1]) <= COLINEAR_EPSILON) &&
+				(fabs (v1[2] - v2[2]) <= COLINEAR_EPSILON))
+			{
+				for (int j = i + 1; j < lnumverts; j++)
+				{
+					// don't bother copying the lightmap coords because they haven't been generated yet
+					surf->verts[j - 1].xyz[0] = surf->verts[j].xyz[0];
+					surf->verts[j - 1].xyz[1] = surf->verts[j].xyz[1];
+					surf->verts[j - 1].xyz[2] = surf->verts[j].xyz[2];
+
+					surf->verts[j - 1].st[0][0] = surf->verts[j].st[0][0];
+					surf->verts[j - 1].st[0][1] = surf->verts[j].st[0][1];
+				}
+
+				lnumverts--;
+				nColinElim++;
+				i--;
+			}
+		}
+
+		surf->numverts = lnumverts;
+	}
+
+	// don't bother with stripping it; there's no real big deal
+	for (int i = 2; i < surf->numverts; i++, indexes += 3)
+	{
+		indexes[0] = 0;
+		indexes[1] = i - 1;
+		indexes[2] = i;
+	}
+
+	if (d3d_MaxSurfVerts < surf->numverts)
+	{
+		d3d_MaxSurfVerts = surf->numverts;
+		Con_DPrintf ("d3d_MaxSurfVerts %i\n", d3d_MaxSurfVerts);
 	}
 
 	// no extents
@@ -1135,18 +1183,11 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 		surf->texturemins[i] = bmins * 16;
 		surf->extents[i] = (bmaxs - bmins) * 16;
 
-		// find max allowable extents (fixme - precalc and store in d3d_GlobalCaps)
-		int maxextents = ((d3d_DeviceCaps.MaxTextureWidth < d3d_DeviceCaps.MaxTextureHeight ? d3d_DeviceCaps.MaxTextureWidth : d3d_DeviceCaps.MaxTextureHeight) << 4) - 16;
-
 		// to all practical purposes this will never be hit; even on 3DFX it's 4080 which is well in excess of the
 		// max allowed by stock ID Quake.  just clamping it may result in weird lightmaps in extreme maps, but in
 		// practice it doesn't even happen for reasons previously outlined.
-		if (surf->extents[i] > maxextents) surf->extents[i] = maxextents;
+		if (surf->extents[i] > d3d_GlobalCaps.MaxExtents) surf->extents[i] = d3d_GlobalCaps.MaxExtents;
 	}
-
-	// check surface extents against max extents
-	if (surf->extents[0] > MaxExtents[0]) MaxExtents[0] = surf->extents[0];
-	if (surf->extents[1] > MaxExtents[1]) MaxExtents[1] = surf->extents[1];
 }
 
 
@@ -1178,6 +1219,7 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 	{
 		// we need this for sorting
 		surf->surfnum = surfnum;
+		surf->model = mod;
 
 		// verts/etc
 		surf->firstedge = face->firstedge;
@@ -1240,12 +1282,10 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 	brushpolyvert_t *verts = (brushpolyvert_t *) MainHunk->Alloc (totalverts * sizeof (brushpolyvert_t), FALSE);
 	unsigned short *indexes = (unsigned short *) MainHunk->Alloc (totalindexes * sizeof (unsigned short), FALSE);
 
-	// Con_Printf ("%s has %i verts\n", mod->name, totalverts);
-
-	surf = mod->brushhdr->surfaces;
-
-	for (int surfnum = 0; surfnum < count; surfnum++, surf++)
+	for (int i = 0; i < count; i++)
 	{
+		surf = &mod->brushhdr->surfaces[i];
+
 		// load all of the vertexes and calc bounds and extents for frustum culling
 		Mod_LoadSurfaceVertexes (mod, surf, verts, indexes);
 
@@ -1403,7 +1443,7 @@ void Mod_LoadVisLeafsNodes (model_t *mod, byte *mod_base, lump_t *v, lump_t *l, 
 		p = nin->planenum;
 		nout->plane = mod->brushhdr->planes + p;
 
-		nout->firstsurface = (unsigned short) nin->firstface;
+		nout->surfaces = mod->brushhdr->surfaces + nin->firstface;
 		nout->numsurfaces = (unsigned short) nin->numfaces;
 		nout->visframe = -1;
 
@@ -1465,11 +1505,23 @@ void Mod_LoadClipnodes (model_t *mod, byte *mod_base, lump_t *l)
 	hull->firstclipnode = 0;
 	hull->lastclipnode = count - 1;
 	hull->planes = mod->brushhdr->planes;
-	hull->clip_mins[0] = -16;
-	hull->clip_mins[1] = -16;
+
+	if (kurok)
+	{
+		hull->clip_mins[0] = -12;
+		hull->clip_mins[1] = -12;
+		hull->clip_maxs[0] = 12;
+		hull->clip_maxs[1] = 12;
+	}
+	else
+	{
+		hull->clip_mins[0] = -16;
+		hull->clip_mins[1] = -16;
+		hull->clip_maxs[0] = 16;
+		hull->clip_maxs[1] = 16;
+	}
+
 	hull->clip_mins[2] = -24;
-	hull->clip_maxs[0] = 16;
-	hull->clip_maxs[1] = 16;
 	hull->clip_maxs[2] = 32;
 
 	hull = &mod->brushhdr->hulls[2];
@@ -1591,8 +1643,9 @@ void Mod_LoadPlanes (model_t *mod, byte *mod_base, lump_t *l)
 
 	count = l->filelen / sizeof (*in);
 
-	// why double the number of planes???
-	out = (mplane_t *) MainHunk->Alloc (count * 2 * sizeof (mplane_t));
+	// was count * 2; i believe this was to make extra space for a possible expansion of planes * 2 in
+	// order to precache both orientations of each plane and not have to use the SURF_PLANEBACK stuff.
+	out = (mplane_t *) MainHunk->Alloc (count * sizeof (mplane_t));
 
 	mod->brushhdr->planes = out;
 	mod->brushhdr->numplanes = count;
@@ -1613,6 +1666,13 @@ void Mod_LoadPlanes (model_t *mod, byte *mod_base, lump_t *l)
 		out->type = in->type;
 		out->signbits = bits;
 	}
+}
+
+
+void Mod_NodeVolumeFromBBox (mnode_t *node)
+{
+	node->volume = (node->maxs[0] - node->mins[0]) * (node->maxs[1] - node->mins[1]) * (node->maxs[2] - node->mins[2]);
+	node->volume = pow (node->volume, (1.0f / 3.0f));
 }
 
 
@@ -1655,6 +1715,7 @@ static void Mod_RecalcNodeBBox (mnode_t *node)
 			leaf->maxs[2] += BBEXPAND;
 		}
 
+		Mod_NodeVolumeFromBBox (node);
 		return;
 	}
 
@@ -1670,6 +1731,8 @@ static void Mod_RecalcNodeBBox (mnode_t *node)
 	node->maxs[0] = max (node->children[0]->maxs[0], node->children[1]->maxs[0]);
 	node->maxs[1] = max (node->children[0]->maxs[1], node->children[1]->maxs[1]);
 	node->maxs[2] = max (node->children[0]->maxs[2], node->children[1]->maxs[2]);
+
+	Mod_NodeVolumeFromBBox (node);
 }
 
 
@@ -1742,6 +1805,15 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	// store the version for correct hull checking
 	mod->brushhdr->bspversion = header->version;
 
+	if (!d3d_RenderDef.WorldModelLoaded)
+	{
+		D3DLight_BeginBuildingLightmaps ();
+		mod->flags |= MOD_WORLD;
+	}
+	else mod->flags |= MOD_BMODEL;
+
+	nColinElim = 0;
+
 	// load into heap (these are the only lumps we need to leave hanging around)
 	Mod_LoadTextures (mod, mod_base, &header->lumps[LUMP_TEXTURES], &header->lumps[LUMP_ENTITIES]);
 	Mod_LoadLighting (mod, mod_base, &header->lumps[LUMP_LIGHTING]);
@@ -1753,6 +1825,19 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	Mod_LoadClipnodes (mod, mod_base, &header->lumps[LUMP_CLIPNODES]);
 	Mod_LoadEntities (mod, mod_base, &header->lumps[LUMP_ENTITIES]);
 	Mod_LoadSubmodels (mod, mod_base, &header->lumps[LUMP_MODELS]);
+
+	// if it's cheaper to just draw the model we just draw it
+	if (mod->brushhdr->numsurfaces < 6) mod->flags |= EF_NOOCCLUDE;
+
+	if (nColinElim) Con_DPrintf ("removed %i colinear points from %s\n", nColinElim, mod->name);
+
+	D3DLight_CreateSurfaceLightmaps (mod);
+
+	if (!d3d_RenderDef.WorldModelLoaded)
+	{
+		//D3DLight_BumpLightmaps ();
+		d3d_RenderDef.WorldModelLoaded = true;
+	}
 
 	Mod_RecalcNodeBBox (mod->brushhdr->nodes);
 	Mod_CalcBModelBBox (mod, mod->brushhdr);
@@ -1796,6 +1881,9 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 		mod->brushhdr->firstmodelsurface = bm->firstface;
 		mod->brushhdr->nummodelsurfaces = bm->numfaces;
 
+		// if it's cheaper to just draw the model we just draw it
+		if (mod->brushhdr->nummodelsurfaces < 6) mod->flags |= EF_NOOCCLUDE;
+
 		// leafs
 		mod->brushhdr->numleafs = bm->visleafs;
 
@@ -1807,6 +1895,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 
 		// radius
 		mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
+		mod->flags |= MOD_BMODEL;
 
 		// grab a submodel slot for the next pass through the loop
 		if (i < mod->brushhdr->numsubmodels - 1)
@@ -1895,19 +1984,12 @@ void Mod_LoadFrameVerts (aliashdr_t *pheader, trivertx_t *verts)
 
 	for (int i = 0; i < pheader->vertsperframe; i++, vertexes++, verts++)
 	{
-		for (int n = 0; n < 3; n++)
-		{
-			vertexes->v[n] = verts->v[n];
-
-			// compress normals so that we can assign them directly and save vertex submission overhead
-			// 100 is used here so that we can get full -1..1 range (+1 converts to 0..2 range)
-			float f = ((r_avertexnormals[verts->lightnormalindex][n] + 1.0f) * 100.0f);
-			vertexes->normal4ub[n] = BYTE_CLAMP (f);
-		}
-
+		vertexes->v[0] = verts->v[0];
+		vertexes->v[1] = verts->v[1];
+		vertexes->v[2] = verts->v[2];
 		vertexes->v[3] = 1;	// provide a default w coord for vertex buffer input
-		vertexes->normal4ub[3] = 1;
-		vertexes->lerpvert = true;
+		vertexes->lightnormalindex = verts->lightnormalindex;
+		vertexes->lerpvert = true;	// assume that the vertex will be lerped by default
 	}
 
 	pheader->nummeshframes++;
@@ -1919,13 +2001,8 @@ void Mod_LoadFrameVerts (aliashdr_t *pheader, trivertx_t *verts)
 Mod_LoadAliasFrame
 =================
 */
-void *Mod_LoadAliasFrame (aliashdr_t *pheader, void *pin, maliasframedesc_t *frame)
+daliasframetype_t *Mod_LoadAliasFrame (aliashdr_t *pheader, daliasframe_t *pdaliasframe, maliasframedesc_t *frame)
 {
-	trivertx_t		*verts;
-	daliasframe_t	*pdaliasframe;
-
-	pdaliasframe = (daliasframe_t *) pin;
-
 	Q_strncpy (frame->name, pdaliasframe->name, 16);
 	frame->firstpose = pheader->nummeshframes;
 	frame->numposes = 1;
@@ -1936,13 +2013,12 @@ void *Mod_LoadAliasFrame (aliashdr_t *pheader, void *pin, maliasframedesc_t *fra
 		frame->bboxmax.v[i] = pdaliasframe->bboxmax.v[i];
 	}
 
-	verts = (trivertx_t *) (pdaliasframe + 1);
+	trivertx_t *verts = (trivertx_t *) (pdaliasframe + 1);
 
 	// load the frame vertexes
 	Mod_LoadFrameVerts (pheader, verts);
-	verts += pheader->vertsperframe;
 
-	return (void *) verts;
+	return (daliasframetype_t *) (verts + pheader->vertsperframe);
 }
 
 
@@ -1951,36 +2027,35 @@ void *Mod_LoadAliasFrame (aliashdr_t *pheader, void *pin, maliasframedesc_t *fra
 Mod_LoadAliasGroup
 =================
 */
-void *Mod_LoadAliasGroup (aliashdr_t *pheader, void *pin, maliasframedesc_t *frame)
+daliasframetype_t *Mod_LoadAliasGroup (aliashdr_t *pheader, daliasgroup_t *pingroup, maliasframedesc_t *frame)
 {
-	daliasgroup_t		*pingroup;
-	int					i, numframes;
-	daliasinterval_t	*pin_intervals;
-	void				*ptemp;
-
-	pingroup = (daliasgroup_t *) pin;
-	numframes = pingroup->numframes;
 	frame->firstpose = pheader->nummeshframes;
-	frame->numposes = numframes;
+	frame->numposes = pingroup->numframes;
 
-	for (i = 0; i < 3; i++)
+	for (int i = 0; i < 3; i++)
 	{
 		frame->bboxmin.v[i] = pingroup->bboxmin.v[i];
 		frame->bboxmax.v[i] = pingroup->bboxmax.v[i];
 	}
 
-	pin_intervals = (daliasinterval_t *) (pingroup + 1);
-	frame->interval = pin_intervals->interval;
-	pin_intervals += numframes;
-	ptemp = (void *) pin_intervals;
+	// let's do frame intervals properly
+	daliasinterval_t *pin_intervals = (daliasinterval_t *) (pingroup + 1);
+	frame->intervals = (float *) MainCache->Alloc ((pingroup->numframes + 1) * sizeof (float));
 
-	for (i = 0; i < numframes; i++)
+	// store an extra interval so that we can determine the correct frame difference between two
+	// (intervals[pose + 1] - intervals[pose]
+	frame->intervals[pingroup->numframes] = pin_intervals[pingroup->numframes].interval + pin_intervals[0].interval;
+
+	void *ptemp = (void *) (pin_intervals + pingroup->numframes);
+
+	for (int i = 0; i < pingroup->numframes; i++)
 	{
+		frame->intervals[i] = pin_intervals[i].interval;
 		Mod_LoadFrameVerts (pheader, (trivertx_t *) ((daliasframe_t *) ptemp + 1));
 		ptemp = (trivertx_t *) ((daliasframe_t *) ptemp + 1) + pheader->vertsperframe;
 	}
 
-	return ptemp;
+	return (daliasframetype_t *) ptemp;
 }
 
 
@@ -2246,8 +2321,15 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 		aliasframetype_t frametype = (aliasframetype_t) pframetype->type;
 
 		if (frametype == ALIAS_SINGLE)
-			pframetype = (daliasframetype_t *) Mod_LoadAliasFrame (pheader, pframetype + 1, &pheader->frames[i]);
-		else pframetype = (daliasframetype_t *) Mod_LoadAliasGroup (pheader, pframetype + 1, &pheader->frames[i]);
+		{
+			daliasframe_t *frame = (daliasframe_t *) (pframetype + 1);
+			pframetype = Mod_LoadAliasFrame (pheader, frame, &pheader->frames[i]);
+		}
+		else
+		{
+			daliasgroup_t *group = (daliasgroup_t *) (pframetype + 1);
+			pframetype = Mod_LoadAliasGroup (pheader, group, &pheader->frames[i]);
+		}
 	}
 
 	// copy framepointers from the scratch buffer to the final cached copy
@@ -2260,6 +2342,10 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 
 	// set the final header
 	mod->aliashdr = pheader;
+
+	// cheaper to just always draw the model
+	if (pheader->nummesh < 6 || pheader->numindexes < 36)
+		mod->flags |= EF_NOOCCLUDE;
 
 	// copy it out to the cache
 	MainCache->Alloc (mod->name, mod, sizeof (model_t));
@@ -2457,6 +2543,9 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer)
 	strcat (mod->name, ".spr");
 
 	mod->type = mod_sprite;
+
+	// it's always cheaper to just draw sprites
+	mod->flags |= EF_NOOCCLUDE;
 
 	// copy it out to the cache
 	MainCache->Alloc (mod->name, mod, sizeof (model_t));

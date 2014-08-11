@@ -326,6 +326,8 @@ void PF_setorigin (void)
 }
 
 
+void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins, float *rmaxs);
+
 void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 {
 	float	*angles;
@@ -337,63 +339,27 @@ void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 	int		i, j, k, l;
 
 	for (i = 0; i < 3; i++)
+	{
 		if (min[i] > max[i])
-			SVProgs->RunError ("backwards mins/maxs");
+		{
+			// this can occasionally happen so just silently fix it up
+			float temp = max[i];
+			max[i] = min[i];
+			min[i] = temp;
+			// SVProgs->RunError ("backwards mins/maxs");
+		}
+	}
 
-	rotate = false;		// FIXME: implement rotation properly again
+	// FIXME - by fixing this we've broken the rotating box fix in SV_LinkEdict...
+	// (although this is only called from spawn functions so is it really that big a deal?)
+	rotate = false;
 
 	if (!rotate)
 	{
 		VectorCopy (min, rmin);
 		VectorCopy (max, rmax);
 	}
-	else
-	{
-		// find min / max for rotations
-		angles = e->v.angles;
-
-		a = angles[1] / 180 * D3DX_PI;
-
-		xvector[0] = cos (a);
-		xvector[1] = sin (a);
-		yvector[0] = -sin (a);
-		yvector[1] = cos (a);
-
-		VectorCopy (min, bounds[0]);
-		VectorCopy (max, bounds[1]);
-
-		rmin[0] = rmin[1] = rmin[2] = 9999;
-		rmax[0] = rmax[1] = rmax[2] = -9999;
-
-		for (i = 0; i <= 1; i++)
-		{
-			base[0] = bounds[i][0];
-
-			for (j = 0; j <= 1; j++)
-			{
-				base[1] = bounds[j][1];
-
-				for (k = 0; k <= 1; k++)
-				{
-					base[2] = bounds[k][2];
-
-					// transform the point
-					transformed[0] = xvector[0] * base[0] + yvector[0] * base[1];
-					transformed[1] = xvector[1] * base[0] + yvector[1] * base[1];
-					transformed[2] = base[2];
-
-					for (l = 0; l < 3; l++)
-					{
-						if (transformed[l] < rmin[l])
-							rmin[l] = transformed[l];
-
-						if (transformed[l] > rmax[l])
-							rmax[l] = transformed[l];
-					}
-				}
-			}
-		}
-	}
+	else SV_RotateBBoxToBBox (e, min, max, rmin, rmax);
 
 	// set derived values
 	VectorCopy (rmin, e->v.mins);
@@ -445,7 +411,6 @@ void PF_setmodel (void)
 	for (i = 0; sv.model_precache[i]; i++)
 	{
 		if (!sv.model_precache[i]) SVProgs->RunError ("no precache: %s\n", m);
-
 		if (!strcmp (sv.model_precache[i], m)) break;
 	}
 
@@ -1567,7 +1532,7 @@ void PF_aim (void)
 
 	// try sending a trace straight
 	VectorCopy (SVProgs->GlobalStruct->v_forward, dir);
-	VectorMultiplyAdd (start, 2048, dir, end);
+	VectorMad (start, 2048, dir, end);
 	tr = SV_Move (start, vec3_origin, vec3_origin, end, false, ent);
 
 	if (tr.ent && tr.ent->v.takedamage == DAMAGE_AIM
@@ -1579,7 +1544,16 @@ void PF_aim (void)
 
 	// try all possible entities
 	VectorCopy (dir, bestdir);
-	bestdist = sv_aim.value;
+
+	if (kurok)
+	{
+		// match kurok default of 0.99
+		if (cl_autoaim.value)
+			bestdist = sv_aim.value * 1.064516;
+		else bestdist = 1;
+	}
+	else bestdist = sv_aim.value;
+
 	bestent = NULL;
 
 	check = NEXT_EDICT (SVProgs->EdictPointers[0]);
@@ -1619,8 +1593,18 @@ void PF_aim (void)
 	if (bestent)
 	{
 		VectorSubtract (bestent->v.origin, ent->v.origin, dir);
-		dist = DotProduct (dir, SVProgs->GlobalStruct->v_forward);
-		VectorScale (SVProgs->GlobalStruct->v_forward, dist, end);
+
+		if (kurok)
+		{
+			end[0] = dir[0];
+			end[1] = dir[1];
+		}
+		else
+		{
+			dist = DotProduct (dir, SVProgs->GlobalStruct->v_forward);
+			VectorScale (SVProgs->GlobalStruct->v_forward, dist, end);
+		}
+
 		end[2] = dir[2];
 		VectorNormalize (end);
 		VectorCopy (end, G_VECTOR (OFS_RETURN));

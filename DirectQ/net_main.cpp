@@ -246,7 +246,12 @@ static void MaxPlayers_f (void)
 
 	if (n == 1)
 		Cvar_Set ("deathmatch", "0");
-	else Cvar_Set ("deathmatch", "1");
+	else
+	{
+		if (kurok && deathmatch.value > 1)
+			Cvar_Set ("deathmatch", deathmatch.value);
+		else Cvar_Set ("deathmatch", "1");
+	}
 }
 
 

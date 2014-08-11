@@ -29,8 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "menu_common.h"
 
-extern bool WinDWM;
-
 char **menu_videomodes = NULL;
 int menu_videomodenum = 0;
 
@@ -38,15 +36,19 @@ char **menu_anisotropicmodes = NULL;
 int menu_anisonum = 0;
 
 extern cvar_t d3d_mode;
+extern cvar_t d3d_width;
+extern cvar_t d3d_height;
+
+int winwidth = 0;
+int winheight = 0;
+
 extern cvar_t v_gamma;
 extern cvar_t r_gamma;
 extern cvar_t g_gamma;
 extern cvar_t b_gamma;
+
 extern cvar_t r_anisotropicfilter;
 extern cvar_t vid_vsync;
-extern cvar_t r_surfacebatchcutoff;
-
-cvar_t dummy_batchcutoff;
 
 char *filtermodes[] = {"None", "Point", "Linear", NULL};
 
@@ -56,9 +58,9 @@ int mipfiltermode = 0;
 // dummy cvars for temp stuff
 int dummy_vsync;
 
-bool D3D_ModeIsCurrent (d3d_ModeDesc_t *mode);
+bool D3D_ModeIsCurrent (D3DDISPLAYMODE *mode);
 
-extern d3d_ModeDesc_t *d3d_ModeList;
+extern D3DDISPLAYMODE *d3d_ModeList;
 extern int d3d_NumModes;
 extern int d3d_NumWindowedModes;
 
@@ -84,12 +86,12 @@ extern int d3d_NumRefreshRates;
 
 void VID_ApplyModeChange (void)
 {
-	// run a screen update after each to make sure they only occur one at a time
+	// these just signal a change is going at happen at the next screen update so it's safe to set them together
 	Cvar_Set (&d3d_mode, menu_videomodenum);
-	SCR_UpdateScreen ();
-
 	Cvar_Set (&vid_vsync, dummy_vsync);
-	SCR_UpdateScreen ();
+
+	// and run the actual change
+	SCR_UpdateScreen (0);
 
 	// position the selection back up one as the "apply" option is no longer valid
 	menu_Video.Key (K_UPARROW);
@@ -179,7 +181,7 @@ int modetypenum = 0;
 
 extern D3DDISPLAYMODE d3d_DesktopMode;
 
-void Menu_VideoDecodeVideoModes (d3d_ModeDesc_t *modes, int totalnummodes, int numwindowed)
+void Menu_VideoDecodeVideoModes (D3DDISPLAYMODE *modes, int totalnummodes, int numwindowed)
 {
 	char tempmode[64];
 
@@ -191,10 +193,10 @@ void Menu_VideoDecodeVideoModes (d3d_ModeDesc_t *modes, int totalnummodes, int n
 
 		for (int i = 0; i < numwindowed; i++)
 		{
-			d3d_ModeDesc_t *mode = modes + i;
+			D3DDISPLAYMODE *mode = modes + i;
 
 			// copy to a temp buffer, alloc in memory, copy back to memory and ensure NULL termination
-			sprintf (tempmode, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
+			sprintf (tempmode, "%i x %i", mode->Width, mode->Height);
 			menu_windowedres[i] = (char *) MainZone->Alloc (strlen (tempmode) + 1);
 			strcpy (menu_windowedres[i], tempmode);
 			menu_windowedres[i + 1] = NULL;
@@ -211,9 +213,9 @@ void Menu_VideoDecodeVideoModes (d3d_ModeDesc_t *modes, int totalnummodes, int n
 
 		for (int i = 0, realfs = 0; i < numfullscreen; i++)
 		{
-			d3d_ModeDesc_t *mode = modes + numwindowed + i;
+			D3DDISPLAYMODE *mode = modes + numwindowed + i;
 
-			switch (mode->d3d_Mode.Format)
+			switch (mode->Format)
 			{
 			case D3DFMT_R5G6B5:
 			case D3DFMT_X1R5G5B5:
@@ -224,7 +226,7 @@ void Menu_VideoDecodeVideoModes (d3d_ModeDesc_t *modes, int totalnummodes, int n
 			default:
 				// add 32 bpp modes
 				// copy to a temp buffer, alloc in memory, copy back to memory and ensure NULL termination
-				sprintf (tempmode, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
+				sprintf (tempmode, "%i x %i", mode->Width, mode->Height);
 				menu_fullscrnres[realfs] = (char *) MainZone->Alloc (strlen (tempmode) + 1);
 				strcpy (menu_fullscrnres[realfs], tempmode);
 				menu_fullscrnres[realfs + 1] = NULL;
@@ -291,8 +293,6 @@ void Menu_VideoDecodeVideoMode (void)
 	// on the kind of crap that *certain* people use they might not...
 	bool allowwindowed = false;
 	bool allowfullscreen = false;
-	bool allow16bpp = false;
-	bool allow32bpp = false;
 
 	char *fullresolutions = (char *) scratchbuf;
 	int numfullresolutions = 0;
@@ -302,26 +302,20 @@ void Menu_VideoDecodeVideoMode (void)
 
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+		D3DDISPLAYMODE *mode = d3d_ModeList + i;
 
-		if (mode->AllowWindowed)
+		if (mode->RefreshRate == 0)
 		{
-			sprintf (windresolutions, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
+			sprintf (windresolutions, "%i x %i", mode->Width, mode->Height);
 			windresolutions += 32;
 			numwindresolutions++;
 			allowwindowed = true;
 		}
 		else
 		{
-			if (mode->BPP == 32)
-			{
-				sprintf (fullresolutions, "%i x %i", mode->d3d_Mode.Width, mode->d3d_Mode.Height);
-				fullresolutions += 32;
-				numfullresolutions++;
-				allow32bpp = true;
-			}
-			else allow16bpp = true;
-
+			sprintf (fullresolutions, "%i x %i", mode->Width, mode->Height);
+			fullresolutions += 32;
+			numfullresolutions++;
 			allowfullscreen = true;
 		}
 	}
@@ -371,18 +365,18 @@ void Menu_VideoEncodeVideoMode (void)
 	// search through the modes for it
 	for (int i = 0; i < d3d_NumModes; i++)
 	{
-		d3d_ModeDesc_t *mode = d3d_ModeList + i;
+		D3DDISPLAYMODE *mode = d3d_ModeList + i;
 
 		// ensure matching dimensions
-		if (mode->d3d_Mode.Width != width) continue;
-		if (mode->d3d_Mode.Height != height) continue;
+		if (mode->Width != width) continue;
+		if (mode->Height != height) continue;
 
 		// match windowed/fullscreen
-		if (!mode->AllowWindowed && modetypenum == 0) continue;
-		if (mode->AllowWindowed && modetypenum == 1) continue;
+		if (mode->RefreshRate != 0 && modetypenum == 0) continue;
+		if (mode->RefreshRate == 0 && modetypenum == 1) continue;
 
 		// this is the mode
-		menu_videomodenum = mode->ModeNum;
+		menu_videomodenum = i;
 		break;
 	}
 }
@@ -390,8 +384,6 @@ void Menu_VideoEncodeVideoMode (void)
 
 int Menu_VideoCustomDraw (int y)
 {
-	Cvar_Set (&r_surfacebatchcutoff, dummy_batchcutoff.value);
-
 	// encode the selected mode options into a video mode number that we can compare with the current mode
 	Menu_VideoEncodeVideoMode ();
 
@@ -437,18 +429,14 @@ int Menu_VideoCustomDraw (int y)
 
 void Menu_VideoCustomEnter (void)
 {
-	dummy_batchcutoff.value = r_surfacebatchcutoff.value;
-
-	if (dummy_batchcutoff.value < 0)
-		dummy_batchcutoff.value = 0;
-	else if (dummy_batchcutoff.value > 1000000)
-		dummy_batchcutoff.value = 1000000;
-
 	// decode the video mode and set currently selected stuff
 	Menu_VideoDecodeVideoMode ();
 
+	winwidth = d3d_CurrentMode.Width;
+	winheight = d3d_CurrentMode.Height;
+
 	// take it from the d3d_mode cvar
-	menu_videomodenum = (int) d3d_mode.value;
+	menu_videomodenum = d3d_mode.integer;
 
 	Menu_VideoDecodeTextureFilter ();
 
@@ -484,12 +472,15 @@ void Menu_VideoCustomEnter (void)
 
 extern cvar_t r_optimizealiasmodels;
 extern cvar_t r_cachealiasmodels;
+extern cvar_t gl_softwarequakemipmaps;
 
 void Menu_VideoBuild (void)
 {
 	menu_Video.AddOption (new CQMenuCustomDraw (Menu_VideoCustomDraw));
 	menu_Video.AddOption (new CQMenuSpinControl ("Video Mode Type", &modetypenum, modelist));
 	menu_Video.AddOption (TAG_WINDOWED_HIDE, new CQMenuSpinControl ("Resolution", &menu_windnum, &menu_windowedres));
+//	menu_Video.AddOption (TAG_WINDOWED_HIDE, new CQMenuSpinControl ("Width", &menu_windnum, &menu_windowedres));
+//	menu_Video.AddOption (TAG_WINDOWED_HIDE, new CQMenuSpinControl ("Height", &menu_windnum, &menu_windowedres));
 	menu_Video.AddOption (TAG_FULLSCREEN_HIDE, new CQMenuSpinControl ("Resolution", &menu_fullnum, &menu_fullscrnres));
 	menu_Video.AddOption (new CQMenuIntegerToggle ("Vertical Sync", &dummy_vsync, 0, 1));
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
@@ -501,6 +492,7 @@ void Menu_VideoBuild (void)
 
 	menu_Video.AddOption (new CQMenuSpinControl ("Texture Filter", &texfiltermode, &filtermodes[1]));
 	menu_Video.AddOption (new CQMenuSpinControl ("Mipmap Filter", &mipfiltermode, filtermodes));
+	menu_Video.AddOption (new CQMenuCvarToggle ("SW Quake Mipmapping", &gl_softwarequakemipmaps, 0, 1));
 
 	if (d3d_DeviceCaps.MaxAnisotropy > 1)
 	{
@@ -527,8 +519,6 @@ void Menu_VideoBuild (void)
 
 		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
 	}
-
-	menu_Video.AddOption (new CQMenuSpinControl ("Surface Batch Cutoff", &dummy_batchcutoff, 0, 1000000, 10, NULL, NULL));
 
 	// only expose these on hardware T&L parts as there have been reports of them being slower with software T&L
 	if (d3d_GlobalCaps.supportHardwareTandL)

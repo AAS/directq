@@ -96,7 +96,7 @@ char	**com_argv;
 #define CMDLINE_LENGTH	256
 char	com_cmdline[CMDLINE_LENGTH];
 
-bool		standard_quake = true, rogue = false, hipnotic = false, quoth = false, nehahra = false;
+bool		standard_quake = true, rogue = false, hipnotic = false, quoth = false, nehahra = false, kurok = false;
 
 /*
 ============================================================================
@@ -432,25 +432,4 @@ bool COM_StringContains (char *str1, char *str2)
 	// not found
 	return false;
 }
-
-
-CDQEventTimer::CDQEventTimer (float BaseTime)
-{
-	this->OldTime = BaseTime;
-}
-
-
-float CDQEventTimer::GetElapsedTime (float NewTime)
-{
-	// this happens on every frame and if OldTime exceeds NewTime it means we've had a map transition;
-	// because that can only happen on the first frame of the map, we just run an update of time 0 in
-	// that frame and subsequent frames will get the correct timing.
-	if (this->OldTime > NewTime) this->OldTime = NewTime;
-
-	float ElapsedTime = NewTime - this->OldTime;
-	this->OldTime = NewTime;
-
-	return ElapsedTime;
-}
-
 

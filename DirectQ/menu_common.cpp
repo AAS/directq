@@ -100,6 +100,7 @@ void Menu_StackPop (void)
 		else key_dest = key_game;
 
 		m_state = m_none;
+		menu_Current = NULL;
 		return;
 	}
 
@@ -469,9 +470,9 @@ void CQMenuSpinControl::Draw (int y)
 	}
 	else if (this->StringBuf)
 	{
-		if (!this->StringBuf[* (this->MenuVal)])
+		if (!this->StringBuf[*(this->MenuVal)])
 			this->OutputText[0] = 0;
-		else strcpy (this->OutputText, this->StringBuf[* (this->MenuVal)]);
+		else strcpy (this->OutputText, this->StringBuf[*(this->MenuVal)]);
 	}
 
 	if (!this->MenuCommandText[0])
@@ -1031,7 +1032,7 @@ void CQMenuCursorSubMenu::Key (int k)
 
 void CQMenuCursorSubMenu::DrawCurrentOptionHighlight (int y)
 {
-	Draw_Pic (((vid.currsize->width - 240) >> 1) + 5, y, menu_dot_lmp[(int) (realtime * 10) % 6]);
+	Draw_Pic (((vid.currsize->width - 240) >> 1) + 5, y, menu_dot_lmp[(int) (realtime * 10) % 6], 1, true);
 }
 
 
@@ -1289,7 +1290,7 @@ CQMenuBanner::CQMenuBanner (qpic_t **pic)
 void CQMenuBanner::Draw (int y)
 {
 	// draw centered on screen and offset down
-	Draw_Pic ((vid.currsize->width - this->Pic[0]->width) >> 1, y, this->Pic[0]);
+	Draw_Pic ((vid.currsize->width - this->Pic[0]->width) >> 1, y, this->Pic[0], 1, true);
 	this->Y = this->Pic[0]->height + 10;
 }
 
@@ -1321,11 +1322,11 @@ void CQMenuChunkyPic::Draw (int y)
 	y -= this->Parent->NumCursorOptions * 20;
 
 	// quake plaque
-	Draw_Pic (((vid.currsize->width - 240) >> 1) - 35, y - 15, gfx_qplaque_lmp);
+	if (!kurok) Draw_Pic (((vid.currsize->width - 240) >> 1) - 35, y - 15, gfx_qplaque_lmp, 1, true);
 
 	// draw centered on screen and offset down
 	// avoid bilerp seam
-	Draw_SubPic (((vid.currsize->width - 240) >> 1) + 26, y + 1, this->Pic[0], 1, 1, this->Pic[0]->width - 2, this->Pic[0]->height - 2);
+	Draw_Pic (((vid.currsize->width - 240) >> 1) + 26, y + 1, this->Pic[0], 1, true);//, 1, 1, this->Pic[0]->width - 2, this->Pic[0]->height - 2);
 
 	this->Y = this->Pic[0]->height + 10;
 }
@@ -1857,6 +1858,7 @@ void CQMenu::Draw (void)
 	int y = 25;
 
 	// reset for each draw frame
+
 	this->NumCursorOptions = 0;
 
 	// no options
@@ -2047,6 +2049,9 @@ void CQMenu::Key (int k)
 
 void CQMenu::EnterMenu (void)
 {
+	// prevent entering the same menu twice
+	if (menu_Current == this) return;
+
 	key_dest = key_menu;
 	m_state = this->MenuState;
 	menu_soundlevel = m_sound_enter;
@@ -2337,6 +2342,7 @@ void Menu_RemoveMenu (void)
 	menu_StackDepth = 0;
 	m_state = m_none;
 	key_dest = key_game;
+	menu_Current = NULL;
 }
 
 
@@ -2349,6 +2355,7 @@ void Menu_ToggleMenu (void)
 {
 	// begin a new stack
 	menu_StackDepth = 0;
+	menu_Current = NULL;
 
 	if (key_dest == key_menu)
 	{
@@ -2364,6 +2371,7 @@ void Menu_ToggleMenu (void)
 	}
 
 	S_ClearBuffer ();
+	Sleep (5);
 
 	if (key_dest == key_console)
 		Con_ToggleConsole_f ();
@@ -2403,6 +2411,7 @@ void M_Draw (void)
 		m_state = m_none;
 		menu_StackDepth = 0;
 		menu_ConBuffer[0] = 0;
+		menu_Current = NULL;
 		return;
 	}
 
@@ -2474,7 +2483,11 @@ void M_Draw (void)
 void M_Keydown (int key)
 {
 	// don't run a key func if we're not in the menus or we don't have a current menu set
-	if (m_state == m_none || !menu_Current) return;
+	if (m_state == m_none || !menu_Current)
+	{
+		menu_Current = NULL;
+		return;
+	}
 
 	// run the appropriate key func
 	menu_Current->Key (key);

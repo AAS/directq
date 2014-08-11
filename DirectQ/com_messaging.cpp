@@ -34,7 +34,7 @@ void MSG_WriteChar (sizebuf_t *sb, int c)
 {
 	byte    *buf;
 
-	buf = (byte *) SZ_GetSpace (sb, 1);
+	buf = (byte *) SZ_GetSpace (sb, 1, "MSG_WriteChar");
 	buf[0] = c;
 }
 
@@ -42,7 +42,7 @@ void MSG_WriteByte (sizebuf_t *sb, int c)
 {
 	byte    *buf;
 
-	buf = (byte *) SZ_GetSpace (sb, 1);
+	buf = (byte *) SZ_GetSpace (sb, 1, "MSG_WriteByte");
 	buf[0] = c;
 }
 
@@ -50,7 +50,7 @@ void MSG_WriteShort (sizebuf_t *sb, int c)
 {
 	byte    *buf;
 
-	buf = (byte *) SZ_GetSpace (sb, 2);
+	buf = (byte *) SZ_GetSpace (sb, 2, "MSG_WriteShort");
 	buf[0] = c & 0xff;
 	buf[1] = c >> 8;
 }
@@ -59,7 +59,7 @@ void MSG_WriteLong (sizebuf_t *sb, int c)
 {
 	byte    *buf;
 
-	buf = (byte *) SZ_GetSpace (sb, 4);
+	buf = (byte *) SZ_GetSpace (sb, 4, "MSG_WriteLong");
 	buf[0] = c & 0xff;
 	buf[1] = (c >> 8) & 0xff;
 	buf[2] = (c >> 16) & 0xff;
@@ -432,17 +432,29 @@ void SZ_Clear (sizebuf_t *buf)
 	buf->cursize = 0;
 }
 
-void *SZ_GetSpace (sizebuf_t *buf, int length)
+void *SZ_GetSpace (sizebuf_t *buf, int length, char *caller)
 {
 	void    *data;
 
 	if (buf->cursize + length > buf->maxsize)
 	{
 		if (!buf->allowoverflow)
-			Sys_Error ("SZ_GetSpace: overflow without allowoverflow set");
+		{
+			Sys_Error
+			(
+				"SZ_GetSpace: overflow without allowoverflow set\n%s\nbuf->cursize = %i\nlength = %i\nbuf->maxsize = %i",
+				caller, buf->cursize, length, buf->maxsize
+			);
+		}
 
 		if (length > buf->maxsize)
-			Sys_Error ("SZ_GetSpace: %i is > full buffer size", length);
+		{
+			Sys_Error
+			(
+				"SZ_GetSpace: length is > full buffer size\n%s\nbuf->cursize = %i\nlength = %i\nbuf->maxsize = %i",
+				caller, buf->cursize, length, buf->maxsize
+			);
+		}
 
 		buf->overflowed = true;
 		Con_Printf ("SZ_GetSpace: overflow");
@@ -457,7 +469,7 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 void SZ_Write (sizebuf_t *buf, void *data, int length)
 {
-	memcpy (SZ_GetSpace (buf, length), data, length);
+	memcpy (SZ_GetSpace (buf, length, "SZ_Write"), data, length);
 }
 
 void SZ_Print (sizebuf_t *buf, char *data)
@@ -468,9 +480,8 @@ void SZ_Print (sizebuf_t *buf, char *data)
 
 	// byte * cast to keep VC++ happy
 	if (buf->data[buf->cursize-1])
-		memcpy ((byte *) SZ_GetSpace (buf, len), data, len); // no trailing 0
-	else
-		memcpy ((byte *) SZ_GetSpace (buf, len - 1) - 1, data, len); // write over trailing 0
+		memcpy ((byte *) SZ_GetSpace (buf, len, "SZ_Print : buf->data[buf->cursize-1]"), data, len); // no trailing 0
+	else memcpy ((byte *) SZ_GetSpace (buf, len - 1, "SZ_Print : other") - 1, data, len); // write over trailing 0
 }
 
 

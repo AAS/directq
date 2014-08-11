@@ -761,6 +761,14 @@ void Cmd_Alias_f (void)
 	Cmd_BuildCompletionList ();
 }
 
+void Cmd_ClearAlias_f (void)
+{
+	// just leaks the memory for now...
+	cmd_alias = NULL;
+}
+
+
+cmd_t clear_alias_cmd ("clear_alias", Cmd_ClearAlias_f);
 
 /*
 =============================================================================

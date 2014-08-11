@@ -400,6 +400,71 @@ __declspec (naked) int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, mplane_t *p)
 
 void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 {
+	if (kurok)
+	{
+		double angle, sr, sp, sy, cr, cp, cy;
+
+		angle = angles[YAW] * (D3DX_PI * 2 / 360);
+
+		sy = sin (angle);
+		cy = cos (angle);
+
+		angle = angles[PITCH] * (D3DX_PI * 2 / 360);
+
+		sp = sin (angle);
+		cp = cos (angle);
+
+		if (forward)
+		{
+			forward[0] = cp * cy;
+			forward[1] = cp * sy;
+			forward[2] = -sp;
+		}
+
+		if (right || up)
+		{
+			if (angles[ROLL])
+			{
+				angle = angles[ROLL] * (D3DX_PI * 2 / 360);
+
+				sr = sin(angle);
+				cr = cos(angle);
+
+				if (right)
+				{
+					right[0] = -1 * (sr * sp * cy + cr * -sy);
+					right[1] = -1 * (sr * sp * sy + cr * cy);
+					right[2] = -1 * (sr * cp);
+				}
+
+				if (up)
+				{
+					up[0] = (cr * sp * cy + -sr * -sy);
+					up[1] = (cr * sp * sy + -sr * cy);
+					up[2] = cr * cp;
+				}
+			}
+			else
+			{
+				if (right)
+				{
+					right[0] = sy;
+					right[1] = -cy;
+					right[2] = 0;
+				}
+
+				if (up)
+				{
+					up[0] = (sp * cy);
+					up[1] = (sp * sy);
+					up[2] = cp;
+				}
+			}
+		}
+
+		return;
+	}
+
 	float		angle;
 	float		sr, sp, sy, cr, cp, cy;
 
@@ -430,32 +495,7 @@ void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 
 void AngleVectors (vec3_t angles, avectors_t *av)
 {
-	float		angle;
-	float		sr, sp, sy, cr, cp, cy;
-
-	angle = angles[YAW] * (D3DX_PI * 2 / 360);
-	sy = sin (angle);
-	cy = cos (angle);
-
-	angle = angles[PITCH] * (D3DX_PI * 2 / 360);
-	sp = sin (angle);
-	cp = cos (angle);
-
-	angle = angles[ROLL] * (D3DX_PI * 2 / 360);
-	sr = sin (angle);
-	cr = cos (angle);
-
-	av->forward[0] = cp * cy;
-	av->forward[1] = cp * sy;
-	av->forward[2] = -sp;
-
-	av->right[0] = (-1 * sr * sp * cy + -1 * cr * -sy);
-	av->right[1] = (-1 * sr * sp * sy + -1 * cr * cy);
-	av->right[2] = -1 * sr * cp;
-
-	av->up[0] = (cr * sp * cy + -sr * -sy);
-	av->up[1] = (cr * sp * sy + -sr * cy);
-	av->up[2] = cr * cp;
+	AngleVectors (angles, av->forward, av->right, av->up);
 }
 
 
@@ -470,7 +510,7 @@ int VectorCompare (vec3_t v1, vec3_t v2)
 	return 1;
 }
 
-void VectorMultiplyAdd (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc)
+void VectorMad (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc)
 {
 	vecc[0] = veca[0] + scale * vecb[0];
 	vecc[1] = veca[1] + scale * vecb[1];
@@ -702,4 +742,73 @@ int GreatestCommonDivisor (int i1, int i2)
 		return GreatestCommonDivisor (i1, i2 % i1);
 	}
 }
+
+
+#define VectorMAM(scale1, b1, scale2, b2, c) ((c)[0] = (scale1) * (b1)[0] + (scale2) * (b2)[0],(c)[1] = (scale1) * (b1)[1] + (scale2) * (b2)[1],(c)[2] = (scale1) * (b1)[2] + (scale2) * (b2)[2])
+
+void AnglesFromVectors (float *angles, const float *forward, const float *up, bool flippitch)
+{
+	if (forward[0] == 0 && forward[1] == 0)
+	{
+		if (forward[2] > 0)
+		{
+			angles[PITCH] = -D3DX_PI * 0.5;
+			angles[YAW] = up ? atan2 (-up[1], -up[0]) : 0;
+		}
+		else
+		{
+			angles[PITCH] = D3DX_PI * 0.5;
+			angles[YAW] = up ? atan2 (up[1], up[0]) : 0;
+		}
+
+		angles[ROLL] = 0;
+	}
+	else
+	{
+		angles[YAW] = atan2(forward[1], forward[0]);
+		angles[PITCH] = -atan2(forward[2], sqrt(forward[0]*forward[0] + forward[1]*forward[1]));
+
+		if (up)
+		{
+			vec_t cp = cos (angles[PITCH]), sp = sin (angles[PITCH]);
+			vec_t cy = cos (angles[YAW]), sy = sin (angles[YAW]);
+
+			vec3_t tleft, tup;
+
+			tleft[0] = -sy;
+			tleft[1] = cy;
+			tleft[2] = 0;
+
+			tup[0] = sp * cy;
+			tup[1] = sp * sy;
+			tup[2] = cp;
+
+			angles[ROLL] = -atan2 (DotProduct (up, tleft), DotProduct (up, tup));
+		}
+		else angles[ROLL] = 0;
+	}
+
+	// now convert radians to degrees, and make all values positive
+	VectorScale (angles, 180.0 / D3DX_PI, angles);
+
+	if (flippitch) angles[PITCH] *= -1;
+	if (angles[PITCH] < 0) angles[PITCH] += 360;
+	if (angles[YAW] < 0) angles[YAW] += 360;
+	if (angles[ROLL] < 0) angles[ROLL] += 360;
+}
+
+
+void NonEulerInterpolateAngles (float *currangles, float *lastangles, float lerp, float *outangles)
+{
+	vec3_t f0, r0, u0, f1, r1, u1;
+
+	AngleVectors (lastangles, f0, r0, u0);
+	AngleVectors (currangles, f1, r1, u1);
+
+	VectorMAM (1 - lerp, f0, lerp, f1, f0);
+	VectorMAM (1 - lerp, u0, lerp, u1, u0);
+
+	AnglesFromVectors (outangles, f0, u0, false);
+}
+
 

@@ -21,11 +21,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void SCR_Init (void);
 
-void SCR_UpdateScreen (void);
+void SCR_UpdateScreen (double frametime);
 
 void SCR_SizeUp (void);
 void SCR_SizeDown (void);
 void SCR_CenterPrint (char *str);
+void SCR_ClearCenterString (void);
 
 void SCR_BeginLoadingPlaque (void);
 void SCR_EndLoadingPlaque (void);
@@ -39,8 +40,6 @@ extern	int			sb_lines;
 extern	int			clearnotify;	// set to 0 whenever notify text is drawn
 extern	bool	scr_disabled_for_loading;
 extern	bool	scr_skipupdate;
-
-extern	cvar_t		scr_viewsize;
 
 extern cvar_t scr_viewsize;
 

@@ -139,19 +139,24 @@ void CL_WipeParticles (void);
 void D3DVid_LoseDeviceResources (void);
 void D3DVid_RecoverDeviceResources (void);
 void D3DVid_ClearScreen (void);
+void Cmd_ClearAlias_f (void);
 
 void COM_UnloadAllStuff (void)
 {
 	extern bool scr_initialized;
 	extern bool signal_cacheclear;
+	extern char lastworldmodel[];
+
+	// for skybox parsing
+	lastworldmodel[0] = 0;
 
 	// disconnect from server and update the screen to keep things nice and clean
 	CL_Disconnect_f ();
 	D3DVid_ClearScreen ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// prevent screen updates while changing
-	scr_disabled_for_loading = true;
+	Host_DisableForLoading (true);
 	scr_initialized = false;
 
 	// clear cached models
@@ -179,6 +184,9 @@ void COM_UnloadAllStuff (void)
 	// do this too...
 	Host_ClearMemory ();
 
+	// clear all alias commands
+	Cmd_ClearAlias_f ();
+
 	// start with a clean filesystem
 	com_searchpaths = NULL;
 }
@@ -197,19 +205,19 @@ void COM_LoadAllStuff (void)
 
 	// now run a screen update to reassure the user that something did actually happen
 	D3DVid_ClearScreen ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// sprinkle some screen updates through here too to give a better sense of something happening
 	Draw_InvalidateMapshot ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 	Menu_SaveLoadInvalidate ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 	Menu_MapsPopulate ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 	Menu_DemoPopulate ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 	Menu_LoadAvailableSkyboxes ();
-	SCR_UpdateScreen ();
+	SCR_UpdateScreen (0);
 
 	// force a video restart to flush and sync up everything
 	Cbuf_InsertText ("vid_restart\n");
@@ -478,7 +486,7 @@ void COM_LoadGame (char *gamename)
 	if (COM_StringContains (gamename, "nehahra")) Cvar_Set (&com_nehahra, 1);
 
 	// check status of add-ons; nothing yet...
-	rogue = hipnotic = quoth = nehahra = false;
+	rogue = hipnotic = quoth = nehahra = kurok = false;
 	standard_quake = true;
 
 	if (com_rogue.value)
@@ -513,6 +521,14 @@ void COM_LoadGame (char *gamename)
 	if (hipnotic) COM_AddGameDirectory (va ("%s/hipnotic", basedir));
 	if (quoth) COM_AddGameDirectory (va ("%s/quoth", basedir));
 	if (nehahra) COM_AddGameDirectory (va ("%s/nehahra", basedir));
+
+	// let's start moving away from the -gamename and com_gamename crap
+	if (COM_StringContains (gamename, "kurok"))
+	{
+		COM_AddGameDirectory (va ("%s/kurok", basedir));
+		standard_quake = false;
+		kurok = true;
+	}
 
 	// add any other games in the list (everything else gets highest priority)
 	char *thisgame = gamename;
@@ -551,6 +567,7 @@ void COM_LoadGame (char *gamename)
 		if (!stricmp (thisgame, "hipnotic")) loadgame = false;
 		if (!stricmp (thisgame, "quoth")) loadgame = false;
 		if (!stricmp (thisgame, "nehahra")) loadgame = false;
+		if (!stricmp (thisgame, "kurok")) loadgame = false;
 		if (!stricmp (thisgame, GAMENAME)) loadgame = false;
 
 		// check is it actually a proper directory
@@ -597,7 +614,7 @@ void COM_LoadGame (char *gamename)
 	Cbuf_Execute ();
 
 	// not disabled any more
-	scr_disabled_for_loading = false;
+	Host_DisableForLoading (false);
 
 	// force a stop of the demo loop in case we change while the game is running
 	cls.demonum = -1;

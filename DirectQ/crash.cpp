@@ -74,3 +74,4 @@ void GetCrashReason (LPEXCEPTION_POINTERS ep)
 				MB_OK | MB_ICONSTOP);
 }
 #endif
+

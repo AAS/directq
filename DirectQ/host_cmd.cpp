@@ -811,7 +811,7 @@ void Host_Loadgame_f (void)
 			if (!strcmp (com_token, "/*"))
 			{
 				// dp puts /*..*/ comments in it's save games.  evil evil evil.
-				// fortunately they're at the end so just skip over them.  must mod COM_Parse to skip them automatically...
+				// fortunately they're at the end so just skip over them.  must mod COM_Parse to skip them automatically... (done)
 				break;
 			}
 			else
@@ -1343,7 +1343,11 @@ void Host_Spawn_f (void)
 
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_TOTALMONSTERS);
-	MSG_WriteLong (&host_client->message, SVProgs->GlobalStruct->total_monsters);
+
+	// fix 2x fish counting in ID progs
+	if (SVProgs->FishHack)
+		MSG_WriteLong (&host_client->message, SVProgs->GlobalStruct->total_monsters - SVProgs->NumFish);
+	else MSG_WriteLong (&host_client->message, SVProgs->GlobalStruct->total_monsters);
 
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_SECRETS);

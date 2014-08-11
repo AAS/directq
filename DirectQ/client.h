@@ -22,8 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // if this is changed then CL_ClearCmd in cl_main.cpp must be updated to reflect it!!!!
 typedef struct
 {
-	vec3_t	viewangles;
-
 	// intended velocities
 	float	forwardmove;
 	float	sidemove;
@@ -66,17 +64,19 @@ typedef struct
 #define	CSHIFT_DAMAGE	1
 #define	CSHIFT_BONUS	2
 #define	CSHIFT_POWERUP	3
-#define CSHIFT_DEATH	4
-#define	NUM_CSHIFTS		5
+#define	NUM_CSHIFTS		4
 
 #define	NAME_LENGTH	64
 
 
 // client_state_t should hold all pieces of the client state
 
-#define	SIGNONS		4			// signon messages to receive before connected
+#define	SIGNON_CONNECTED		4			// signon messages to receive before connected
 
 #define	MAX_DLIGHTS		128
+
+#define DLF_NOCORONA	1	// set if the dynamic light is not to have a corona
+#define DLF_KILL		2	// kill the light automatically after 1 frame
 
 typedef struct
 {
@@ -84,8 +84,8 @@ typedef struct
 	float	radius;
 	float	die;				// stop lighting after this time
 	float	decay;				// drop this each second
-	float	minlight;			// don't add when contributing less
 	int		key;
+	int		flags;
 
 	// coloured light
 	unsigned short rgb[3];
@@ -102,7 +102,8 @@ void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned 
 typedef enum
 {
 	ca_disconnected, 	// full screen console with no connection
-	ca_connected		// valid netcon, talking to a server
+	ca_connected,		// valid netcon, talking to a server
+	ca_runningmap		// everything up and running
 } cactive_t;
 
 
@@ -125,6 +126,9 @@ typedef struct
 	char		mapstring[MAX_QPATH];
 	char		spawnparms[MAX_MAPSTRING];	// to restart a level
 
+	// true if a map is running
+	bool		maprunning;
+
 	// demo loop control
 	int			demonum;		// -1 = don't play demos
 	char		demos[MAX_DEMOS][MAX_DEMONAME];		// when not playing
@@ -136,9 +140,8 @@ typedef struct
 	bool	timedemo;
 	char	demoname[MAX_DEMONAME];	// current demo
 	int			forcetrack;			// -1 = use normal cd track
-	int			td_lastframe;		// to meter out one message a frame
-	int			td_startframe;		// host_framecount at start
-	float		td_starttime;		// realtime at second frame of timedemo
+	int			td_currframe;		// to meter out one message a frame
+	double		td_starttime;		// realtime at second frame of timedemo
 
 	download_t	download;
 
@@ -146,7 +149,6 @@ typedef struct
 	int			signon;			// 0 to SIGNONS
 	struct qsocket_s	*netcon;
 	sizebuf_t	message;		// writing buffer to send to server
-
 } client_static_t;
 
 extern client_static_t	cls;
@@ -184,13 +186,6 @@ typedef struct client_state_s
 
 	vec3_t		punchangle;		// temporary offset
 
-	// pitch drifting vars
-	float		idealpitch;
-	float		pitchvel;
-	bool		nodrift;
-	float		driftmove;
-	double		laststop;
-
 	float		viewheight;
 	float		crouch;			// local amount for smoothing stepups
 
@@ -203,11 +198,13 @@ typedef struct client_state_s
 
 	double		mtime[2];		// keep message times steady
 
+	double		oldtime;
 	double		time;			// clients view of time, should be between
 								// servertime and oldservertime to generate
 								// a lerp point for other data
 
-	double		frametime;		// client frametime
+	double		nexteffecttime;	// the next cl.time at which effects will be spawned
+	double		frametime;		// cl.time - cl.oldtime
 
 	float		lastrecievedmessage;	// (realtime) for net trouble icon
 
@@ -271,6 +268,8 @@ extern	cvar_t	cl_autofire;
 extern	cvar_t	cl_shownet;
 extern	cvar_t	cl_nolerp;
 
+extern  cvar_t  cl_autoaim;
+
 extern	cvar_t	cl_pitchdriftspeed;
 extern	cvar_t	lookspring;
 extern	cvar_t	lookstrafe;
@@ -323,19 +322,18 @@ extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
 
 void CL_InitInput (void);
-void CL_SendCmd (float frametime);
+void CL_SendCmd (void);
 void CL_SendMove (usercmd_t *cmd);
 
 void CL_ParseTEnt (void);
 void CL_UpdateTEnts (void);
-void CL_RelinkEntities (void);
 
 void CL_ClearState (void);
 
 
-int  CL_ReadFromServer (double frametime);
+void CL_UpdateClient (double frametime, bool readfromserver);
 void CL_WriteToServer (usercmd_t *cmd);
-void CL_BaseMove (usercmd_t *cmd);
+void CL_BaseMove (usercmd_t *cmd, double frametime);
 
 
 float CL_KeyState (kbutton_t *key);
@@ -353,15 +351,10 @@ void CL_TimeDemo_f (void);
 // cl_parse.c
 void CL_ParseServerMessage (void);
 
-// view
-void CL_StartPitchDrift (void);
-void CL_StopPitchDrift (void);
-void CL_DriftPitch (float time);
-
 void V_RenderView (void);
 void V_UpdateCShifts (void);
 void V_Register (void);
-void V_ParseDamage (float time);
+void V_ParseDamage (void);
 void V_SetContentsColor (int contents);
 
 
@@ -377,4 +370,6 @@ void CL_SignonReply (void);
 #define CLEAR_ALLLERP	(CLEAR_POSES | CLEAR_ORIGIN | CLEAR_ANGLES)
 
 void CL_ClearInterpolation (entity_t *ent, int clearflags);
+entity_t *CL_AllocEntity (void);
+extern int cl_entityallocs;
 

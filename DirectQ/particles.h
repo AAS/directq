@@ -46,12 +46,10 @@ typedef struct particle_s
 	int			visframe;
 
 	// render adjustable
-	LPDIRECT3DTEXTURE9 tex;
 	float scale;
 	float alpha;
 	float fade;
 	float growth;
-	float scalemod;
 } particle_t;
 
 
@@ -91,3 +89,4 @@ extern particle_type_t *active_particle_types;
 extern particle_type_t *free_particle_types;
 
 extern int r_numparticles;
+

@@ -134,6 +134,7 @@ void Menu_ExitMenus (void)
 	key_dest = key_game;
 	m_state = m_none;
 	cls.demonum = m_save_demonum;
+	menu_Current = NULL;
 
 	if (cls.demonum != -1 && !cls.demoplayback && cls.state != ca_connected) CL_NextDemo ();
 }
@@ -198,6 +199,8 @@ void Menu_MainExitQuake (void)
 		return;
 
 	key_dest = key_console;
+	m_state = m_none;
+	menu_Current = NULL;
 	Host_Quit_f ();
 }
 

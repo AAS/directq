@@ -17,28 +17,37 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-// sys.h -- non-portable functions
+// quad batcher
+// we could use ID3DXSprite but:
+// - it addrefs a texture which is slow
+// - it locks each 4 verts vhich is slow
+// - it's not flexible enough for our needs
+// so we don't
 
-int	Sys_FileExists (char *path);
-void Sys_mkdir (char *path);
-void Sys_ThreadCatchup (void);
+typedef struct quadvert_s
+{
+	float xyz[3];
+	DWORD color;
+	float st[2];
+} quadvert_t;
 
-// system IO
-void Sys_DebugLog (char *file, char *fmt, ...);
 
-void Sys_Error (char *error, ...);
-// an error will cause the entire program to exit
+typedef struct d3d_quadstate_s
+{
+	int FirstVertex;
+	int NumVertexes;
+	int FirstIndex;
+	int NumIndexes;
+	int TotalVertexes;
+	int TotalIndexes;
+	int LockOffset;
+	quadvert_t *QuadVerts;
+} d3d_quadstate_t;
 
-void Sys_Quit (int ExitCode);
+extern d3d_quadstate_t d3d_QuadState;
 
-double Sys_FloatTime (void);
-DWORD Sys_Milliseconds (void);
 
-void Sys_SendKeyEvents (void);
-// Perform Key_Event () callbacks until the input que is empty
-
-void Sys_LowFPPrecision (void);
-void Sys_HighFPPrecision (void);
-void Sys_SetFPCW (void);
-
-extern SYSTEM_INFO SysInfo;
+void D3DQuad_Flush (void);
+void D3DQuad_Begin (LPDIRECT3DVERTEXDECLARATION9 decloverride = NULL);
+void D3DQuad_CheckLock (int numvertexes);
+void D3DQuad_Advance (void);

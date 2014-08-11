@@ -29,8 +29,107 @@ void D3DBrush_FlushSurfaces (void);
 void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent);
 
 
-LPDIRECT3DTEXTURE9 d3d_WaterWarpTexture = NULL;
+LPDIRECT3DTEXTURE9 d3d_WWTexture = NULL;
 
+
+byte D3DWarp_SineWarp (int num, int detail)
+{
+	float ang = (num % detail);
+
+	ang /= (float) detail;
+	ang *= 360.0f;
+
+	ang = sin (D3DXToRadian (ang));
+	ang += 1.0f;
+	ang /= 2.0f;
+
+	return BYTE_CLAMPF (ang);
+}
+
+
+byte D3DWarp_EdgeWarp (int num, int detail)
+{
+	float ang = (num % detail);
+
+	// 0..0 range
+	ang /= (float) (detail - 1);
+	ang *= 180.0f;
+
+	// extreme clamp to force the bounding regions to the edges
+	ang = sin (D3DXToRadian (ang));
+	ang *= 4.0f;
+
+	return BYTE_CLAMPF (ang);
+}
+
+
+void D3DWarp_CreateWWTex (int detaillevel)
+{
+	if (!d3d_Device) return;
+
+	int detail;
+
+	if (!d3d_GlobalCaps.supportNonPow2)
+		for (detail = 1; detail < detaillevel; detail <<= 1);
+	else detail = (detaillevel + 3) & ~3;
+
+	if (detail < 8) detail = 8;
+	if (detail > 256) detail = 256;
+	if (detail > d3d_DeviceCaps.MaxTextureWidth) detail = d3d_DeviceCaps.MaxTextureWidth;
+	if (detail > d3d_DeviceCaps.MaxTextureHeight) detail = d3d_DeviceCaps.MaxTextureHeight;
+
+	// protect against multiple calls
+	SAFE_RELEASE (d3d_WWTexture);
+
+	hr = d3d_Device->CreateTexture (detail, detail, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &d3d_WWTexture, NULL);
+	if (FAILED (hr)) Sys_Error ("D3DWarp_CreateWWTex : d3d_Device->CreateTexture failed");
+
+	D3DLOCKED_RECT lockrect;
+
+	d3d_WWTexture->LockRect (0, &lockrect, NULL, 0);
+
+	byte *bgra = (byte *) lockrect.pBits;
+
+	for (int y = 0; y < detail; y++)
+	{
+		for (int x = 0; x < detail; x++, bgra += 4)
+		{
+			bgra[0] = D3DWarp_EdgeWarp (x, detail);
+			bgra[1] = D3DWarp_SineWarp (x, detail);
+			bgra[2] = D3DWarp_SineWarp (y, detail);
+			bgra[3] = D3DWarp_EdgeWarp (y, detail);
+		}
+	}
+
+	d3d_WWTexture->UnlockRect (0);
+	D3DXFilterTexture (d3d_WWTexture, NULL, 0, D3DX_FILTER_BOX);
+
+	// D3DXSaveTextureToFile ("wwtex.png", D3DXIFF_PNG, d3d_WWTexture, NULL);
+}
+
+
+void D3DWarp_SetWaterQuality (cvar_t *var)
+{
+	D3DWarp_CreateWWTex (var->integer * 8);
+}
+
+
+// fitz compatibility, although it does slightly different stuff in DirectQ
+cvar_t r_waterquality ("r_waterquality", "8", CVAR_ARCHIVE, D3DWarp_SetWaterQuality);
+
+void D3DWarp_WWTexOnLoss (void)
+{
+	SAFE_RELEASE (d3d_WWTexture);
+}
+
+
+void D3DWarp_WWTexOnRecover (void)
+{
+	D3DWarp_CreateWWTex (r_waterquality.integer * 8);
+}
+
+
+CD3DDeviceLossHandler d3d_WWTexHandler (D3DWarp_WWTexOnLoss, D3DWarp_WWTexOnRecover);
 
 /*
 ==============================================================================================================================
@@ -123,11 +222,11 @@ void D3DWarp_SetupTurbState (void)
 		D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
 	else D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
 
-	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_LINEAR);
 	D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
 	D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 
-	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// warping
+	D3DHLSL_SetTexture (1, d3d_WWTexture);	// warping
 
 	D3DBrush_Begin ();
 
@@ -183,9 +282,6 @@ void D3DWarp_DrawSurface (d3d_modelsurf_t *modelsurf)
 	msurface_t *surf = modelsurf->surf;
 	bool recommit = false;
 	byte thisalpha = 255;
-
-	// check because we can get a frame update while the verts are NULL
-	if (!modelsurf->surf->verts) return;
 
 	// automatic alpha
 	if (surf->flags & SURF_DRAWWATER) thisalpha = d3d_WaterAlpha;
@@ -385,16 +481,12 @@ void D3DRTT_BeginScene (void)
 	d3d_RenderDef.RTT = false;
 
 	// ensure that this fires only if we're actually running a map
-	if (cls.state != ca_connected) return;
+	if (!cls.maprunning) return;
 
 	// check if we're underwater first
 	if (r_waterwarp.integer != 666)
 	{
 		if (r_waterwarp.value > 1) return;
-
-		// ha!  this causes a host_error when trying to connect online before a map is downloaded!  just bypass it for now
-		if (!cl.worldmodel) return;
-		if (!cl.worldmodel->brushhdr->nodes) return;
 
 		// r_refdef.vieworigin is set in V_RenderView so it can be reliably tested here
 		// fixme - only eval this once
@@ -463,8 +555,8 @@ void D3DRTT_EndScene (void)
 	// set up shader for drawing
 	D3DHLSL_SetWorldMatrix (&m);
 	D3DHLSL_SetTexture (0, d3d_RTTTexture);
-	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// edge biasing
-	D3DHLSL_SetTexture (2, d3d_WaterWarpTexture);	// warping
+	D3DHLSL_SetTexture (1, d3d_WWTexture);	// edge biasing
+	D3DHLSL_SetTexture (2, d3d_WWTexture);	// warping
 
 	// even the baseline RTT texture needs linear filtering as the texcoords will be offset by a sine warp
 	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_NONE);
@@ -506,19 +598,22 @@ void D3DRTT_EndScene (void)
 	d3d_RTTVerts[2].c = blendcolor;
 	d3d_RTTVerts[3].c = blendcolor;
 
-	D3DHLSL_SetFloat ("warptime", cl.time * r_waterwarpspeed.value);
+	D3DHLSL_SetFloat ("warptime", cl.time * r_waterwarpspeed.value * 0.666f);
 
 	// prevent division by 0 in the shader
 	if (r_waterwarpscale.value < 1) Cvar_Set (&r_waterwarpscale, 1.0f);
 	if (r_waterwarpfactor.value < 1) Cvar_Set (&r_waterwarpfactor, 1.0f);
 
+	// rescale to the approx same range as software quake
+	float warpscale = (r_waterwarpscale.value * 7.0f) / 5.0f;
+
 	float Scale[3] =
 	{
 		// this is the correct value to divide the rtt texture into squares as sbheight has already been subtracted from
 		// the incoming texcoord
-		r_waterwarpscale.value * (float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height * 0.2f,
-		r_waterwarpscale.value * 0.2f,
-		(r_waterwarpfactor.value / 1000.0f)
+		warpscale * (float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height * 0.2f,
+		warpscale * 0.2f,
+		(r_waterwarpfactor.value / 1500.0f)
 	};
 
 	D3DHLSL_SetFloatArray ("Scale", Scale, 3);

@@ -36,8 +36,11 @@ m*_t structures are in-memory
 #define	EF_MUZZLEFLASH 			2
 #define	EF_BRIGHTLIGHT 			4
 #define	EF_DIMLIGHT 			8
+#define	EF_REDLIGHT 			16
+#define	EF_BLUELIGHT 			32
 
 #define EF_FULLBRIGHT			16384
+#define EF_NOOCCLUDE			32768
 
 /*
 ==============================================================================
@@ -55,12 +58,14 @@ BRUSH MODELS
 typedef struct d3d_modelsurf_s
 {
 	struct msurface_s *surf;
+	struct texture_s *basetex;
 	entity_t *ent;
 	LPDIRECT3DTEXTURE9 textures[3];
 	int surfalpha;
 	int shaderpass;
-	struct d3d_modelsurf_s *next;
+
 	struct d3d_modelsurf_s *chain;
+	struct d3d_modelsurf_s *next;
 } d3d_modelsurf_t;
 
 
@@ -114,7 +119,7 @@ typedef struct texture_s
 	int contentscolor[3];
 
 	// chains for rendering
-	struct msurface_s *texturechain;
+	struct msurface_s *chain;
 } texture_t;
 
 
@@ -208,6 +213,7 @@ typedef struct msurface_s
 	int			surfnum;
 	int			visframe;		// should be drawn when node is crossed
 
+	struct model_s *model;
 	mplane_t	*plane;
 	int			flags;
 
@@ -220,7 +226,7 @@ typedef struct msurface_s
 	brushpolyvert_t	*verts;
 	unsigned short *indexes;
 
-	struct msurface_s *texturechain;
+	struct msurface_s *chain;
 
 	short		texturemins[2];
 	short		extents[2];
@@ -232,6 +238,7 @@ typedef struct msurface_s
 	// rectangle specifying the surface lightmap
 	RECT		LightRect;
 	int			LightmapOffset;
+	int			LightBase;
 
 	mtexinfo_t	*texinfo;
 
@@ -270,6 +277,7 @@ typedef struct mnode_s
 	int			visframe;		// node needs to be traversed if current
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
+	float		volume;
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -279,9 +287,8 @@ typedef struct mnode_s
 	int			side;
 	mplane_t	*plane;
 	struct mnode_s	*children[2];
-	bool		validside[2];
-	unsigned short		firstsurface;
-	unsigned short		numsurfaces;
+	msurface_t	*surfaces;
+	int	numsurfaces;
 } mnode_t;
 
 
@@ -293,6 +300,7 @@ typedef struct mleaf_s
 	int			visframe;		// node needs to be traversed if current
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
+	float		volume;
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
@@ -379,7 +387,7 @@ typedef struct
 {
 	int					firstpose;
 	int					numposes;
-	float				interval;
+	float				*intervals;
 	trivertx_t			bboxmin;
 	trivertx_t			bboxmax;
 	int					frame;
@@ -481,10 +489,9 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 // mh - special flags
 #define EF_PLAYER	(1 << 21)
 
-// Quake uses 3 (count 'em!) different types of brush model and we need to distinguish between all of them
-#define MOD_BRUSH_WORLD		0
-#define MOD_BRUSH_INLINE	1
-#define MOD_BRUSH_INSTANCED	2
+// prevent bmodels from picking up entity dlight effects
+#define MOD_WORLD	65536
+#define MOD_BMODEL	131072
 
 typedef struct brushheader_s
 {
@@ -525,6 +532,9 @@ typedef struct brushheader_s
 
 	// 29 (Q1) or 30 (HL)
 	int			bspversion;
+
+	struct d3d_drawcall_s *DrawCalls;
+	int NumDrawCalls;
 
 	// bounding box used for rendering with
 	float		bmins[3];

@@ -48,7 +48,6 @@ HRESULT hr = S_OK;
 
 bool	ActiveApp, Minimized;
 bool	WinNT = false;
-bool	WinDWM = false;
 
 static HANDLE	hFile;
 static HANDLE	heventParent;
@@ -120,8 +119,6 @@ Sys_Init
 */
 void Sys_Init (void)
 {
-	// run the timer once to get a valid baseline for subsequents
-	Sys_FloatTime ();
 }
 
 
@@ -188,36 +185,110 @@ void Sys_Quit (int ExitCode)
 {
 	Host_Shutdown ();
 	AllowAccessibilityShortcutKeys (true);
+	timeEndPeriod (1);
 	exit (ExitCode);
+}
+
+
+DWORD Sys_Milliseconds (void)
+{
+#if 1
+	return timeGetTime ();
+#else
+	static __int64 qpcfreq;
+	static bool first;
+	__int64 qpccount;
+
+	if (!first)
+	{
+		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
+		first = true;
+	}
+
+	QueryPerformanceCounter ((LARGE_INTEGER *) &qpccount);
+
+	// compensate for integer division - this is valid in a FRAPS benchmark
+	return (((qpccount * 1000) + (qpcfreq >> 1)) / qpcfreq);
+#endif
 }
 
 
 double Sys_FloatTime (void)
 {
-	__int64	freq;
-	static double totaltime = 0;
+#if 1
+	static DWORD starttime = 0;
+	static bool firsttime = true;
 
-	// get the current frequency as it may change from frame to frame
-	QueryPerformanceFrequency ((LARGE_INTEGER *) &freq);
+	if (firsttime)
+	{
+		starttime = Sys_Milliseconds ();
+		firsttime = false;
+		return 0;
+	}
 
-	__int64 pcount;
-	static __int64 lastpcount;
-	static double frametime;
+	DWORD now = Sys_Milliseconds ();
 
-	// now get the current counter
-	QueryPerformanceCounter ((LARGE_INTEGER *) &pcount);
+	return (double) (now - starttime) * 0.001;
 
-	// if we wrap we just retain the last valid frametime and it will automatically rectify itself next time
-	if (pcount < lastpcount)
-		; // Con_Printf ("QPC overflow!!!\n");
-	else frametime = (double) (pcount - lastpcount) / (double) freq;
+	/*
+	static bool first = true;
 
-	totaltime += frametime;
+	static __int64 qpcfreq;
+	static __int64 qpcstart;
 
-	// store back the previous counter
-	lastpcount = pcount;
+	if (first)
+	{
+		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
+		QueryPerformanceCounter ((LARGE_INTEGER *) &qpcstart);
+		first = false;
+		return 0;
+	}
 
-	return totaltime;
+	__int64 qpccount;
+
+	QueryPerformanceCounter ((LARGE_INTEGER *) &qpccount);
+
+	return ((double) qpccount - (double) qpcstart) / (double) qpcfreq;
+	*/
+#else
+	static bool firsttime = true;
+	static __int64 qpcfreq = 0;
+	static __int64 currqpccount = 0;
+	static __int64 lastqpccount = 0;
+	static double qpcfudge = 0;
+	DWORD currtime = 0;
+	static DWORD lasttime = 0;
+	static DWORD starttime = 0;
+
+	if (firsttime)
+	{
+		timeBeginPeriod (1);
+		starttime = lasttime = Sys_Milliseconds ();
+		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
+		QueryPerformanceCounter ((LARGE_INTEGER *) &lastqpccount);
+		firsttime = false;
+		return 0;
+	}
+
+	// get the current time from both counters
+	currtime = Sys_Milliseconds ();
+	QueryPerformanceCounter ((LARGE_INTEGER *) &currqpccount);
+
+	if (currtime != lasttime)
+	{
+		// requery the frequency in case it changes (which it can on multicore machines)
+		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
+
+		// store back times and calc a fudge factor as Sys_Milliseconds can overshoot on a sub-millisecond scale
+		qpcfudge = ((double) (currqpccount - lastqpccount) / (double) qpcfreq) - ((double) (currtime - lasttime) * 0.001);
+		lastqpccount = currqpccount;
+		lasttime = currtime;
+	}
+	else qpcfudge = 0;
+
+	// the final time is the base from Sys_Milliseconds plus an addition from QPC
+	return ((double) (currtime - starttime) * 0.001) + ((double) (currqpccount - lastqpccount) / (double) qpcfreq) + qpcfudge;
+#endif
 }
 
 
@@ -525,7 +596,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 		block_drawing = false;
 
 		// do this first as the api calls might affect the other stuff
-		if (modestate == MS_FULLDIB)
+		if (D3DVid_IsFullscreen ())
 		{
 			if (vid_canalttab && vid_wassuspended)
 			{
@@ -538,7 +609,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 		}
 
 		ClearAllStates ();
-		IN_SetMouseState (modestate == MS_FULLDIB);
+		IN_SetMouseState (D3DVid_IsFullscreen ());
 
 		// restore everything else
 		VID_SetAppGamma ();
@@ -552,14 +623,14 @@ void AppActivate (BOOL fActive, BOOL minimize)
 	{
 		bWindowActive = false;
 		ClearAllStates ();
-		IN_SetMouseState (modestate == MS_FULLDIB);
+		IN_SetMouseState (D3DVid_IsFullscreen ());
 		VID_SetOSGamma ();
 		CDAudio_Pause ();
 		S_ClearBuffer ();
 		block_drawing = true;
 		AllowAccessibilityShortcutKeys (true);
 
-		if (modestate == MS_FULLDIB)
+		if (D3DVid_IsFullscreen ())
 		{
 			if (vid_canalttab)
 			{
@@ -588,8 +659,8 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 			GetWindowRect (hWnd, &windowrect);
 			GetClientRect (hWnd, &clientrect);
 
-			mmi->ptMinTrackSize.x = 320 + ((windowrect.right - windowrect.left) - (clientrect.right - clientrect.left));
-			mmi->ptMinTrackSize.y = 240 + ((windowrect.bottom - windowrect.top) - (clientrect.bottom - clientrect.top));
+			mmi->ptMinTrackSize.x = 640 + ((windowrect.right - windowrect.left) - (clientrect.right - clientrect.left));
+			mmi->ptMinTrackSize.y = 480 + ((windowrect.bottom - windowrect.top) - (clientrect.bottom - clientrect.top));
 		}
 
 		return 0;
@@ -626,7 +697,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		}
 
 	case WM_KILLFOCUS:
-		if (modestate == MS_FULLDIB)
+		if (D3DVid_IsFullscreen ())
 			ShowWindow (d3d_Window, SW_SHOWMINNOACTIVE);
 
 		return 0;
@@ -708,7 +779,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 
 
-void Host_Frame (double time);
+void Host_Frame (DWORD time);
 void VID_DefaultMonitorGamma_f (void);
 
 void GetCrashReason (LPEXCEPTION_POINTERS ep);
@@ -730,6 +801,8 @@ LONG WINAPI TildeDirectQ (LPEXCEPTION_POINTERS toast)
 int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	InitCommonControls ();
+
+	// this is useless for error diagnosis but at least restores gamma on a crash
 	SetUnhandledExceptionFilter (TildeDirectQ);
 
 	// in case we ever need it for anything...
@@ -740,7 +813,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	WNDCLASS wc;
 
 	// here we use DefWindowProc because we're going to change it a few times and we don't want spurious messages
-	wc.style = CS_CLASSDC;//CS_CLASSDC | CS_HREDRAW | CS_VREDRAW;
+	wc.style = CS_CLASSDC;
 	wc.lpfnWndProc = (WNDPROC) DefWindowProc;
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
@@ -806,11 +879,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if (vinfo.dwPlatformId == VER_PLATFORM_WIN32_NT)
 		WinNT = true;
 	else WinNT = false;
-
-	// see if we're on vista or higher
-	if (vinfo.dwMajorVersion >= 6)
-		WinDWM = true;
-	else WinDWM = false;
 
 	quakeparms_t parms;
 	char cwd[MAX_PATH];
@@ -907,12 +975,13 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// force an initial refdef calculation
 	vid.recalc_refdef = 1;
 
-	// bring everything up and run an initial frame to settle things down
 	Sys_Init ();
 	Host_Init (&parms);
-	Host_Frame (0.1);
 
-	double oldtime = Sys_FloatTime ();
+	// init the timers
+	timeBeginPeriod (1);
+	DWORD oldtime = Sys_Milliseconds ();
+
 	MSG msg;
 
 	// prime the message
@@ -933,22 +1002,19 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		else if (!ActiveApp || Minimized || block_drawing)
 			Sleep (NOT_FOCUS_SLEEP);
 
-		double newtime = Sys_FloatTime ();
+		// RMQ engine timer; more limited resolution than QPC but virtually immune to resolution problems at very high FPS
+		// and gives ultra-smooth performance (some low-level sub-millisecond graininess is present with decoupled timers
+		// but that's an artefact of timer-decoupling rather than related to the timer.....)
+		DWORD newtime = Sys_Milliseconds ();
+		DWORD time = newtime - oldtime;
 
-		// smooth out timings
-		newtime = ((newtime * 2.0) + oldtime) / 3.0;
+		Host_Frame (time);
 
-		// don't run any 0-length frames and give up remainder of this threads time-slice if we have one
-		if (newtime > oldtime)
-		{
-			// run a normal frame
-			Host_Frame (newtime - oldtime);
-			oldtime = newtime;
-		}
-		else Sleep (0);
+		oldtime = newtime;
 	}
 
 	// run through correct shutdown
+	timeEndPeriod (1);
 	Sys_Quit (msg.wParam);
 	return 0;
 }
