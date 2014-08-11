@@ -375,8 +375,10 @@ void COM_CheckContentDirectory (cvar_t *contdir, bool createifneeded);
 // likewise since i moved it to a class
 extern cvar_t registered;
 
-// this can't be externed in heap.h as it doesn't know what a HANDLE is
-extern HANDLE QGlobalHeap;
-
 // line testing
 float CastRay (float *p1, float *p2);
+
+// using byte colours and having the macros wrap may have seemed like a good idea to someone somewhere sometime
+// say in 1996, when every single byte or cpu cycle was precious...
+#define BYTE_CLAMP(i) (int) ((((i) > 255) ? 255 : (((i) < 0) ? 0 : (i))))
+

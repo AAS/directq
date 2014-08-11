@@ -21,127 +21,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
-#include "d3d_hlsl.h"
+
 #include "winquake.h"
 #include "resource.h"
 #include <commctrl.h>
 
+
+extern int NumFilteredStates;
+void D3D_SetDefaultStates (void);
+
+DWORD d3d_3DFilterType = D3DTEXF_LINEAR;
 DWORD d3d_ZbufferEnableFunction = D3DZB_TRUE;
-
-/*
-===================================================================================================================
-
-		STATE MANAGEMENT
-
-	Here Direct3D makes things really easy for us by using a separate enum and separate member functions for
-	each type of state.  This would be a fucking nightmare under OpenGL...
-
-	Note that the runtime will filter state changes on a non-pure device, but we'll also do it ourselves to
-	avoid the overhead of sending them to the runtime in the first place, which may be more optimal
-
-===================================================================================================================
-*/
-
-int NumFilteredStates = 0;
-int NumChangedStates = 0;
-
-
-DWORD d3d_RenderStates[256];
-
-void D3D_SetRenderState (D3DRENDERSTATETYPE State, DWORD Value)
-{
-	if (d3d_RenderStates[(int) State] == Value)
-	{
-		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
-		return;
-	}
-	else
-	{
-		d3d_Device->SetRenderState (State, Value);
-		d3d_RenderStates[(int) State] = Value;
-		NumChangedStates++;
-	}
-}
-
-
-void D3D_SetRenderStatef (D3DRENDERSTATETYPE State, float Value)
-{
-	// some states require float input
-	D3D_SetRenderState (State, ((DWORD *) &Value)[0]);
-}
-
-
-DWORD d3d_TextureStageStates[8][64];
-
-void D3D_SetTextureStageState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)
-{
-	if (d3d_TextureStageStates[Stage][(int) Type] == Value)
-	{
-		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
-		return;
-	}
-	else
-	{
-		d3d_Device->SetTextureStageState (Stage, Type, Value);
-		d3d_TextureStageStates[Stage][(int) Type] = Value;
-		NumChangedStates++;
-	}
-}
-
-
-void D3D_SetTextureStageStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Value)
-{
-	// some states require float input
-	D3D_SetTextureStageState (Stage, Type, ((DWORD *) &Value)[0]);
-}
-
-
-DWORD d3d_SamplerStates[8][64];
-
-void D3D_SetSamplerState (DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value)
-{
-	if (d3d_SamplerStates[Stage][(int) Type] == Value)
-	{
-		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
-		return;
-	}
-	else
-	{
-		d3d_Device->SetSamplerState (Stage, Type, Value);
-		d3d_SamplerStates[Stage][(int) Type] = Value;
-		NumChangedStates++;
-	}
-}
-
-
-void D3D_SetSamplerStatef (DWORD Stage, D3DSAMPLERSTATETYPE Type, float Value)
-{
-	// some states require float input
-	D3D_SetSamplerState (Stage, Type, ((DWORD *) &Value)[0]);
-}
-
-
-LPDIRECT3DTEXTURE9 d3d_Textures[8];
-
-void D3D_SetTexture (DWORD Sampler, LPDIRECT3DTEXTURE9 pTexture)
-{
-	if (d3d_Textures[Sampler] == pTexture)
-	{
-		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
-		return;
-	}
-	else
-	{
-		d3d_Device->SetTexture (Sampler, pTexture);
-		d3d_Textures[Sampler] = pTexture;
-		NumChangedStates++;
-	}
-}
-
 
 // declarations that don't really fit in anywhere else
 LPDIRECT3D9 d3d_Object = NULL;
@@ -151,7 +41,6 @@ D3DCAPS9 d3d_DeviceCaps;
 d3d_global_caps_t d3d_GlobalCaps;
 D3DPRESENT_PARAMETERS d3d_PresentParams;
 
-extern LPDIRECT3DVERTEXBUFFER9 d3d_SkySphereVerts;
 extern LPDIRECT3DINDEXBUFFER9 d3d_DPSkyIndexes;
 extern LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts;
 
@@ -185,11 +74,10 @@ bool DDActive = true;
 bool scr_skipupdate;
 
 
-LPD3DXMATRIXSTACK d3d_WorldMatrixStack = NULL;
-D3DXMATRIX d3d_ViewMatrix;
-D3DXMATRIX d3d_WorldMatrix;
-D3DXMATRIX d3d_PerspectiveMatrix;
-D3DXMATRIX d3d_OrthoMatrix;
+CD3D_MatrixStack *d3d_WorldMatrixStack = NULL;
+CD3D_MatrixStack *d3d_ViewMatrixStack = NULL;
+CD3D_MatrixStack *d3d_ProjMatrixStack = NULL;
+
 
 // RotateAxisLocal requires instantiating a class and filling it's members just to pass
 // 3 floats to it!  These little babies avoid that silly nonsense.  SORT IT OUT MICROSOFT!!!
@@ -231,17 +119,15 @@ void Splash_Destroy (void);
 // video cvars
 // force an invalid mode on initial entry
 cvar_t		vid_mode ("vid_mode", "-666", CVAR_ARCHIVE);
+cvar_t		d3d_mode ("d3d_mode", "0", CVAR_ARCHIVE);
 cvar_t		vid_wait ("vid_wait", "0");
 cvar_t		v_gamma ("gamma", "1", CVAR_ARCHIVE);
 cvar_t		r_gamma ("r_gamma", "1", CVAR_ARCHIVE);
 cvar_t		g_gamma ("g_gamma", "1", CVAR_ARCHIVE);
 cvar_t		b_gamma ("b_gamma", "1", CVAR_ARCHIVE);
-cvar_t		r_64bitlightmaps ("r_64bitlightmaps", 1, CVAR_ARCHIVE);
 
 // consistency with DP and FQ
 cvar_t r_anisotropicfilter ("gl_texture_anisotropy", "1", CVAR_ARCHIVE);
-extern cvar_t r_defaultshaderprecision;
-extern cvar_t r_warpshaderprecision;
 
 
 typedef struct d3d_ModeDesc_s
@@ -399,227 +285,6 @@ void D3D_ResetWindow (D3DDISPLAYMODE *mode)
 
 	// force a status update (i *think* this is all we need here)
 	VID_UpdateWindowStatus ();
-}
-
-
-void D3D_SetDefaultStates (void)
-{
-	// create a matrix stack for the world
-	SAFE_RELEASE (d3d_WorldMatrixStack);
-	D3DXCreateMatrixStack (0, &d3d_WorldMatrixStack);
-	d3d_WorldMatrixStack->LoadIdentity ();
-
-	// init all render states
-	for (int i = 0; i < 256; i++)
-	{
-		DWORD rs;
-
-		HRESULT hr = d3d_Device->GetRenderState ((D3DRENDERSTATETYPE) i, &rs);
-
-		if (SUCCEEDED (hr))
-		{
-			// cache something invalid in there
-			d3d_RenderStates[i] = (rs + 1);
-
-			// now send it through the manager to get a valid default forced
-			D3D_SetRenderState ((D3DRENDERSTATETYPE) i, rs);
-		}
-	}
-
-	for (int s = 0; s < 8; s++)
-	{
-		DWORD ss;
-		HRESULT hr;
-
-		for (int i = 0; i < 64; i++)
-		{
-			// texture stage
-			hr = d3d_Device->GetTextureStageState (s, (D3DTEXTURESTAGESTATETYPE) i, &ss);
-
-			if (SUCCEEDED (hr))
-			{
-				// cache something invalid in there
-				d3d_TextureStageStates[s][i] = (ss + 1);
-
-				// now send it through the manager to get a valid default forced
-				D3D_SetTextureStageState (s, (D3DTEXTURESTAGESTATETYPE) i, ss);
-			}
-
-			// sampler
-			hr = d3d_Device->GetSamplerState (s, (D3DSAMPLERSTATETYPE) i, &ss);
-
-			if (SUCCEEDED (hr))
-			{
-				// cache something invalid in there
-				d3d_SamplerStates[s][i] = (ss + 1);
-
-				// now send it through the manager to get a valid default forced
-				D3D_SetSamplerState (s, (D3DSAMPLERSTATETYPE) i, ss);
-			}
-		}
-
-		// clear the cached texture too
-		d3d_Textures[s] = NULL;
-	}
-
-	NumFilteredStates = 0;
-	NumChangedStates = 0;
-
-	// now we set all of our states to the dcoumented D3D defaults; this is
-	// to protect us against drivers who think they know better than we do.
-	// (note: i observed bad defaults coming through on Intel cards here, so the exercise is valid)
-	D3D_SetRenderState (D3DRS_ZENABLE, d3d_ZbufferEnableFunction);
-	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
-	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_LASTPIXEL, TRUE);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_ONE);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_ZERO);
-	D3D_SetRenderState (D3DRS_CULLMODE, D3DCULL_CCW);
-	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	D3D_SetRenderState (D3DRS_ALPHAREF, 0);
-	D3D_SetRenderState (D3DRS_ALPHAFUNC, D3DCMP_ALWAYS);
-	D3D_SetRenderState (D3DRS_DITHERENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_FOGENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_SPECULARENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_FOGCOLOR, 0);
-	D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
-	D3D_SetRenderStatef (D3DRS_FOGSTART, 0.0f);
-	D3D_SetRenderStatef (D3DRS_FOGEND, 1.0f);
-	D3D_SetRenderStatef (D3DRS_FOGDENSITY, 1.0f);
-	D3D_SetRenderState (D3DRS_RANGEFOGENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_STENCILENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_STENCILPASS, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_STENCILFUNC, D3DCMP_ALWAYS);
-	D3D_SetRenderState (D3DRS_STENCILREF, 0);
-	D3D_SetRenderState (D3DRS_STENCILMASK, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_STENCILWRITEMASK, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_TEXTUREFACTOR, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_WRAP0, 0);
-	D3D_SetRenderState (D3DRS_WRAP1, 0);
-	D3D_SetRenderState (D3DRS_WRAP2, 0);
-	D3D_SetRenderState (D3DRS_WRAP3, 0);
-	D3D_SetRenderState (D3DRS_WRAP4, 0);
-	D3D_SetRenderState (D3DRS_WRAP5, 0);
-	D3D_SetRenderState (D3DRS_WRAP6, 0);
-	D3D_SetRenderState (D3DRS_WRAP7, 0);
-	D3D_SetRenderState (D3DRS_CLIPPING, TRUE);
-	D3D_SetRenderState (D3DRS_LIGHTING, TRUE);
-	D3D_SetRenderState (D3DRS_AMBIENT, 0);
-	D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_NONE);
-	D3D_SetRenderState (D3DRS_COLORVERTEX, TRUE);
-	D3D_SetRenderState (D3DRS_LOCALVIEWER, TRUE);
-	D3D_SetRenderState (D3DRS_NORMALIZENORMALS, FALSE);
-	D3D_SetRenderState (D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1);
-	D3D_SetRenderState (D3DRS_SPECULARMATERIALSOURCE, D3DMCS_COLOR2);
-	D3D_SetRenderState (D3DRS_AMBIENTMATERIALSOURCE, D3DMCS_MATERIAL);
-	D3D_SetRenderState (D3DRS_EMISSIVEMATERIALSOURCE, D3DMCS_MATERIAL);
-	D3D_SetRenderState (D3DRS_VERTEXBLEND, D3DVBF_DISABLE);
-	D3D_SetRenderState (D3DRS_CLIPPLANEENABLE, 0);
-	D3D_SetRenderStatef (D3DRS_POINTSIZE, 1.0f);
-	D3D_SetRenderStatef (D3DRS_POINTSIZE_MIN, 1.0f);
-	D3D_SetRenderState (D3DRS_POINTSPRITEENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_POINTSCALEENABLE, FALSE);
-	D3D_SetRenderStatef (D3DRS_POINTSCALE_A, 1.0f);
-	D3D_SetRenderStatef (D3DRS_POINTSCALE_B, 0.0f);
-	D3D_SetRenderStatef (D3DRS_POINTSCALE_C, 0.0f);
-	D3D_SetRenderState (D3DRS_MULTISAMPLEANTIALIAS, TRUE);
-	D3D_SetRenderState (D3DRS_MULTISAMPLEMASK, 0xFFFFFFFF);
-	D3D_SetRenderState (D3DRS_PATCHEDGESTYLE, D3DPATCHEDGE_DISCRETE);
-	D3D_SetRenderState (D3DRS_DEBUGMONITORTOKEN, D3DDMT_DISABLE);
-	D3D_SetRenderStatef (D3DRS_POINTSIZE_MAX, 64.0f);
-	D3D_SetRenderState (D3DRS_INDEXEDVERTEXBLENDENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0x0000000F);
-	D3D_SetRenderStatef (D3DRS_TWEENFACTOR, 0.0f);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_POSITIONDEGREE, D3DDEGREE_CUBIC);
-	D3D_SetRenderState (D3DRS_NORMALDEGREE, D3DDEGREE_LINEAR);
-	D3D_SetRenderState (D3DRS_SCISSORTESTENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_SLOPESCALEDEPTHBIAS, 0);
-	D3D_SetRenderState (D3DRS_ANTIALIASEDLINEENABLE, FALSE);
-	D3D_SetRenderStatef (D3DRS_MINTESSELLATIONLEVEL, 1.0f);
-	D3D_SetRenderStatef (D3DRS_MAXTESSELLATIONLEVEL, 1.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_X, 0.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_Y, 0.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_Z, 1.0f);
-	D3D_SetRenderStatef (D3DRS_ADAPTIVETESS_W, 0.0f);
-	D3D_SetRenderState (D3DRS_ENABLEADAPTIVETESSELLATION, FALSE);
-	D3D_SetRenderState (D3DRS_TWOSIDEDSTENCILMODE, FALSE);
-	D3D_SetRenderState (D3DRS_CCW_STENCILFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_CCW_STENCILZFAIL, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_CCW_STENCILPASS, D3DSTENCILOP_KEEP);
-	D3D_SetRenderState (D3DRS_CCW_STENCILFUNC, D3DCMP_ALWAYS);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE1, 0x0000000f);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE2, 0x0000000f);
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE3, 0x0000000f);
-	D3D_SetRenderState (D3DRS_BLENDFACTOR, 0xffffffff);
-	D3D_SetRenderState (D3DRS_SRGBWRITEENABLE, 0);
-	D3D_SetRenderStatef (D3DRS_DEPTHBIAS, 0);
-	D3D_SetRenderState (D3DRS_WRAP8, 0);
-	D3D_SetRenderState (D3DRS_WRAP9, 0);
-	D3D_SetRenderState (D3DRS_WRAP10, 0);
-	D3D_SetRenderState (D3DRS_WRAP11, 0);
-	D3D_SetRenderState (D3DRS_WRAP12, 0);
-	D3D_SetRenderState (D3DRS_WRAP13, 0);
-	D3D_SetRenderState (D3DRS_WRAP14, 0);
-	D3D_SetRenderState (D3DRS_WRAP15, 0);
-	D3D_SetRenderState (D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_SRCBLENDALPHA, D3DBLEND_ONE);
-	D3D_SetRenderState (D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO);
-	D3D_SetRenderState (D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
-
-	for (int s = 0; s < 8; s++)
-	{
-		D3D_SetSamplerState (s, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
-		D3D_SetSamplerState (s, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
-		D3D_SetSamplerState (s, D3DSAMP_ADDRESSW, D3DTADDRESS_WRAP);
-		D3D_SetSamplerState (s, D3DSAMP_BORDERCOLOR, 0x00000000);
-		D3D_SetSamplerState (s, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-		D3D_SetSamplerState (s, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-		D3D_SetSamplerState (s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-		D3D_SetSamplerState (s, D3DSAMP_MIPMAPLODBIAS, 0);
-		D3D_SetSamplerState (s, D3DSAMP_MAXMIPLEVEL, 0);
-		D3D_SetSamplerState (s, D3DSAMP_MAXANISOTROPY, 1);
-		D3D_SetSamplerState (s, D3DSAMP_SRGBTEXTURE, 0);
-		D3D_SetSamplerState (s, D3DSAMP_ELEMENTINDEX, 0);
-		D3D_SetSamplerState (s, D3DSAMP_DMAPOFFSET, 0);
-
-		D3D_SetTextureStageState (s, D3DTSS_COLOROP, s == 0 ? D3DTOP_MODULATE : D3DTOP_DISABLE);
-		D3D_SetTextureStageState (s, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-		D3D_SetTextureStageState (s, D3DTSS_COLORARG2, D3DTA_CURRENT);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAOP, s == 0 ? D3DTOP_SELECTARG1 : D3DTOP_DISABLE);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAARG2, D3DTA_CURRENT);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT00, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT01, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT10, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVMAT11, 0.0f);
-		// D3D_SetTextureStageState (s, D3DTSS_TEXCOORDINDEX = 11,
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVLSCALE, 0.0f);
-		D3D_SetTextureStageStatef (s, D3DTSS_BUMPENVLOFFSET, 0.0f);
-		D3D_SetTextureStageState (s, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
-		D3D_SetTextureStageState (s, D3DTSS_COLORARG0, D3DTA_CURRENT);
-		D3D_SetTextureStageState (s, D3DTSS_ALPHAARG0, D3DTA_CURRENT);
-		D3D_SetTextureStageState (s, D3DTSS_RESULTARG, D3DTA_CURRENT);
-		//D3D_SetTextureStageState (s, D3DTSS_CONSTANT = 32,
-	}
-
-	if (NumChangedStates) Con_DPrintf ("%i States set back to correct defaults\n", NumChangedStates);
-
-	NumFilteredStates = 0;
-	NumChangedStates = 0;
-
-	// disable lighting
-	for (int l = 0; l < 8; l++) d3d_Device->LightEnable (l, FALSE);
-
-	D3D_SetRenderState (D3DRS_LIGHTING, FALSE);
-
-	// force updates of values that are checked per-frame
-	d3d_ForceStateUpdates = true;
 }
 
 
@@ -811,13 +476,13 @@ bool D3D_ModeIsCurrent (d3d_ModeDesc_t *mode)
 
 void D3D_SetVidMode (void)
 {
-	// puts a correct number into the vid_mode cvar
+	// puts a correct number into the d3d_mode cvar
 	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
 	{
 		if (D3D_ModeIsCurrent (mode))
 		{
 			// set the correct value
-			Cvar_Set (&vid_mode, mode->ModeNum);
+			Cvar_Set (&d3d_mode, mode->ModeNum);
 			return;
 		}
 	}
@@ -838,7 +503,7 @@ void D3D_DescribeCurrentMode_f (void)
 
 void D3D_DescribeMode_f (void)
 {
-	int modenum = Q_atoi (Cmd_Argv (1));
+	int modenum = atoi (Cmd_Argv (1));
 
 	for (d3d_ModeDesc_t *mode = d3d_ModeList; mode; mode = mode->Next)
 	{
@@ -856,7 +521,6 @@ void D3D_VidRestart_f (void)
 {
 	// release anything that needs to be released
 	D3D_KillUnderwaterTexture ();
-	D3D_ShutdownHLSL ();
 
 	// ensure that present params are valid
 	D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
@@ -971,7 +635,7 @@ void D3D_EnumerateVideoModes (void)
 			// we need to keep our own list because d3d makes it awkward for us by maintaining a separate list for each format
 			if (!d3d_ModeList)
 			{
-				d3d_ModeList = (d3d_ModeDesc_t *) Heap_QMalloc (sizeof (d3d_ModeDesc_t));
+				d3d_ModeList = (d3d_ModeDesc_t *) Pool_Alloc (POOL_PERMANENT, sizeof (d3d_ModeDesc_t));
 				newmode = d3d_ModeList;
 			}
 			else
@@ -981,7 +645,7 @@ void D3D_EnumerateVideoModes (void)
 					if (!newmode->Next)
 						break;
 
-				newmode->Next = (d3d_ModeDesc_t *) Heap_QMalloc (sizeof (d3d_ModeDesc_t));
+				newmode->Next = (d3d_ModeDesc_t *) Pool_Alloc (POOL_PERMANENT, sizeof (d3d_ModeDesc_t));
 				newmode = newmode->Next;
 			}
 
@@ -1036,7 +700,7 @@ void D3D_EnumerateVideoModes (void)
 	if (!NumWindowedModes) return;
 
 	// now we emulate winquake by pushing windowed modes to the start of the list
-	d3d_ModeDesc_t *WindowedModes = (d3d_ModeDesc_t *) Heap_QMalloc (NumWindowedModes * sizeof (d3d_ModeDesc_t));
+	d3d_ModeDesc_t *WindowedModes = (d3d_ModeDesc_t *) Pool_Alloc (POOL_PERMANENT, NumWindowedModes * sizeof (d3d_ModeDesc_t));
 	int wm = 0;
 
 	// walk the main list adding any windowed modes to the windowed modes list
@@ -1084,7 +748,7 @@ void D3D_FindModeForVidMode (D3DDISPLAYMODE *mode)
 	for (d3d_ModeDesc_t *findmode = d3d_ModeList; findmode; findmode = findmode->Next)
 	{
 		// look for a match
-		if (findmode->ModeNum == (int) vid_mode.value)
+		if (findmode->ModeNum == (int) d3d_mode.value)
 		{
 			// copy them out
 			mode->Width = findmode->d3d_Mode.Width;
@@ -1233,7 +897,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 
 		if (SUCCEEDED (hr))
 		{
-			Con_Printf ("Video mode %i (%ix%i) Initialized\n", (int) vid_mode.value, mode->Width, mode->Height);
+			Con_Printf ("Video mode %i (%ix%i) Initialized\n", (int) d3d_mode.value, mode->Width, mode->Height);
 
 			for (int j = 0; ; j++)
 			{
@@ -1298,39 +962,11 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 	else d3d_ZbufferEnableFunction = D3DZB_TRUE;
 
-	// attempt to create a texture in D3DFMT_A16B16G16R16 format
+	// test texture
 	LPDIRECT3DTEXTURE9 tex;
 
-	HRESULT hr = d3d_Device->CreateTexture
-	(
-		128,
-		128,
-		1,
-		0,
-		D3DFMT_A16B16G16R16,
-		D3DPOOL_DEFAULT,
-		&tex,
-		NULL
-	);
-
-	if (SUCCEEDED (hr))
-	{
-		// done with the texture
-		tex->Release ();
-
-		// flag it
-		Con_Printf ("Allowing A16B16G16R16 Lightmap Format!\n");
-		d3d_GlobalCaps.AllowA16B16G16R16 = true;
-	}
-	else
-	{
-		// sucks
-		Con_Printf ("Using A8B8G8R8 Lightmap Format\n");
-		d3d_GlobalCaps.AllowA16B16G16R16 = false;
-	}
-
 	// check for compressed texture formats
-	hr = d3d_Device->CreateTexture
+	HRESULT hr = d3d_Device->CreateTexture
 	(
 		128,
 		128,
@@ -1395,7 +1031,6 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 	else d3d_GlobalCaps.supportDXT5 = false;
 
-	D3D_InitHLSL ();
 	D3D_InitUnderwaterTexture ();
 
 	Con_Printf ("\n");
@@ -1409,7 +1044,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	// set default states
 	D3D_SetDefaultStates ();
 
-	// set the vid_mode cvar correctly
+	// set the d3d_mode cvar correctly
 	D3D_SetVidMode ();
 
 	// build the rest of the video menu (deferred to here as it's dependent on video being up)
@@ -1496,7 +1131,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	(
 		ExWindowStyle,
 		D3D_WINDOW_CLASS_NAME,
-		"DirectQ Version 1.6.3",
+		"DirectQ Version 1.7.2",
 		WindowStyle,
 		rect.left, rect.top,
 		width,
@@ -1573,7 +1208,7 @@ void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
 	scr_disabled_for_loading = true;
 	CDAudio_Pause ();
 
-	// if neither width nor height were specified we take it from the vid_mode cvar
+	// if neither width nor height were specified we take it from the d3d_mode cvar
 	// this then passes through to the find best... functions so that the rest of the mode is filled in
 	if (mode->Width == 0 && mode->Height == 0) D3D_FindModeForVidMode (mode);
 
@@ -1686,7 +1321,7 @@ static void Check_Gamma (unsigned char *pal)
 	// set this properly...
 	if ((i = COM_CheckParm ("-gamma")) == 0)
 		;
-	else Cvar_Set (&v_gamma, Q_atof (com_argv[i + 1]));
+	else Cvar_Set (&v_gamma, atof (com_argv[i + 1]));
 }
 
 
@@ -1699,6 +1334,9 @@ cmd_t D3D_VidRestart_f_Cmd ("vid_restart", D3D_VidRestart_f);
 void D3D_VidInit (byte *palette)
 {
 	InitCommonControls ();
+
+	// ensure
+	memset (&d3d_RenderDef, 0, sizeof (d3d_renderdef_t));
 
 	vid_initialized = true;
 
@@ -1769,7 +1407,7 @@ void D3D_VidInit (byte *palette)
 		if (COM_CheckParm ("-bpp"))
 		{
 			// retrieve the desired BPP
-			int bpp = Q_atoi (com_argv[COM_CheckParm ("-bpp") + 1]);
+			int bpp = atoi (com_argv[COM_CheckParm ("-bpp") + 1]);
 
 			// set the mode format according to the BPP
 			if (bpp == 32)
@@ -1790,7 +1428,7 @@ void D3D_VidInit (byte *palette)
 	if (COM_CheckParm ("-width"))
 	{
 		// if they specify width store it out
-		d3d_CurrentMode.Width = Q_atoi (com_argv[COM_CheckParm ("-width") + 1]);
+		d3d_CurrentMode.Width = atoi (com_argv[COM_CheckParm ("-width") + 1]);
 	}
 	else
 	{
@@ -1802,7 +1440,7 @@ void D3D_VidInit (byte *palette)
 	if (COM_CheckParm ("-height"))
 	{
 		// if they specify height store it out
-		d3d_CurrentMode.Height = Q_atoi (com_argv[COM_CheckParm ("-height") + 1]);
+		d3d_CurrentMode.Height = atoi (com_argv[COM_CheckParm ("-height") + 1]);
 	}
 	else
 	{
@@ -1830,12 +1468,8 @@ void D3D_ShutdownDirect3D (void)
 
 	// release anything that needs to be released
 	D3D_ReleaseTextures ();
-	D3D_ShutdownHLSL ();
 
 	// release everything else
-	SAFE_RELEASE (d3d_WorldMatrixStack);
-	SAFE_RELEASE (d3d_BrushModelVerts);
-	SAFE_RELEASE (d3d_SkySphereVerts);
 	SAFE_RELEASE (d3d_DPSkyIndexes);
 	SAFE_RELEASE (d3d_DPSkyVerts);
 
@@ -1874,7 +1508,6 @@ bool D3D_CheckRecoverDevice (void)
 		{
 		case D3D_OK:
 			// recreate anything that needs to be recreated
-			D3D_InitHLSL ();
 			D3D_InitUnderwaterTexture ();
 
 			// set default states
@@ -1898,7 +1531,6 @@ bool D3D_CheckRecoverDevice (void)
 			// the device is ready to be reset
 			// release anything that needs to be released
 			D3D_KillUnderwaterTexture ();
-			D3D_ShutdownHLSL ();
 
 			// ensure that present params are valid
 			D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
@@ -1949,19 +1581,17 @@ void D3D_CheckTextureFiltering (void)
 	// store out
 	old_aniso = real_aniso;
 
-	DWORD FilterType = D3DTEXF_LINEAR;
-
 	if (real_aniso == 1)
 	{
 		// regular linear filtering
-		FilterType = D3DTEXF_LINEAR;
+		d3d_3DFilterType = D3DTEXF_LINEAR;
 
 		if (key_dest == key_console) Con_Printf ("Set Linear Filtering\n");
 	}
 	else
 	{
 		// anisotropic filtering
-		FilterType = D3DTEXF_ANISOTROPIC;
+		d3d_3DFilterType = D3DTEXF_ANISOTROPIC;
 
 		if (key_dest == key_console) Con_Printf ("Set %i x Anisotropic Filtering\n", real_aniso);
 	}
@@ -1969,29 +1599,29 @@ void D3D_CheckTextureFiltering (void)
 	for (int i = 0; i < d3d_DeviceCaps.MaxTextureBlendStages; i++)
 	{
 		D3D_SetSamplerState (i, D3DSAMP_MAXANISOTROPY, real_aniso);
-		D3D_SetSamplerState (i, D3DSAMP_MINFILTER, FilterType);
-		D3D_SetSamplerState (i, D3DSAMP_MIPFILTER, FilterType);
-		D3D_SetSamplerState (i, D3DSAMP_MAGFILTER, FilterType);
+		D3D_SetSamplerState (i, D3DSAMP_MINFILTER, d3d_3DFilterType);
+		D3D_SetSamplerState (i, D3DSAMP_MIPFILTER, d3d_3DFilterType);
+		D3D_SetSamplerState (i, D3DSAMP_MAGFILTER, d3d_3DFilterType);
 	}
 }
 
 
 void D3D_CheckVidMode (void)
 {
-	// 0 is a valid vid_mode!
+	// 0 is a valid d3d_mode!
 	static int old_vidmode = -1;
 
-	if (old_vidmode == vid_mode.integer) return;
+	if (old_vidmode == d3d_mode.integer) return;
 
 	if (old_vidmode == -1)
 	{
 		// first time is not a mode change
-		old_vidmode = vid_mode.integer;
+		old_vidmode = d3d_mode.integer;
 		return;
 	}
 
 	// testing
-	Con_DPrintf ("mode is %i (was %i)...\n", (int) vid_mode.value, old_vidmode);
+	Con_DPrintf ("mode is %i (was %i)...\n", (int) d3d_mode.value, old_vidmode);
 
 	// attempt to find the mode
 	d3d_ModeDesc_t *findmode = NULL;
@@ -2001,7 +1631,7 @@ void D3D_CheckVidMode (void)
 	for (findmode = d3d_ModeList; findmode; findmode = findmode->Next)
 	{
 		// look for a match
-		if (findmode->ModeNum == vid_mode.integer)
+		if (findmode->ModeNum == d3d_mode.integer)
 		{
 			// look for differences
 			if (findmode->d3d_Mode.Format != d3d_CurrentMode.Format) break;
@@ -2011,6 +1641,9 @@ void D3D_CheckVidMode (void)
 
 			// no differences found so it hasn't changed, just get out
 			Con_Printf ("Mode is unchanged\n");
+
+			// store back to prevent this from repeatedly occurring
+			old_vidmode = d3d_mode.integer;
 			return;
 		}
 	}
@@ -2022,14 +1655,14 @@ void D3D_CheckVidMode (void)
 		Con_Printf ("D3D_CheckVidMode: selected video mode not available\n");
 
 		// restore the previous value
-		Cvar_Set (&vid_mode, old_vidmode);
+		Cvar_Set (&d3d_mode, old_vidmode);
 
 		// get out
 		return;
 	}
 
 	// store back (deferred to here so that we can restore the value if the mode isn't found)
-	old_vidmode = vid_mode.integer;
+	old_vidmode = d3d_mode.integer;
 
 	// reset the window
 	D3D_ResetWindow (&findmode->d3d_Mode);
@@ -2104,50 +1737,6 @@ void D3D_CheckGamma (void)
 }
 
 
-void D3D_CheckShaderPrecision (void)
-{
-	static int old_defaultprecision = 0;
-	static int old_warpprecision = 0;
-	bool reinithlsl = false;
-
-	if (r_defaultshaderprecision.integer != old_defaultprecision || d3d_ForceStateUpdates)
-	{
-		reinithlsl = true;
-		old_defaultprecision = r_defaultshaderprecision.integer;
-	}
-
-	if (r_warpshaderprecision.integer != old_warpprecision || d3d_ForceStateUpdates)
-	{
-		reinithlsl = true;
-		old_warpprecision = r_warpshaderprecision.integer;
-	}
-
-	if (reinithlsl)
-	{
-		D3D_ShutdownHLSL ();
-		D3D_InitHLSL ();
-	}
-}
-
-
-void D3D_Check64BitLightmaps (void)
-{
-	static int old_r_64bitlightmaps = 1;
-
-	if (r_64bitlightmaps.integer != old_r_64bitlightmaps)
-	{
-		if (cls.state == ca_connected)
-		{
-			if (d3d_GlobalCaps.AllowA16B16G16R16)
-				Con_Printf ("You must reload this map for this setting to take effect\n");
-			else Con_Printf ("64-Bit Lightmaps are not supported on this video driver\n");
-		}
-
-		old_r_64bitlightmaps = r_64bitlightmaps.integer;
-	}
-}
-
-
 void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 {
 	// if (NumFilteredStates) Con_Printf ("Filtered %i redundant state changes\n", NumFilteredStates);
@@ -2161,8 +1750,6 @@ void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 	D3D_CheckGamma ();
 	D3D_CheckVidMode ();
 	D3D_CheckTextureFiltering ();
-	D3D_CheckShaderPrecision ();
-	D3D_Check64BitLightmaps ();
 
 	// flush any state update forcing
 	d3d_ForceStateUpdates = false;
@@ -2386,33 +1973,17 @@ extern cvar_t scr_fovcompat;
 void VID_ApplyModeChange (void)
 {
 	// the value here has already been forced to correct in the draw func so we just set it
-	Cvar_Set (&vid_mode, menu_videomodenum);
+	Cvar_Set (&d3d_mode, menu_videomodenum);
 
 	// position the selection back at the video mode option
 	menu_Video.Key (K_UPARROW);
 }
 
 
-#define TAG_64BIT	4
-
 int Menu_VideoCustomDraw (int y)
 {
-	// shader precision
-	if (r_defaultshaderprecision.integer < 0)
-		Cvar_Set (&r_defaultshaderprecision, (float) 0);
-	else if (r_defaultshaderprecision.integer > 2)
-		Cvar_Set (&r_defaultshaderprecision, 2);
-	else Cvar_Set (&r_defaultshaderprecision, r_defaultshaderprecision.integer);
-
-	// shader precision
-	if (r_warpshaderprecision.integer < 0)
-		Cvar_Set (&r_warpshaderprecision, (float) 0);
-	else if (r_warpshaderprecision.integer > 2)
-		Cvar_Set (&r_warpshaderprecision, 2);
-	else Cvar_Set (&r_warpshaderprecision, r_warpshaderprecision.integer);
-
-	// check for "Apply" on vid_mode change
-	if (menu_videomodenum == vid_mode.integer)
+	// check for "Apply" on d3d_mode change
+	if (menu_videomodenum == d3d_mode.integer)
 		menu_Video.DisableOptions (TAG_VIDMODEAPPLY);
 	else menu_Video.EnableOptions (TAG_VIDMODEAPPLY);
 
@@ -2425,20 +1996,20 @@ int Menu_VideoCustomDraw (int y)
 	{
 		if (menu_videomodenum == nummodes)
 		{
-			// store to vid_mode cvar
-			//vid_mode.value = nummodes;
-			//Cvar_Set (&vid_mode, vid_mode.value);
+			// store to d3d_mode cvar
+			//d3d_mode.value = nummodes;
+			//Cvar_Set (&d3d_mode, d3d_mode.value);
 			goto do_aniso;
 		}
 	}
 
-	// invalid mode in vid_mode so force it to the current mode
+	// invalid mode in d3d_mode so force it to the current mode
 	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
 	{
 		if (D3D_ModeIsCurrent (mode))
 		{
-			menu_videomodenum = /*vid_mode.value =*/ nummodes;
-			//Cvar_Set (&vid_mode, vid_mode.value);
+			menu_videomodenum = /*d3d_mode.value =*/ nummodes;
+			//Cvar_Set (&d3d_mode, d3d_mode.value);
 			break;
 		}
 	}
@@ -2464,8 +2035,8 @@ do_aniso:
 
 void Menu_VideoCustomEnter (void)
 {
-	// take it from the vid_mode cvar
-	menu_videomodenum = (int) vid_mode.value;
+	// take it from the d3d_mode cvar
+	menu_videomodenum = (int) d3d_mode.value;
 
 	int real_aniso;
 
@@ -2494,14 +2065,6 @@ void Menu_VideoCustomEnter (void)
 }
 
 
-char *shaderprecisions[] =
-{
-	"Auto-Detect",
-	"Partial",
-	"Full",
-	NULL
-};
-
 void Menu_VideoBuild (void)
 {
 	d3d_ModeDesc_t *mode;
@@ -2511,16 +2074,17 @@ void Menu_VideoBuild (void)
 	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++);
 
 	// add 1 for terminating NULL
-	menu_videomodes = (char **) Heap_QMalloc ((nummodes + 1) * sizeof (char *));
+	menu_videomodes = (char **) Pool_Alloc (POOL_PERMANENT, (nummodes + 1) * sizeof (char *));
 
 	// now write them in
 	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
 	{
-		menu_videomodes[nummodes] = (char *) Heap_QMalloc (128);
+		menu_videomodes[nummodes] = (char *) Pool_Alloc (POOL_PERMANENT, 128);
 
-		sprintf
+		_snprintf
 		(
 			menu_videomodes[nummodes],
+			128,
 			"%i x %i x %i (%s)",
 			mode->d3d_Mode.Width,
 			mode->d3d_Mode.Height,
@@ -2554,15 +2118,15 @@ void Menu_VideoBuild (void)
 		{
 			if (mode == d3d_DeviceCaps.MaxAnisotropy)
 			{
-				menu_anisotropicmodes = (char **) Heap_QMalloc ((i + 1) * sizeof (char *));
+				menu_anisotropicmodes = (char **) Pool_Alloc (POOL_PERMANENT, (i + 1) * sizeof (char *));
 
 				for (int m = 0, f = 1; m < i; m++, f *= 2)
 				{
-					menu_anisotropicmodes[m] = (char *) Heap_QMalloc (32);
+					menu_anisotropicmodes[m] = (char *) Pool_Alloc (POOL_PERMANENT, 32);
 
 					if (f == 1)
-						strcpy (menu_anisotropicmodes[m], "Off");
-					else sprintf (menu_anisotropicmodes[m], "%i x Filtering", f);
+						strncpy (menu_anisotropicmodes[m], "Off", 32);
+					else _snprintf (menu_anisotropicmodes[m], 32, "%i x Filtering", f);
 				}
 
 				menu_anisotropicmodes[i] = NULL;
@@ -2573,14 +2137,8 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
 	}
 
-	if (d3d_GlobalCaps.AllowA16B16G16R16)
-		menu_Video.AddOption (TAG_64BIT, new CQMenuCvarToggle ("64-Bit Lightmaps", &r_64bitlightmaps, 0, 1));
-
 	menu_Video.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
 	menu_Video.AddOption (new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
-	menu_Video.AddOption (new CQMenuTitle ("Shader Precision"));
-	menu_Video.AddOption (new CQMenuSpinControl ("Default Surfaces", &r_defaultshaderprecision.integer, shaderprecisions));
-	menu_Video.AddOption (new CQMenuSpinControl ("Liquid Surfaces", &r_warpshaderprecision.integer, shaderprecisions));
 	menu_Video.AddOption (new CQMenuTitle ("Brightness Controls"));
 	menu_Video.AddOption (new CQMenuCvarSlider ("Master Gamma", &v_gamma, 1.75, 0.25, 0.05));
 	menu_Video.AddOption (new CQMenuCvarSlider ("Red Gamma", &r_gamma, 1.75, 0.25, 0.05));

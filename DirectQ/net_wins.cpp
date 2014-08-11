@@ -94,7 +94,7 @@ void WINS_GetLocalAddress()
 	myAddr = *(int *)local->h_addr_list[0];
 
 	addr = ntohl(myAddr);
-	sprintf(my_tcpip_address, "%d.%d.%d.%d", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
+	_snprintf (my_tcpip_address, 64, "%d.%d.%d.%d", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
 }
 
 
@@ -135,7 +135,7 @@ int WINS_Init (void)
 	}
 
 	// if the quake hostname isn't set, set it to the machine name
-	if (Q_strcmp(hostname.string, "UNNAMED") == 0)
+	if (strcmp(hostname.string, "UNNAMED") == 0)
 	{
 		// see if it's a text IP address (well, close enough)
 		for (p = buff; *p; p++)
@@ -307,7 +307,7 @@ static int PartialIPAddress (char *in, struct qsockaddr *hostaddr)
 	}
 	
 	if (*b++ == ':')
-		port = Q_atoi(b);
+		port = atoi(b);
 	else
 		port = net_hostport;
 
@@ -417,7 +417,7 @@ char *WINS_AddrToString (struct qsockaddr *addr)
 	int haddr;
 
 	haddr = ntohl(((struct sockaddr_in *)addr)->sin_addr.s_addr);
-	sprintf(buffer, "%d.%d.%d.%d:%d", (haddr >> 24) & 0xff, (haddr >> 16) & 0xff, (haddr >> 8) & 0xff, haddr & 0xff, ntohs(((struct sockaddr_in *)addr)->sin_port));
+	_snprintf (buffer, 22, "%d.%d.%d.%d:%d", (haddr >> 24) & 0xff, (haddr >> 16) & 0xff, (haddr >> 8) & 0xff, haddr & 0xff, ntohs(((struct sockaddr_in *)addr)->sin_port));
 	return buffer;
 }
 
@@ -444,7 +444,7 @@ int WINS_GetSocketAddr (int socket, struct qsockaddr *addr)
 	int addrlen = sizeof(struct qsockaddr);
 	unsigned int a;
 
-	Q_memset(addr, 0, sizeof(struct qsockaddr));
+	memset(addr, 0, sizeof(struct qsockaddr));
 	getsockname(socket, (struct sockaddr *)addr, &addrlen);
 	a = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
 	if (a == 0 || a == inet_addr("127.0.0.1"))
@@ -462,11 +462,11 @@ int WINS_GetNameFromAddr (struct qsockaddr *addr, char *name)
 	hostentry = gethostbyaddr ((char *)&((struct sockaddr_in *)addr)->sin_addr, sizeof(struct in_addr), AF_INET);
 	if (hostentry)
 	{
-		Q_strncpy (name, (char *)hostentry->h_name, NET_NAMELEN - 1);
+		strncpy (name, (char *)hostentry->h_name, NET_NAMELEN - 1);
 		return 0;
 	}
 
-	Q_strcpy (name, WINS_AddrToString (addr));
+	strcpy (name, WINS_AddrToString (addr));
 	return 0;
 }
 

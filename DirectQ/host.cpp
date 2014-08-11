@@ -88,7 +88,7 @@ void Host_EndGame (char *message, ...)
 	char		string[1024];
 	
 	va_start (argptr,message);
-	vsprintf (string,message,argptr);
+	_vsnprintf (string,1024,message,argptr);
 	va_end (argptr);
 	Con_DPrintf ("Host_EndGame: %s\n",string);
 	
@@ -123,7 +123,7 @@ void Host_Error (char *error, ...)
 	SCR_EndLoadingPlaque ();		// reenable screen updates
 
 	va_start (argptr,error);
-	vsprintf (string,error,argptr);
+	_vsnprintf (string,1024,error,argptr);
 	va_end (argptr);
 
 	Con_Printf ("Host_Error: %s\n", string);
@@ -160,7 +160,7 @@ void Host_FindMaxClients (void)
 	if (i)
 	{
 		if (i != (com_argc - 1))
-			svs.maxclients = Q_atoi (com_argv[i + 1]);
+			svs.maxclients = atoi (com_argv[i + 1]);
 		else svs.maxclients = 8;
 	}
 
@@ -176,7 +176,7 @@ void Host_FindMaxClients (void)
 		svs.maxclientslimit = 4;
 
 	// allocate space for the max clients
-	svs.clients = (client_s *) Heap_TagAlloc (TAG_STARTUP, svs.maxclientslimit * sizeof (client_t));
+	svs.clients = (client_s *) Pool_Alloc (POOL_PERMANENT, svs.maxclientslimit * sizeof (client_t));
 
 	// if we request more than 1 client we set the appropriate game mode
 	if (svs.maxclients > 1)
@@ -265,7 +265,7 @@ void SV_ClientPrintf (char *fmt, ...)
 	char		string[1024];
 	
 	va_start (argptr,fmt);
-	vsprintf (string, fmt,argptr);
+	_vsnprintf (string, 1024,fmt,argptr);
 	va_end (argptr);
 	
 	MSG_WriteByte (&host_client->message, svc_print);
@@ -284,11 +284,11 @@ void SV_BroadcastPrintf (char *fmt, ...)
 	va_list		argptr;
 	char		string[1024];
 	int			i;
-	
+
 	va_start (argptr,fmt);
-	vsprintf (string, fmt,argptr);
+	_vsnprintf (string, 1024, fmt,argptr);
 	va_end (argptr);
-	
+
 	for (i=0 ; i<svs.maxclients ; i++)
 		if (svs.clients[i].active && svs.clients[i].spawned)
 		{
@@ -310,12 +310,13 @@ void Host_ClientCommands (char *fmt, ...)
 	char		string[1024];
 
 	va_start (argptr,fmt);
-	vsprintf (string, fmt,argptr);
+	_vsnprintf (string, 1024, fmt,argptr);
 	va_end (argptr);
 
 	MSG_WriteByte (&host_client->message, svc_stufftext);
 	MSG_WriteString (&host_client->message, string);
 }
+
 
 /*
 =====================
@@ -456,6 +457,24 @@ This clears all the memory used by both the client and server, but does
 not reinitialize anything.
 ================
 */
+bool signal_cacheclear = false;
+
+void Cmd_SignalCacheClear_f (void)
+{
+	if (!signal_cacheclear)
+	{
+		signal_cacheclear = true;
+		Con_Printf ("Cache memory will be cleared on the next map load\n");
+	}
+	else
+	{
+		signal_cacheclear = false;
+		Con_Printf ("Cache memory will not be cleared\n");
+	}
+}
+
+cmd_t Cmd_SignalCacheClear ("cacheclear", Cmd_SignalCacheClear_f);
+
 void Host_ClearMemory (void)
 {
 	// clear anything that needs to be cleared specifically
@@ -463,15 +482,30 @@ void Host_ClearMemory (void)
 	Mod_ClearAll ();
 	S_ClearSounds ();
 
-	// free everything with a tag allocation of 101 or above
-	Heap_Free101Plus ();
-
 	cls.signon = 0;
+
+	if (signal_cacheclear)
+	{
+		// clear the cache if signalled
+		Pool_Free (POOL_CACHE);
+		signal_cacheclear = false;
+	}
+
+	// clear virtual memory pools for the map and any scratch allocations
+	Pool_Free (POOL_MAP);
+	Pool_Free (POOL_TEMP);
+	Pool_Free (POOL_LOADFILE);
 
 	// wipe the client and server structs
 	memset (&sv, 0, sizeof (sv));
 	memset (&cl, 0, sizeof (cl));
+
+	// clear out the progs structs
 	PR_ClearProgs ();
+
+	// force all open buffers to commit and close
+	// can't do this because of demos!!!
+	// while (_fcloseall ());
 }
 
 
@@ -485,12 +519,20 @@ Host_FilterTime
 Returns false if the time is too short to run a frame
 ===================
 */
+// this really *should* be sv_maxfps, but it's cl_maxfps for compatibility reasons :p
+// changed to host_maxfps for compatibility reasons.  really need to find a way to have 2 names refer to the same variable here...
+cvar_t cl_maxfps ("host_maxfps", 72, CVAR_ARCHIVE);
+
 bool Host_FilterTime (float time)
 {
 	realtime += time;
 
-	// fixme - lock this to refresh rate?
-	if (!cls.timedemo && realtime - oldrealtime < 1.0 / 72.0)
+	// bound sensibly
+	if (cl_maxfps.value < 30) Cvar_Set (&cl_maxfps, 30);
+	if (cl_maxfps.value > 666) Cvar_Set (&cl_maxfps, 666);
+
+	// fixme - lock this to refresh rate? - can't really do that as this is server-side stuff and refresh rate is on the client
+	if (!cls.timedemo && (realtime - oldrealtime < (1.0f / cl_maxfps.value)))
 		return false;		// framerate is too high
 
 	host_frametime = realtime - oldrealtime;
@@ -699,66 +741,8 @@ void Host_Frame (float time)
 //============================================================================
 
 
-extern int vcrFile;
-#define	VCR_SIGNATURE	0x56435231
-// "VCR1"
-
 void Host_InitVCR (quakeparms_t *parms)
 {
-	int		i, len, n;
-	char	*p;
-	
-	if (COM_CheckParm("-playback"))
-	{
-		if (com_argc != 2)
-			Sys_Error("No other parameters allowed with -playback\n");
-
-		Sys_FileOpenRead("quake.vcr", &vcrFile);
-		if (vcrFile == -1)
-			Sys_Error("playback file not found\n");
-
-		Sys_FileRead (vcrFile, &i, sizeof(int));
-		if (i != VCR_SIGNATURE)
-			Sys_Error("Invalid signature in vcr file\n");
-
-		Sys_FileRead (vcrFile, &com_argc, sizeof(int));
-		com_argv = (char **) Heap_QMalloc (com_argc * sizeof(char *));
-		com_argv[0] = parms->argv[0];
-		for (i = 0; i < com_argc; i++)
-		{
-			Sys_FileRead (vcrFile, &len, sizeof(int));
-			p = (char *) Heap_QMalloc (len);
-			Sys_FileRead (vcrFile, p, len);
-			com_argv[i+1] = p;
-		}
-		com_argc++; /* add one for arg[0] */
-		parms->argc = com_argc;
-		parms->argv = com_argv;
-	}
-
-	if ( (n = COM_CheckParm("-record")) != 0)
-	{
-		vcrFile = Sys_FileOpenWrite("quake.vcr");
-
-		i = VCR_SIGNATURE;
-		Sys_FileWrite(vcrFile, &i, sizeof(int));
-		i = com_argc - 1;
-		Sys_FileWrite(vcrFile, &i, sizeof(int));
-		for (i = 1; i < com_argc; i++)
-		{
-			if (i == n)
-			{
-				len = 10;
-				Sys_FileWrite(vcrFile, &len, sizeof(int));
-				Sys_FileWrite(vcrFile, "-playback", len);
-				continue;
-			}
-			len = Q_strlen(com_argv[i]) + 1;
-			Sys_FileWrite(vcrFile, &len, sizeof(int));
-			Sys_FileWrite(vcrFile, com_argv[i], len);
-		}
-	}
-	
 }
 
 /*
@@ -780,7 +764,8 @@ void Host_Init (quakeparms_t *parms)
 	// hold back some things until we're fully up
 	full_initialized = false;
 
-	host_parms = *parms;
+	memcpy (&host_parms, parms, sizeof (quakeparms_t));
+	// host_parms = *parms;
 
 	com_argc = parms->argc;
 	com_argv = parms->argv;
@@ -790,7 +775,6 @@ void Host_Init (quakeparms_t *parms)
 	Cmd_Init ();	
 	V_Init ();
 	Chase_Init ();
-	Host_InitVCR (parms);
 	COM_Init (parms->basedir);
 
 	// as soon as the filesystem comes up we want to load the configs so that cvars will have correct

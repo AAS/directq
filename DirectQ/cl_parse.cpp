@@ -64,7 +64,24 @@ char *svc_strings[] =
 	"svc_finale",			// [string] music [string] text
 	"svc_cdtrack",			// [byte] track [byte] looptrack
 	"svc_sellscreen",
-	"svc_cutscene"
+	"svc_cutscene",
+	"svc_showlmp",	// [string] iconlabel [string] lmpfile [byte] x [byte] y
+	"svc_hidelmp",	// [string] iconlabel
+	"svc_skybox", // [string] skyname
+	"?", // 38
+	"?", // 39
+	"?", // 40
+	"?", // 41
+	"?", // 42
+	"?", // 43
+	"?", // 44
+	"?", // 45
+	"?", // 46
+	"?", // 47
+	"?", // 48
+	"?", // 49
+	"svc_skyboxsize", // [coord] size
+	"svc_fog" // [byte] enable <optional past this point, only included if enable is true> [float] density [byte] red [byte] green [byte] blue
 };
 
 //=============================================================================
@@ -113,7 +130,7 @@ entity_t *CL_EntityNum (int num)
 			if (!cl_entities[cl.num_entities])
 			{
 				// alloc a new entity and set it's number
-				cl_entities[cl.num_entities] = (entity_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, sizeof (entity_t));
+				cl_entities[cl.num_entities] = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t));
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
 			}
 
@@ -235,14 +252,37 @@ void CL_KeepaliveMessage (void)
 CL_ParseServerInfo
 ==================
 */
+// lets get these out of huge arrays on the stack
+static char	**model_precache = NULL;
+static char	**sound_precache = NULL;
+static model_t **static_cl_model_precache = NULL;
+static sfx_t **static_cl_sfx_precache = NULL;
+
 void CL_ParseServerInfo (void)
 {
 	char	*str;
 	int		i;
 	int		nummodels, numsounds;
 
-	char	model_precache[MAX_MODELS][MAX_QPATH];
-	char	sound_precache[MAX_SOUNDS][MAX_QPATH];
+	if (!model_precache)
+	{
+		model_precache = (char **) Pool_Alloc (POOL_PERMANENT, MAX_MODELS * sizeof (char *));
+
+		for (i = 0; i < MAX_MODELS; i++)
+			model_precache[i] = (char *) Pool_Alloc (POOL_PERMANENT, MAX_QPATH * sizeof (char));
+	}
+
+	if (!sound_precache)
+	{
+		sound_precache = (char **) Pool_Alloc (POOL_PERMANENT, MAX_SOUNDS * sizeof (char *));
+
+		for (i = 0; i < MAX_SOUNDS; i++)
+			sound_precache[i] = (char *) Pool_Alloc (POOL_PERMANENT, MAX_QPATH * sizeof (char));
+	}
+
+	// alloc these in permanent memory first time they're needed
+	if (!static_cl_model_precache) static_cl_model_precache = (model_t **) Pool_Alloc (POOL_PERMANENT, MAX_MODELS * sizeof (model_t *));
+	if (!static_cl_sfx_precache) static_cl_sfx_precache = (sfx_t **) Pool_Alloc (POOL_PERMANENT, MAX_SOUNDS * sizeof (sfx_t *));
 
 	Con_DPrintf ("Serverinfo packet received.\n");
 
@@ -266,7 +306,7 @@ void CL_ParseServerInfo (void)
 		return;
 	}
 
-	cl.scores = (scoreboard_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, cl.maxclients * sizeof (*cl.scores));
+	cl.scores = (scoreboard_t *) Pool_Alloc (POOL_MAP, cl.maxclients * sizeof (*cl.scores));
 
 	// parse gametype
 	cl.gametype = MSG_ReadByte ();
@@ -279,12 +319,17 @@ void CL_ParseServerInfo (void)
 	Con_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
 	Con_Printf ("%c%s\n", 2, str);
 
-	// first we go through and touch all of the precache data that still
-	// happens to be in the cache, so precaching something else doesn't
-	// needlessly purge it
-	// precache models
-	memset (cl.model_precache, 0, sizeof(cl.model_precache));
-	for (nummodels=1 ; ; nummodels++)
+	// set up model and sound precache lists
+	cl.model_precache = static_cl_model_precache;
+	cl.sound_precache = static_cl_sfx_precache;
+
+	// item 1 in each list is set to NULL so that we get proper list termination in the event of a return below
+	cl.model_precache[1] = NULL;
+	cl.sound_precache[1] = NULL;
+
+	// first we go through and touch all of the precache data that still happens to
+	// be in the cache, so precaching something else doesn't needlessly purge it
+	for (nummodels = 1;; nummodels++)
 	{
 		str = MSG_ReadString ();
 		if (!str[0])
@@ -296,13 +341,11 @@ void CL_ParseServerInfo (void)
 			return;
 		}
 
-		strcpy (model_precache[nummodels], str);
+		strncpy (model_precache[nummodels], str, MAX_QPATH - 1);
 		Mod_TouchModel (str);
 	}
 
-// precache sounds
-	memset (cl.sound_precache, 0, sizeof(cl.sound_precache));
-	for (numsounds=1 ; ; numsounds++)
+	for (numsounds = 1;; numsounds++)
 	{
 		str = MSG_ReadString ();
 		if (!str[0])
@@ -312,30 +355,37 @@ void CL_ParseServerInfo (void)
 			Con_Printf ("Server sent too many sound precaches\n");
 			return;
 		}
-		strcpy (sound_precache[numsounds], str);
+
+		strncpy (sound_precache[numsounds], str, MAX_QPATH - 1);
 		S_TouchSound (str);
 	}
 
-//
-// now we try to load everything else until a cache allocation fails
-//
-
-	for (i=1 ; i<nummodels ; i++)
+	// now we try to load everything else until a cache allocation fails
+	for (i = 1; i < nummodels; i++)
 	{
 		cl.model_precache[i] = Mod_ForName (model_precache[i], false);
+
+		// avoid memset 0 requirement
+		cl.model_precache[i + 1] = NULL;
+
 		if (cl.model_precache[i] == NULL)
 		{
 			Con_Printf("Model %s not found\n", model_precache[i]);
 			return;
 		}
+
 		CL_KeepaliveMessage ();
 	}
 
 	S_BeginPrecaching ();
 
-	for (i=1 ; i<numsounds ; i++)
+	for (i = 1; i < numsounds; i++)
 	{
 		cl.sound_precache[i] = S_PrecacheSound (sound_precache[i]);
+
+		// avoid memset 0 requirement
+		cl.sound_precache[i + 1] = NULL;
+
 		CL_KeepaliveMessage ();
 	}
 
@@ -348,11 +398,11 @@ void CL_ParseServerInfo (void)
 	// take a pointer to the brush header
 	cl.worldbrush = cl.worldmodel->bh;
 
+	// clean up zone allocations
+	Zone_Compact ();
+
 	// set up map
 	R_NewMap ();
-
-	// make sure nothing is hurt
-	Heap_Check ();
 
 	// noclip is turned off at start
 	noclip_anglehack = false;
@@ -395,19 +445,17 @@ void CL_ParseUpdate (int bits)
 
 	if (bits & U_LONGENTITY)	
 		num = MSG_ReadShort ();
-	else
-		num = MSG_ReadByte ();
+	else num = MSG_ReadByte ();
 
 	ent = CL_EntityNum (num);
 
-for (i=0 ; i<16 ; i++)
-if (bits&(1<<i))
-	bitcounts[i]++;
+	for (i = 0; i < 16; i++)
+		if (bits & (1 << i))
+			bitcounts[i]++;
 
 	if (ent->msgtime != cl.mtime[1])
 		forcelink = true;	// no previous frame to lerp from
-	else
-		forcelink = false;
+	else forcelink = false;
 
 	ent->msgtime = cl.mtime[0];
 
@@ -425,8 +473,7 @@ if (bits&(1<<i))
 	// (e.g. if the ent was originally spawned on a frame other than 0)
 	if (bits & U_FRAME)
 		ent->frame = MSG_ReadByte ();
-	else
-		ent->frame = ent->baseline.frame;
+	else ent->frame = ent->baseline.frame;
 
 	if (model != ent->model)
 	{
@@ -445,7 +492,7 @@ if (bits&(1<<i))
 		}
 		else forcelink = true;	// hack to make null model players work
 
-		if (num > 0 && num <= cl.maxclients) R_TranslatePlayerSkin (num - 1);
+		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
 
 		// if the model has changed we must also reset the interpolation data
 		// pose1 and pose2 are critical as they might be pointing to invalid frames in the new model!!!
@@ -465,34 +512,31 @@ if (bits&(1<<i))
 
 	if (bits & U_COLORMAP)
 		i = MSG_ReadByte();
-	else
-		i = ent->baseline.colormap;
+	else i = ent->baseline.colormap;
 
 	if (!i)
 		ent->colormap = vid.colormap;
 	else
 	{
 		if (i > cl.maxclients)
-			Sys_Error ("i >= cl.maxclients");
-		ent->colormap = cl.scores[i-1].translations;
+			Con_DPrintf ("CL_ParseUpdate: i >= cl.maxclients\n");
+		else ent->colormap = cl.scores[i - 1].translations;
 	}
 
 	if (bits & U_SKIN)
 		skin = MSG_ReadByte();
-	else
-		skin = ent->baseline.skin;
+	else skin = ent->baseline.skin;
 
 	if (skin != ent->skinnum)
 	{
 		ent->skinnum = skin;
 		if (num > 0 && num <= cl.maxclients)
-			R_TranslatePlayerSkin (num - 1);
+			D3D_TranslatePlayerSkin (num - 1);
 	}
 
 	if (bits & U_EFFECTS)
 		ent->effects = MSG_ReadByte();
-	else
-		ent->effects = ent->baseline.effects;
+	else ent->effects = ent->baseline.effects;
 
 	// shift the known values for interpolation
 	VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
@@ -500,36 +544,48 @@ if (bits&(1<<i))
 
 	if (bits & U_ORIGIN1)
 		ent->msg_origins[0][0] = MSG_ReadCoord ();
-	else
-		ent->msg_origins[0][0] = ent->baseline.origin[0];
+	else ent->msg_origins[0][0] = ent->baseline.origin[0];
+
 	if (bits & U_ANGLE1)
 		ent->msg_angles[0][0] = MSG_ReadAngle();
-	else
-		ent->msg_angles[0][0] = ent->baseline.angles[0];
+	else ent->msg_angles[0][0] = ent->baseline.angles[0];
 
 	if (bits & U_ORIGIN2)
 		ent->msg_origins[0][1] = MSG_ReadCoord ();
-	else
-		ent->msg_origins[0][1] = ent->baseline.origin[1];
+	else ent->msg_origins[0][1] = ent->baseline.origin[1];
+
 	if (bits & U_ANGLE2)
-		ent->msg_angles[0][1] = MSG_ReadAngle();
-	else
-		ent->msg_angles[0][1] = ent->baseline.angles[1];
+		ent->msg_angles[0][1] = MSG_ReadAngle ();
+	else ent->msg_angles[0][1] = ent->baseline.angles[1];
 
 	if (bits & U_ORIGIN3)
 		ent->msg_origins[0][2] = MSG_ReadCoord ();
-	else
-		ent->msg_origins[0][2] = ent->baseline.origin[2];
+	else ent->msg_origins[0][2] = ent->baseline.origin[2];
+
 	if (bits & U_ANGLE3)
-		ent->msg_angles[0][2] = MSG_ReadAngle();
-	else
-		ent->msg_angles[0][2] = ent->baseline.angles[2];
+		ent->msg_angles[0][2] = MSG_ReadAngle ();
+	else ent->msg_angles[0][2] = ent->baseline.angles[2];
 
-	if (bits & U_NOLERP)
-		ent->forcelink = true;
+	// the server controls the protocol so this is safe to do.
+	// required as some engines add U_TRANS but don't change PROTOCOL_VERSION
+	if (bits & U_TRANS) // && (cl.Protocol != PROTOCOL_VERSION || nehahra))
+	{
+		// retain neharha protocol compatibility; the 1st and 3rd do nothing yet...
+		int transbits = MSG_ReadFloat ();
+		ent->alphaval = MSG_ReadFloat () * 256;
+		if (transbits == 2) MSG_ReadFloat ();
 
-	// store anything that may have changed back to the baseline
-	//ent->baseline.frame = ent->frame;
+		// hack - nehahra sends alpha of 0 in some (many?) cases
+		// bjp nehahra engine does this too
+		if (ent->alphaval < 1 && nehahra) ent->alphaval = 255;
+	}
+	else if (ent != cl_entities[cl.viewentity])
+	{
+		// this will stomp the alphaval set in chase, so don't do it
+		ent->alphaval = 255;
+	}
+
+	if (bits & U_NOLERP) ent->forcelink = true;
 
 	if (forcelink)
 	{
@@ -706,7 +762,7 @@ void CL_NewTranslation (int slot)
 	top = cl.scores[slot].colors & 0xf0;
 	bottom = (cl.scores[slot].colors &15)<<4;
 
-	R_TranslatePlayerSkin (slot);
+	D3D_TranslatePlayerSkin (slot);
 
 	// fixme - old winquake?
 	for (i=0 ; i<VID_GRADES ; i++, dest += 256, source+=256)
@@ -726,6 +782,9 @@ void CL_NewTranslation (int slot)
 }
 
 
+vec3_t absmins;
+vec3_t absmaxs;
+
 // this is basically the "a lof of this goes away" thing in the old gl_refrag...
 // or at least one version of it.  see also R_AddStaticEntitiesForLeaf and the various struct defs
 void CL_FindTouchedLeafs (entity_t *ent, mnode_t *node)
@@ -733,13 +792,15 @@ void CL_FindTouchedLeafs (entity_t *ent, mnode_t *node)
 	mplane_t	*splitplane;
 	int			sides;
 
+loc0:;
 	if (node->contents == CONTENTS_SOLID) return;
 
 	// add as a touched leaf if the node is a leaf
 	if (node->contents < 0)
 	{
+loc1:;
 		mleaf_t *leaf = (mleaf_t *) node;
-		staticent_t *se = (staticent_t *) Heap_TagAlloc (TAG_BRUSHMODELS, sizeof (staticent_t));
+		staticent_t *se = (staticent_t *) Pool_Alloc (POOL_MAP, sizeof (staticent_t));
 		se->ent = ent;
 
 		se->next = leaf->statics;
@@ -747,20 +808,55 @@ void CL_FindTouchedLeafs (entity_t *ent, mnode_t *node)
 		return;
 	}
 
-	vec3_t absmins;
-	vec3_t absmaxs;
-
-	// setup absmin and max for the entity (nothing much to be gained from caching
-	// these once as it's load time stuff and minimal overhead to recalculate them...)
-	VectorAdd (ent->origin, ent->model->mins, absmins);
-	VectorAdd (ent->origin, ent->model->maxs, absmaxs);
-
 	splitplane = node->plane;
 	sides = BOX_ON_PLANE_SIDE (absmins, absmaxs, splitplane);
 
 	// recurse down the contacted sides
-	if (sides & 1) CL_FindTouchedLeafs (ent, node->children[0]);
-	if (sides & 2) CL_FindTouchedLeafs (ent, node->children[1]);
+#if 1
+	if ((sides & 1) && node->children[0]->contents != CONTENTS_SOLID)
+	{
+		if (!(sides & 2) && node->children[0]->contents < 0)
+		{
+			node = node->children[0];
+			goto loc1;
+		}
+		else if (!(sides & 2))
+		{
+			node = node->children[0];
+			goto loc0;
+		}
+		else CL_FindTouchedLeafs (ent, node->children[0]);
+	}
+
+	if ((sides & 2) && node->children[1]->contents != CONTENTS_SOLID)
+	{
+		// test for a leaf and drop out if so, otherwise it's a node so go round again
+		node = node->children[1];
+
+		if (node->contents < 0)
+			goto loc1;
+		else goto loc0;	// CL_FindTouchedLeafs (ent, node);
+	}
+#else
+	switch (sides)
+	{
+	case 1:
+		node = node->children[0];
+		goto loc0;
+
+	case 2:
+		node = node->children[1];
+		goto loc0;
+
+	default:
+		// (sides & 1) && (sides & 2)
+		if (node->children[0]->contents != CONTENTS_SOLID)
+			CL_FindTouchedLeafs (ent, node->children[0]);
+
+		node = node->children[1];
+		goto loc0;
+	}
+#endif
 }
 
 
@@ -779,7 +875,7 @@ void CL_ParseStatic (void)
 
 	entity_t *ent;
 
-	ent = (entity_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, sizeof (entity_t));
+	ent = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t));
 	CL_ParseBaseline (ent);
 
 	// copy it to the current state
@@ -793,8 +889,19 @@ void CL_ParseStatic (void)
 	VectorCopy (ent->baseline.origin, ent->origin);
 	VectorCopy (ent->baseline.angles, ent->angles);
 
-	// find all leafs which this static ent touches
-	CL_FindTouchedLeafs (ent, cl.worldbrush->nodes);
+	// some static ents don't have models; that's OK as we only use this for rendering them!
+	if (ent->model)
+	{
+		// setup absmin and absmax for the entity
+		VectorAdd (ent->origin, ent->model->mins, absmins);
+		VectorAdd (ent->origin, ent->model->maxs, absmaxs);
+
+		// find all leafs which this static ent touches
+		CL_FindTouchedLeafs (ent, cl.worldbrush->nodes);
+	}
+
+	// not removed yet
+	ent->staticremoved = false;
 }
 
 
@@ -821,6 +928,9 @@ void CL_ParseStaticSound (void)
 
 #define SHOWNET(x) if(cl_shownet.value==2)Con_Printf ("%3i:%s\n", msg_readcount-1, x);
 
+void SHOWLMP_decodehide (void);
+void SHOWLMP_decodeshow (void);
+
 /*
 =====================
 CL_ParseServerMessage
@@ -844,7 +954,9 @@ void CL_ParseServerMessage (void)
 // parse the message
 //
 	MSG_BeginReading ();
-	
+
+	static int lastcmd = 0;
+
 	while (1)
 	{
 		if (msg_badread)
@@ -858,21 +970,21 @@ void CL_ParseServerMessage (void)
 			return;		// end of message
 		}
 
-	// if the high bit of the command byte is set, it is a fast update
+		// if the high bit of the command byte is set, it is a fast update
 		if (cmd & 128)
 		{
 			SHOWNET("fast update");
-			CL_ParseUpdate (cmd&127);
+			CL_ParseUpdate (cmd & 127);
 			continue;
 		}
 
 		SHOWNET(svc_strings[cmd]);
-	
-	// other commands
+
+		// other commands
 		switch (cmd)
 		{
 		default:
-			Host_Error ("CL_ParseServerMessage: Illegible server message\n");
+			Host_Error ("CL_ParseServerMessage: Illegible server message %i\nlast was %s\n", cmd, svc_strings[lastcmd]);
 			break;
 
 		case svc_nop:
@@ -908,7 +1020,18 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_stufftext:
-			Cbuf_AddText (MSG_ReadString ());
+			{
+				char *stufftxt = MSG_ReadString ();
+
+				if (!strnicmp (stufftxt, "crosshair", 9) && nehahra)
+				{
+					// gotcha FUCKING nehahra
+					// the crosshair cvar belongs to the PLAYER, not to the mod
+					break;
+				}
+
+				Cbuf_AddText (stufftxt);
+			}
 			break;
 
 		case svc_damage:
@@ -931,14 +1054,17 @@ void CL_ParseServerMessage (void)
 
 		case svc_lightstyle:
 			i = MSG_ReadByte ();
+
 			if (i >= MAX_LIGHTSTYLES)
 			{
-				Con_DPrintf ("CL_ParseServerMessage: svc_lightstyle > MAX_LIGHTSTYLES\n");
+				Con_Printf ("CL_ParseServerMessage: svc_lightstyle > MAX_LIGHTSTYLES\n");
+				MSG_ReadString ();
 				break;
 			}
 
-			Q_strcpy (cl_lightstyle[i].map,  MSG_ReadString());
-			cl_lightstyle[i].length = Q_strlen(cl_lightstyle[i].map);
+			// note - 64, not 63, is intentional here
+			strncpy (cl_lightstyle[i].map,  MSG_ReadString(), 64);
+			cl_lightstyle[i].length = strlen(cl_lightstyle[i].map);
 			break;
 
 		case svc_sound:
@@ -952,24 +1078,42 @@ void CL_ParseServerMessage (void)
 
 		case svc_updatename:
 			i = MSG_ReadByte ();
+
 			if (i >= cl.maxclients)
-				Host_Error ("CL_ParseServerMessage: svc_updatename > MAX_SCOREBOARD");
-			strcpy (cl.scores[i].name, MSG_ReadString ());
+			{
+				Con_DPrintf ("CL_ParseServerMessage: svc_updatename > MAX_SCOREBOARD\n");
+				MSG_ReadString ();
+				break;
+			}
+
+			strncpy (cl.scores[i].name, MSG_ReadString (), 31);
 			break;
 
 		case svc_updatefrags:
 			i = MSG_ReadByte ();
+
 			if (i >= cl.maxclients)
-				Host_Error ("CL_ParseServerMessage: svc_updatefrags > MAX_SCOREBOARD");
+			{
+				Con_DPrintf ("CL_ParseServerMessage: svc_updatefrags > MAX_SCOREBOARD\n");
+				MSG_ReadShort ();
+				break;
+			}
+
 			cl.scores[i].frags = MSG_ReadShort ();
 			break;			
 
 		case svc_updatecolors:
 			i = MSG_ReadByte ();
+
 			if (i >= cl.maxclients)
-				Host_Error ("CL_ParseServerMessage: svc_updatecolors > MAX_SCOREBOARD");
+			{
+				Con_DPrintf ("CL_ParseServerMessage: svc_updatecolors > MAX_SCOREBOARD\n");
+				MSG_ReadByte ();
+				break;
+			}
+
 			cl.scores[i].colors = MSG_ReadByte ();
-			// CL_NewTranslation (i);
+			CL_NewTranslation (i);
 			break;
 
 		case svc_particle:
@@ -1024,8 +1168,12 @@ void CL_ParseServerMessage (void)
 			if (i < 0 || i >= MAX_CL_STATS)
 			{
 				Con_DPrintf ("CL_ParseServerMessage: svc_updatestat: %i is invalid\n", i);
+
+				// keep message state consistent
+				MSG_ReadLong ();
 				break;
 			}
+
 			cl.stats[i] = MSG_ReadLong ();;
 			break;
 
@@ -1065,7 +1213,46 @@ void CL_ParseServerMessage (void)
 		case svc_sellscreen:
 			Cmd_ExecuteString ("help", src_command);
 			break;
+
+		case svc_hidelmp:
+			SHOWLMP_decodehide ();
+			break;
+
+		case svc_showlmp:
+			SHOWLMP_decodeshow ();
+			break;
+
+		case svc_skybox:
+			{
+				// cheesy skybox loading
+				char *skyname = MSG_ReadString ();
+				Cmd_ExecuteString (va ("loadsky %s\n", skyname), src_command);
+			}
+			break;
+
+		case svc_skyboxsize:
+			MSG_ReadCoord ();
+			break;
+
+		case svc_fog:
+			if (MSG_ReadByte())
+			{
+				Cvar_Set ("gl_fogdensity", MSG_ReadFloat ());
+				Cvar_Set ("gl_fogred", MSG_ReadByte () / 255.0);
+				Cvar_Set ("gl_foggreen", MSG_ReadByte () / 255.0);
+				Cvar_Set ("gl_fogblue", MSG_ReadByte () / 255.0);
+				Cvar_Set ("gl_fogenable", 1);
+			}
+			else
+			{
+				Cvar_Set ("gl_fogenable", 0.0f);
+				Cvar_Set ("gl_fogdensity", 0.0f);
+			}
+
+			break;
 		}
+
+		lastcmd = cmd;
 	}
 }
 

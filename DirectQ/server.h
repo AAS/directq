@@ -45,9 +45,7 @@ typedef struct
 	double		lastchecktime;
 	
 	char		name[64];			// map name
-#ifdef QUAKE2
-	char		startspot[64];
-#endif
+
 	char		modelname[64];		// maps/<name>.bsp, for model_precache[0]
 
 	struct model_s 	*worldmodel;

@@ -20,7 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
-#include "d3d_hlsl.h"
+
 
 cvar_t r_newparticles ("r_newparticles", "0", CVAR_ARCHIVE);
 
@@ -91,8 +91,8 @@ int		ramp2[] = {0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66, -1, -1, -1, -1, 
 int		ramp3[] = {0x6d, 0x6b, 6, 5, 4, 3, -1, -1, -1, -1, -1};
 
 particle_t	*active_particles, *free_particles;
+particle_t	r_defaultparticle;
 
-particle_t	*particles;
 int	r_numparticles;
 int r_numallocations;
 
@@ -104,15 +104,33 @@ typedef struct partverts_s
 	float x, y, z;
 	DWORD color;
 	float s, t;
-	byte pad[8];
 } partverts_t;
 
-// size of the particle batch - about 1000 verts per primitive call per d3d documentation
-// this ensures that we satisfy the "divide by 6" rule
+
+// sizes of the particle batch
 #define R_PARTICLE_RENDER_BATCH_SIZE	300
+#define R_PARTICLE_RENDER_VERT_COUNT	200
 
 // draw in batches
-partverts_t partverts[R_PARTICLE_RENDER_BATCH_SIZE];
+partverts_t partverts[R_PARTICLE_RENDER_VERT_COUNT];
+short partindexes[R_PARTICLE_RENDER_BATCH_SIZE];
+
+void D3D_SetParticleIndexes (void)
+{
+	// simulate quads using triangles (d3d don't have quads)
+	int indexes[] = {0, 1, 2, 2, 3, 0};
+
+	for (int i = 0, j = 0; i < R_PARTICLE_RENDER_BATCH_SIZE; i++)
+	{
+		partindexes[i] = indexes[j];
+		indexes[j] += 4;
+		j++;
+
+		// wrap
+		if (j == 6) j = 0;
+	}
+}
+
 
 /*
 ===============
@@ -128,7 +146,39 @@ void R_InitParticles (void)
 		return;
 	}
 
-	// setup anything else we need here...
+	// sanity check the vertex count also; these should be equal otherwise the code is bad
+	int vc = R_PARTICLE_RENDER_BATCH_SIZE / 6 * 4;
+
+	if (vc != R_PARTICLE_RENDER_VERT_COUNT)
+	{
+		Sys_Error ("R_InitParticles: particle batch sizes do not compute");
+		return;
+	}
+
+	// create indexes for quad drawing
+	D3D_SetParticleIndexes ();
+
+	// setup default particle state
+	// we need to explicitly set stuff to 0 as memsetting to 0 doesn't
+	// actually equate to a value of 0 with floating point
+	r_defaultparticle.scale = 0.5;
+	r_defaultparticle.alpha = 255;
+	r_defaultparticle.fade = 0;
+	r_defaultparticle.growth = 0;
+	r_defaultparticle.scalemod = 0.004;
+
+	// default flags
+	r_defaultparticle.flags = PT_STATIC;
+
+	// default velocity change and gravity
+	r_defaultparticle.dvel[0] = r_defaultparticle.dvel[1] = r_defaultparticle.dvel[2] = 0;
+	r_defaultparticle.grav = 0;
+
+	// colour and ramps
+	r_defaultparticle.colorramp = NULL;
+	r_defaultparticle.color = 0;
+	r_defaultparticle.ramp = 0;
+	r_defaultparticle.ramptime = 0;
 }
 
 
@@ -141,7 +191,7 @@ void R_ClearParticles (void)
 {
 	int i;
 
-	free_particles = (particle_t *) Heap_TagAlloc (TAG_PARTICLES, PARTICLE_BATCH_SIZE * sizeof (particle_t));
+	free_particles = (particle_t *) Pool_Alloc (POOL_MAP, PARTICLE_BATCH_SIZE * sizeof (particle_t));
 	active_particles = NULL;
 
 	for (i = 1; i < PARTICLE_BATCH_SIZE; i++)
@@ -155,6 +205,9 @@ void R_ClearParticles (void)
 
 	// no allocations have been done yet
 	r_numallocations = 0;
+
+	// particledottexture didn't exist when r_defaultparticle was created
+	r_defaultparticle.tex = particledottexture;
 }
 
 
@@ -168,56 +221,33 @@ particle_t *R_NewParticle (void)
 		// just take from the free list
 		p = free_particles;
 		free_particles = p->next;
+
+		// set default drawing parms (may be overwritten as desired)
+		memcpy (p, &r_defaultparticle, sizeof (particle_t));
+
+		// link it in
 		p->next = active_particles;
 		active_particles = p;
 
-		// set default parameters
-		// (these may be overwritten as required)
-		// we need to explicitly set these to 0 as memsetting to 0 doesn't
-		// actually equate to a value of 0 with floating point
-		p->tex = particledottexture;
-		p->scale = 0.5;
-		p->alpha = 255;
-		p->fade = 0;
-		p->growth = 0;
-		p->scalemod = 0.004;
-
-		// default flags
-		p->flags = PT_STATIC;
-
-		// default velocity change and gravity
-		p->dvel[0] = p->dvel[1] = p->dvel[2] = 0;
-		p->grav = 0;
-
-		// colour and ramps
-		p->colorramp = NULL;
-		p->color = 0;
-		p->ramp = 0;
-		p->ramptime = 0;
-
+		// done
 		return p;
 	}
-	else
-	{
-		// testing
-		// Con_Printf ("%i Particle Allocations!\n", ++r_numallocations);
 
-		// alloc some more free particles
-		free_particles = (particle_t *) Heap_TagAlloc (TAG_PARTICLES, PARTICLE_EXTRA_SIZE * sizeof (particle_t));
+	// alloc some more free particles
+	free_particles = (particle_t *) Pool_Alloc (POOL_MAP, PARTICLE_EXTRA_SIZE * sizeof (particle_t));
 
-		// link them up
-		for (i = 0; i < PARTICLE_EXTRA_SIZE; i++)
-			free_particles[i].next = &free_particles[i + 1];
+	// link them up
+	for (i = 0; i < PARTICLE_EXTRA_SIZE; i++)
+		free_particles[i].next = &free_particles[i + 1];
 
-		// finish the link
-		free_particles[PARTICLE_EXTRA_SIZE - 1].next = NULL;
+	// finish the link
+	free_particles[PARTICLE_EXTRA_SIZE - 1].next = NULL;
 
-		// track the number of particles we have
-		r_numparticles += PARTICLE_EXTRA_SIZE;
+	// track the number of particles we have
+	r_numparticles += PARTICLE_EXTRA_SIZE;
 
-		// call recursively to return the first new free particle
-		return R_NewParticle ();
-	}
+	// call recursively to return the first new free particle
+	return R_NewParticle ();
 }
 
 
@@ -287,6 +317,7 @@ void R_EntityParticles (entity_t *ent)
 
 void R_ReadPointFile_f (void)
 {
+	// fixme - draw as a line list...
 	FILE	*f;
 	vec3_t	org;
 	int		r;
@@ -294,9 +325,11 @@ void R_ReadPointFile_f (void)
 	particle_t	*p;
 	char	name[MAX_OSPATH];
 	
-	sprintf (name,"maps/%s.pts", sv.name);
+	_snprintf (name, 128, "%s/maps/%s.pts", com_gamedir, sv.name);
 
-	COM_FOpenFile (name, &f);
+	// we don't expect that these will ever be in PAKs
+	f = fopen (name, "rb");
+
 	if (!f)
 	{
 		Con_Printf ("couldn't open %s\n", name);
@@ -305,6 +338,7 @@ void R_ReadPointFile_f (void)
 	
 	Con_Printf ("Reading %s...\n", name);
 	c = 0;
+
 	for ( ;; )
 	{
 		r = fscanf (f,"%f %f %f\n", &org[0], &org[1], &org[2]);
@@ -324,6 +358,35 @@ void R_ReadPointFile_f (void)
 	fclose (f);
 	Con_Printf ("%i points read\n", c);
 }
+
+
+void R_EmitParticle (vec3_t org)
+{
+}
+
+
+void R_EmitParticles (vec3_t mins, vec3_t maxs, int scale, int time)
+{
+	particle_t *p;
+
+	for (int i = mins[0]; i < maxs[0]; i += scale)
+	{
+		for (int j = mins[1]; j < maxs[1]; j += scale)
+		{
+			for (int k = mins[2]; k < maxs[2]; k += scale)
+			{
+				p = R_NewParticle ();
+
+				p->org[0] = i;
+				p->org[1] = j;
+				p->org[2] = k;
+
+				p->die = cl.time + 0.01;
+			}
+		}
+	}
+}
+
 
 /*
 ===============
@@ -804,22 +867,16 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 /*
 ===============
-R_DrawParticles
+D3D_DrawParticles
 ===============
 */
 extern	cvar_t	sv_gravity;
 
-inline DWORD FloatToDW (float f)
-{
-	return *((DWORD *) &f);
-}
+float partst[6][2] = {{1, 0}, {1, 1}, {0, 1}, {0, 0}};
+float partv[6][2] = {{1, 1}, {-1, 1}, {-1, -1}, {1, -1}};
 
 
-float partst[6][2] = {{1, 0}, {1, 1}, {0, 1}, {0, 1}, {0, 0}, {1, 0}};
-float partv[6][2] = {{1, 1}, {-1, 1}, {-1, -1}, {-1, -1}, {1, -1}, {1, 1}};
-
-
-void R_KillParticles (void)
+void D3D_PrepareParticles (void)
 {
 	// no particles at all!
 	if (!active_particles) return;
@@ -874,12 +931,71 @@ void R_KillParticles (void)
 			if (p->leaf->contents == CONTENTS_SOLID || p->leaf->contents == CONTENTS_SKY) p->die = -1;
 		}
 
+		// set contents rendering flags
+		if (p->leaf->contents == CONTENTS_WATER || p->leaf->contents == CONTENTS_SLIME || p->leaf->contents == CONTENTS_LAVA)
+		{
+			d3d_RenderDef.renderflags |= R_RENDERWATERPARTICLE;
+			p->flags |= R_RENDERWATERPARTICLE;
+		}
+		else
+		{
+			d3d_RenderDef.renderflags |= R_RENDEREMPTYPARTICLE;
+			p->flags |= R_RENDEREMPTYPARTICLE;
+		}
+
 		// do anything else interesting with the particle that we need to do here...
 	}
 }
 
 
-__inline int R_SubmitParticles (int v, int treshold)
+void R_UpdateParticle (particle_t *p)
+{
+	int i;
+	float grav = d3d_RenderDef.frametime * sv_gravity.value * 0.05;
+
+	// fade alpha and increase size
+	p->alpha -= (p->fade * d3d_RenderDef.frametime);
+	p->scale += (p->growth * d3d_RenderDef.frametime);
+
+	// kill if fully faded or too small
+	if (p->alpha <= 0 || p->scale <= 0)
+	{
+		// no further adjustments needed
+		p->die = -1;
+		return;
+	}
+
+	if (p->colorramp)
+	{
+		// colour ramps
+		p->ramp += p->ramptime * d3d_RenderDef.frametime;
+
+		// adjust color for ramp
+		if (p->colorramp[(int) p->ramp] < 0)
+		{
+			// no further adjustments needed
+			p->die = -1;
+			return;
+		}
+		else p->color = p->colorramp[(int) p->ramp];
+	}
+
+	// update origin
+	p->org[0] += p->vel[0] * d3d_RenderDef.frametime;
+	p->org[1] += p->vel[1] * d3d_RenderDef.frametime;
+	p->org[2] += p->vel[2] * d3d_RenderDef.frametime;
+
+	// adjust for gravity
+	p->vel[2] += grav * p->grav;
+
+	// adjust for velocity change
+	p->vel[0] += p->dvel[0] * d3d_RenderDef.frametime;
+	p->vel[1] += p->dvel[1] * d3d_RenderDef.frametime;
+	p->vel[2] += p->dvel[2] * d3d_RenderDef.frametime;
+}
+
+
+int D3D_SubmitParticles (int v, int treshold)
 {
 	// nothing to submit
 	if (!v) return 0;
@@ -888,17 +1004,29 @@ __inline int R_SubmitParticles (int v, int treshold)
 	if (v < treshold) return v;
 
 	// draw current batch
-	d3d_ParticleFX.Draw (D3DPT_TRIANGLELIST, v / 3, partverts, sizeof (partverts_t));
+	D3D_DrawPrimitive
+	(
+		D3DPT_TRIANGLELIST,
+		0,
+		v,
+		v / 2,
+		partindexes,
+		D3DFMT_INDEX16,
+		partverts,
+		sizeof (partverts_t)
+	);
 
 	// reset counter to 0
 	return 0;
 }
 
 
-void R_RenderParticles (void)
+void D3D_DrawParticles (int flag)
 {
 	// no particles to render
 	if (!active_particles) return;
+	if ((flag & R_RENDEREMPTYPARTICLE) && !(d3d_RenderDef.renderflags & R_RENDEREMPTYPARTICLE)) return;
+	if ((flag & R_RENDERWATERPARTICLE) && !(d3d_RenderDef.renderflags & R_RENDERWATERPARTICLE)) return;
 
 	// texture is a shader param so we need to update shader state if we switch texture
 	// hence we also cache it and check for changes here
@@ -906,18 +1034,24 @@ void R_RenderParticles (void)
 	int NumPasses;
 
 	// state setup
-	d3d_Device->SetVertexDeclaration (d3d_ParticleVertexDeclaration);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 
-	d3d_ParticleFX.BeginRender ();
-	d3d_ParticleFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
-	d3d_ParticleFX.SwitchToPass (0);
+	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
 
 	// disable z buffer writing and enable blending
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
+
+	D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+
+	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+
+	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+
+	D3D_SetTexCoordIndexes (0);
 
 	// for rendering
 	int v = 0;
@@ -931,11 +1065,15 @@ void R_RenderParticles (void)
 		// note however that we just skip drawing rather than killing it as it may be in a
 		// visible leaf later on in it's lifetime.  the exception (dealt with above) is if it
 		// hits a solid or sky leaf, at which point we stop drawing it.
-		if (p->leaf->visframe != r_visframecount) continue;
+		if (p->leaf->visframe != d3d_RenderDef.visframecount) continue;
 
 		// final sanity check on colour to avoid array bounds errors
 		if (p->color < 0 || p->color > 255) continue;
 
+		if ((flag & R_RENDEREMPTYPARTICLE) && !(p->flags & R_RENDEREMPTYPARTICLE)) continue;
+		if ((flag & R_RENDERWATERPARTICLE) && !(p->flags & R_RENDERWATERPARTICLE)) continue;
+
+		// contents
 		// check for a texture change
 		// to do - sort by texture?
 		// we need to keep a separate texture cache here as the particle renderer need to know when
@@ -943,10 +1081,10 @@ void R_RenderParticles (void)
 		if (p->tex != cachedtexture)
 		{
 			// submit everything in the current batch
-			v = R_SubmitParticles (v, 0);
+			v = D3D_SubmitParticles (v, 0);
 
 			// bind it and update the shader state
-			d3d_ParticleFX.SetTexture (p->tex);
+			D3D_SetTexture (0, p->tex);
 
 			// re-cache
 			cachedtexture = p->tex;
@@ -976,12 +1114,12 @@ void R_RenderParticles (void)
 		else scale = 1;
 
 		// note - scale each particle individually
-		VectorScale (vup, p->scale * scale, up);
-		VectorScale (vright, p->scale * scale, right);
+		VectorScale (vup, p->scale * scale * 1.125, up);
+		VectorScale (vright, p->scale * scale * 1.125, right);
 
 		// draw as two triangles so that we can submit multiple particles in a single batch
-		// (might not be optimal...)
-		for (int pv = 0; pv < 6; pv++, v++)
+		// note: these are indexed triangles
+		for (int pv = 0; pv < 4; pv++, v++)
 		{
 			partverts[v].x = p->org[0] + up[0] * partv[pv][0] + right[0] * partv[pv][1];
 			partverts[v].y = p->org[1] + up[1] * partv[pv][0] + right[1] * partv[pv][1];
@@ -992,80 +1130,17 @@ void R_RenderParticles (void)
 		}
 
 		// check batch submission
-		v = R_SubmitParticles (v, R_PARTICLE_RENDER_BATCH_SIZE);
+		v = D3D_SubmitParticles (v, R_PARTICLE_RENDER_VERT_COUNT);
+
+		// update this particle
+		R_UpdateParticle (p);
 	}
 
 	// submit everything left over
-	R_SubmitParticles (v, 0);
+	D3D_SubmitParticles (v, 0);
 
 	// revert state
-	d3d_ParticleFX.EndRender ();
+	D3D_DisableAlphaBlend ();
 }
 
-
-void R_UpdateParticles (void)
-{
-	// no particles to update
-	if (!active_particles) return;
-
-	int i;
-	float grav = r_frametime * sv_gravity.value * 0.05;
-
-	// walk the list starting at the first active particle
-	for (particle_t *p = active_particles; p; p = p->next)
-	{
-		// fade alpha and increase size
-		p->alpha -= (p->fade * r_frametime);
-		p->scale += (p->growth * r_frametime);
-
-		// kill if fully faded or too small
-		if (p->alpha <= 0 || p->scale <= 0)
-		{
-			// no further adjustments needed
-			p->die = -1;
-			continue;
-		}
-
-		if (p->colorramp)
-		{
-			// colour ramps
-			p->ramp += p->ramptime * r_frametime;
-
-			// adjust color for ramp
-			if (p->colorramp[(int) p->ramp] < 0)
-			{
-				// no further adjustments needed
-				p->die = -1;
-				continue;
-			}
-			else p->color = p->colorramp[(int) p->ramp];
-		}
-
-		// update origin
-		p->org[0] += p->vel[0] * r_frametime;
-		p->org[1] += p->vel[1] * r_frametime;
-		p->org[2] += p->vel[2] * r_frametime;
-
-		// adjust for gravity
-		p->vel[2] += grav * p->grav;
-
-		// adjust for velocity change
-		p->vel[0] += p->dvel[0] * r_frametime;
-		p->vel[1] += p->dvel[1] * r_frametime;
-		p->vel[2] += p->dvel[2] * r_frametime;
-	}
-}
-
-
-void R_DrawParticles (void)
-{
-	// remove expired particles from the active particles list
-	R_KillParticles ();
-
-	// render all particles still in the active list
-	R_RenderParticles ();
-
-	// update particle states
-	R_UpdateParticles ();
-}
 

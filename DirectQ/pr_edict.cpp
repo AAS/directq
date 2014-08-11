@@ -60,6 +60,52 @@ typedef struct {
 
 static gefv_cache	gefvCache[GEFV_CACHESIZE] = {{NULL, ""}, {NULL, ""}};
 
+int ed_alpha;
+int ed_fullbright;
+int ed_ammo_shells1;
+int ed_ammo_nails1;
+int ed_ammo_lava_nails;
+int ed_ammo_rockets1;
+int ed_ammo_multi_rockets;
+int ed_ammo_cells1;
+int ed_ammo_plasma;
+int ed_items2;
+int ed_gravity;
+int ed_idealpitch;
+int ed_pitch_speed;
+
+ddef_t *ED_FindField (char *name);
+
+int FindFieldOffset (char *field)
+{
+	ddef_t *d;
+
+	if (!(d = ED_FindField (field)))
+		return 0;
+
+	return d->ofs * 4;
+}
+
+
+void FindEdictFieldOffsets (void)
+{
+	// get field offsets for anything that's sent through GetEdictFieldValue
+	ed_alpha = FindFieldOffset ("alpha");
+	ed_fullbright = FindFieldOffset ("fullbright");
+	ed_ammo_shells1 = FindFieldOffset ("ammo_shells1");
+	ed_ammo_nails1 = FindFieldOffset ("ammo_nails1");
+	ed_ammo_lava_nails = FindFieldOffset ("ammo_lava_nails");
+	ed_ammo_rockets1 = FindFieldOffset ("ammo_rockets1");
+	ed_ammo_multi_rockets = FindFieldOffset ("ammo_multi_rockets");
+	ed_ammo_cells1 = FindFieldOffset ("ammo_cells1");
+	ed_ammo_plasma = FindFieldOffset ("ammo_plasma");
+	ed_items2 = FindFieldOffset ("items2");
+	ed_gravity = FindFieldOffset ("gravity");
+	ed_idealpitch = FindFieldOffset ("idealpitch");
+	ed_pitch_speed = FindFieldOffset ("pitch_speed");
+}
+
+
 /*
 =================
 ED_ClearEdict
@@ -70,6 +116,7 @@ Sets everything to NULL
 void ED_ClearEdict (edict_t *e)
 {
 	memset (&e->v, 0, qcprogs.entityfields * 4);
+	e->tracetimer = -1;
 	e->free = false;
 }
 
@@ -84,6 +131,8 @@ instead of being removed and recreated, which can cause interpolated
 angles and bad trails.
 =================
 */
+edict_t *SV_AllocEdicts (int numedicts);
+
 edict_t *ED_Alloc (void)
 {
 	int			i;
@@ -103,7 +152,7 @@ edict_t *ED_Alloc (void)
 		}
 	}
 
-	if (i == MAX_EDICTS)
+	if (i >= MAX_EDICTS)
 	{
 		// if we hit the absolute upper limit just pick the one with the lowest free time
 		float bestfree = sv.time;
@@ -132,32 +181,8 @@ edict_t *ED_Alloc (void)
 		Sys_Error ("ED_Alloc: edict count at protocol maximum!");
 	}
 
-#define EDICT_BATCH_SIZE 128
-	if (i == sv.max_edicts)
-	{
-		Con_DPrintf ("Allocating %i new edicts\n", EDICT_BATCH_SIZE);
-
-		// allocate a new batch of edicts in temporary memory
-		edict_t *new_edicts = (edict_t *) Heap_TagAlloc (TAG_TEMPORARY1, (sv.max_edicts + EDICT_BATCH_SIZE) * pr_edict_size);
-
-		// copy the old in
-		memcpy (new_edicts, sv.edicts, sv.max_edicts * pr_edict_size);
-
-		// release the old
-		Heap_TagFree (TAG_SV_EDICTS);
-
-		// increase the max edict number
-		sv.max_edicts += EDICT_BATCH_SIZE;
-
-		// now reallocate the old
-		sv.edicts = (edict_t *) Heap_TagAlloc (TAG_SV_EDICTS, sv.max_edicts * pr_edict_size);
-
-		// copy the new back to the old
-		memcpy (sv.edicts, new_edicts, sv.max_edicts * pr_edict_size);
-
-		// now release the temp
-		Heap_TagFree (TAG_TEMPORARY1);
-	}
+	// alloc 32 more edicts
+	if (i >= sv.max_edicts) SV_AllocEdicts (32);
 
 	sv.num_edicts++;
 	e = EDICT_NUM (i);
@@ -345,33 +370,33 @@ char *PR_ValueString (etype_t type, eval_t *val)
 	switch (itype)
 	{
 	case ev_string:
-		sprintf (line, "%s", pr_strings + val->string);
+		_snprintf (line, 256, "%s", pr_strings + val->string);
 		break;
 	case ev_entity:	
-		sprintf (line, "entity %i", NUM_FOR_EDICT(PROG_TO_EDICT(val->edict)) );
+		_snprintf (line, 256, "entity %i", NUM_FOR_EDICT(PROG_TO_EDICT(val->edict)) );
 		break;
 	case ev_function:
 		f = pr_functions + val->function;
-		sprintf (line, "%s()", pr_strings + f->s_name);
+		_snprintf (line, 256, "%s()", pr_strings + f->s_name);
 		break;
 	case ev_field:
 		def = ED_FieldAtOfs ( val->_int );
-		sprintf (line, ".%s", pr_strings + def->s_name);
+		_snprintf (line, 256, ".%s", pr_strings + def->s_name);
 		break;
 	case ev_void:
-		sprintf (line, "void");
+		_snprintf (line, 256, "void");
 		break;
 	case ev_float:
-		sprintf (line, "%5.1f", val->_float);
+		_snprintf (line, 256, "%5.1f", val->_float);
 		break;
 	case ev_vector:
-		sprintf (line, "'%5.1f %5.1f %5.1f'", val->vector[0], val->vector[1], val->vector[2]);
+		_snprintf (line, 256, "'%5.1f %5.1f %5.1f'", val->vector[0], val->vector[1], val->vector[2]);
 		break;
 	case ev_pointer:
-		sprintf (line, "pointer");
+		_snprintf (line, 256, "pointer");
 		break;
 	default:
-		sprintf (line, "bad type %i", itype);
+		_snprintf (line, 256, "bad type %i", itype);
 		break;
 	}
 	
@@ -399,30 +424,30 @@ char *PR_UglyValueString (etype_t type, eval_t *val)
 	switch (itype)
 	{
 	case ev_string:
-		sprintf (line, "%s", pr_strings + val->string);
+		_snprintf (line, 256, "%s", pr_strings + val->string);
 		break;
 	case ev_entity:	
-		sprintf (line, "%i", NUM_FOR_EDICT(PROG_TO_EDICT(val->edict)));
+		_snprintf (line, 256, "%i", NUM_FOR_EDICT(PROG_TO_EDICT(val->edict)));
 		break;
 	case ev_function:
 		f = pr_functions + val->function;
-		sprintf (line, "%s", pr_strings + f->s_name);
+		_snprintf (line, 256, "%s", pr_strings + f->s_name);
 		break;
 	case ev_field:
 		def = ED_FieldAtOfs ( val->_int );
-		sprintf (line, "%s", pr_strings + def->s_name);
+		_snprintf (line, 256, "%s", pr_strings + def->s_name);
 		break;
 	case ev_void:
-		sprintf (line, "void");
+		_snprintf (line, 256, "void");
 		break;
 	case ev_float:
-		sprintf (line, "%f", val->_float);
+		_snprintf (line, 256, "%f", val->_float);
 		break;
 	case ev_vector:
-		sprintf (line, "%f %f %f", val->vector[0], val->vector[1], val->vector[2]);
+		_snprintf (line, 256, "%f %f %f", val->vector[0], val->vector[1], val->vector[2]);
 		break;
 	default:
-		sprintf (line, "bad type %i", itype);
+		_snprintf (line, 256, "bad type %i", itype);
 		break;
 	}
 	
@@ -448,11 +473,11 @@ char *PR_GlobalString (int ofs)
 	val = (void *)&pr_globals[ofs];
 	def = ED_GlobalAtOfs(ofs);
 	if (!def)
-		sprintf (line,"%i(???)", ofs);
+		_snprintf (line,128,"%i(???)", ofs);
 	else
 	{
 		s = PR_ValueString ((etype_t) def->type, (eval_t *) val);
-		sprintf (line,"%i(%s)%s", ofs, pr_strings + def->s_name, s);
+		_snprintf (line,128,"%i(%s)%s", ofs, pr_strings + def->s_name, s);
 	}
 	
 	i = strlen(line);
@@ -471,9 +496,9 @@ char *PR_GlobalStringNoContents (int ofs)
 	
 	def = ED_GlobalAtOfs(ofs);
 	if (!def)
-		sprintf (line,"%i(???)", ofs);
+		_snprintf (line,128,"%i(???)", ofs);
 	else
-		sprintf (line,"%i(%s)", ofs, pr_strings + def->s_name);
+		_snprintf (line,128,"%i(%s)", ofs, pr_strings + def->s_name);
 	
 	i = strlen(line);
 	for ( ; i<20 ; i++)
@@ -614,7 +639,7 @@ void ED_PrintEdict_f (void)
 {
 	int		i;
 	
-	i = Q_atoi (Cmd_Argv(1));
+	i = atoi (Cmd_Argv(1));
 	if (i >= sv.num_edicts)
 	{
 		Con_Printf("Bad edict number\n");
@@ -756,8 +781,8 @@ char *ED_NewString (char *string)
 	char	*newstring, *new_p;
 	int		i,l;
 
-	l = strlen(string) + 1;
-	newstring = (char *) Heap_TagAlloc (TAG_PROGS, l);
+	l = strlen (string) + 1;
+	newstring = (char *) Pool_Alloc (POOL_MAP, l);
 	new_p = newstring;
 
 	for (i=0 ; i< l ; i++)
@@ -936,7 +961,7 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 		{
 			char	temp[32];
 			strcpy (temp, com_token);
-			sprintf (com_token, "0 %s 0", temp);
+			_snprintf (com_token, 1024, "0 %s 0", temp);
 		}
 
 		if (!ED_ParseEpair ((void *)&ent->v, key, com_token))
@@ -1040,6 +1065,7 @@ void ED_LoadFromFile (char *data)
 
 		pr_global_struct->self = EDICT_TO_PROG (ent);
 		PR_ExecuteProgram (func - pr_functions);
+
 		ed_number++;
 	}
 
@@ -1057,7 +1083,7 @@ void ED_LoadFromFile (char *data)
 
 void *PR_LoadProgsLump (byte *lumpbegin, int lumplen, int lumpitemsize)
 {
-	byte *lumpdata = (byte *) Heap_TagAlloc (TAG_PROGS, lumplen * lumpitemsize);
+	byte *lumpdata = (byte *) Pool_Alloc (POOL_MAP, lumplen * lumpitemsize);
 	memcpy (lumpdata, lumpbegin, lumplen * lumpitemsize);
 	return lumpdata;
 }
@@ -1096,24 +1122,26 @@ void PR_LoadProgs (void)
 
 	CRC_Init (&pr_crc);
 
-	FILE *progsfile;
-	int progslen = COM_FOpenFile ("progs.dat", &progsfile);
+	HANDLE progshandle = INVALID_HANDLE_VALUE;
+	DWORD rlen;
+	int progslen = COM_FOpenFile ("progs.dat", &progshandle);
 
-	if (!progsfile)
-		Host_Error ("PR_LoadProgs: couldn't load progs.dat");
+	if (progshandle == INVALID_HANDLE_VALUE) Host_Error ("PR_LoadProgs: couldn't load progs.dat");
+
 	Con_DPrintf ("Programs occupy %iK.\n", progslen / 1024);
 
 	// because progs seems prone to heap corruption errors (fixme - why?) we load the header
 	// into a non-pointer struct and the lumps into their own individual buffers to make it more robust
 	// this fixes the crash bug with game changing followed by map load
-	byte *progsbuf = new byte[progslen];
-	progs = (dprograms_t *) progsbuf;
+	progs = (dprograms_t *) Pool_Alloc (POOL_TEMP, progslen);
 
 	// read it all in
-	fread (progs, progslen, 1, progsfile);
+	ReadFile (progshandle, progs, progslen, &rlen, NULL);
 
 	// done with the file
-	fclose (progsfile);
+	COM_FCloseFile (&progshandle);
+
+	if (rlen != progslen) Host_Error ("PR_LoadProgs: not enough data read");
 
 	// CRC the progs
 	for (i = 0; i < progslen; i++)
@@ -1140,12 +1168,8 @@ void PR_LoadProgs (void)
 	pr_statements = (dstatement_t *) PR_LoadProgsLump (progsdata + qcprogs.ofs_statements, qcprogs.numstatements, sizeof (dstatement_t));
 	pr_globals = (float *) PR_LoadProgsLump (progsdata + qcprogs.ofs_globals, qcprogs.numglobals, sizeof (float));
 
-	// done with the loaded progs now
-	delete[] progsbuf;
-
 	// this just points at pr_globals (per comment above on it's declaration)
 	pr_global_struct = (globalvars_t *) pr_globals;
-
 	pr_edict_size = qcprogs.entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
 
 	// byte swap the lumps
@@ -1174,7 +1198,7 @@ void PR_LoadProgs (void)
 		pr_globaldefs[i].s_name = LittleLong (pr_globaldefs[i].s_name);
 	}
 
-	for (i=0 ; i<qcprogs.numfielddefs ; i++)
+	for (i = 0; i < qcprogs.numfielddefs; i++)
 	{
 		pr_fielddefs[i].type = LittleShort (pr_fielddefs[i].type);
 		if (pr_fielddefs[i].type & DEF_SAVEGLOBAL)
@@ -1183,7 +1207,10 @@ void PR_LoadProgs (void)
 		pr_fielddefs[i].s_name = LittleLong (pr_fielddefs[i].s_name);
 	}
 
-	for (i = 0; i < qcprogs.numglobals; i++) ((int *) pr_globals)[i] = LittleLong (((int *) pr_globals)[i]);
+	for (i = 0; i < qcprogs.numglobals; i++)
+		((int *) pr_globals)[i] = LittleLong (((int *) pr_globals)[i]);
+
+	FindEdictFieldOffsets ();
 }
 
 
@@ -1203,11 +1230,26 @@ void PR_Init (void)
 }
 
 
-edict_t *EDICT_NUM(int n)
+edict_t *EDICT_NUM (int n)
 {
+	// edict overflow
+	if (n >= MAX_EDICTS)
+		Host_Error ("EDICT_NUM: bad number %i (max: %i)", n, sv.max_edicts);
+
+	// do it this way because we're not guaranteed that 16 allocs will get us to n edicts
+	while (n >= sv.max_edicts)
+	{
+		if (sv.max_edicts >= MAX_EDICTS)
+			Host_Error ("EDICT_NUM: edict overflow\n");
+
+		// this can happen in some mods
+		SV_AllocEdicts (16);
+	}
+
 	if (n < 0 || n >= sv.max_edicts)
-		Sys_Error ("EDICT_NUM: bad number %i", n);
-	return (edict_t *)((byte *)sv.edicts+ (n)*pr_edict_size);
+		Host_Error ("EDICT_NUM: bad number %i (max: %i)", n, sv.max_edicts);
+
+	return (edict_t *) ((byte *) sv.edicts + (n) * pr_edict_size);
 }
 
 int NUM_FOR_EDICT(edict_t *e)

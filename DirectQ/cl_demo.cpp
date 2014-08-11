@@ -20,9 +20,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+static HANDLE demohandle = INVALID_HANDLE_VALUE;
+
 static long demofile_len, demofile_start;
 
 void CL_FinishTimeDemo (void);
+
+// nehahra cutscene - fixme - need to find a way to skip a cutscene while playing
+cvar_t cutscene ("cutscene", "1", CVAR_ARCHIVE);
 
 /*
 ==============================================================================
@@ -44,12 +49,13 @@ CL_CloseDemoFile
 */
 void CL_CloseDemoFile (void)
 {
-	if (!cls.demofile)
+	if (demohandle == INVALID_HANDLE_VALUE)
 		return;
 
-	fclose (cls.demofile);
-	cls.demofile = NULL;
+	COM_FCloseFile (&demohandle);
+	demohandle = INVALID_HANDLE_VALUE;
 }
+
 
 void SCR_SetTimeout (float timeout);
 
@@ -90,19 +96,19 @@ bool CL_WriteDemoMessage (void)
 	bool    Success;
 
 	len = LittleLong (net_message.cursize);
-	Success = fwrite (&len, 4, 1, cls.demofile) == 1;
+	Success = (COM_FWriteFile (demohandle, &len, 4) == 1);
 
-	for (i=0 ; i<3 && Success ; i++)
+	for (i = 0; i < 3 && Success; i++)
 	{
 		f = LittleFloat (cl.viewangles[i]);
-		Success = fwrite (&f, 4, 1, cls.demofile) == 1;
+		Success = (COM_FWriteFile (demohandle, &f, 4) == 1);
 	}
 
 	if (Success)
-		Success = fwrite (net_message.data, net_message.cursize, 1, cls.demofile) == 1;
+		Success = (COM_FWriteFile (demohandle, net_message.data, net_message.cursize) == 1);
 
 	if (Success)
-		fflush (cls.demofile);
+		; // flush buffer
 	else
 	{
 		CL_CloseDemoFile ();
@@ -127,7 +133,7 @@ int CL_GetMessage (void)
 	
 	if	(cls.demoplayback)
 	{
-	// decide if it is time to grab the next message		
+		// decide if it is time to grab the next message		
 		if (cls.signon == SIGNONS)	// allways grab until fully connected
 		{
 			if (cls.timedemo)
@@ -145,27 +151,30 @@ int CL_GetMessage (void)
 					return 0;		// don't need another message yet
 			}
 		}
-		
+
 		// Detect EOF, especially for demos in pak files
-		if (ftell(cls.demofile) - demofile_start >= demofile_len)
+		if (SetFilePointer (demohandle, 0, NULL, FILE_CURRENT) - demofile_start >= demofile_len)
 			Host_EndGame ("Missing disconnect in demofile\n");
-	
-	// get the next message
-		Success = fread (&net_message.cursize, 4, 1, cls.demofile) == 1;
+
+		// get the next message
+		Success = (COM_FReadFile (demohandle, &net_message.cursize, 4) != -1);
 
 		VectorCopy (cl.mviewangles[0], cl.mviewangles[1]);
-		for (i=0 ; i<3 && Success ; i++)
+
+		for (i = 0; i < 3 && Success; i++)
 		{
-			Success = fread (&f, 4, 1, cls.demofile) == 1;
+			Success = (COM_FReadFile (demohandle, &f, 4) != -1);
 			cl.mviewangles[0][i] = LittleFloat (f);
 		}
 		
 		if (Success)
 		{
 			net_message.cursize = LittleLong (net_message.cursize);
+
 			if (net_message.cursize > MAX_MSGLEN)
 				Host_Error ("Demo message %d > MAX_MSGLEN (%d)", net_message.cursize, MAX_MSGLEN);
-			Success = fread (net_message.data, net_message.cursize, 1, cls.demofile) == 1;
+
+			Success = (COM_FReadFile (demohandle, net_message.data, net_message.cursize) != -1);
 		}
 
 		if (!Success)
@@ -219,7 +228,7 @@ void CL_Stop_f (void)
 		return;
 	}
 
-	if (cls.demofile)
+	if (demohandle != INVALID_HANDLE_VALUE)
 	{
 		// write a disconnect message to the demo file
 		SZ_Clear (&net_message);
@@ -282,30 +291,38 @@ void CL_Record_f (void)
 	}
 	else track = -1;
 
-	sprintf (name, "%s/%s", com_gamedir, Cmd_Argv(1));
-	
-//
-// start the map up
-//
+	_snprintf (name, 128, "%s/%s", com_gamedir, Cmd_Argv(1));
+
+	// start the map up
 	if (c > 2)
 		Cmd_ExecuteString ( va("map %s", Cmd_Argv(2)), src_command);
-	
-//
-// open the demo file
-//
+
+	// open the demo file
+	if (demohandle != INVALID_HANDLE_VALUE)
+	{
+		COM_FCloseFile (&demohandle);
+		demohandle = INVALID_HANDLE_VALUE;
+	}
+
 	COM_DefaultExtension (name, ".dem");
 
 	Con_Printf ("recording to %s.\n", name);
-	cls.demofile = fopen (name, "wb");
-	if (!cls.demofile)
+
+	demohandle = CreateFile (name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+
+	if (demohandle == INVALID_HANDLE_VALUE)
 	{
 		Con_Printf ("ERROR: couldn't open.\n");
 		return;
 	}
 
 	cls.forcetrack = track;
-	fprintf (cls.demofile, "%i\n", cls.forcetrack);
-	
+
+	char demotrack[64];
+
+	sprintf (demotrack, "%i\n", cls.forcetrack);
+	COM_FWriteFile (demohandle, demotrack, strlen (demotrack));
+
 	cls.demorecording = true;
 
 	// force a refersh of the demo list
@@ -331,26 +348,32 @@ bool CL_DoPlayDemo (void)
 	CL_Disconnect ();
 
 	// open the demo file
-	strcpy (name, Cmd_Argv(1));
+	strncpy (name, Cmd_Argv(1), 127);
 	COM_DefaultExtension (name, ".dem");
 
+	if (demohandle != INVALID_HANDLE_VALUE)
+	{
+		COM_FCloseFile (&demohandle);
+		demohandle = INVALID_HANDLE_VALUE;
+	}
+
 	Con_Printf ("Playing demo from %s.\n", name);
-        demofile_len = COM_FOpenFile (name, &cls.demofile);
-	
-	if (!cls.demofile)
+	demofile_len = COM_FOpenFile (name, &demohandle);
+
+	if (demohandle == INVALID_HANDLE_VALUE)
 	{
 		Con_Printf ("ERROR: couldn't open %s\n", name);
 		cls.demonum = -1;		// stop demo loop
 		return false;
 	}
 
-    demofile_start = ftell (cls.demofile);
+    demofile_start = SetFilePointer (demohandle, 0, NULL, FILE_CURRENT);
 
 	cls.demoplayback = true;
 	cls.state = ca_connected;
 	cls.forcetrack = 0;
 
-	while ((c = getc(cls.demofile)) != '\n')
+	while ((c = COM_FReadChar (demohandle)) != '\n')
 	{
 		if (c == '-')
 			neg = true;

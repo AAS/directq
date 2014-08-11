@@ -20,7 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
-#include "d3d_hlsl.h"
+
 
 /*
 =============================================================
@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 typedef struct sprverts_s
 {
 	float x, y, z;
+	DWORD c;
 	float s, t;
 } sprverts_t;
 
@@ -43,7 +44,7 @@ sprverts_t sprverts[4];
 R_GetSpriteFrame
 ================
 */
-mspriteframe_t *R_GetSpriteFrame (entity_t *currententity)
+mspriteframe_t *R_GetSpriteFrame (entity_t *e)
 {
 	msprite_t		*psprite;
 	mspritegroup_t	*pspritegroup;
@@ -51,8 +52,8 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *currententity)
 	int				i, numframes, frame;
 	float			*pintervals, fullinterval, targettime, time;
 
-	psprite = currententity->model->sh;
-	frame = currententity->frame;
+	psprite = e->model->sh;
+	frame = e->frame;
 
 	if ((frame >= psprite->numframes) || (frame < 0))
 	{
@@ -71,7 +72,7 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *currententity)
 		numframes = pspritegroup->numframes;
 		fullinterval = pintervals[numframes-1];
 
-		time = cl.time + currententity->syncbase;
+		time = cl.time + e->syncbase;
 
 		// when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
 		// are positive, so we don't have to worry about division by 0
@@ -92,13 +93,13 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *currententity)
 
 /*
 =================
-R_DrawSpriteModel
+D3D_DrawSpriteModel
 
 =================
 */
 #define VectorScalarMult(a,b,c) {(c)[0] = (a)[0] * (b); (c)[1] = (a)[1] * (b); (c)[2] = (a)[2] * (b);}
 
-void R_DrawSpriteModel (entity_t *e)
+void D3D_DrawSpriteModel (entity_t *e)
 {
 	vec3_t	point;
 	mspriteframe_t	*frame;
@@ -110,10 +111,24 @@ void R_DrawSpriteModel (entity_t *e)
 	vec3_t		tvec;
 	float		angle, sr, cr;
 
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTextureMipmap (0, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
+
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+
+	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+
+	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+
 	// don't even bother culling, because it's just a single
 	// polygon without a surface cache
 	frame = R_GetSpriteFrame (e);
-	psprite = currententity->model->sh;
+	psprite = e->model->sh;
 
 	VectorCopy (e->origin, fixed_origin);
 
@@ -121,7 +136,7 @@ void R_DrawSpriteModel (entity_t *e)
 	{
 	case SPR_ORIENTED:
 		// bullet marks on walls
-		AngleVectors (currententity->angles, v_forward, v_right, v_up);
+		AngleVectors (e->angles, v_forward, v_right, v_up);
 
 		VectorScalarMult (v_forward, -2, temp);
 		VectorAdd (temp, fixed_origin, fixed_origin);
@@ -140,7 +155,7 @@ void R_DrawSpriteModel (entity_t *e)
 		break;
 
 	case SPR_FACING_UPRIGHT:
-		VectorSubtract (currententity->origin, r_origin, v_forward);
+		VectorSubtract (e->origin, r_origin, v_forward);
 		v_forward[2] = 0;
 		VectorNormalize (v_forward);
 
@@ -163,7 +178,7 @@ void R_DrawSpriteModel (entity_t *e)
 		break;
 
 	case SPR_VP_PARALLEL_ORIENTED:
-		angle = currententity->angles[ROLL] * (M_PI / 180.0);
+		angle = e->angles[ROLL] * (M_PI / 180.0);
 		sr = sin (angle);
 		cr = cos (angle);
 
@@ -183,60 +198,34 @@ void R_DrawSpriteModel (entity_t *e)
 		// unknown type - just assume it's normal and Con_DPrintf it
 		up = vup;
 		right = vright;
-		Con_DPrintf ("R_DrawSpriteModel - Unknown Sprite Type %i\n", psprite->type);
+		Con_DPrintf ("D3D_DrawSpriteModel - Unknown Sprite Type %i\n", psprite->type);
 		break;
 	}
 
-	d3d_SpriteFX.SetTexture ((LPDIRECT3DTEXTURE9) frame->texture);
+	// set texture
+	D3D_SetTexture (0, (LPDIRECT3DTEXTURE9) frame->texture);
 
 	VectorMA (fixed_origin, frame->down, up, point);
 	VectorMA (point, frame->left, right, point);
 	sprverts[0].x = point[0]; sprverts[0].y = point[1]; sprverts[0].z = point[2]; sprverts[0].s = 0; sprverts[0].t = 1;
+	sprverts[0].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
 
 	VectorMA (fixed_origin, frame->up, up, point);
 	VectorMA (point, frame->left, right, point);
 	sprverts[1].x = point[0]; sprverts[1].y = point[1]; sprverts[1].z = point[2]; sprverts[1].s = 0; sprverts[1].t = 0;
+	sprverts[1].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
 
 	VectorMA (fixed_origin, frame->up, up, point);
 	VectorMA (point, frame->right, right, point);
 	sprverts[2].x = point[0]; sprverts[2].y = point[1]; sprverts[2].z = point[2]; sprverts[2].s = 1; sprverts[2].t = 0;
+	sprverts[2].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
 
 	VectorMA (fixed_origin, frame->down, up, point);
 	VectorMA (point, frame->right, right, point);
 	sprverts[3].x = point[0]; sprverts[3].y = point[1]; sprverts[3].z = point[2]; sprverts[3].s = 1; sprverts[3].t = 1;
+	sprverts[3].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
 
-	d3d_SpriteFX.Draw (D3DPT_TRIANGLEFAN, 2, sprverts, sizeof (sprverts_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, sprverts, sizeof (sprverts_t));
 }
 
-
-void D3D_DrawSpriteModels (void)
-{
-	if (!r_drawentities.value) return;
-	if (!(r_renderflags & R_RENDERSPRITE)) return;
-
-	d3d_Device->SetVertexDeclaration (d3d_V3ST2Declaration);
-
-	d3d_SpriteFX.BeginRender ();
-	d3d_SpriteFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
-	d3d_SpriteFX.SwitchToPass (0);
-
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-
-	for (int i = 0; i < cl_numvisedicts; i++)
-	{
-		currententity = cl_visedicts[i];
-
-		// not a sprite model
-		if (currententity->model->type != mod_sprite) continue;
-
-		// draw it
-		R_DrawSpriteModel (currententity);
-	}
-
-	d3d_SpriteFX.EndRender ();
-}
 

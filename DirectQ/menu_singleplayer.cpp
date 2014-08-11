@@ -36,6 +36,7 @@ extern char *SkillNames[];
 ========================================================================================================================
 */
 
+extern cvar_t com_nehahra;
 
 void Menu_SPNewGame (void)
 {
@@ -53,7 +54,13 @@ void Menu_SPNewGame (void)
 	Cvar_Set ("teamplay", 0.0f);
 
 	Cbuf_AddText ("maxplayers 1\n");
-	Cbuf_AddText ("map start\n");
+
+	// different start map
+	if (com_nehahra.value)
+		Cbuf_AddText ("map nehstart\n");
+	else Cbuf_AddText ("map start\n");
+
+	Cbuf_Execute ();
 }
 
 
@@ -137,7 +144,7 @@ void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	// copy to kills
 	// note: we did it this way so that we could strip out the whitespace from it.
 	// kills numbers are written as %3i, but parsing the array would break if there was > 999 of either
-	sprintf (si->kills, "%i/%i", stuff_done, stuff_total);
+	_snprintf (si->kills, 64, "%i/%i", stuff_done, stuff_total);
 
 	// read and skip over spawn parms
 	for (j = 0; j < NUM_SPAWN_PARMS; j++)
@@ -165,7 +172,7 @@ void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	fscanf (f, "%f\n", &dummy);
 
 	// convert dummy time to real time
-	sprintf (si->time, "%02i:%02i", ((int) dummy) / 60, (int) dummy - (((int) dummy) / 60) * 60);
+	_snprintf (si->time, 64, "%02i:%02i", ((int) dummy) / 60, (int) dummy - (((int) dummy) / 60) * 60);
 
 	// initially nothing (differentiate from 0 as there may be genuinely 0)
 	stuff_total = -1;
@@ -192,7 +199,7 @@ void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 				}
 			}
 
-			stuff_total = Q_atoi (&si->secrets[1]);
+			stuff_total = atoi (&si->secrets[1]);
 		}
 
 		if (!strcmp (si->secrets, "\"stuff_done\"") && stuff_done == -1)
@@ -210,7 +217,7 @@ void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 				}
 			}
 
-			stuff_done = Q_atoi (&si->secrets[1]);
+			stuff_done = atoi (&si->secrets[1]);
 		}
 
 		// eof
@@ -225,14 +232,14 @@ void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 
 	if (stuff_done > stuff_total) stuff_done = stuff_total;
 
-	sprintf (si->secrets, "%i/%i", stuff_done, stuff_total);
+	_snprintf (si->secrets, 64, "%i/%i", stuff_done, stuff_total);
 
 	fclose (f);
 
 	char name2[256];
 
 	// set up the file name for opening
-	sprintf (name2, "%s/%s/%s", com_gamedir, host_savedir.string, filename);
+	_snprintf (name2, 256, "%s/%s/%s", com_gamedir, host_savedir.string, filename);
 
 	// open it again (isn't the Windows API beautiful?)
 	HANDLE hFile = CreateFile (name2, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -250,10 +257,10 @@ void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	FileTimeToLocalFileTime (&FileInfo.ftLastWriteTime, &lft);
 	FileTimeToSystemTime (&lft, &st);
 
-	sprintf (si->savetime, "%04i-%02i-%02i %02i:%02i", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+	_snprintf (si->savetime, 64, "%04i-%02i-%02i %02i:%02i", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
 
 	// close the file handle
-	CloseHandle (hFile);
+	COM_FCloseFile (&hFile);
 }
 
 
@@ -271,11 +278,20 @@ public:
 		if (!this->SaveInfo.filename[0]) return;
 
 		// update anything that could change (fixme - also update time when we fix it up above)
-		sprintf (this->SaveInfo.kills, "%i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
-		sprintf (this->SaveInfo.mapname, "%s", cl.levelname);
-		sprintf (this->SaveInfo.secrets, "%i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+		_snprintf (this->SaveInfo.mapname, 40, "%s", cl.levelname);
+
+		// remake quake compatibility
+		if (cl.stats[STAT_TOTALMONSTERS] == 0)
+			_snprintf (this->SaveInfo.kills, 64, "Kills:   %i", cl.stats[STAT_MONSTERS]);
+		else _snprintf (this->SaveInfo.kills, 64, "Kills:   %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
+
+		// remake quake compatibility
+		if (cl.stats[STAT_TOTALSECRETS] == 0)
+			_snprintf (this->SaveInfo.secrets, 64, "Secrets: %i", cl.stats[STAT_SECRETS]);
+		else _snprintf (this->SaveInfo.secrets, 64, "Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+
 		this->SaveInfo.skill = (int) skill.value;
-		sprintf (this->SaveInfo.time, "%02i:%02i", (int) (cl.time / 60), (int) (cl.time - (int) (cl.time / 60) * 60));
+		_snprintf (this->SaveInfo.time, 64, "%02i:%02i", (int) (cl.time / 60), (int) (cl.time - (int) (cl.time / 60) * 60));
 	}
 
 	CSaveInfo (void)
@@ -338,6 +354,9 @@ void Menu_SaveLoadAddSave (WIN32_FIND_DATA *savefile)
 }
 
 
+// for autocompletion
+char **saveloadlist = NULL;
+
 void Menu_SaveLoadScanSaves (void)
 {
 	if (!savelistchanged) return;
@@ -351,7 +370,7 @@ void Menu_SaveLoadScanSaves (void)
 
 	if (SaveInfoArray)
 	{
-		Heap_QFree (SaveInfoArray);
+		Zone_Free (SaveInfoArray);
 		SaveInfoArray = NULL;
 		ActiveSaveInfoArray = NULL;
 	}
@@ -366,6 +385,17 @@ void Menu_SaveLoadScanSaves (void)
 	{
 		delete LoadScrollbox;
 		LoadScrollbox = NULL;
+	}
+
+	if (saveloadlist)
+	{
+		for (int i = 0; ; i++)
+		{
+			if (!saveloadlist[i]) break;
+			Zone_Free (saveloadlist[i]);
+		}
+
+		Zone_Free (saveloadlist);
 	}
 
 	ActiveScrollbox = NULL;
@@ -402,14 +432,44 @@ void Menu_SaveLoadScanSaves (void)
 	SaveInfoList = si;
 
 	// now put them all in an array for easy access
-	SaveInfoArray = (CSaveInfo **) Heap_QMalloc (sizeof (CSaveInfo *) * NumSaves);
+	SaveInfoArray = (CSaveInfo **) Zone_Alloc (sizeof (CSaveInfo *) * NumSaves);
 	int SaveIndex = 0;
+	int slindex = 0;
+
+	// for the autocomplete list - add 1 for null termination
+	saveloadlist = (char **) Zone_Alloc (sizeof (char *) * (NumSaves + 1));
+	saveloadlist[0] = NULL;
 
 	for (CSaveInfo *si = SaveInfoList; si; si = si->Next)
 	{
 		SaveInfoArray[SaveIndex] = si;
+
+		// only add games that have a filename
+		if (si->SaveInfo.filename[0])
+		{
+			// add to the null terminated autocompletion list
+			saveloadlist[slindex] = (char *) Zone_Alloc (strlen (si->SaveInfo.filename) + 1);
+			strcpy (saveloadlist[slindex], si->SaveInfo.filename);
+
+			// remove the .sav extension from the list entry
+			for (int i = strlen (saveloadlist[slindex]); i; i--)
+			{
+				if (!stricmp (&saveloadlist[slindex][i], ".sav"))
+				{
+					saveloadlist[slindex][i] = 0;
+					break;
+				}
+			}
+
+			saveloadlist[slindex + 1] = NULL;
+			slindex++;
+		}
+
 		SaveIndex++;
 	}
+
+	// the list doesn't come out in ascending order so sort it
+	COM_SortStringList (saveloadlist, true);
 
 	// create the scrollbox providers
 	// save and load need separate providers as they have slightly different lists
@@ -492,8 +552,17 @@ void Menu_SaveLoadOnHover (int initialy, int y, int itemnum)
 		Draw_Mapshot (NULL, (vid.width - 320) / 2 + 208, initialy + 8);
 		Menu_PrintWhite (220, initialy + 145, "Current Stats");
 		Menu_Print (218, initialy + 160, DIVIDER_LINE);
-		Menu_Print (220, initialy + 175, va ("Kills:   %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]));
-		Menu_Print (220, initialy + 187, va ("Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]));
+
+		// remake quake compatibility
+		if (cl.stats[STAT_TOTALMONSTERS] == 0)
+			Menu_Print (220, initialy + 175, va ("Kills:   %i", cl.stats[STAT_MONSTERS]));
+		else Menu_Print (220, initialy + 175, va ("Kills:   %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]));
+
+		// remake quake compatibility
+		if (cl.stats[STAT_TOTALSECRETS] == 0)
+			Menu_Print (220, initialy + 175, va ("Secrets: %i", cl.stats[STAT_SECRETS]));
+		else Menu_Print (220, initialy + 175, va ("Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]));
+
 		Menu_Print (220, initialy + 199, va ("Skill:   %s", SkillNames[(int) skill.value]));
 		Menu_Print (220, initialy + 211, va ("Time:    %02i:%02i", (int) (cl.time / 60), (int) (cl.time - (int) (cl.time / 60) * 60)));
 	}
@@ -611,6 +680,9 @@ void Menu_DirtySaveLoadMenu (void)
 	// note - we *COULD* pass this a char * of the save name, check it against
 	// the array contents and only update if it's a replacement item...
 	savelistchanged = true;
+
+	// rescan for autocompletion
+	Menu_SaveLoadScanSaves ();
 }
 
 

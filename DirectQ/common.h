@@ -116,23 +116,6 @@ float MSG_ReadAngle (void);
 
 //============================================================================
 
-void Q_memset (void *dest, int fill, int count);
-void Q_memcpy (void *dest, void *src, int count);
-int Q_memcmp (void *m1, void *m2, int count);
-void Q_strcpy (char *dest, char *src);
-void Q_strncpy (char *dest, char *src, int count);
-int Q_strlen (char *str);
-char *Q_strrchr (char *s, char c);
-void Q_strcat (char *dest, char *src);
-int Q_strcmp (char *s1, char *s2);
-int Q_strncmp (char *s1, char *s2, int count);
-int Q_strcasecmp (char *s1, char *s2);
-int Q_strncasecmp (char *s1, char *s2, int n);
-int	Q_atoi (char *str);
-float Q_atof (char *str);
-
-//============================================================================
-
 extern	char		com_token[1024];
 extern	bool	com_eof;
 
@@ -162,13 +145,21 @@ struct cache_user_s;
 
 extern	char	com_gamedir[MAX_OSPATH];
 
-void COM_WriteFile (char *filename, void *data, int len);
-int COM_OpenFile (char *filename, int *hndl);
-int COM_FOpenFile (char *filename, FILE **file);
-void COM_CloseFile (int h);
+// common.h doesn't know what a HANDLE is...
+int COM_FOpenFile (char *filename, void *hf);
+int COM_FReadFile (void *fh, void *buf, int len);
+int COM_FReadChar (void *fh);
+int COM_FWriteFile (void *fh, void *buf, int len);
+void COM_FCloseFile (void *fh);
 
 byte *COM_LoadTempFile (char *path);
 byte *COM_LoadHunkFile (char *path);
 
-extern bool		standard_quake, rogue, hipnotic;
+extern bool		standard_quake, rogue, hipnotic, nehahra;
 bool IsTimeout (float *PrevTime, float WaitTime);
+
+
+void COM_HashData (byte *hash, const void *data, int size);
+#define COM_CheckHash(h1, h2) !(memcmp ((h1), (h2), 16))
+
+void COM_SortStringList (char **stringlist, bool ascending);

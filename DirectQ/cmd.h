@@ -73,7 +73,7 @@ class cmd_t
 public:
 	cmd_t (char *cmdname, xcommand_t cmdcmd);
 
-	char			name[128];
+	char			*name;
 	xcommand_t		function;
 	cmd_t *next;
 };

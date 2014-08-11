@@ -59,59 +59,66 @@ void TraceLine (vec3_t start, vec3_t end, vec3_t impact)
 bool chase_nodraw;
 int chase_alpha;
 
+bool Chase_CheckBrushEdict (entity_t *e, vec3_t checkpoint, int viewcontents)
+{
+	vec3_t mins;
+	vec3_t maxs;
+
+	// don't check against self
+	if (e == cl_entities[cl.viewentity]) return true;
+
+	// let's not clip against these types
+	if (e->model->name[0] != '*') return true;
+
+	// because you never know what a mod might try...
+	if (e->model->type != mod_brush) return true;
+
+	// derive the bbox
+	if (e->angles[0] || e->angles[1] || e->angles[2])
+	{
+		// copied from R_CullBox rotation code for inline bmodels, loop just unrolled
+		mins[0] = e->origin[0] - e->model->radius;
+		maxs[0] = e->origin[0] + e->model->radius;
+		mins[1] = e->origin[1] - e->model->radius;
+		maxs[1] = e->origin[1] + e->model->radius;
+		mins[2] = e->origin[2] - e->model->radius;
+		maxs[2] = e->origin[2] + e->model->radius;
+	}
+	else
+	{
+		VectorAdd (e->origin, e->model->mins, mins);
+		VectorAdd (e->origin, e->model->maxs, maxs);
+	}
+
+	// check against bbox
+	if (checkpoint[0] < mins[0]) return true;
+	if (checkpoint[1] < mins[1]) return true;
+	if (checkpoint[2] < mins[2]) return true;
+	if (checkpoint[0] > maxs[0]) return true;
+	if (checkpoint[1] > maxs[1]) return true;
+	if (checkpoint[2] > maxs[2]) return true;
+
+	// blocked
+	return false;
+}
+
+
 bool Chase_Check (vec3_t checkpoint, int viewcontents)
 {
 	int i;
-	vec3_t mins;
-	vec3_t maxs;
 
 	// check against world model - going into different contents
 	if ((Mod_PointInLeaf (checkpoint, cl.worldmodel))->contents != viewcontents) return false;
 
 	// check visedicts - this happens *after* CL_ReadFromServer so the list will be valid
 	// (may not include static entities) (but only checks brush models)
-	for (i = 0; i < cl_numvisedicts; i++)
-	{
-		// retrieve the current entity
-		entity_t *e = cl_visedicts[i];
+	for (i = 0; i < d3d_RenderDef.numvisedicts; i++)
+		if (!Chase_CheckBrushEdict (d3d_RenderDef.visedicts[i], checkpoint, viewcontents)) return false;
 
-		// don't check against self
-		if (e == cl_entities[cl.viewentity]) continue;
-
-		// let's not clip against these types
-		if (e->model->name[0] != '*') continue;
-
-		// because you never know what a mod might try...
-		if (e->model->type != mod_brush) continue;
-
-		// derive the bbox
-		if (e->angles[0] || e->angles[1] || e->angles[2])
-		{
-			// copied from R_CullBox rotation code for inline bmodels, loop just unrolled
-			mins[0] = e->origin[0] - e->model->radius;
-			maxs[0] = e->origin[0] + e->model->radius;
-			mins[1] = e->origin[1] - e->model->radius;
-			maxs[1] = e->origin[1] + e->model->radius;
-			mins[2] = e->origin[2] - e->model->radius;
-			maxs[2] = e->origin[2] + e->model->radius;
-		}
-		else
-		{
-			VectorAdd (e->origin, e->model->mins, mins);
-			VectorAdd (e->origin, e->model->maxs, maxs);
-		}
-
-		// check against bbox
-		if (checkpoint[0] < mins[0]) continue;
-		if (checkpoint[1] < mins[1]) continue;
-		if (checkpoint[2] < mins[2]) continue;
-		if (checkpoint[0] > maxs[0]) continue;
-		if (checkpoint[1] > maxs[1]) continue;
-		if (checkpoint[2] > maxs[2]) continue;
-
-		// point inside
-		return false;
-	}
+	// check translucent edicts too
+	// fixme - currently this goes through transedicts.  ah well, 1.8
+	for (i = 0; i < d3d_RenderDef.numtransedicts; i++)
+		if (!Chase_CheckBrushEdict (d3d_RenderDef.transedicts[i], checkpoint, viewcontents)) return false;
 
 	// it's good now
 	return true;

@@ -1,0 +1,85 @@
+DIRECTQ 1.7 UPDATES
+===================
+
+* Cleared open file handles on a game change.
+* Fixed .alpha "illegible server message".
+* Renamed vid_mode cvar to d3d_mode (prevent invalid values in a config from causing problems).
+* Removed display of total monsters or total secrets when either is 0 (remake quake compatibility).
+* Lightened default contents cshifts for better underwater visibility.
+* Fixed automap scaling and positioning.
+* Cleaned out matrix handling.
+* Transitioned 2D rendering back to fixed functionality.
+* Transitioned particles back to fixed functionality.
+* Transitioned underwater warp back to fixed functionality.
+* Transitioned sprites back to fixed functionality.
+* Transitioned alias models back to fixed functionality.
+* Transferred initial camera position to view matrix so that default world matrix is always identity (easier save/restore).
+* Transitioned instanced brush models back to fixed functionality.
+* Completed transition to fixed functionality for all remaining items and removed HLSL framework.
+* Ported FitzQuake's "old style" "correct warp" water warp render.
+* Removed MH sky sphere warp.
+* Split opaque water drawing to a separate dedicated pass.
+* Signficantly reworked alias model drawing.
+* Added .alpha support to brush models, alias models and sprite models.
+* Reworked edict allocation and fixed potential crash bug when loading edicts from saves.
+* Fixed (I hope!) long-standing DirectQ crash bug in Draw_CachePic.
+* Added simple sky alternative for r_skywarp 0.
+* Fixed static entity removal was not working.
+* Added permanent gibs cvar (sv_permagibs, default 0).
+* Reworked entire Heap memory allocation system to use virtual pools instead.
+* Reverted to compressed vis (for faster map loading and memory overhead reduction).
+* Added gl_compressedtextures cvar, default 1, set to 0 to disable texture compression on new textures.
+* Restored alias model caching.
+* Restored sound caching.
+* Added sprite caching.
+* Fixed crash bug in multiplayer setup menu.
+* Fixed colour change doesn't take effect until after map change.
+* Added gl_maxtextureretention cvar (default 3) to control how long unused textures are retained for.
+* Switched particle render to use indexed primitives for performance.
+* Implemented particle filtering by contents to fully resolve particle above water/below water issues.
+* Implemented entity depth sorting for alpha resolving.
+* Added fog (usual cvars) with parsing from worldspawn.
+* Added zone memory using new memory system.
+* Completely relocated all malloc calls to new memory pool system for better reporting of memory use.
+* Added fog options menu.
+* Added correct contents colour shifts depending on colout of liquid texture.
+* Resolved all animating texture Host_Errors by just switching the offending texture to non-animating and devprinting a message.
+* Resolved 16 char long texture names error.
+* Implemented non-recursive BSP node/leaf parent matching to resolve extreme BSP depths (this is clever...)
+* Resolved various automap rendering bugs and omissions, and implemented some optimisations.
+* Added reporting of which lump has the funny size (this is now a Host_Error so you can continue playing on another map).
+* Made r_novis take effect immediately instead of on a viewleaf change.
+* Added r_lockfrustum cvar (default 0).
+* Resolved long-standing issue of entities in server fatpvs showing through water surfs.
+* Added several optimized recursion cases.
+* Fixed crash bug where a static entity doesn't have a model.
+* Renamed sv_antiwallhack to sv_cullentities (compatibility).
+* Added r_normqrain cvar to enable user to disable Remake Quake rain model (default 0).
+* Generalised brush render functions for inline and instanced with or without alpha.
+* Added r_instancedlight cvar, set to 0 to revert to old ammo box lighting mode (default 1).
+* Added key_automap state with special automap keys to scroll and zoom.
+* Resolved several rendering issues and general all-round weirdness with the automap.
+* Resolved issue of inline brush models that have not been sent by the server not being visible in the automap.
+* Documented automap control cvars and commands.
+* Removed library replacement functions.
+* Switched all vsprintf to _vsnprintf to make buffers safe.
+* Replaced all uses of sprintf with _snprintf to make buffers safe.
+* Restored gl_flashblend 1 mode (0 is the default).
+* Removed net_vcr code; removed more old grotty modem and IPX code.
+* Removed 64 bit lightmaps.
+* Removed disgusting and buggy old file handles system.
+* Ensured that all memory allocated by DirectQ is marked non-executable.
+* Added autocompletion to changelevel, game, save and load commands.
+* Fixed sky fog (looks ugly on skyboxes because of corners, will need to project the skybox onto a sphere for to fix this).
+* Increased cl.levelname to 128 for those really long level names (requires hackery in game saves).
+* Added cacheclear command for on-demand clearing of cached objects.
+* Resolved several trigger and clip bugs that made warpc impossible to complete.
+* Imported BJP Quake PR_ExecuteProgram for more robust QC interpretation: no longer crashes on SDQuake mod.
+* Improved gamedir enumeration by looking for bsp, mdl and any pak file if known game files are not found.
+* Reverted to 1.6.3 lightmap updating for code simplicity, faster map loads and memory saving.
+* Initial nehahra support implemented; can now run nehahra maps without crashing (as much as I've tested anyway).
+* Optimized memory usage during alias model meshing a little for faster loading.
+
+
+
+

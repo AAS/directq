@@ -22,8 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 int			num_temp_entities;
-entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
-beam_t		cl_beams[MAX_BEAMS];
+entity_t	*cl_temp_entities;
+beam_t		*cl_beams;
 
 sfx_t			*cl_sfx_wizhit;
 sfx_t			*cl_sfx_knighthit;
@@ -35,6 +35,8 @@ sfx_t			*cl_sfx_r_exp3;
 
 // don't protect this one as a mod may wish to use it
 cvar_t r_extradlight ("r_extradlight", "0", CVAR_ARCHIVE);
+
+void D3D_AddVisEdict (entity_t *ent, bool noculledict);
 
 /*
 =================
@@ -199,8 +201,7 @@ void CL_ParseTEnt (void)
 				S_StartSound (-1, 0, cl_sfx_ric1, pos, 1, 1);
 			else if (rnd == 2)
 				S_StartSound (-1, 0, cl_sfx_ric2, pos, 1, 1);
-			else
-				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
+			else S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
 		break;
 
@@ -370,7 +371,7 @@ void CL_ParseTEnt (void)
 // PGM 01/21/97 
 	case TE_BEAM:				// grappling hook beam
 		ent = MSG_ReadShort ();
-		
+
 		start[0] = MSG_ReadCoord ();
 		start[1] = MSG_ReadCoord ();
 		start[2] = MSG_ReadCoord ();
@@ -412,10 +413,64 @@ void CL_ParseTEnt (void)
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
+	case TE_SMOKE:
+		// falls through to explosion 3
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+		MSG_ReadByte();
+
+	case TE_EXPLOSION3:
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+		dl = CL_AllocDlight (0);
+		VectorCopy (pos, dl->origin);
+		dl->radius = 350;
+		dl->die = cl.time + 0.5;
+		dl->decay = 300;
+		dl->rgb[0] = MSG_ReadCoord() * 255;
+		dl->rgb[1] = MSG_ReadCoord() * 255;
+		dl->rgb[2] = MSG_ReadCoord() * 255;
+		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
+		break;
+
+	case TE_LIGHTNING4:
+		{
+			// need to do it this way for correct parsing order
+			char *modelname = MSG_ReadString ();
+
+			ent = MSG_ReadShort ();
+			
+			start[0] = MSG_ReadCoord ();
+			start[1] = MSG_ReadCoord ();
+			start[2] = MSG_ReadCoord ();
+			
+			end[0] = MSG_ReadCoord ();
+			end[1] = MSG_ReadCoord ();
+			end[2] = MSG_ReadCoord ();
+
+			CL_ParseBeam (Mod_ForName (modelname, true), ent, start, end);
+		}
+
+		break;
+
+	case TE_NEW1:
+		break;
+
+	case TE_NEW2:
+		break;
+
 	default:
 		// no need to crash the engine but we will crash the map, as it means we have
 		// a malformed packet
-		Host_Error ("CL_ParseTEnt: bad type");
+		Con_DPrintf ("CL_ParseTEnt: bad type %i\n", type);
+
+		// note - this might crash the server at some stage if more data is expected
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+		break;
 	}
 }
 
@@ -429,17 +484,12 @@ entity_t *CL_NewTempEntity (void)
 {
 	entity_t	*ent;
 
-	if (cl_numvisedicts == MAX_VISEDICTS) return NULL;
 	if (num_temp_entities == MAX_TEMP_ENTITIES) return NULL;
 
 	ent = &cl_temp_entities[num_temp_entities];
-	memset (ent, 0, sizeof(*ent));
+	memset (ent, 0, sizeof (*ent));
 
 	num_temp_entities++;
-	ent->nocullbox = false;
-	cl_visedicts[cl_numvisedicts] = ent;
-	cl_numvisedicts++;
-
 	ent->colormap = vid.colormap;
 	return ent;
 }
@@ -483,21 +533,21 @@ void CL_UpdateTEnts (void)
 		if (dist[1] == 0 && dist[0] == 0)
 		{
 			yaw = 0;
+
 			if (dist[2] > 0)
 				pitch = 90;
-			else
-				pitch = 270;
+			else pitch = 270;
 		}
 		else
 		{
 			yaw = (int) (atan2(dist[1], dist[0]) * 180 / M_PI);
-			if (yaw < 0)
-				yaw += 360;
+
+			if (yaw < 0) yaw += 360;
 	
 			forward = sqrt (dist[0]*dist[0] + dist[1]*dist[1]);
 			pitch = (int) (atan2(dist[2], forward) * 180 / M_PI);
-			if (pitch < 0)
-				pitch += 360;
+
+			if (pitch < 0) pitch += 360;
 		}
 
 		// add new entities for the lightning
@@ -523,6 +573,9 @@ void CL_UpdateTEnts (void)
 				org[j] += dist[j] * 30;
 				ent->origin[j] = org[j];
 			}
+
+			// add a visedict for it
+			D3D_AddVisEdict (ent, false);
 
 			d -= 30;
 		}

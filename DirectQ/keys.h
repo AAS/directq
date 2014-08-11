@@ -118,8 +118,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define K_POV4		245
 
 
-
-typedef enum {key_game, key_console, key_message, key_menu} keydest_t;
+// added automap as a new key_dest
+typedef enum {key_game, key_console, key_message, key_menu, key_automap} keydest_t;
 
 extern keydest_t	key_dest;
 extern char *keybindings[256];
@@ -132,4 +132,4 @@ void Key_Init (void);
 void Key_WriteBindings (FILE *f);
 void Key_SetBinding (int keynum, char *binding);
 void Key_ClearStates (void);
-
+int Key_GetBinding (char *cmd);

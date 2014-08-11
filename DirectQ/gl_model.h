@@ -76,7 +76,9 @@ typedef struct mplane_s
 
 typedef struct texture_s
 {
-	char		name[16];
+	// 1 extra for 16 char texnames
+	char		name[17];
+
 	unsigned	width, height;
 
 	void		*d3d_Texture;
@@ -91,16 +93,24 @@ typedef struct texture_s
 	struct texture_s *anim_next;		// in the animation sequence
 	struct texture_s *alternate_anims;	// bmodels in frmae 1 use these
 	unsigned	offsets[MIPLEVELS];		// four mip maps stored
+
+	int contentscolor[3];
 } texture_t;
 
 
 #define	SURF_PLANEBACK		2
 #define	SURF_DRAWSKY		4
 #define SURF_DRAWSPRITE		8
-#define SURF_DRAWTURB		0x10
-#define SURF_DRAWTILED		0x20
-#define SURF_DRAWBACKGROUND	0x40
-#define SURF_UNDERWATER		0x80
+#define SURF_DRAWTURB		16
+#define SURF_DRAWTILED		32
+#define SURF_DRAWBACKGROUND	64
+#define SURF_UNDERWATER		128
+
+// contents types
+#define SURF_DRAWLAVA		256
+#define SURF_DRAWTELE		512
+#define SURF_DRAWWATER		1024
+#define SURF_DRAWSLIME		2048
 
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
 typedef struct
@@ -117,6 +127,21 @@ typedef struct
 	int			flags;
 } mtexinfo_t;
 
+#define VERTEXSIZE		7
+
+typedef struct glpolyvert_s
+{
+	float xyz[3];
+	float st[2];
+	float lm[2];
+} glpolyvert_t;
+
+typedef struct glpoly_s
+{
+	int numverts;
+	glpolyvert_t *verts;
+	struct glpoly_s *next;
+} glpoly_t;
 
 typedef struct msurface_s
 {
@@ -124,6 +149,9 @@ typedef struct msurface_s
 
 	mplane_t	*plane;
 	int			flags;
+
+	// 0 to 255 scale
+	int			alpha;
 
 	int			firstedge;	// look up in model->surfedges[], negative numbers
 	int			numedges;	// are backwards edges
@@ -137,8 +165,7 @@ typedef struct msurface_s
 	byte		smax, tmax;			// lightmap extents (width and height) (relative to LIGHTMAP_SIZE, not 0 to 1)
 	byte		light_r, light_b;	// lightmap rect right and bottom (light_s + smax, light_t + tmax)
 
-	// this will be NULL for solid surfaces, must be casted to the correct poly type for water and sky
-	void	*polys;
+	glpoly_t *polys;
 
 	struct	msurface_s	*texturechain;
 
@@ -151,11 +178,8 @@ typedef struct msurface_s
 	// direct3d stuff
 	void		*d3d_Lightmap;
 
-	// offset to first vert in the vertex buffer
-	int			vboffset;
-
-	// the model to which this surf belongs
-	struct model_s *model;
+	// the matrix used for transforming this surf
+	void		*matrix;
 
 	// extents of the surf in world space
 	float		mins[3];
@@ -165,6 +189,10 @@ typedef struct msurface_s
 	int			cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
 	bool		cached_dlight;				// true if dynamic light in cache
 	byte		*samples;		// [numstyles*surfsize]
+
+	// for alpha sorting
+	float		dist;
+	float		midpoint[3];
 } msurface_t;
 
 typedef struct mnode_s
@@ -174,7 +202,10 @@ typedef struct mnode_s
 	int			visframe;		// node needs to be traversed if current
 	bool		seen;
 	float		minmaxs[6];		// for bounding box culling
+	float		radius;
 	struct mnode_s	*parent;
+	int			num;
+	int			flags;
 
 	// node specific
 	mplane_t	*plane;
@@ -193,10 +224,13 @@ typedef struct mleaf_s
 	int			visframe;		// node needs to be traversed if current
 	bool		seen;
 	float		minmaxs[6];		// for bounding box culling
+	float		radius;
 	struct mnode_s	*parent;
+	int			num;
+	int			flags;
 
 	// leaf specific
-	byte		*decompressed_vis;
+	byte		*compressed_vis;
 
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
@@ -206,6 +240,9 @@ typedef struct mleaf_s
 
 	int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
+
+	// contents colour for cshifts
+	int *contentscolor;
 } mleaf_t;
 
 // !!! if this is changed, it must be changed in asm_i386.h too !!!
@@ -253,6 +290,7 @@ typedef struct
 typedef struct
 {
 	int					type;
+	int					version;
 	int					maxwidth;
 	int					maxheight;
 	int					numframes;
@@ -333,7 +371,7 @@ typedef struct aliashdr_s
 	int	 *commands;	// gl command list with embedded s/t
 	void				*texture[MAX_SKINS][4];
 	void				*fullbright[MAX_SKINS][4];
-	int					texels[MAX_SKINS];	// only for player skins
+	byte				*texels[MAX_SKINS];	// only for player skins
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
 
@@ -358,10 +396,21 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 #define	EF_TRACER2	64			// orange split trail + rotate
 #define	EF_TRACER3	128			// purple trail
 
+// mh - special flags
+#define EF_RMQRAIN	(1 << 20)	// remake quake rain
+
+// Quake uses 3 (count 'em!) different types of brush model and we need to distinguish between all of them
+#define MOD_BRUSH_WORLD		0
+#define MOD_BRUSH_INLINE	1
+#define MOD_BRUSH_INSTANCED	2
 
 typedef struct brushheader_s
 {
-	int			firstmodelsurface, nummodelsurfaces;
+	// world, inline or instanced
+	int			brushtype;
+
+	int			firstmodelsurface;
+	int			nummodelsurfaces;
 
 	int			numsubmodels;
 	dmodel_t	*submodels;
@@ -386,6 +435,7 @@ typedef struct brushheader_s
 
 	int			numsurfaces;
 	msurface_t	*surfaces;
+	msurface_t	*alphasurfaces;
 
 	int			numsurfedges;
 	int			*surfedges;
@@ -436,8 +486,11 @@ typedef struct model_s
 	aliashdr_t	*ah;
 	msprite_t	*sh;
 
-	// the matrix used for transforming this model
-	void		*matrix;
+	// the entity that used this model (inline bmodels only)
+	struct entity_s *cacheent;
+
+	// true if the model was ever seen
+	bool wasseen;
 } model_t;
 
 //============================================================================
@@ -449,5 +502,6 @@ void	Mod_TouchModel (char *name);
 
 mleaf_t *Mod_PointInLeaf (float *p, model_t *model);
 byte	*Mod_LeafPVS (mleaf_t *leaf, model_t *model);
+byte *Mod_FatPVS (vec3_t org);
 
 #endif	// __MODEL__

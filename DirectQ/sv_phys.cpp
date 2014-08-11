@@ -68,7 +68,11 @@ void SV_CheckAllEnts (void)
 	for (e = 1; e < sv.num_edicts; e++, check = NEXT_EDICT (check))
 	{
 		if (check->free) continue;
-		if (check->v.movetype == MOVETYPE_PUSH || check->v.movetype == MOVETYPE_NONE || check->v.movetype == MOVETYPE_NOCLIP) continue;
+
+		if (check->v.movetype == MOVETYPE_PUSH ||
+			check->v.movetype == MOVETYPE_NONE ||
+			check->v.movetype == MOVETYPE_FOLLOW || // Nehahra
+			check->v.movetype == MOVETYPE_NOCLIP)
 
 		if (SV_TestEntityPosition (check))
 			Con_Printf ("entity in invalid position\n");
@@ -135,7 +139,7 @@ bool SV_RunThink (edict_t *ent)
 	thinktime = ent->v.nextthink;
 	if (thinktime <= 0 || thinktime > sv.time + host_frametime)
 		return true;
-		
+
 	if (thinktime < sv.time)
 		thinktime = sv.time;	// don't let things stay in the past.
 								// it is possible to start that way
@@ -378,20 +382,15 @@ void SV_AddGravity (edict_t *ent)
 {
 	float	ent_gravity;
 
-#ifdef QUAKE2
-	if (ent->v.gravity)
-		ent_gravity = ent->v.gravity;
-	else
-		ent_gravity = 1.0;
-#else
 	eval_t	*val;
 
-	val = GetEdictFieldValue(ent, "gravity");
+	val = GETEDICTFIELDVALUEFAST (ent, ed_gravity);
+
 	if (val && val->_float)
 		ent_gravity = val->_float;
 	else
 		ent_gravity = 1.0;
-#endif
+
 	ent->v.velocity[2] -= ent_gravity * sv_gravity.value * host_frametime;
 }
 
@@ -479,10 +478,15 @@ void SV_PushMove (edict_t *pusher, float movetime)
 	for (e = 1; e < sv.num_edicts; e++, check = NEXT_EDICT (check))
 	{
 		if (check->free) continue;
-		if (check->v.movetype == MOVETYPE_PUSH || check->v.movetype == MOVETYPE_NONE || check->v.movetype == MOVETYPE_NOCLIP) continue;
+
+		if (check->v.movetype == MOVETYPE_PUSH ||
+			check->v.movetype == MOVETYPE_NONE ||
+			check->v.movetype == MOVETYPE_FOLLOW || // Nehahra
+			check->v.movetype == MOVETYPE_NOCLIP)
+			continue;
 
 		// if the entity is standing on the pusher, it will definately be moved
-		if (!(((int) check->v.flags & FL_ONGROUND) && PROG_TO_EDICT(check->v.groundentity) == pusher))
+		if (!(((int) check->v.flags & FL_ONGROUND) && PROG_TO_EDICT (check->v.groundentity) == pusher))
 		{
 			if (check->v.absmin[0] >= maxs[0] || check->v.absmin[1] >= maxs[1] || check->v.absmin[2] >= maxs[2] ||
 				check->v.absmax[0] <= mins[0] || check->v.absmax[1] <= mins[1] || check->v.absmax[2] <= mins[2])
@@ -561,11 +565,9 @@ void SV_PushMove (edict_t *pusher, float movetime)
 			return;
 		}	
 	}
-
-	
 }
 
-#ifdef QUAKE2
+
 /*
 ============
 SV_PushRotate
@@ -699,10 +701,8 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 			VectorAdd (check->v.angles, amove, check->v.angles);
 		}
 	}
-
-	
 }
-#endif
+
 
 /*
 ================
@@ -725,14 +725,11 @@ void SV_Physics_Pusher (edict_t *ent)
 		if (movetime < 0)
 			movetime = 0;
 	}
-	else
-		movetime = host_frametime;
+	else movetime = host_frametime;
 
-	if (movetime)
-	{
-		SV_PushMove (ent, movetime);	// advances ent->v.ltime if not blocked
-	}
-		
+	// advances ent->v.ltime if not blocked
+	if (movetime) SV_PushMove (ent, movetime);
+
 	if (thinktime > oldltime && thinktime <= ent->v.ltime)
 	{
 		ent->v.nextthink = 0;
@@ -740,8 +737,8 @@ void SV_Physics_Pusher (edict_t *ent)
 		pr_global_struct->self = EDICT_TO_PROG(ent);
 		pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
 		PR_ExecuteProgram (ent->v.think);
-		if (ent->free)
-			return;
+
+		if (ent->free) return;
 	}
 }
 
@@ -1148,7 +1145,8 @@ void SV_Physics_None (edict_t *ent)
 	SV_RunThink (ent);
 }
 
-#ifdef QUAKE2
+
+// Nehahra
 /*
 =============
 SV_Physics_Follow
@@ -1158,12 +1156,47 @@ Entities that are "stuck" to another entity
 */
 void SV_Physics_Follow (edict_t *ent)
 {
-// regular thinking
-	SV_RunThink (ent);
-	VectorAdd (PROG_TO_EDICT(ent->v.aiment)->v.origin, ent->v.v_angle, ent->v.origin);
+	vec3_t  vf, vr, vu, angles, v;
+	edict_t *e;
+
+	// regular thinking
+	if (!SV_RunThink (ent))
+		return;
+
+	e = PROG_TO_EDICT (ent->v.aiment);
+
+	if (e->v.angles[0] == ent->v.punchangle[0] && e->v.angles[1] == ent->v.punchangle[1] && e->v.angles[2] == ent->v.punchangle[2])
+	{
+		// quick case for no rotation
+		VectorAdd (e->v.origin, ent->v.view_ofs, ent->v.origin);
+	}
+	else
+	{
+		angles[0] = -ent->v.punchangle[0];
+		angles[1] =  ent->v.punchangle[1];
+		angles[2] =  ent->v.punchangle[2];
+
+		AngleVectors (angles, vf, vr, vu);
+
+		v[0] = ent->v.view_ofs[0] * vf[0] + ent->v.view_ofs[1] * vr[0] + ent->v.view_ofs[2] * vu[0];
+		v[1] = ent->v.view_ofs[0] * vf[1] + ent->v.view_ofs[1] * vr[1] + ent->v.view_ofs[2] * vu[1];
+		v[2] = ent->v.view_ofs[0] * vf[2] + ent->v.view_ofs[1] * vr[2] + ent->v.view_ofs[2] * vu[2];
+
+		angles[0] = -e->v.angles[0];
+		angles[1] =  e->v.angles[1];
+		angles[2] =  e->v.angles[2];
+
+		AngleVectors (angles, vf, vr, vu);
+
+		ent->v.origin[0] = v[0] * vf[0] + v[1] * vf[1] + v[2] * vf[2] + e->v.origin[0];
+		ent->v.origin[1] = v[0] * vr[0] + v[1] * vr[1] + v[2] * vr[2] + e->v.origin[1];
+		ent->v.origin[2] = v[0] * vu[0] + v[1] * vu[1] + v[2] * vu[2] + e->v.origin[2];
+	}
+
+	VectorAdd (e->v.angles, ent->v.v_angle, ent->v.angles);
 	SV_LinkEdict (ent, true);
 }
-#endif
+
 
 /*
 =============
@@ -1174,10 +1207,10 @@ A moving object that doesn't obey physics
 */
 void SV_Physics_Noclip (edict_t *ent)
 {
-// regular thinking
+	// regular thinking
 	if (!SV_RunThink (ent))
 		return;
-	
+
 	VectorMA (ent->v.angles, host_frametime, ent->v.avelocity, ent->v.angles);
 	VectorMA (ent->v.origin, host_frametime, ent->v.velocity, ent->v.origin);
 
@@ -1531,9 +1564,7 @@ void SV_Physics (void)
 			continue;
 
 		if (pr_global_struct->force_retouch)
-		{
 			SV_LinkEdict (ent, true);	// force retouch even for stationary
-		}
 
 		if (i > 0 && i <= svs.maxclients)
 			SV_Physics_Client (ent, i);
@@ -1541,19 +1572,14 @@ void SV_Physics (void)
 			SV_Physics_Pusher (ent);
 		else if (ent->v.movetype == MOVETYPE_NONE)
 			SV_Physics_None (ent);
-#ifdef QUAKE2
-		else if (ent->v.movetype == MOVETYPE_FOLLOW)
+		else if (ent->v.movetype == MOVETYPE_FOLLOW) // Nehahra
 			SV_Physics_Follow (ent);
-#endif
 		else if (ent->v.movetype == MOVETYPE_NOCLIP)
 			SV_Physics_Noclip (ent);
 		else if (ent->v.movetype == MOVETYPE_STEP)
 			SV_Physics_Step (ent);
 		else if (ent->v.movetype == MOVETYPE_TOSS 
 		|| ent->v.movetype == MOVETYPE_BOUNCE
-#ifdef QUAKE2
-		|| ent->v.movetype == MOVETYPE_BOUNCEMISSILE
-#endif
 		|| ent->v.movetype == MOVETYPE_FLY
 		|| ent->v.movetype == MOVETYPE_FLYMISSILE)
 			SV_Physics_Toss (ent);
@@ -1577,7 +1603,6 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	double	save_frametime;
 //	extern particle_t	*active_particles, *free_particles;
 //	particle_t	*p;
-
 
 	save_frametime = host_frametime;
 	host_frametime = 0.05;

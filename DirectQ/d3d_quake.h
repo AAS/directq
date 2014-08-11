@@ -18,12 +18,54 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-
-
 #include <d3d9.h>
 #include <d3dx9.h>
 
-void D3D_SetFVFStateManaged (DWORD NewFVF);
+/*
+=======================================================================================================================
+
+replicates the D3DXMatrixStack class but DOESN'T require creation and releasing of a fucking COM object...!
+
+also mimics OpenGL more closely in the operation of some functions (particularly rotation) and includes a few extra
+helper members for convenience
+
+=======================================================================================================================
+*/
+
+
+// 32 is standard for OpenGL so copy that
+#define MAX_MATRIX_STACK_DEPTH		32
+
+
+class CD3D_MatrixStack
+{
+public:
+	CD3D_MatrixStack (D3DTRANSFORMSTATETYPE trans);
+	void Push (void);
+	void Pop (void);
+	void Reset (void);
+	void ResetIdentity (void);
+	void LoadIdentity (void);
+	void Rotate (float x, float y, float z, float angle);
+	void Translate (float x, float y, float z);
+	void Translatev (float *v);
+	void Scale (float x, float y, float z);
+	void Scalev (float *v);
+	D3DXMATRIX *GetTop (void);
+	void GetMatrix (D3DXMATRIX *m);
+	void SetMatrix (D3DXMATRIX *m);
+	void Ortho2D (float left, float right, float bottom, float top, float znear, float zfar);
+	void Perspective3D (float fovy, float screenaspect, float znear, float zfar);
+	void CheckDirtyState (void);
+
+private:
+	D3DXMATRIX theStack[MAX_MATRIX_STACK_DEPTH];
+	D3DTRANSFORMSTATETYPE usage;
+	int currdepth;
+	bool pushed;
+	bool dirty;
+};
+
 
 // generic world surface with verts and two sets of texcoords
 typedef struct worldvert_s
@@ -36,11 +78,7 @@ typedef struct worldvert_s
 	DWORD dummy;
 } worldvert_t;
 
-extern LPDIRECT3DVERTEXBUFFER9 d3d_BrushModelVerts;
-extern int d3d_VertexBufferVerts;
-
 extern DWORD d3d_VertexBufferUsage;
-extern D3DFORMAT d3d_BrushIndexFormat;
 
 // video
 void D3D_InitDirect3D (D3DDISPLAYMODE *mode);
@@ -50,23 +88,8 @@ void D3D_EndRendering (void);
 
 extern D3DDISPLAYMODE d3d_CurrentMode;
 
-// this is stored out so that it can be used subsequently
-extern D3DVIEWPORT9 d3d_3DViewport;
-
-// we'll store this out too in case we ever want to do anything with it
-extern D3DVIEWPORT9 d3d_2DViewport;
-
 
 // textures
-#define D3D_TEXTURE0	0
-#define D3D_TEXTURE1	1
-#define D3D_TEXTURE2	2
-#define D3D_TEXTURE3	3
-#define D3D_TEXTURE4	4
-#define D3D_TEXTURE5	5
-#define D3D_TEXTURE6	6
-#define D3D_TEXTURE7	7
-
 #define IMAGE_MIPMAP		1
 #define IMAGE_ALPHA			2
 #define IMAGE_32BIT			4
@@ -77,6 +100,8 @@ extern D3DVIEWPORT9 d3d_2DViewport;
 #define IMAGE_SPRITE		128
 #define IMAGE_LUMA			256
 #define IMAGE_NOCOMPRESS	512
+#define IMAGE_RMQRAIN		1024
+
 
 typedef struct image_s
 {
@@ -119,7 +144,7 @@ void D3D_UploadLightmaps (void);
 void D3D_ReleaseLightmaps (void);
 LPDIRECT3DTEXTURE9 D3D_GetLightmap (void *lm);
 void D3D_CheckLightmapModification (msurface_t *surf);
-void D3D_UnlockLightmaps (void);
+void D3D_UploadModifiedLightmaps (void);
 
 // global stuff
 extern LPDIRECT3D9 d3d_Object;
@@ -128,45 +153,25 @@ extern D3DADAPTER_IDENTIFIER9 d3d_Adapter;
 extern D3DCAPS9 d3d_DeviceCaps;
 
 // matrixes
-extern LPD3DXMATRIXSTACK d3d_WorldMatrixStack;
-extern D3DXMATRIX d3d_ViewMatrix;
-extern D3DXMATRIX d3d_WorldMatrix;
-extern D3DXMATRIX d3d_PerspectiveMatrix;
-extern D3DXMATRIX d3d_OrthoMatrix;
-
-// scaling factors for x and y coords in the 2D view;
-#define SCALE_2D_X(x) (((x) * glwidth) / 640)
-#define SCALE_2D_Y(y) (((y) * glheight) / 480)
+extern CD3D_MatrixStack *d3d_WorldMatrixStack;
+extern CD3D_MatrixStack *d3d_ViewMatrixStack;
+extern CD3D_MatrixStack *d3d_ProjMatrixStack;
 
 // state changes
 void D3D_Set2D (void);
-
-// x/y/z vector shortcuts
-extern D3DXVECTOR3 XVECTOR;
-extern D3DXVECTOR3 YVECTOR;
-extern D3DXVECTOR3 ZVECTOR;
 
 // global caps - used for any specific settings that we choose rather than that are
 // enforced on us through device caps
 typedef struct d3d_global_caps_s
 {
-	bool AllowA16B16G16R16;
 	D3DFORMAT DepthStencilFormat;
 	bool isNvidia;
-	bool supportPixelShaders;
 	bool supportDXT1;
 	bool supportDXT3;
 	bool supportDXT5;
 } d3d_global_caps_t;
 
 extern d3d_global_caps_t d3d_GlobalCaps;
-
-// using byte colours and having the macros wrap may have seemed like a good idea to someone somewhere sometime
-// say in 1996, when every single byte or cpu cycle was precious...
-#define BYTE_CLAMP(i) (int) ((((i) > 255) ? 255 : (((i) < 0) ? 0 : (i))))
-
-// useful in various places
-extern float r_frametime;
 
 // renderflags for global updates
 #define R_RENDERABOVEWATER			(1 << 0)
@@ -178,14 +183,56 @@ extern float r_frametime;
 #define R_RENDERINLINEBRUSH			(1 << 6)
 #define R_RENDERLUMA				(1 << 7)
 #define R_RENDERNOLUMA				(1 << 8)
+#define R_RENDERALPHAWATER			(1 << 9)
+#define R_RENDEROPAQUEWATER			(1 << 10)
+#define R_RENDERALPHASURFACE		(1 << 11)
+#define R_RENDEROPAQUEBRUSH			(1 << 12)
+#define R_RENDERALPHABRUSH			(1 << 13)
+#define R_RENDERFULLBRIGHTALIAS		(1 << 16)
+#define R_RENDERTEXTUREDALIAS		(1 << 17)
+#define R_RENDERWATERPARTICLE		(1 << 18)
+#define R_RENDEREMPTYPARTICLE		(1 << 19)
 
-extern int r_renderflags;
+typedef struct d3d_renderdef_s
+{
+	int framecount;
+	int visframecount;
 
-extern cvar_t r_64bitlightmaps;
+	// r_speeds counts
+	int	brush_polys;
+	int alias_polys;
+
+	mleaf_t *viewleaf;
+	mleaf_t *oldviewleaf;
+	entity_t *currententity;
+	bool automap;
+	int renderflags;
+
+	// render flags for entity types
+	int brushrenderflags;
+
+	// normal texture chains render from the texture_t * object;
+	// these ones are just stored separately for special handling
+	msurface_t *skychain;
+
+	// normal opaque entities
+	entity_t **visedicts;
+	int numvisedicts;
+
+	// translucent entities
+	entity_t **transedicts;
+	int numtransedicts;
+
+	entity_t worldentity;
+	float frametime;
+} d3d_renderdef_t;
+
+
+extern d3d_renderdef_t d3d_RenderDef;
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
-extern cvar_t	r_hlsl;
+extern DWORD d3d_3DFilterType;
 
 // state management functions
 // these are wrappers around the real call that check the previous value for a change before issuing the API call
@@ -196,4 +243,26 @@ void D3D_SetSamplerStatef (DWORD Stage, D3DSAMPLERSTATETYPE Type, float Value);
 void D3D_SetTextureStageState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value);
 void D3D_SetTextureStageStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Value);
 void D3D_SetTexture (DWORD Sampler, LPDIRECT3DTEXTURE9 pTexture);
+void D3D_SetFVF (DWORD FVF);
+void D3D_CheckDirtyMatrixes (void);
+void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride);
+void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount);
+void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount);
+void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, const void *pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 
+// batched up states
+void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor, bool disablezwrite = true);
+void D3D_DisableAlphaBlend (bool enablezwrite = true);
+void D3D_SetTexCoordIndexes (DWORD tmu0index, DWORD tmu1index = 1, DWORD tmu2index = 2);
+void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode = D3DTADDRESS_WRAP, DWORD tmu2mode = D3DTADDRESS_WRAP);
+void D3D_SetTextureMipmap (DWORD stage, DWORD magfilter, DWORD minfilter, DWORD mipfilter = D3DTEXF_NONE);
+void D3D_SetTextureMatrixOp (DWORD tmu0op, DWORD tmu1op = D3DTTFF_DISABLE, DWORD tmu2op = D3DTTFF_DISABLE);
+void D3D_SetTextureColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
+void D3D_SetTextureAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
+
+typedef bool (*entityfunc_t) (entity_t *);
+void R_DrawEntitiesOnList (entity_t **list, int count, int type, entityfunc_t drawfunc);
+void R_PrepareEntitiesOnList (entity_t **list, int count, int type, entityfunc_t prepfunc);
+
+void D3D_DrawTexturedPic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic);
+bool R_CullBox (vec3_t mins, vec3_t maxs);

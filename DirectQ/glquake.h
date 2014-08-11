@@ -78,14 +78,7 @@ typedef struct
 //====================================================
 
 
-extern	entity_t	r_worldentity;
-extern	bool	r_cache_thrash;		// compatability
 extern	vec3_t		modelorg, r_entorigin;
-extern	entity_t	*currententity;
-extern	int			r_visframecount;	// ??? what difs?
-extern	int			r_framecount;
-extern	int		c_brush_polys, c_alias_polys;
-
 
 //
 // view origin
@@ -99,7 +92,6 @@ extern	vec3_t	r_origin;
 // screen size info
 //
 extern	refdef_t	r_refdef;
-extern	mleaf_t		*r_viewleaf, *r_oldviewleaf;
 extern	texture_t	*r_notexture_mip;
 extern	int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
@@ -124,6 +116,6 @@ extern	cvar_t	gl_polyblend;
 extern	cvar_t	gl_nocolors;
 extern	cvar_t	gl_doubleeyes;
 
-void R_TranslatePlayerSkin (int playernum);
+void D3D_TranslatePlayerSkin (int playernum);
 
 

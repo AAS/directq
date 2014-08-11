@@ -24,6 +24,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 cvar_t	*cvar_vars;
 char	*cvar_null_string = "";
 
+// poxy fucking nehahra cvars
+// and there I was thinking that HIPNOTIC was a collection of vile hacks...
+cvar_t nehx00 ("nehx00", "0"); cvar_t nehx01 ("nehx01", "0"); cvar_t nehx02 ("nehx02", "0"); cvar_t nehx03 ("nehx03", "0");
+cvar_t nehx04 ("nehx04", "0"); cvar_t nehx05 ("nehx05", "0"); cvar_t nehx06 ("nehx06", "0"); cvar_t nehx07 ("nehx07", "0");
+cvar_t nehx08 ("nehx08", "0"); cvar_t nehx09 ("nehx09", "0"); cvar_t nehx10 ("nehx10", "0"); cvar_t nehx11 ("nehx11", "0");
+cvar_t nehx12 ("nehx12", "0"); cvar_t nehx13 ("nehx13", "0"); cvar_t nehx14 ("nehx14", "0"); cvar_t nehx15 ("nehx15", "0");
+cvar_t nehx16 ("nehx16", "0"); cvar_t nehx17 ("nehx17", "0"); cvar_t nehx18 ("nehx18", "0"); cvar_t nehx19 ("nehx19", "0");
+
 /*
 ============
 Cvar_FindVar
@@ -34,7 +42,7 @@ cvar_t *Cvar_FindVar (char *var_name)
 	cvar_t	*var;
 
 	for (var=cvar_vars ; var ; var=var->next)
-		if (!Q_strcmp (var_name, var->name))
+		if (!strcmp (var_name, var->name))
 			return var;
 
 	return NULL;
@@ -53,7 +61,7 @@ float Cvar_VariableValue (char *var_name)
 
 	if (!var) return 0;
 
-	return Q_atof (var->string);
+	return atof (var->string);
 }
 
 
@@ -83,7 +91,7 @@ char *Cvar_CompleteVariable (char *partial)
 	cvar_t		*cvar;
 	int			len;
 	
-	len = Q_strlen(partial);
+	len = strlen(partial);
 	
 	if (!len)
 		return NULL;
@@ -120,12 +128,16 @@ void Cvar_Set (cvar_t *var, char *value)
 		return;
 	}
 
-	changed = Q_strcmp (var->string, value);
+	changed = strcmp (var->string, value);
 
-	// store back to the cvar
-	Q_strcpy (var->string, value);
-	var->value = Q_atof (var->string);
-	var->integer = (int) var->value;
+	if (changed)
+	{
+		Zone_Free (var->string);
+		var->string = (char *) Zone_Alloc (strlen (value) + 1);
+		strcpy (var->string, value);
+		var->value = atof (var->string);
+		var->integer = (int) var->value;
+	}
 
 	if ((var->usage & CVAR_SERVER) && changed)
 	{
@@ -153,12 +165,23 @@ void Cvar_Set (cvar_t *var, float value)
 		return;
 	}
 
-	changed = (var->value == value);
+	changed = (var->value != value);
 
-	// store back to the cvar
-	var->value = value;
-	var->integer = (int) var->value;
-	sprintf (var->string, "%g", var->value);
+	if (changed)
+	{
+		// store back to the cvar
+		var->value = value;
+		var->integer = (int) var->value;
+
+		// copy out the value to a temp buffer
+		char valbuf[32];
+		_snprintf (valbuf, 32, "%g", var->value);
+
+		Zone_Free (var->string);
+		var->string = (char *) Zone_Alloc (strlen (valbuf) + 1);
+
+		strcpy (var->string, valbuf);
+	}
 
 	if ((var->usage & CVAR_SERVER) && changed)
 	{
@@ -200,7 +223,7 @@ static void Cvar_Register (cvar_t *variable)
 	if (Cmd_Exists (variable->name)) return;
 
 	// store the value off
-	variable->value = Q_atof (variable->string);
+	variable->value = atof (variable->string);
 	variable->integer = (int) variable->value;
 
 	// link the variable in
@@ -255,6 +278,10 @@ void Cvar_WriteVariables (FILE *f)
 
 cvar_t::cvar_t (char *cvarname, char *initialval, int useflags)
 {
+	// alloc space
+	this->name = (char *) Zone_Alloc (strlen (cvarname) + 1);
+	this->string = (char *) Zone_Alloc (strlen (initialval) + 1);
+
 	// copy in the data
 	strcpy (this->name, cvarname);
 	strcpy (this->string, initialval);
@@ -267,9 +294,19 @@ cvar_t::cvar_t (char *cvarname, char *initialval, int useflags)
 
 cvar_t::cvar_t (char *cvarname, float initialval, int useflags)
 {
+	// alloc space
+	this->name = (char *) Zone_Alloc (strlen (cvarname) + 1);
+
+	// copy out the value to a temp buffer
+	char valbuf[32];
+	_snprintf (valbuf, 32, "%g", initialval);
+
+	// alloc space for the string
+	this->string = (char *) Zone_Alloc (strlen (valbuf) + 1);
+
 	// copy in the data
 	strcpy (this->name, cvarname);
-	sprintf (this->string, "%g", initialval);
+	strcpy (this->string, valbuf);
 	this->usage = useflags;
 
 	// self-register the cvar at construction time
@@ -279,6 +316,10 @@ cvar_t::cvar_t (char *cvarname, float initialval, int useflags)
 
 cvar_t::cvar_t (void)
 {
+	// dummy cvar for temp usage; not registered
+	this->name = (char *) Zone_Alloc (2);
+	this->string = (char *) Zone_Alloc (2);
+
 	this->name[0] = 0;
 	this->string[0] = 0;
 	this->value = 0;
@@ -287,3 +328,10 @@ cvar_t::cvar_t (void)
 	this->next = NULL;
 }
 
+
+cvar_t::~cvar_t (void)
+{
+	// protect the zone from overflowing if cvars are declared in function scope
+//	Zone_Free (this->name);
+//	Zone_Free (this->string);
+}

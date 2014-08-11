@@ -56,7 +56,7 @@ void Cmd_BuildCompletionList (void)
 	for (cmd = cmd_functions; cmd; cmd = cmd->next) numcomplist++;
 
 	// alloc space for the completion list (add some overshoot here; we need 1 to NULL terminate the list)
-	complist = (complist_t *) Heap_TagAlloc (TAG_CONSOLE, (numcomplist + 1) * sizeof (complist_t));
+	complist = (complist_t *) Pool_Alloc (POOL_PERMANENT, (numcomplist + 1) * sizeof (complist_t));
 
 	// current item we're working on
 	complist_t *complistcurrent = complist;
@@ -64,14 +64,14 @@ void Cmd_BuildCompletionList (void)
 	// write in cvars
 	for (var = cvar_vars; var; var = var->next, complistcurrent++)
 	{
-		strcpy (complistcurrent->type, "(cvar)");
+		strncpy (complistcurrent->type, "(cvar)", 9);
 		strncpy (complistcurrent->name, var->name, 127);
 	}
 
 	// write in cmds
 	for (cmd = cmd_functions; cmd; cmd = cmd->next, complistcurrent++)
 	{
-		strcpy (complistcurrent->type, "(cmd) ");
+		strncpy (complistcurrent->type, "(cmd) ", 9);
 		strncpy (complistcurrent->name, cmd->name, 127);
 	}
 
@@ -87,9 +87,9 @@ void Cmd_BuildCompletionList (void)
 			{
 				if (strcmp (complist[j].name, complist[i].name) < 0)
 				{
-					Q_memcpy (&temp, &complist[j], sizeof (complist_t));
-					Q_memcpy (&complist[j], &complist[i], sizeof (complist_t));
-					Q_memcpy (&complist[i], &temp, sizeof (complist_t));
+					memcpy (&temp, &complist[j], sizeof (complist_t));
+					memcpy (&complist[j], &complist[i], sizeof (complist_t));
+					memcpy (&complist[i], &temp, sizeof (complist_t));
 				}
 			}
 		}
@@ -212,9 +212,7 @@ Adds command text at the end of the buffer
 */
 void Cbuf_AddText (char *text)
 {
-	int		l;
-	
-	l = Q_strlen (text);
+	int l = strlen (text);
 
 	if (cmd_text.cursize + l >= cmd_text.maxsize)
 	{
@@ -222,7 +220,7 @@ void Cbuf_AddText (char *text)
 		return;
 	}
 
-	SZ_Write (&cmd_text, text, Q_strlen (text));
+	SZ_Write (&cmd_text, text, strlen (text));
 }
 
 
@@ -240,13 +238,19 @@ void Cbuf_InsertText (char *text)
 	char	*temp;
 	int		templen;
 
+	if (!strnicmp (text, "crosshair 0", 11))
+	{
+		int xxx = 0;
+		xxx = 1;
+	}
+
 	// copy off any commands still remaining in the exec buffer
 	templen = cmd_text.cursize;
 
 	if (templen)
 	{
-		temp = (char *) Heap_QMalloc (templen);
-		Q_memcpy (temp, cmd_text.data, templen);
+		temp = (char *) Zone_Alloc (templen);
+		memcpy (temp, cmd_text.data, templen);
 		SZ_Clear (&cmd_text);
 	}
 	else
@@ -259,7 +263,7 @@ void Cbuf_InsertText (char *text)
 	if (templen)
 	{
 		SZ_Write (&cmd_text, temp, templen);
-		Heap_QFree (temp);
+		Zone_Free (temp);
 	}
 }
 
@@ -303,7 +307,7 @@ void Cbuf_Execute (void)
 		{
 			i++;
 			cmd_text.cursize -= i;
-			Q_memcpy (text, text+i, cmd_text.cursize);
+			memcpy (text, text+i, cmd_text.cursize);
 		}
 
 		// execute the command line
@@ -355,24 +359,24 @@ void Cmd_StuffCmds_f (void)
 	{
 		if (!com_argv[i])
 			continue;		// NEXTSTEP nulls out -NXHost
-		s += Q_strlen (com_argv[i]) + 1;
+		s += strlen (com_argv[i]) + 1;
 	}
 
 	if (!s) return;
 
-	text = (char *) Heap_QMalloc (s + 1);
+	text = (char *) Zone_Alloc (s + 1);
 	text[0] = 0;
 
 	for (i = 1; i < com_argc; i++)
 	{
 		if (!com_argv[i])
 			continue;		// NEXTSTEP nulls out -NXHost
-		Q_strcat (text,com_argv[i]);
-		if (i != com_argc - 1) Q_strcat (text, " ");
+		strcat (text,com_argv[i]);
+		if (i != com_argc - 1) strcat (text, " ");
 	}
 
 	// pull out the commands
-	build = (char *) Heap_QMalloc (s+1);
+	build = (char *) Zone_Alloc (s+1);
 	build[0] = 0;
 
 	for (i = 0; i < s - 1; i++)
@@ -386,8 +390,8 @@ void Cmd_StuffCmds_f (void)
 			c = text[j];
 			text[j] = 0;
 
-			Q_strcat (build, text + i);
-			Q_strcat (build, "\n");
+			strcat (build, text + i);
+			strcat (build, "\n");
 			text[j] = c;
 			i = j - 1;
 		}
@@ -395,8 +399,8 @@ void Cmd_StuffCmds_f (void)
 
 	if (build[0]) Cbuf_InsertText (build);
 
-	Heap_QFree (text);
-	Heap_QFree (build);
+	Zone_Free (text);
+	Zone_Free (build);
 }
 
 
@@ -466,7 +470,7 @@ char *CopyString (char *in)
 {
 	char	*out;
 
-	out = (char *) Heap_QMalloc (strlen(in)+1);
+	out = (char *) Zone_Alloc (strlen(in)+1);
 	strcpy (out, in);
 	return out;
 }
@@ -499,19 +503,19 @@ void Cmd_Alias_f (void)
 	{
 		if (!strcmp(s, a->name))
 		{
-			Heap_QFree (a->value);
+			Zone_Free (a->value);
 			break;
 		}
 	}
 
 	if (!a)
 	{
-		a = (cmdalias_t *) Heap_QMalloc (sizeof (cmdalias_t));
+		a = (cmdalias_t *) Zone_Alloc (sizeof (cmdalias_t));
 		a->next = cmd_alias;
 		cmd_alias = a;
 	}
 
-	strcpy (a->name, s);	
+	strncpy (a->name, s, 31);	
 
 	// copy the rest of the command line
 	cmd[0] = 0;		// start out with a null string
@@ -538,7 +542,7 @@ void Cmd_Alias_f (void)
 #define	MAX_ARGS		80
 
 static	int			cmd_argc;
-static	char		cmd_argv[MAX_ARGS][1024];
+static	char		**cmd_argv = NULL;
 static	char		*cmd_null_string = "";
 static	char		*cmd_args = NULL;
 
@@ -609,6 +613,16 @@ void Cmd_TokenizeString (char *text)
 {
 	int		i;
 
+	if (!cmd_argv)
+	{
+		// because these are reused every frame as commands are executed,
+		// we put them in a large one-time-only block instead of dynamically allocating
+		cmd_argv = (char **) Pool_Alloc (POOL_PERMANENT, 80 * sizeof (char *));
+
+		for (i = 0; i < MAX_ARGS; i++)
+			cmd_argv[i] = (char *) Pool_Alloc (POOL_PERMANENT, 1024);
+	}
+
 	cmd_argc = 0;
 	cmd_args = NULL;
 
@@ -633,7 +647,8 @@ void Cmd_TokenizeString (char *text)
 
 		if (cmd_argc < MAX_ARGS)
 		{
-			Q_strcpy (cmd_argv[cmd_argc], com_token);
+			// prevent overflow
+			strncpy (cmd_argv[cmd_argc], com_token, 1023);
 			cmd_argc++;
 		}
 	}
@@ -652,7 +667,7 @@ void Cmd_Add (cmd_t *newcmd)
 
 	// fail if the command already exists
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next)
-		if (!Q_strcmp (newcmd->name, cmd->name))
+		if (!strcmp (newcmd->name, cmd->name))
 			return;
 
 	// link in
@@ -672,7 +687,7 @@ bool Cmd_Exists (char *cmd_name)
 
 	for (cmd = cmd_functions; cmd; cmd = cmd->next)
 	{
-		if (!Q_strcmp (cmd_name, cmd->name))
+		if (!strcmp (cmd_name, cmd->name))
 			return true;
 	}
 
@@ -690,14 +705,14 @@ char *Cmd_CompleteCommand (char *partial)
 	cmd_t	*cmd;
 	int				len;
 	
-	len = Q_strlen(partial);
+	len = strlen(partial);
 	
 	if (!len)
 		return NULL;
 
 	// check functions
 	for (cmd=cmd_functions ; cmd ; cmd=cmd->next)
-		if (!Q_strncmp (partial,cmd->name, len))
+		if (!strncmp (partial,cmd->name, len))
 			return cmd->name;
 
 	return NULL;
@@ -727,7 +742,7 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 	// check functions
 	for (cmd = cmd_functions; cmd; cmd = cmd->next)
 	{
-		if (!Q_strcasecmp (cmd_argv[0], cmd->name))
+		if (!stricmp (cmd_argv[0], cmd->name))
 		{
 			if (full_initialized)
 			{
@@ -756,7 +771,7 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 	// check alias
 	for (a = cmd_alias; a; a = a->next)
 	{
-		if (!Q_strcasecmp (cmd_argv[0], a->name))
+		if (!stricmp (cmd_argv[0], a->name))
 		{
 			Cbuf_InsertText (a->value);
 			return;
@@ -791,7 +806,7 @@ void Cmd_ForwardToServer (void)
 		return;		// not really connected
 
 	MSG_WriteByte (&cls.message, clc_stringcmd);
-	if (Q_strcasecmp(Cmd_Argv(0), "cmd") != 0)
+	if (stricmp(Cmd_Argv(0), "cmd") != 0)
 	{
 		SZ_Print (&cls.message, Cmd_Argv(0));
 		SZ_Print (&cls.message, " ");
@@ -823,7 +838,7 @@ int Cmd_CheckParm (char *parm)
 	}
 
 	for (i = 1; i < Cmd_Argc (); i++)
-		if (! Q_strcasecmp (parm, Cmd_Argv (i)))
+		if (! stricmp (parm, Cmd_Argv (i)))
 			return i;
 			
 	return 0;
@@ -832,7 +847,9 @@ int Cmd_CheckParm (char *parm)
 
 cmd_t::cmd_t (char *cmdname, xcommand_t cmdcmd)
 {
-	strncpy (this->name, cmdname, 127);
+	this->name = (char *) Zone_Alloc (strlen (cmdname) + 1);
+
+	strcpy (this->name, cmdname);
 	this->function = cmdcmd;
 
 	// just add it

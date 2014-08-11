@@ -76,6 +76,7 @@ extern cvar_t r_automapshot;
 extern cvar_t com_hipnotic;
 extern cvar_t com_rogue;
 extern cvar_t com_quoth;
+extern cvar_t com_nehahra;
 extern cvar_t scr_centerlog;
 extern cvar_t host_savenamebase;
 extern cvar_t scr_shotnamebase;
@@ -84,11 +85,8 @@ extern cvar_t r_skybackscroll;
 extern cvar_t r_skyfrontscroll;
 extern cvar_t r_waterwarptime;
 extern cvar_t r_waterwarpscale;
-extern cvar_t r_defaultshaderprecision;
-extern cvar_t r_warpshaderprecision;
 extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
-extern cvar_t r_lightscale;
 
 CQMenu menu_Main (NULL, m_main);
 CQMenu menu_Singleplayer (&menu_Main, m_other);
@@ -108,6 +106,7 @@ CQMenu menu_Input (&menu_Options, m_other);
 CQMenu menu_Keybindings (&menu_Input, m_keys);
 CQMenu menu_Effects (&menu_Options, m_other);
 CQMenu menu_WarpSurf (&menu_Options, m_other);
+CQMenu menu_Fog (&menu_Options, m_other);
 CQMenu menu_ContentDir (&menu_Options, m_other);
 CQMenu menu_Chase (&menu_Options, m_other);
 CQMenu menu_Game (&menu_Main, m_other);
@@ -236,7 +235,8 @@ char *key_bindnames[][2] =
 	{"+mlook", 			"Mouse Look"},
 	{"+klook", 			"Keyboard Look"},
 	{"+moveup",			"Swim Up"},
-	{"+movedown",		"Swim Down"}
+	{"+movedown",		"Swim Down"},
+	{"toggleautomap",	"Automap On/Off"}
 };
 
 
@@ -350,7 +350,7 @@ void Menu_KeybindingsCustomKey (int key)
 
 			// set the new binding
 			char cmd[256];
-			sprintf (cmd, "bind \"%s\" \"%s\"\n", Key_KeynumToString (key), key_bindnames[bind_cursor][0]);
+			_snprintf (cmd, 256, "bind \"%s\" \"%s\"\n", Key_KeynumToString (key), key_bindnames[bind_cursor][0]);
 			Cbuf_InsertText (cmd);
 		}
 
@@ -428,15 +428,48 @@ bool CheckKnownFile (char *path)
 }
 
 
+bool CheckKnownContent (char *mask)
+{
+	WIN32_FIND_DATA FindFileData;
+	HANDLE hFind = INVALID_HANDLE_VALUE;
+
+	hFind = FindFirstFile (mask, &FindFileData);
+
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		// found no files
+		FindClose (hFind);
+		return false;
+	}
+
+	// found something
+	FindClose (hFind);
+	return true;
+}
+
+
 bool IsGameDir (char *path)
 {
-	// check for files that indicate a gamedir
+	char *basedir = host_parms.basedir;
+
+	// check for known files that indicate a gamedir
 	if (CheckKnownFile (va ("%s/pak0.pak", path))) return true;
 	if (CheckKnownFile (va ("%s/config.cfg", path))) return true;
 	if (CheckKnownFile (va ("%s/autoexec.cfg", path))) return true;
 	if (CheckKnownFile (va ("%s/progs.dat", path))) return true;
 	if (CheckKnownFile (va ("%s/gfx.wad", path))) return true;
 
+	// some gamedirs just have maps or models, of may have weirdly named paks
+	if (CheckKnownContent (va ("%s/%s/maps/*.bsp", basedir, path))) return true;
+	if (CheckKnownContent (va ("%s/%s/progs/*.mdl", basedir, path))) return true;
+	if (CheckKnownContent (va ("%s/%s/*.pak", basedir, path))) return true;
+
+	// some gamedirs are just used for keeping stuff separate
+	if (CheckKnownContent (va ("%s/%s/*.sav", basedir, path))) return true;
+	if (CheckKnownContent (va ("%s/%s/*.dem", basedir, path))) return true;
+	if (CheckKnownContent (va ("%s/%s/save/*.sav", basedir, path))) return true;
+
+	// nope
 	return false;
 }
 
@@ -450,7 +483,7 @@ void AddGameDirOption (char *dirname, cvar_t *togglecvar)
 	else menu_Game.AddOption (new CQMenuSpacer (dirname));
 }
 
-#define MAX_GAME_DIRS	1024
+#define MAX_GAME_DIRS	2048
 char *gamedirs[MAX_GAME_DIRS] = {NULL};
 int gamedirnum = 0;
 
@@ -532,12 +565,13 @@ void EnumGameDirs (void)
 		if (!stricmp (FindFileData.cFileName, "rogue")) continue;
 		if (!stricmp (FindFileData.cFileName, "hipnotic")) continue;
 		if (!stricmp (FindFileData.cFileName, "quoth")) continue;
+		if (!stricmp (FindFileData.cFileName, "nehahra")) continue;
 
 		// ensure that it's a game dir
 		if (!IsGameDir (FindFileData.cFileName)) continue;
 
 		// store it out
-		gamedirs[numgamedirs] = (char *) Heap_QMalloc (strlen (FindFileData.cFileName) + 1);
+		gamedirs[numgamedirs] = (char *) Zone_Alloc (strlen (FindFileData.cFileName) + 1);
 		strcpy (gamedirs[numgamedirs], FindFileData.cFileName);
 
 		numgamedirs++;
@@ -558,7 +592,7 @@ void EnumGameDirs (void)
 		menu_Game.AddOption (new CQMenuSpinControl ("Game Directory", &gamedirnum, gamedirs));
 	}
 
-	if (IsGameDir ("Hipnotic") || IsGameDir ("Rogue") || IsGameDir ("Quoth") || numgamedirs)
+	if (IsGameDir ("Hipnotic") || IsGameDir ("Rogue") || IsGameDir ("Quoth") || IsGameDir ("Nehahra") || numgamedirs)
 	{
 		menu_Game.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 		menu_Game.AddOption (new CQMenuCommand ("Load Selected Games and Add-Ons", Menu_GameLoadGames));
@@ -622,7 +656,7 @@ int Menu_ContentCustomDraw (int y)
 }
 
 
-char *skywarpstyles[] = {"DirectQ", "Classic", NULL};
+char *skywarpstyles[] = {"Simple", "Classic", NULL};
 
 // keep these consistent with the loader
 extern char *TextureExtensions[];
@@ -638,18 +672,7 @@ int old_skybox_menunumber = 0;
 
 void Menu_LoadAvailableSkyboxes (void)
 {
-	if (skybox_menulist)
-	{
-		for (int i = 0; ; i++)
-		{
-			if (!skybox_menulist[i]) break;
-			free (skybox_menulist[i]);
-		}
-
-		free (skybox_menulist);
-		skybox_menulist = NULL;
-	}
-
+	skybox_menulist = NULL;
 	std::vector<char *> SkyboxList;
 
 	for (int i = 0; ; i++)
@@ -703,12 +726,12 @@ void Menu_LoadAvailableSkyboxes (void)
 
 		if (!present)
 		{
-			char *addbox = (char *) malloc (strlen (SkyboxList[i]) + 1);
+			char *addbox = (char *) Zone_Alloc (strlen (SkyboxList[i]) + 1);
 			strcpy (addbox, SkyboxList[i]);
 			NewSkyboxList.push_back (addbox);
 		}
 
-		free (SkyboxList[i]);
+		Zone_Free (SkyboxList[i]);
 	}
 
 	SkyboxList.clear ();
@@ -716,18 +739,18 @@ void Menu_LoadAvailableSkyboxes (void)
 
 	// alloc a buffer for the menu list (add 1 to null term the list)
 	// and a second for the first item, which will be "no skybox"
-	skybox_menulist = (char **) malloc ((listlen + 2) * sizeof (char *));
+	skybox_menulist = (char **) Pool_Alloc (POOL_GAME, (listlen + 2) * sizeof (char *));
 
 	// this is needed for cases where there are no skyboxes present
 	skybox_menulist[1] = NULL;
 
 	for (int i = 0; i < listlen; i++)
 	{
-		skybox_menulist[i + 1] = (char *) malloc (strlen (NewSkyboxList[i]) + 1);
+		skybox_menulist[i + 1] = (char *) Pool_Alloc (POOL_GAME, strlen (NewSkyboxList[i]) + 1);
 		strcpy (skybox_menulist[i + 1], NewSkyboxList[i]);
 
 		// it's the callers responsibility to free up the list generated by COM_BuildContentList
-		free (NewSkyboxList[i]);
+		Zone_Free (NewSkyboxList[i]);
 
 		// always null term the next item to ensure that the menu list is null termed itself
 		skybox_menulist[i + 2] = NULL;
@@ -736,7 +759,7 @@ void Menu_LoadAvailableSkyboxes (void)
 	NewSkyboxList.clear ();
 
 	// set up item 0 (ensure that it's name can't conflict with a valid name)
-	skybox_menulist[0] = (char *) malloc (20);
+	skybox_menulist[0] = (char *) Pool_Alloc (POOL_GAME, 20);
 	strcpy (skybox_menulist[0], "none/no skybox");
 
 	// new menu
@@ -823,6 +846,132 @@ int Menu_MenuCustomDraw (int y)
 }
 
 
+char *fogenablelist[] = {"Off", "On", NULL};
+char *fogqualitylist[] = {"Per-Vertex", "Per-Pixel", NULL};
+char *fogmodelist[] = {"Linear", "Exp", "Exp2", NULL};
+int fogenable = 0;
+int fogquality = 0;
+int fogmode = 0;
+#define TAG_FOGDISABLED	1
+#define TAG_LINEARONLY	2
+#define TAG_EXPONLY		3
+
+extern cvar_t gl_fogenable;
+extern cvar_t gl_fogred;
+extern cvar_t gl_foggreen;
+extern cvar_t gl_fogblue;
+extern cvar_t gl_fogdensity;
+extern cvar_t gl_fogstart;
+extern cvar_t gl_fogend;
+extern cvar_t gl_fogsky;
+
+void Menu_FogCustomEnter (void)
+{
+	// decode cvar into variables
+	switch (gl_fogenable.integer)
+	{
+	case 2:
+		menu_Fog.EnableOptions (TAG_EXPONLY);
+		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		fogquality = 0;
+		fogmode = 1;
+		break;
+
+	case 3:
+		menu_Fog.EnableOptions (TAG_EXPONLY);
+		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		fogquality = 0;
+		fogmode = 2;
+		break;
+
+	case 4:
+		menu_Fog.DisableOptions (TAG_EXPONLY);
+		menu_Fog.EnableOptions (TAG_LINEARONLY);
+		fogquality = 1;
+		fogmode = 0;
+		break;
+
+	case 5:
+		menu_Fog.EnableOptions (TAG_EXPONLY);
+		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		fogquality = 1;
+		fogmode = 1;
+		break;
+
+	case 6:
+		menu_Fog.EnableOptions (TAG_EXPONLY);
+		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		fogquality = 1;
+		fogmode = 2;
+		break;
+
+	default:
+		menu_Fog.DisableOptions (TAG_EXPONLY);
+		menu_Fog.EnableOptions (TAG_LINEARONLY);
+		fogquality = 0;
+		fogmode = 0;
+		break;
+	}
+
+	if (gl_fogenable.integer)
+	{
+		fogenable = 1;
+		menu_Fog.EnableOptions (TAG_FOGDISABLED);
+	}
+	else
+	{
+		fogenable = 0;
+		menu_Fog.DisableOptions (TAG_FOGDISABLED);
+		menu_Fog.DisableOptions (TAG_EXPONLY);
+		menu_Fog.DisableOptions (TAG_LINEARONLY);
+	}
+}
+
+
+int Menu_FogCustomDraw (int y)
+{
+	// decode variables into cvar
+	if (fogenable)
+	{
+		int fogenableval = 1 + fogmode + (3 * fogquality);
+		Cvar_Set (&gl_fogenable, fogenableval);
+	}
+	else Cvar_Set (&gl_fogenable, 0.0f);
+
+	// sanity check cvars
+	if (gl_fogstart.value < 10) gl_fogstart.value = 10.0f;
+	if (gl_fogend.value < 10) gl_fogend.value = 10.0f;
+	if (gl_fogstart.value > 4010) gl_fogstart.value = 4010.0f;
+	if (gl_fogend.value > 4010) gl_fogend.value = 4010.0f;
+	if (gl_fogend.value < gl_fogstart.value) gl_fogend.value = gl_fogstart.value;
+
+	if (gl_fogdensity.value < 0) gl_fogdensity.value = 0.0f;
+	if (gl_fogdensity.value > 0.01f) gl_fogdensity.value = 0.01f;
+
+	// update cvars
+	Cvar_Set (&gl_fogstart, gl_fogstart.value);
+	Cvar_Set (&gl_fogend, gl_fogend.value);
+	Cvar_Set (&gl_fogdensity, gl_fogdensity.value);
+	Cvar_Set (&gl_fogred, gl_fogred.value);
+	Cvar_Set (&gl_foggreen, gl_foggreen.value);
+	Cvar_Set (&gl_fogblue, gl_fogblue.value);
+
+	// toggle options
+	Menu_FogCustomEnter ();
+	return y;
+}
+
+
+int Menu_FogColourBox (int y)
+{
+	if (!gl_fogenable.integer) return y;
+
+	Draw_TextBox ((vid.width / 2) - 125, y, 234, 50);
+	Draw_Fill ((vid.width / 2) - 117, y + 8, 234, 50, gl_fogred.value, gl_foggreen.value, gl_fogblue.value);
+	return y;
+}
+
+
 void Menu_InitOptionsMenu (void)
 {
 	// options
@@ -835,6 +984,7 @@ void Menu_InitOptionsMenu (void)
 	menu_Options.AddOption (new CQMenuSubMenu ("Video and View Options", &menu_Video));
 	menu_Options.AddOption (new CQMenuSubMenu ("Special Effects Options", &menu_Effects));
 	menu_Options.AddOption (new CQMenuSubMenu ("Warp Surfaces Options", &menu_WarpSurf));
+	menu_Options.AddOption (new CQMenuSubMenu ("Fog Options", &menu_Fog));
 	menu_Options.AddOption (new CQMenuSubMenu ("Sound Options", &menu_Sound));
 	menu_Options.AddOption (new CQMenuSubMenu ("Movement and Input Options", &menu_Input));
 	menu_Options.AddOption (new CQMenuSubMenu ("Chase Camera Options", &menu_Chase));
@@ -847,6 +997,27 @@ void Menu_InitOptionsMenu (void)
 	menu_Menu.AddOption (new CQMenuCustomDraw (Menu_MenuCustomDraw));
 	menu_Menu.AddOption (new CQMenuTitle ("Menu Layout and Configuration"));
 	menu_Menu.AddOption (new CQMenuColourBar ("Highlight Colour", &menu_fillcolor.integer));
+
+	// fog
+	menu_Fog.AddOption (new CQMenuCustomEnter (Menu_FogCustomEnter));
+	menu_Fog.AddOption (new CQMenuCustomDraw (Menu_FogCustomDraw));
+	menu_Fog.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
+	menu_Fog.AddOption (new CQMenuTitle ("Fog Options"));
+	menu_Fog.AddOption (new CQMenuSpinControl ("Enable Fog", &fogenable, fogenablelist));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpinControl ("Quality", &fogquality, fogqualitylist));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpinControl ("Mode", &fogmode, fogmodelist));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarToggle ("Sky Fog", &gl_fogsky, 0, 1));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Fog.AddOption (TAG_LINEARONLY, new CQMenuCvarSlider ("Fog Start", &gl_fogstart, 10, 4010, 100));
+	menu_Fog.AddOption (TAG_LINEARONLY, new CQMenuCvarSlider ("Fog End", &gl_fogend, 10, 4010, 100));
+	menu_Fog.AddOption (TAG_EXPONLY, new CQMenuCvarSlider ("Fog Density", &gl_fogdensity, 0, 0.01, 0.0005));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarSlider ("Fog Red", &gl_fogred, 0, 1, 0.05));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarSlider ("Fog Green", &gl_foggreen, 0, 1, 0.05));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuCvarSlider ("Fog Blue", &gl_fogblue, 0, 1, 0.05));
+	menu_Fog.AddOption (TAG_FOGDISABLED, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Fog.AddOption (new CQMenuCustomDraw (Menu_FogColourBox));
 
 	// warp
 	menu_WarpSurf.AddOption (new CQMenuCustomEnter (Menu_WarpCustomEnter));
@@ -927,7 +1098,6 @@ void Menu_InitOptionsMenu (void)
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Extra DLights", &r_extradlight, 0, 1));
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Rapid Fire Effect", &r_rapidfire, 0, 1));
 	menu_Effects.AddOption (new CQMenuTitle ("Other Effects"));
-	menu_Effects.AddOption (new CQMenuCvarSlider ("Light Scale Factor", &r_lightscale, 0, 2, 0.05f));
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Z-Fighting Hack", &r_zhack, 0, 1));
 
 	// this is to give users some control over where content items go as they're not standardised per engine
@@ -972,11 +1142,13 @@ void Menu_InitOptionsMenu (void)
 	menu_Game.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
 
 	// add in add-ons
-	if (IsGameDir ("Hipnotic") || IsGameDir ("Rogue") || IsGameDir ("Quoth"))
+	if (IsGameDir ("Hipnotic") || IsGameDir ("Rogue") || IsGameDir ("Quoth") || IsGameDir ("Nehahra"))
 	{
 		menu_Game.AddOption (new CQMenuTitle ("Select Game Add-Ons"));
+
 		AddGameDirOption ("Hipnotic", &com_hipnotic);
 		AddGameDirOption ("Rogue", &com_rogue);
+		AddGameDirOption ("Nehahra", &com_nehahra);
 		AddGameDirOption ("Quoth", &com_quoth);
 	}
 
@@ -1196,25 +1368,25 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 		// check the key for info we wanna cache - value is stored in com_token
 		if (!stricmp (key, "message"))
 		{
-			info->mapname = (char *) malloc (strlen (com_token) + 1);
+			info->mapname = (char *) Pool_Alloc (POOL_GAME, strlen (com_token) + 1);
 			strcpy (info->mapname, com_token);
 		}
 		else if (!stricmp (key, "sounds"))
 		{
-			info->cdtrack = Q_atoi (com_token);
+			info->cdtrack = atoi (com_token);
 		}
 		else if (!stricmp (key, "worldtype"))
 		{
-			info->ambience = Q_atoi (com_token);
+			info->ambience = atoi (com_token);
 		}
 		else if (!stricmp (key, "sky") || !stricmp (key, "skyname") || !stricmp (key, "q1sky") || !stricmp (key, "skybox"))
 		{
-			info->skybox = (char *) malloc (strlen (com_token) + 1);
+			info->skybox = (char *) Pool_Alloc (POOL_GAME, strlen (com_token) + 1);
 			strcpy (info->skybox, com_token);
 		}
 		else if (!stricmp (key, "wad"))
 		{
-			info->wad = (char *) malloc (strlen (com_token) + 1);
+			info->wad = (char *) Pool_Alloc (POOL_GAME, strlen (com_token) + 1);
 			strcpy (info->wad, com_token);
 		}
 	}
@@ -1287,37 +1459,47 @@ void Menu_MapsOnEnter (int itemnum)
 
 bool ValidateMap (char *mapname, int itemnum)
 {
-	FILE *f;
+	HANDLE fh = INVALID_HANDLE_VALUE;
+	DWORD rlen;
 	char fullmapname[MAX_PATH];
 
-	sprintf (fullmapname, "maps/%s", mapname);
+	_snprintf (fullmapname, 260, "maps/%s", mapname);
 
-	COM_FOpenFile (fullmapname, &f);
+	COM_FOpenFile (fullmapname, &fh);
 
-	if (!f) return false;
+	if (fh == INVALID_HANDLE_VALUE) return false;
 
 	// because the map could be coming from a PAK file we need to save out the base pos so that fseek is valid
-	int basepos = ftell (f);
+	int basepos = SetFilePointer (fh, 0, NULL, FILE_CURRENT);
 	dheader_t bsphead;
 
-	fread (&bsphead, sizeof (dheader_t), 1, f);
+	ReadFile (fh, &bsphead, sizeof (dheader_t), &rlen, NULL);
+
+	if (rlen != sizeof (dheader_t))
+	{
+		COM_FCloseFile (&fh);
+		return false;
+	}
 
 	if (bsphead.version != BSPVERSION)
 	{
 		// don't add maps with a bad version number to the list
-		fclose (f);
+		COM_FCloseFile (&fh);
 		return false;
 	}
 
 	// find the entities lump
-	fseek (f, basepos + bsphead.lumps[LUMP_ENTITIES].fileofs, SEEK_SET);
+	SetFilePointer (fh, basepos + bsphead.lumps[LUMP_ENTITIES].fileofs, NULL, FILE_BEGIN);
 
 	// read it all in
-	char *entlump = (char *) malloc (bsphead.lumps[LUMP_ENTITIES].filelen);
-	fread (entlump, bsphead.lumps[LUMP_ENTITIES].filelen, 1, f);
+	char *entlump = (char *) Pool_Alloc (POOL_TEMP, bsphead.lumps[LUMP_ENTITIES].filelen);
+	ReadFile (fh, entlump, bsphead.lumps[LUMP_ENTITIES].filelen, &rlen, NULL);
 
 	// done with the file now
-	fclose (f);
+	COM_FCloseFile (&fh);
+
+	// not enough data
+	if (rlen != bsphead.lumps[LUMP_ENTITIES].filelen) return false;
 
 	// true if the map is valid
 	bool validmap = false;
@@ -1327,7 +1509,7 @@ bool ValidateMap (char *mapname, int itemnum)
 		if (!strnicmp (&entlump[i], "info_player", 11))
 		{
 			// map is valid
-			menu_mapslist[itemnum].bspname = (char *) malloc (strlen (mapname) + 1);
+			menu_mapslist[itemnum].bspname = (char *) Pool_Alloc (POOL_GAME, strlen (mapname) + 1);
 			strcpy (menu_mapslist[itemnum].bspname, mapname);
 
 			// rip out the extension (so that the "map" command will work with it)
@@ -1348,7 +1530,6 @@ bool ValidateMap (char *mapname, int itemnum)
 	}
 
 	// not found
-	free (entlump);
 	return validmap;
 }
 
@@ -1356,21 +1537,7 @@ bool ValidateMap (char *mapname, int itemnum)
 void Menu_MapsPopulate (void)
 {
 	// clear down previous map list
-	if (menu_mapslist)
-	{
-		for (int i = 0; i < num_menumaps; i++)
-		{
-			if (menu_mapslist[i].bspname) free (menu_mapslist[i].bspname);
-			if (menu_mapslist[i].mapname) free (menu_mapslist[i].mapname);
-			if (menu_mapslist[i].skybox) free (menu_mapslist[i].skybox);
-			if (menu_mapslist[i].wad) free (menu_mapslist[i].wad);
-		}
-
-		// because someone somewhere sometime might attempt to run quake without any BSP files available
-		// we need to null the list as well as free it
-		free (menu_mapslist);
-		menu_mapslist = NULL;
-	}
+	menu_mapslist = NULL;
 
 	if (MapListScrollBox) delete MapListScrollBox;
 
@@ -1382,7 +1549,7 @@ void Menu_MapsPopulate (void)
 	int listlen = MapList.size ();
 	int maplistlen = 0;
 
-	menu_mapslist = (mapinfo_t *) malloc (listlen * sizeof (mapinfo_t));
+	menu_mapslist = (mapinfo_t *) Pool_Alloc (POOL_GAME, listlen * sizeof (mapinfo_t));
 
 	// fill it in
 	for (int i = 0; i < listlen; i++)
@@ -1391,7 +1558,7 @@ void Menu_MapsPopulate (void)
 		if (ValidateMap (MapList[i], maplistlen)) maplistlen++;
 
 		// clear down the source vector item as we don't need it any more
-		free (MapList[i]);
+		Zone_Free (MapList[i]);
 	}
 
 	// release the vector
@@ -1414,12 +1581,9 @@ void Menu_MapsPopulate (void)
 	num_menumaps = maplistlen;
 
 	// now we also set up a spinbox-compatible list
-	if (spinbox_maps) free (spinbox_maps);
-	if (spinbox_bsps) free (spinbox_bsps);
-
 	// add 1 for the NULL terminator
-	spinbox_maps = (char **) malloc ((num_menumaps + 1) * sizeof (char *));
-	spinbox_bsps = (char **) malloc ((num_menumaps + 1) * sizeof (char *));
+	spinbox_maps = (char **) Pool_Alloc (POOL_GAME, (num_menumaps + 1) * sizeof (char *));
+	spinbox_bsps = (char **) Pool_Alloc (POOL_GAME, (num_menumaps + 1) * sizeof (char *));
 
 	for (int i = 0; i < num_menumaps; i++)
 	{
@@ -1473,17 +1637,8 @@ int demo_skillnum = 0;
 
 void Menu_DemoPopulate (void)
 {
-	if (demolist)
-	{
-		for (int i = 0; ; i++)
-		{
-			if (!demolist[i]) break;
-			free (demolist[i]);
-		}
-
-		// because there might be no demos we should NULL the list too
-		demolist = NULL;
-	}
+	// because there might be no demos we should NULL the list too
+	demolist = NULL;
 
 	std::vector<char *> demovector;
 	COM_BuildContentList (demovector, "", ".dem");
@@ -1491,7 +1646,7 @@ void Menu_DemoPopulate (void)
 	// by now it should be obvious what we're doing here...
 	int numdemos = demovector.size ();
 
-	demolist = (char **) malloc ((numdemos + 1) * sizeof (char *));
+	demolist = (char **) Pool_Alloc (POOL_GAME, (numdemos + 1) * sizeof (char *));
 
 	if (numdemos)
 	{
@@ -1499,7 +1654,7 @@ void Menu_DemoPopulate (void)
 		{
 			int thisdemolen = strlen (demovector[i]);
 
-			demolist[i] = (char *) malloc (thisdemolen + 1);
+			demolist[i] = (char *) Pool_Alloc (POOL_GAME, thisdemolen + 1);
 			strcpy (demolist[i], demovector[i]);
 
 			for (int j = thisdemolen; j; j--)
@@ -1512,7 +1667,7 @@ void Menu_DemoPopulate (void)
 			}
 
 			demolist[i + 1] = NULL;
-			free (demovector[i]);
+			Zone_Free (demovector[i]);
 		}
 	}
 	else demolist[0] = NULL;
@@ -1599,29 +1754,39 @@ demo_serverinfo_t dsi = {15, 1, 0, "", NULL, NULL, NULL, 0};
 
 bool M_Menu_Demo_Info (char *demofile)
 {
-	FILE *f;
+	HANDLE fh = INVALID_HANDLE_VALUE;
+	DWORD rlen;
 	int msg;
 	int msgsize;
 	float viewangs[3];
 
 	// try opening on the root
-	COM_FOpenFile (va ("%s.dem", demofile), &f);
+	COM_FOpenFile (va ("%s.dem", demofile), &fh);
 
 	// try opening in /demos
-	if (!f) COM_FOpenFile (va ("demos/%s.dem", demofile), &f);
+	if (fh == INVALID_HANDLE_VALUE)
+		COM_FOpenFile (va ("demos/%s.dem", demofile), &fh);
 
 	// we expect this to always work
-	if (f)
+	if (fh != INVALID_HANDLE_VALUE)
 	{
 		bool neg = false;
 		dsi.cdtrack = 0;
 
 		// read until we get a \n
-		while ((msg = getc (f)) != '\n')
-			if (msg == '-')
+		while (1)
+		{
+			char cmsg;
+
+			ReadFile (fh, &cmsg, 1, &rlen, NULL);
+
+			if (cmsg == '\n') break;
+
+			if (cmsg == '-')
 				neg = true;
 			else
-				dsi.cdtrack = dsi.cdtrack * 10 + (msg - '0');
+				dsi.cdtrack = dsi.cdtrack * 10 + (cmsg - '0');
+		}
 
 		if (neg) dsi.cdtrack = -dsi.cdtrack;
 
@@ -1630,14 +1795,14 @@ bool M_Menu_Demo_Info (char *demofile)
 		while (1)
 		{
 			// get the size of the message
-			fread (&msgsize, 4, 1, f);
+			ReadFile (fh, &msgsize, 4, &rlen, NULL);
 
 			// read viewangles
-			fread (viewangs, sizeof (float), 3, f);
+			ReadFile (fh, viewangs, sizeof (float) * 3, &rlen, NULL);
 
 			// read in the message
-			byte *msgdata = (byte *) malloc (msgsize);
-			fread (msgdata, msgsize, 1, f);
+			byte *msgdata = (byte *) Zone_Alloc (msgsize);
+			ReadFile (fh, msgdata, msgsize, &rlen, NULL);
 
 			// parse the message
 			for (int msgpos = 0;;)
@@ -1676,30 +1841,20 @@ bool M_Menu_Demo_Info (char *demofile)
 					// copy out the serverinfo
 					// the cd track will be stomped on by this fread, so we need to save it out then restore it
 					{
-					int savedcdtrack = dsi.cdtrack;
-					memcpy (&dsi, &msgdata[msgpos], sizeof (demo_serverinfo_t));
-					dsi.cdtrack = savedcdtrack;
+						int savedcdtrack = dsi.cdtrack;
+						memcpy (&dsi, &msgdata[msgpos], sizeof (demo_serverinfo_t));
+						dsi.cdtrack = savedcdtrack;
 					}
-
-					/*
-					// this might be valid...
-					if (dsi.proto_version != PROTOCOL_VERSION)
-					{
-						fclose (f);
-						free (msgdata);
-						return false;
-					}
-					*/
 
 					// done
-					fclose (f);
-					free (msgdata);
+					COM_FCloseFile (&fh);
+					Zone_Free (msgdata);
 					return true;
 
 				default:
 					// unsupported
-					fclose (f);
-					free (msgdata);
+					COM_FCloseFile (&fh);
+					Zone_Free (msgdata);
 					return false;
 				}
 
@@ -1708,10 +1863,10 @@ bool M_Menu_Demo_Info (char *demofile)
 			}
 
 			// release the data
-			free (msgdata);
+			Zone_Free (msgdata);
 		}
 
-		fclose (f);
+		COM_FCloseFile (&fh);
 
 		return false;
 	}

@@ -19,40 +19,26 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 
+// pool memory
+#define NUM_VIRTUAL_POOLS	10
 
-// global heap allocation
-#define Heap_QFree(memptr) {free ((memptr)); memptr = NULL;}
-void *Heap_QMalloc (int size);
-void *Heap_TagAlloc (int tag, int size);
-void Heap_TagFree (int tag);
-void Heap_Free101Plus (void);
-void *Heap_TempAlloc (int size);
-void Heap_Init (void);
-void Heap_Check (void);
+// pools
+#define POOL_PERMANENT		0
+#define POOL_GAME			1
+#define POOL_CACHE			2
+#define POOL_MAP			3
+#define POOL_EDICTS			4
+#define POOL_TEMP			5
+#define POOL_LOADFILE		6
 
-// some custom defined tags to make it easier to alloc properly
-#define TAG_STARTUP			0
-#define TAG_CLIENTSTARTUP	1
-#define TAG_FILESYSTEM		2
-#define TAG_SOUNDSTARTUP	3
-#define TAG_SIZEBUF			4
-#define TAG_NETWORK			5
-#define TAG_CONSOLE			6
-#define TAG_HUNKFILE		7
-#define TAG_BRUSHMODELS		101
-#define TAG_ALIASMODELS		102
-#define TAG_SPRITEMODELS	103
-#define TAG_CLIENTSTRUCT	104
-#define TAG_PARTICLES		105
-#define TAG_SOUND			106
-#define TAG_PROGS			107
-#define TAG_LIGHTSTYLES		108
-#define TAG_LOADMODELS		109
-#define TAG_SV_EDICTS		666
-
-// define 4 temporary tags (we're not restricted to these, of course
-#define TAG_TEMPORARY1		1000
-#define TAG_TEMPORARY2		1001
-#define TAG_TEMPORARY3		1002
-#define TAG_TEMPORARY4		1003
+// interface
+void *Pool_Alloc (int pool, int size);
+void Pool_Init (void);
+void Pool_Free (int pool);
+void Pool_Reset (int pool, int newsizebytes);
+void *Cache_Check (char *name);
+void *Cache_Alloc (char *name, void *data, int size);
+void *Zone_Alloc (int size);
+void Zone_Free (void *ptr);
+void Zone_Compact (void);
 

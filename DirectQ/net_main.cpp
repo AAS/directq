@@ -20,26 +20,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // net_main.c
 
 #include "quakedef.h"
-#include "net_vcr.h"
 
 qsocket_t	*net_activeSockets = NULL;
 qsocket_t	*net_freeSockets = NULL;
 int			net_numsockets = 0;
 
-bool	serialAvailable = false;
-bool	ipxAvailable = false;
 bool	tcpipAvailable = false;
 
 int			net_hostport;
 int			DEFAULTnet_hostport = 26000;
 
-char		my_ipx_address[NET_NAMELEN];
 char		my_tcpip_address[NET_NAMELEN];
-
-void (*GetComPortConfig) (int portNumber, int *port, int *irq, int *baud, bool *useModem);
-void (*SetComPortConfig) (int portNumber, int port, int irq, int baud, bool useModem);
-void (*GetModemConfig) (int portNumber, char *dialType, char *clear, char *init, char *hangup);
-void (*SetModemConfig) (int portNumber, char *dialType, char *clear, char *init, char *hangup);
 
 static bool	listening = false;
 
@@ -67,21 +58,6 @@ cvar_t	net_messagetimeout ("net_messagetimeout","300");
 cvar_t	hostname ("hostname", "UNNAMED");
 
 bool	configRestored = false;
-cvar_t	config_com_port ("_config_com_port", "0x3f8", CVAR_ARCHIVE);
-cvar_t	config_com_irq ("_config_com_irq", "4", CVAR_ARCHIVE);
-cvar_t	config_com_baud ("_config_com_baud", "57600", CVAR_ARCHIVE);
-cvar_t	config_com_modem ("_config_com_modem", "1", CVAR_ARCHIVE);
-cvar_t	config_modem_dialtype ("_config_modem_dialtype", "T", CVAR_ARCHIVE);
-cvar_t	config_modem_clear ("_config_modem_clear", "ATZ", CVAR_ARCHIVE);
-cvar_t	config_modem_init ("_config_modem_init", "", CVAR_ARCHIVE);
-cvar_t	config_modem_hangup ("_config_modem_hangup", "AT H", CVAR_ARCHIVE);
-
-#ifdef IDGODS
-cvar_t	idgods ("idgods", "0");
-#endif
-
-int	vcrFile = -1;
-bool recording = false;
 
 // these two macros are to make the code more readable
 #define sfunc	net_drivers[sock->driver]
@@ -127,7 +103,7 @@ qsocket_t *NET_NewQSocket (void)
 
 	sock->disconnected = false;
 	sock->connecttime = net_time;
-	Q_strcpy (sock->address,"UNSET ADDRESS");
+	strcpy (sock->address,"UNSET ADDRESS");
 	sock->driver = net_driverlevel;
 	sock->socket = 0;
 	sock->driverdata = NULL;
@@ -180,7 +156,7 @@ static void NET_Listen_f (void)
 		return;
 	}
 
-	listening = Q_atoi(Cmd_Argv(1)) ? true : false;
+	listening = atoi(Cmd_Argv(1)) ? true : false;
 
 	for (net_driverlevel=0 ; net_driverlevel<net_numdrivers; net_driverlevel++)
 	{
@@ -207,7 +183,7 @@ static void MaxPlayers_f (void)
 		return;
 	}
 
-	n = Q_atoi(Cmd_Argv(1));
+	n = atoi(Cmd_Argv(1));
 	if (n < 1)
 		n = 1;
 	if (n > svs.maxclientslimit)
@@ -240,7 +216,7 @@ static void NET_Port_f (void)
 		return;
 	}
 
-	n = Q_atoi(Cmd_Argv(1));
+	n = atoi(Cmd_Argv(1));
 	if (n < 1 || n > 65534)
 	{
 		Con_Printf ("Bad value, must be between 1 and 65534\n");
@@ -378,7 +354,7 @@ qsocket_t *NET_Connect (char *host)
 
 	if (host)
 	{
-		if (Q_strcasecmp (host, "local") == 0)
+		if (stricmp (host, "local") == 0)
 		{
 			numdrivers = 1;
 			goto JustDoIt;
@@ -387,7 +363,7 @@ qsocket_t *NET_Connect (char *host)
 		if (hostCacheCount)
 		{
 			for (n = 0; n < hostCacheCount; n++)
-				if (Q_strcasecmp (host, hostcache[n].name) == 0)
+				if (stricmp (host, hostcache[n].name) == 0)
 				{
 					host = hostcache[n].cname;
 					break;
@@ -413,7 +389,7 @@ qsocket_t *NET_Connect (char *host)
 
 	if (hostCacheCount)
 		for (n = 0; n < hostCacheCount; n++)
-			if (Q_strcasecmp (host, hostcache[n].name) == 0)
+			if (stricmp (host, hostcache[n].name) == 0)
 			{
 				host = hostcache[n].cname;
 				break;
@@ -462,31 +438,12 @@ qsocket_t *NET_CheckNewConnections (void)
 
 	for (net_driverlevel=0 ; net_driverlevel<net_numdrivers; net_driverlevel++)
 	{
-		if (net_drivers[net_driverlevel].initialized == false)
-			continue;
-		if (net_driverlevel && listening == false)
-			continue;
+		if (net_drivers[net_driverlevel].initialized == false) continue;
+		if (net_driverlevel && listening == false) continue;
+
 		ret = net_DriverFunc.CheckNewConnections ();
-		if (ret)
-		{
-			if (recording)
-			{
-				vcrConnect.time = host_time;
-				vcrConnect.op = VCR_OP_CONNECT;
-				vcrConnect.session = (long)ret;
-				Sys_FileWrite (vcrFile, &vcrConnect, sizeof(vcrConnect));
-				Sys_FileWrite (vcrFile, ret->address, NET_NAMELEN);
-			}
-			return ret;
-		}
-	}
-	
-	if (recording)
-	{
-		vcrConnect.time = host_time;
-		vcrConnect.op = VCR_OP_CONNECT;
-		vcrConnect.session = 0;
-		Sys_FileWrite (vcrFile, &vcrConnect, sizeof(vcrConnect));
+
+		if (ret) return ret;
 	}
 
 	return NULL;
@@ -575,28 +532,6 @@ int	NET_GetMessage (qsocket_t *sock)
 			else if (ret == 2)
 				unreliableMessagesReceived++;
 		}
-
-		if (recording)
-		{
-			vcrGetMessage.time = host_time;
-			vcrGetMessage.op = VCR_OP_GETMESSAGE;
-			vcrGetMessage.session = (long)sock;
-			vcrGetMessage.ret = ret;
-			vcrGetMessage.len = net_message.cursize;
-			Sys_FileWrite (vcrFile, &vcrGetMessage, 24);
-			Sys_FileWrite (vcrFile, net_message.data, net_message.cursize);
-		}
-	}
-	else
-	{
-		if (recording)
-		{
-			vcrGetMessage.time = host_time;
-			vcrGetMessage.op = VCR_OP_GETMESSAGE;
-			vcrGetMessage.session = (long)sock;
-			vcrGetMessage.ret = ret;
-			Sys_FileWrite (vcrFile, &vcrGetMessage, 20);
-		}
 	}
 
 	return ret;
@@ -640,15 +575,6 @@ int NET_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	if (r == 1 && sock->driver)
 		messagesSent++;
 
-	if (recording)
-	{
-		vcrSendMessage.time = host_time;
-		vcrSendMessage.op = VCR_OP_SENDMESSAGE;
-		vcrSendMessage.session = (long)sock;
-		vcrSendMessage.r = r;
-		Sys_FileWrite (vcrFile, &vcrSendMessage, 20);
-	}
-	
 	return r;
 }
 
@@ -671,15 +597,6 @@ int NET_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	if (r == 1 && sock->driver)
 		unreliableMessagesSent++;
 
-	if (recording)
-	{
-		vcrSendMessage.time = host_time;
-		vcrSendMessage.op = VCR_OP_SENDMESSAGE;
-		vcrSendMessage.session = (long)sock;
-		vcrSendMessage.r = r;
-		Sys_FileWrite (vcrFile, &vcrSendMessage, 20);
-	}
-	
 	return r;
 }
 
@@ -705,16 +622,7 @@ bool NET_CanSendMessage (qsocket_t *sock)
 	SetNetTime();
 
 	r = sfunc.CanSendMessage(sock);
-	
-	if (recording)
-	{
-		vcrSendMessage.time = host_time;
-		vcrSendMessage.op = VCR_OP_CANSENDMESSAGE;
-		vcrSendMessage.session = (long)sock;
-		vcrSendMessage.r = r;
-		Sys_FileWrite (vcrFile, &vcrSendMessage, 20);
-	}
-	
+
 	return r;
 }
 
@@ -752,6 +660,10 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 	}
 
 	start = Sys_FloatTime();
+
+	int xxx = 0;
+	xxx++;
+
 	while (count)
 	{
 		count = 0;
@@ -811,25 +723,14 @@ void NET_Init (void)
 	int			controlSocket;
 	qsocket_t	*s;
 
-	if (COM_CheckParm("-playback"))
-	{
-		net_numdrivers = 1;
-		net_drivers[0].Init = VCR_Init;
-	}
-
-	if (COM_CheckParm("-record"))
-		recording = true;
-
 	i = COM_CheckParm ("-port");
-	if (!i)
-		i = COM_CheckParm ("-udpport");
-	if (!i)
-		i = COM_CheckParm ("-ipxport");
+
+	if (!i) i = COM_CheckParm ("-udpport");
 
 	if (i)
 	{
 		if (i < com_argc-1)
-			DEFAULTnet_hostport = Q_atoi (com_argv[i+1]);
+			DEFAULTnet_hostport = atoi (com_argv[i+1]);
 		else
 			Sys_Error ("NET_Init: you must specify a number after -port");
 	}
@@ -846,7 +747,7 @@ void NET_Init (void)
 
 	for (i = 0; i < net_numsockets; i++)
 	{
-		s = (qsocket_t *) Heap_TagAlloc (TAG_NETWORK, sizeof (qsocket_t));
+		s = (qsocket_t *) Pool_Alloc (POOL_PERMANENT, sizeof (qsocket_t));
 		s->next = net_freeSockets;
 		net_freeSockets = s;
 		s->disconnected = true;
@@ -867,10 +768,7 @@ void NET_Init (void)
 			net_drivers[net_driverlevel].Listen (true);
 		}
 
-	if (*my_ipx_address)
-		Con_DPrintf("IPX address %s\n", my_ipx_address);
-	if (*my_tcpip_address)
-		Con_DPrintf("TCP/IP address %s\n", my_tcpip_address);
+	if (*my_tcpip_address) Con_DPrintf("TCP/IP address %s\n", my_tcpip_address);
 }
 
 /*
@@ -899,12 +797,6 @@ void		NET_Shutdown (void)
 			net_drivers[net_driverlevel].initialized = false;
 		}
 	}
-
-	if (vcrFile != -1)
-	{
-		Con_Printf ("Closing vcrfile.\n");
-		Sys_FileClose(vcrFile);
-	}
 }
 
 
@@ -916,18 +808,7 @@ void NET_Poll(void)
 	bool	useModem;
 
 	if (!configRestored)
-	{
-		if (serialAvailable)
-		{
-			if (config_com_modem.value == 1.0)
-				useModem = true;
-			else
-				useModem = false;
-			SetComPortConfig (0, (int)config_com_port.value, (int)config_com_irq.value, (int)config_com_baud.value, useModem);
-			SetModemConfig (0, config_modem_dialtype.string, config_modem_clear.string, config_modem_init.string, config_modem_hangup.string);
-		}
 		configRestored = true;
-	}
 
 	SetNetTime();
 
@@ -964,20 +845,3 @@ void SchedulePollProcedure(PollProcedure *proc, double timeOffset)
 	prev->next = proc;
 }
 
-
-#ifdef IDGODS
-#define IDNET	0xc0f62800
-
-bool IsID(struct qsockaddr *addr)
-{
-	if (idgods.value == 0.0)
-		return false;
-
-	if (addr->sa_family != 2)
-		return false;
-
-	if ((BigLong(*(int *)&addr->sa_data[2]) & 0xffffff00) == IDNET)
-		return true;
-	return false;
-}
-#endif

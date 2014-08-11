@@ -52,11 +52,12 @@ client_state_t	cl;
 #define BASE_ENTITIES	512
 
 entity_t		**cl_entities = NULL;
-lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
+lightstyle_t	*cl_lightstyle;
 dlight_t		*cl_dlights = NULL;
 
-int				cl_numvisedicts;
-entity_t		**cl_visedicts = NULL;
+// visedicts now belong to the render
+void D3D_AddVisEdict (entity_t *ent, bool noculledict);
+void D3D_BeginVisedicts (void);
 
 
 /*
@@ -77,23 +78,23 @@ void CL_ClearState (void)
 
 	SZ_Clear (&cls.message);
 
-	// set up arrays on the heap (note - this will automatically clear them for us too)
-	cl_dlights = (dlight_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, MAX_DLIGHTS * sizeof (dlight_t));
-	cl_visedicts = (entity_t **) Heap_TagAlloc (TAG_CLIENTSTRUCT, MAX_VISEDICTS * sizeof (entity_t *));
-
-	// clear down anything that stayed as static
+	// clear down anything that was allocated one-time-only at startup
+	memset (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
 	memset (cl_temp_entities, 0, MAX_TEMP_ENTITIES * sizeof (entity_t));
 	memset (cl_beams, 0, MAX_BEAMS * sizeof (beam_t));
 	memset (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
 	// allocate space for the first 512 entities - also clears the array
 	// the remainder are left at NULL and allocated on-demand if they are ever needed
+	entity_t *cl_dynamic_entities = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t) * BASE_ENTITIES);
+
+	// now fill them in
 	// this array was allocated in CL_Init as it's a one-time-only need.
 	for (i = 0; i < MAX_EDICTS; i++)
 	{
 		if (i < BASE_ENTITIES)
 		{
-			cl_entities[i] = (entity_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, sizeof (entity_t));
+			cl_entities[i] = &cl_dynamic_entities[i];
 			cl_entities[i]->entnum = i;
 		}
 		else cl_entities[i] = NULL;
@@ -109,10 +110,14 @@ Sends a disconnect message to the server
 This is also called on Host_Error, so it shouldn't cause any errors
 =====================
 */
+void SHOWLMP_clear (void);
+
 void CL_Disconnect (void)
 {
 	// stop sounds (especially looping!)
 	S_StopAllSounds (true);
+
+	SHOWLMP_clear ();
 
 	// bring the console down and fade the colors back to normal
 	//	SCR_BringDownConsole ();
@@ -152,8 +157,6 @@ void CL_Disconnect_f (void)
 }
 
 
-
-
 /*
 =====================
 CL_EstablishConnection
@@ -186,7 +189,7 @@ An svc_signonnum has been received, perform a client side setup
 */
 void CL_SignonReply (void)
 {
-	char 	str[8192];
+	static char 	str[8192];
 
 	Con_DPrintf ("CL_SignonReply: %i\n", cls.signon);
 
@@ -205,7 +208,7 @@ void CL_SignonReply (void)
 		MSG_WriteString (&cls.message, va("color %i %i\n", ((int)cl_color.value)>>4, ((int)cl_color.value)&15));
 	
 		MSG_WriteByte (&cls.message, clc_stringcmd);
-		sprintf (str, "spawn %s", cls.spawnparms);
+		_snprintf (str, 8192, "spawn %s", cls.spawnparms);
 		MSG_WriteString (&cls.message, str);
 		break;
 		
@@ -249,7 +252,7 @@ void CL_NextDemo (void)
 		}
 	}
 
-	sprintf (str,"playdemo %s\n", cls.demos[cls.demonum]);
+	_snprintf (str,1024, "playdemo %s\n", cls.demos[cls.demonum]);
 	Cbuf_InsertText (str);
 	cls.demonum++;
 }
@@ -364,6 +367,7 @@ dlight_t *CL_FindDlight (int key)
 
 	// then look for anything else
 	dl = cl_dlights;
+
 	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
 	{
 		if (dl->die < cl.time)
@@ -494,6 +498,9 @@ extern cvar_t r_lerporient;
 
 void CL_RelinkEntities (void)
 {
+	// reset visedicts count and structs
+	D3D_BeginVisedicts ();
+
 	entity_t	*ent;
 	int			i, j;
 	float		frac, f, d;
@@ -506,8 +513,6 @@ void CL_RelinkEntities (void)
 
 	// determine partial update time	
 	frac = CL_LerpPoint ();
-
-	cl_numvisedicts = 0;
 
 	// interpolate player info
 	for (i = 0; i < 3; i++)
@@ -528,7 +533,7 @@ void CL_RelinkEntities (void)
 			cl.viewangles[j] = cl.mviewangles[1][j] + frac * d;
 		}
 	}
-	
+
 	bobjrotate = anglemod (100 * cl.time);
 
 	// start on the entity after the world
@@ -537,7 +542,13 @@ void CL_RelinkEntities (void)
 		ent = cl_entities[i];
 
 		// doesn't have a model
-		if (!ent->model) continue;
+		if (!ent->model)
+		{
+			// remove this entity from the render
+			if (ent->forcelink) ent->staticremoved = true;
+
+			continue;
+		}
 
 		// if the object wasn't included in the last packet, remove it
 		if (ent->msgtime != cl.mtime[0])
@@ -635,7 +646,13 @@ void CL_RelinkEntities (void)
 
 		VectorSubtract (ent->origin2, ent->origin1, delta);
 
-		if (r_lerporient.value)
+		// switch off interpolation
+		bool nolerp = false;
+
+		if (ent->model->type == mod_alias)
+			nolerp = ent->model->ah->nolerp;
+
+		if (r_lerporient.value && !nolerp)
 		{
 			// set interpolated origin
 			ent->origin[0] = ent->origin1[0] + (blend * delta[0]);
@@ -682,14 +699,12 @@ void CL_RelinkEntities (void)
 			ent->angles[2] = ent->angles1[2] + (blend * delta[2]);
 		}
 
-		// no alpha
-		ent->alphaval = 255;
-
 		// rotate binary objects locally
 		if (ent->model->flags & EF_ROTATE)
 		{
 			// bugfix - a rotating backpack spawned from a dead player gets the same angles as the player
-			// if it was spawned when the player is not upright (e.g. killed by a rocket or similar)
+			// if it was spawned when the player is not upright (e.g. killed by a rocket or similar) and
+			// it inherits the players entity_t struct
 			ent->angles[0] = 0;
 			ent->angles[1] = bobjrotate;
 			ent->angles[2] = 0;
@@ -862,12 +877,7 @@ void CL_RelinkEntities (void)
 		// chasecam test
 		if (i == cl.viewentity && !chase_active.value) continue;
 
-		if (cl_numvisedicts < MAX_VISEDICTS)
-		{
-			ent->nocullbox = false;
-			cl_visedicts[cl_numvisedicts] = ent;
-			cl_numvisedicts++;
-		}
+		D3D_AddVisEdict (ent, false);
 	}
 }
 
@@ -923,15 +933,14 @@ void CL_SendCmd (void)
 
 	if (cls.signon == SIGNONS)
 	{
-	// get basic movement from keyboard
+		// get basic movement from keyboard
 		CL_BaseMove (&cmd);
-	
-	// allow mice or other external controllers to add to the move
+
+		// allow mice or other external controllers to add to the move
 		IN_Move (&cmd);
-	
-	// send the unreliable message
+
+		// send the unreliable message
 		CL_SendMove (&cmd);
-	
 	}
 
 	if (cls.demoplayback)
@@ -939,11 +948,11 @@ void CL_SendCmd (void)
 		SZ_Clear (&cls.message);
 		return;
 	}
-	
-// send the reliable message
+
+	// send the reliable message
 	if (!cls.message.cursize)
 		return;		// no message at all
-	
+
 	if (!NET_CanSendMessage (cls.netcon))
 	{
 		Con_DPrintf ("CL_WriteToServer: can't send\n");
@@ -977,7 +986,13 @@ void CL_Init (void)
 	// referenced during a changelevel (?only when there's no intermission?) so it needs to be in
 	// the persistent heap, and (3) the full thing is allocated each map anyway, so why not shift
 	// the overhead (small as it is) to one time only.
-	cl_entities = (entity_t **) Heap_TagAlloc (TAG_CLIENTSTARTUP, MAX_EDICTS * sizeof (entity_t *));
+	cl_entities = (entity_t **) Pool_Alloc (POOL_PERMANENT, MAX_EDICTS * sizeof (entity_t *));
+
+	// these were static arrays but we put them into memory pools so that we can track usage more accurately
+	cl_dlights = (dlight_t *) Pool_Alloc (POOL_PERMANENT, MAX_DLIGHTS * sizeof (dlight_t));
+	cl_temp_entities = (entity_t *) Pool_Alloc (POOL_PERMANENT, MAX_TEMP_ENTITIES * sizeof (entity_t));
+	cl_beams = (beam_t *) Pool_Alloc (POOL_PERMANENT, MAX_BEAMS * sizeof (beam_t));
+	cl_lightstyle = (lightstyle_t *) Pool_Alloc (POOL_PERMANENT, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
 	CL_InitInput ();
 }

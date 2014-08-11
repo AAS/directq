@@ -87,7 +87,7 @@ typedef struct
 void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b);
 
 
-#define	MAX_BEAMS	64
+#define	MAX_BEAMS	512
 
 typedef struct
 {
@@ -131,7 +131,6 @@ typedef struct
 	bool	demoplayback;
 	bool	timedemo;
 	int			forcetrack;			// -1 = use normal cd track
-	FILE		*demofile;
 	int			td_lastframe;		// to meter out one message a frame
 	int			td_startframe;		// host_framecount at start
 	float		td_starttime;		// realtime at second frame of timedemo
@@ -209,10 +208,10 @@ typedef struct
 	float		last_received_message;	// (realtime) for net trouble icon
 
 	// information that is static for the entire time connected to a server
-	struct model_s		*model_precache[MAX_MODELS];
-	struct sfx_s		*sound_precache[MAX_SOUNDS];
+	struct model_s		**model_precache;
+	struct sfx_s		**sound_precache;
 
-	char		levelname[40];	// for display on solo scoreboard
+	char		levelname[128];	// for display on solo scoreboard
 	int			viewentity;		// cl_entitites[cl.viewentity] = player
 	int			maxclients;
 	int			gametype;
@@ -268,7 +267,7 @@ extern	cvar_t	m_forward;
 extern	cvar_t	m_side;
 
 
-#define	MAX_TEMP_ENTITIES	128			// lightning bolts, etc
+#define	MAX_TEMP_ENTITIES	512			// lightning bolts, etc
 
 typedef struct staticent_s
 {
@@ -284,10 +283,10 @@ extern	client_state_t	cl;
 
 // FIXME, allocate dynamically
 extern	entity_t		**cl_entities;
-extern	lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
+extern	lightstyle_t	*cl_lightstyle;
 extern	dlight_t		*cl_dlights;
-extern	entity_t		cl_temp_entities[MAX_TEMP_ENTITIES];
-extern	beam_t			cl_beams[MAX_BEAMS];
+extern	entity_t		*cl_temp_entities;
+extern	beam_t			*cl_beams;
 
 //=============================================================================
 
@@ -312,12 +311,7 @@ void CL_NextDemo (void);
 // bumped to 16384 as static entities can also add on
 #define			MAX_VISEDICTS	16384
 
-extern	int				cl_numvisedicts;
-extern	entity_t		**cl_visedicts;
-
-//
 // cl_input
-//
 typedef struct
 {
 	int		down[2];		// key nums holding it down

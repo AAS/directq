@@ -23,11 +23,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
-#include "d3d_hlsl.h"
+
 #include <vector>
 #include <algorithm>
 
-#define	D3DQUAKE_VERSION		0.01
+#define	DIRECTQ_VERSION		1.6.4
 
 PALETTEENTRY texturepal[256];
 
@@ -67,11 +67,13 @@ qpic_t *conback;
 int		texels;
 
 
+DWORD d3d_2DTextureColor = 0xffffffff;
+
 typedef struct vert_2d_s
 {
 	float xyz[3];
+	DWORD c;
 	float st[2];
-	byte pad[12];
 } vert_2d_t;
 
 
@@ -91,7 +93,7 @@ typedef struct cachepic_s
 
 cachepic_t *menu_cachepics = NULL;
 
-byte		menuplyr_pixels[4096];
+byte		*menuplyr_pixels = NULL;
 
 int		pic_texels;
 int		pic_count;
@@ -149,6 +151,7 @@ qpic_t *Draw_CachePic (char *path)
 	qpic_t		*dat;
 	glpic_t		*gl;
 
+	// these can't go into normal cached memory because of on-demand cache clearing
 	for (pic = menu_cachepics, freepic = NULL; pic; pic = pic->next)
 	{
 		if (!pic->name[0]) freepic = pic;
@@ -160,25 +163,26 @@ qpic_t *Draw_CachePic (char *path)
 		pic = freepic;
 	else
 	{
-		// add a new pic
-		pic = (cachepic_t *) malloc (sizeof (cachepic_t));
+		// add a new pic to the game pool
+		pic = (cachepic_t *) Pool_Alloc (POOL_GAME, sizeof (cachepic_t));
 		pic->next = menu_cachepics;
 		menu_cachepics = pic;
 	}
 
-	strcpy (pic->name, path);
+	strncpy (pic->name, path, 63);
 
 	// load the pic from disk
 	dat = (qpic_t *) COM_LoadTempFile (path);
 
 	if (!dat)
 	{
+		// don't swap draw_failsafe!!!
 		Con_Printf ("Draw_CachePic: failed to load %s", path);
 		dat = draw_failsafe;
 	}
 	else
 	{
-		// don't swap draw_failsafe!!!
+		// only swap if it loaded
 		SwapPic (dat);
 	}
 
@@ -199,7 +203,11 @@ qpic_t *Draw_CachePic (char *path)
 	// the translatable player picture just for the menu
 	// configuration dialog
 	if (!strcmp (path, "gfx/menuplyr.lmp"))
+	{
+		// this should only happen once
+		menuplyr_pixels = (byte *) Pool_Alloc (POOL_GAME, dat->width * dat->height);
 		memcpy (menuplyr_pixels, dat->data, dat->width * dat->height);
+	}
 
 	pic->pic.width = dat->width;
 	pic->pic.height = dat->height;
@@ -212,6 +220,9 @@ qpic_t *Draw_CachePic (char *path)
 	gl->tl = 0;
 	gl->th = 1;
 
+	// don't pollute the temp pool with small fry
+	Pool_Free (POOL_TEMP);
+
 	return &pic->pic;
 }
 
@@ -223,7 +234,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	int i, j, c;
 
 	// allocate memory for a new charset
-	newchars = (byte *) Heap_QMalloc (w * h * 4);
+	newchars = (byte *) Pool_Alloc (POOL_TEMP, w * h * 4);
 
 	// clear to all alpha
 	memset (newchars, 0, w * h * 4);
@@ -303,9 +314,6 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 
 	// now turn them into textures
 	char_texture = D3D_LoadTexture ("charset", 256, 256, newchars, false, true);
-
-	// free the working memory we used
-	Heap_QFree (newchars);
 }
 
 
@@ -339,24 +347,22 @@ void Draw_Init (void)
 	}
 
 	// free cache pics
-	for (cachepic_t *pic = menu_cachepics; pic; pic = pic->next)
-		pic->name[0] = 0;
+	menu_cachepics = NULL;
 
-	// setup failsafe pic
-	// free previous allocation (on game change)
-	if (failsafedata) Heap_QFree (failsafedata);
+	if (!failsafedata)
+	{
+		// this is a qpic_t that's used in the event of any qpic_t failing to load!!!
+		// we alloc enough memory for the glpic_t that draw_failsafe->data is casted to.
+		// this crazy-assed shit prevents an "ambiguous call to overloaded function" error.
+		// add 1 cos of integer round down.  do it this way in case we ever change the glpic_t struct
+		int failsafedatasize = D3D_PowerOf2Size ((int) sqrt ((float) (sizeof (glpic_t))) + 1);
 
-	// this is a qpic_t that's used in the event of any qpic_t failing to load!!!
-	// we alloc enough memory for the glpic_t that draw_failsafe->data is casted to.
-	// this crazy-assed shit prevents an "ambiguous call to overloaded function" error.
-	// add 1 cos of integer round down.  do it this way in case we ever change the glpic_t struct
-	int failsafedatasize = D3D_PowerOf2Size ((int) sqrt ((float) (sizeof (glpic_t))) + 1);
-
-	// persist in memory
-	failsafedata = (byte *) Heap_QMalloc (sizeof (int) * 2 + (failsafedatasize * failsafedatasize));
-	draw_failsafe = (qpic_t *) failsafedata;
-	draw_failsafe->height = failsafedatasize;
-	draw_failsafe->width = failsafedatasize;
+		// persist in memory
+		failsafedata = (byte *) Pool_Alloc (POOL_PERMANENT, sizeof (int) * 2 + (failsafedatasize * failsafedatasize));
+		draw_failsafe = (qpic_t *) failsafedata;
+		draw_failsafe->height = failsafedatasize;
+		draw_failsafe->width = failsafedatasize;
+	}
 
 	// lookup table for charset and palette texcoords
 	for (int i = 0; i < 256; i++)
@@ -382,16 +388,8 @@ void Draw_Init (void)
 	}
 
 	draw_chars = (byte *) W_GetLumpName ("conchars");
-
-	if (!draw_chars)
-	{
-		Sys_Error ("Draw_Init: failed to load draw_chars");
-		return;
-	}
-
 	Draw_SpaceOutCharSet (draw_chars, 128, 128);
 
-	// load the console background
 	conback = Draw_CachePic ("gfx/conback.lmp");
 
 	// set it's correct dimensions
@@ -428,17 +426,19 @@ void Draw_Character (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	d3d_Flat2DFX.SetTexture (char_texture);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, quadcoords[num].s, quadcoords[num].t},
-		{x + 8, y, 0, quadcoords[num].smax, quadcoords[num].t},
-		{x + 8, y + 8, 0, quadcoords[num].smax, quadcoords[num].tmax},
-		{x, y + 8, 0, quadcoords[num].s, quadcoords[num].tmax}
+		{x, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
+		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax},
+		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -455,17 +455,19 @@ void Draw_InvertCharacter (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	d3d_Flat2DFX.SetTexture (char_texture);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, quadcoords[num].s, quadcoords[num].tmax},
-		{x + 8, y, 0, quadcoords[num].smax, quadcoords[num].tmax},
-		{x + 8, y + 8, 0, quadcoords[num].smax, quadcoords[num].t},
-		{x, y + 8, 0, quadcoords[num].s, quadcoords[num].t}
+		{x, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
+		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax},
+		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -482,17 +484,19 @@ void Draw_BackwardsCharacter (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	d3d_Flat2DFX.SetTexture (char_texture);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, quadcoords[num].smax, quadcoords[num].t},
-		{x + 8, y, 0, quadcoords[num].s, quadcoords[num].t},
-		{x + 8, y + 8, 0, quadcoords[num].s, quadcoords[num].tmax},
-		{x, y + 8, 0, quadcoords[num].smax, quadcoords[num].tmax}
+		{x, y, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
+		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
+		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -509,17 +513,19 @@ void Draw_RotateCharacter (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	d3d_Flat2DFX.SetTexture (char_texture);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, quadcoords[num].s, quadcoords[num].tmax},
-		{x + 8, y, 0, quadcoords[num].s, quadcoords[num].t},
-		{x + 8, y + 8, 0, quadcoords[num].smax, quadcoords[num].t},
-		{x, y + 8, 0, quadcoords[num].smax, quadcoords[num].tmax}
+		{x, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
+		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
+		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -588,23 +594,21 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	float AlphaColour[] = {1, 1, 1, alpha};
+	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha * 255), 255, 255, 255);
 
-	d3d_Flat2DFX.SwitchToPass (2);
-	d3d_Flat2DFX.SetColor4f (AlphaColour);
-
-	d3d_Flat2DFX.SetTexture (gl->tex);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, gl->sl, gl->tl},
-		{x + pic->width, y, 0, gl->sh, gl->tl},
-		{x + pic->width, y + pic->height, 0, gl->sh, gl->th},
-		{x, y + pic->height, 0, gl->sl, gl->th}
+		{x, y, 0, alphacolor, gl->sl, gl->tl},
+		{x + pic->width, y, 0, alphacolor, gl->sh, gl->tl},
+		{x + pic->width, y + pic->height, 0, alphacolor, gl->sh, gl->th},
+		{x, y + pic->height, 0, alphacolor, gl->sl, gl->th}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
-	d3d_Flat2DFX.SwitchToPass (0);
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -617,17 +621,37 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	d3d_Flat2DFX.SetTexture (gl->tex);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, gl->sl, gl->tl},
-		{x + pic->width, y, 0, gl->sh, gl->tl},
-		{x + pic->width, y + pic->height, 0, gl->sh, gl->th},
-		{x, y + pic->height, 0, gl->sl, gl->th}
+		{x, y, 0, d3d_2DTextureColor, gl->sl, gl->tl},
+		{x + pic->width, y, 0, d3d_2DTextureColor, gl->sh, gl->tl},
+		{x + pic->width, y + pic->height, 0, d3d_2DTextureColor, gl->sh, gl->th},
+		{x, y + pic->height, 0, d3d_2DTextureColor, gl->sl, gl->th}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void D3D_DrawTexturedPic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic)
+{
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, texpic);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, d3d_2DTextureColor, 0, 0},
+		{x + w, y, 0, d3d_2DTextureColor, 1, 0},
+		{x + w, y + h, 0, d3d_2DTextureColor, 1, 1},
+		{x, y + h, 0, d3d_2DTextureColor, 0, 1}
+	};
+
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -697,17 +721,19 @@ void Draw_Crosshair (int x, int y, int size)
 	float t = xhairimage[xhairt];
 
 	// bind it
-	d3d_Flat2DFX.SetTexture (crosshairtexture);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, crosshairtexture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, s, t},
-		{x + size, y, 0, s + 0.25, t},
-		{x + size, y + size, 0, s + 0.25, t + 0.25},
-		{x, y + size, 0, s, t + 0.25}
+		{x, y, 0, d3d_2DTextureColor, s, t},
+		{x + size, y, 0, d3d_2DTextureColor, s + 0.25, t},
+		{x + size, y + size, 0, d3d_2DTextureColor, s + 0.25, t + 0.25},
+		{x, y + size, 0, d3d_2DTextureColor, s, t + 0.25}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -715,17 +741,19 @@ void Draw_HalfPic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	d3d_Flat2DFX.SetTexture (gl->tex);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, gl->sl, gl->tl},
-		{x + pic->width / 2, y, 0, gl->sh, gl->tl},
-		{x + pic->width / 2, y + pic->height / 2, 0, gl->sh, gl->th},
-		{x, y + pic->height / 2, 0, gl->sl, gl->th}
+		{x, y, 0, d3d_2DTextureColor, gl->sl, gl->tl},
+		{x + pic->width / 2, y, 0, d3d_2DTextureColor, gl->sh, gl->tl},
+		{x + pic->width / 2, y + pic->height / 2, 0, d3d_2DTextureColor, gl->sh, gl->th},
+		{x, y + pic->height / 2, 0, d3d_2DTextureColor, gl->sl, gl->th}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -796,17 +824,19 @@ void Draw_MapshotTexture (LPDIRECT3DTEXTURE9 mstex, int x, int y)
 {
 	Draw_TextBox (x - 8, y - 8, 128, 128);
 
-	d3d_Flat2DFX.SetTexture (mstex);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, mstex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, 0, 0},
-		{x + 128, y, 0, 1, 0},
-		{x + 128, y + 128, 0, 1, 1},
-		{x, y + 128, 0, 0, 1}
+		{x, y, 0, d3d_2DTextureColor, 0, 0},
+		{x + 128, y, 0, d3d_2DTextureColor, 1, 0},
+		{x + 128, y + 128, 0, d3d_2DTextureColor, 1, 1},
+		{x, y + 128, 0, d3d_2DTextureColor, 0, 1}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -867,21 +897,44 @@ Draw_PicTranslate
 Only used for the player color selection menu
 =============
 */
-void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation)
+void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt, int pants)
 {
 	int				v, u, c;
 	unsigned		*dest;
 	byte			*src;
 	int				p;
+	static int old_shirt = -1;
+	static int old_pants = -1;
 
+	if (shirt == old_shirt && pants == old_pants)
+	{
+		// prevent updating if it hasn't changed
+		Draw_Pic (x, y, pic);
+		return;
+	}
+
+	old_shirt = shirt;
+	old_pants = pants;
 	c = pic->width * pic->height;
 
 	// lock the texture rectangle for updating
-	D3DLOCKED_RECT LockRect;
+	LPDIRECT3DTEXTURE9 tex = ((glpic_t *) (pic->data))->tex;
+	D3DSURFACE_DESC Level0Desc;
+	D3DLOCKED_RECT Level0Rect;
 
-	((glpic_t *) (pic->data))->tex->LockRect (0, &LockRect, NULL, 0);
+	LPDIRECT3DSURFACE9 LumaSurf;
 
-	dest = (unsigned *) LockRect.pBits;
+	tex->GetLevelDesc (0, &Level0Desc);
+	tex->GetSurfaceLevel (0, &LumaSurf);
+
+	// copy it out to an ARGB surface
+	LPDIRECT3DSURFACE9 CopySurf;
+
+	d3d_Device->CreateOffscreenPlainSurface (Level0Desc.Width, Level0Desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &CopySurf, NULL);
+	D3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, LumaSurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+	CopySurf->LockRect (&Level0Rect, NULL, 0);
+
+	dest = (unsigned *) Level0Rect.pBits;
 
 	for (v = 0; v < 64; v++, dest += 64)
 	{
@@ -891,15 +944,16 @@ void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation)
 		{
 			p = src[(u * pic->width) >> 6];
 
-			if (p == 255)
-				dest[u] = p;
-			else
-				dest[u] =  d_8to24table[translation[p]];
+			// bug in the previous just set colour to red rather than the correct alpha
+			dest[u] =  d_8to24table[translation[p]];
 		}
 	}
 
-	// unlock
-	((glpic_t *) (pic->data))->tex->UnlockRect (0);
+	CopySurf->UnlockRect ();
+	D3DXLoadSurfaceFromSurface (LumaSurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+	CopySurf->Release ();
+	LumaSurf->Release ();
 
 	// draw it normally
 	Draw_Pic (x, y, pic);
@@ -938,18 +992,19 @@ void Draw_TileClear (int x, int y, int w, int h)
 {
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
 
-	d3d_Flat2DFX.SwitchToPass (3);
-	d3d_Flat2DFX.SetTexture (gl->tex);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
+	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, x / 64.0, y / 64.0},
-		{x + w, y, 0, (x + w) / 64.0, y / 64.0},
-		{x + w, y + h, 0, (x + w) / 64.0, (y + h) / 64.0},
-		{x, y + h, 0, x / 64.0, (y + h) / 64.0},
+		{x, y, 0, d3d_2DTextureColor, x / 64.0, y / 64.0},
+		{x + w, y, 0, d3d_2DTextureColor, (x + w) / 64.0, y / 64.0},
+		{x + w, y + h, 0, d3d_2DTextureColor, (x + w) / 64.0, (y + h) / 64.0},
+		{x, y + h, 0, d3d_2DTextureColor, x / 64.0, (y + h) / 64.0},
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -964,27 +1019,57 @@ void Draw_Fill (int x, int y, int w, int h, int c, int alpha)
 {
 	byte *bgra = (byte *) &d_8to24table[c];
 
-	float FillColour[4] =
-	{
-		bgra[2] / 255.0f, 
-		bgra[1] / 255.0f, 
-		bgra[0] / 255.0f, 
-		alpha / 255.0f
-	};
+	DWORD fillcolor = D3DCOLOR_ARGB
+	(
+		BYTE_CLAMP (alpha),
+		bgra[2],
+		bgra[1],
+		bgra[0]
+	);
 
-	d3d_Flat2DFX.SwitchToPass (1);
-	d3d_Flat2DFX.SetColor4f (FillColour);
+	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0},
-		{x + w, y, 0},
-		{x + w, y + h, 0},
-		{x, y + h, 0}
+		{x, y, 0, fillcolor},
+		{x + w, y, 0, fillcolor},
+		{x + w, y + h, 0, fillcolor},
+		{x, y + h, 0, fillcolor}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
-	d3d_Flat2DFX.SwitchToPass (0);
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+}
+
+
+void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alpha)
+{
+	DWORD fillcolor = D3DCOLOR_ARGB
+	(
+		BYTE_CLAMP (alpha * 255),
+		BYTE_CLAMP (r * 255),
+		BYTE_CLAMP (g * 255),
+		BYTE_CLAMP (b * 255)
+	);
+
+	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, fillcolor},
+		{x + w, y, 0, fillcolor},
+		{x + w, y + h, 0, fillcolor},
+		{x, y + h, 0, fillcolor}
+	};
+
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 
@@ -996,23 +1081,25 @@ Draw_FadeScreen
 
 ================
 */
-void Draw_FadeScreen (void)
+void Draw_FadeScreen (int alpha)
 {
-	float FadeColour[4] = {0, 0, 0, 0.8f};
+	DWORD fadecolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha), 0, 0, 0);
 
-	d3d_Flat2DFX.SwitchToPass (1);
-	d3d_Flat2DFX.SetColor4f (FadeColour);
+	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
 
 	vert_2d_t verts[] =
 	{
-		{0, 0, 0},
-		{vid.width, 0, 0},
-		{vid.width, vid.height, 0},
-		{0, vid.height, 0}
+		{0, 0, 0, fadecolor},
+		{vid.width, 0, 0, fadecolor},
+		{vid.width, vid.height, 0, fadecolor},
+		{0, vid.height, 0, fadecolor}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
-	d3d_Flat2DFX.SwitchToPass (0);
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 
@@ -1028,28 +1115,30 @@ void Draw_PolyBlend (void)
 	if (!gl_polyblend.value) return;
 	if (!v_blend[3]) return;
 
-	float BlendColor[4] =
-	{
-		v_blend[0] / 255.0f,
-		v_blend[1] / 255.0f,
-		v_blend[2] / 255.0f,
-		v_blend[3] / 255.0f
-	};
+	DWORD blendcolor = D3DCOLOR_ARGB
+	(
+		BYTE_CLAMP (v_blend[3]),
+		BYTE_CLAMP (v_blend[0]),
+		BYTE_CLAMP (v_blend[1]),
+		BYTE_CLAMP (v_blend[2])
+	);
 
-	d3d_Flat2DFX.SwitchToPass (1);
-	d3d_Flat2DFX.SetColor4f (BlendColor);
+	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
 
 	vert_2d_t verts[] =
 	{
 		// don't go down into the status bar area
-		{0, 0, 0},
-		{vid.width, 0, 0},
-		{vid.width, vid.height - sb_lines, 0},
-		{0, vid.height - sb_lines, 0}
+		{0, 0, 0, blendcolor},
+		{vid.width, 0, 0, blendcolor},
+		{vid.width, vid.height - sb_lines, 0, blendcolor},
+		{0, vid.height - sb_lines, 0, blendcolor}
 	};
 
-	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
-	d3d_Flat2DFX.SwitchToPass (0);
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 
@@ -1057,28 +1146,37 @@ void D3D_Set2DShade (float shadecolor)
 {
 	if (shadecolor >= 0.99f)
 	{
-		// revert to pass 0
-		d3d_Flat2DFX.SwitchToPass (0);
+		// solid
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+		d3d_2DTextureColor = 0xffffffff;
 	}
 	else
 	{
-		// set color
-		float ShadeColor[4] = {shadecolor, shadecolor, shadecolor, shadecolor};
+		// 0 to 255 scale
+		shadecolor *= 255.0f;
 
-		// switch to pass 2
-		d3d_Flat2DFX.SwitchToPass (2);
-		d3d_Flat2DFX.SetColor4f (ShadeColor);
+		// fade out
+		d3d_2DTextureColor = D3DCOLOR_ARGB
+		(
+			BYTE_CLAMP (shadecolor),
+			BYTE_CLAMP (shadecolor),
+			BYTE_CLAMP (shadecolor),
+			BYTE_CLAMP (shadecolor)
+		);
+
+		D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 	}
 }
 
 
 // we'll store this out too in case we ever want to do anything with it
-D3DVIEWPORT9 d3d_2DViewport;
 void D3D_DrawUnderwaterWarp (void);
 void SCR_SetupToDrawHUD (void);
 
 void D3D_Set2D (void)
 {
+	D3DVIEWPORT9 d3d_2DViewport;
+
 	// switch to a fullscreen viewport for 2D drawing
 	d3d_2DViewport.X = 0;
 	d3d_2DViewport.Y = 0;
@@ -1090,9 +1188,6 @@ void D3D_Set2D (void)
 	// because the underwater warp needs it's own beginscene/endscene pair, we need a beginscene here too...
 	d3d_Device->SetViewport (&d3d_2DViewport);
 
-	// world matrix
-	d3d_WorldMatrixStack->LoadIdentity ();
-
 	// disable depth testing and writing
 	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
 	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
@@ -1100,38 +1195,44 @@ void D3D_Set2D (void)
 	// no backface culling
 	D3D_BackfaceCull (D3DCULL_NONE);
 
-	// common for all 2D drawing, including the underwater warp
-	d3d_Device->SetVertexDeclaration (d3d_V3ST2Declaration);
+	// view matrix
+	d3d_ViewMatrixStack->Reset ();
+	d3d_ViewMatrixStack->LoadIdentity ();
+
+	// world matrix
+	d3d_WorldMatrixStack->Reset ();
+	d3d_WorldMatrixStack->LoadIdentity ();
+
+	// state
+	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTexCoordIndexes (0);
 
 	// draw the underwater warp here - all the above state is common but it uses a different orthographic matrix
-	D3D_DrawUnderwaterWarp ();
+	if (!d3d_RenderDef.automap) D3D_DrawUnderwaterWarp ();
 
 	// projection matrix
-	D3DXMatrixIdentity (&d3d_OrthoMatrix);
-	D3DXMatrixOrthoOffCenterRH (&d3d_OrthoMatrix, 0, vid.width, vid.height, 0, 0, 1);
+	d3d_ProjMatrixStack->Reset ();
+	d3d_ProjMatrixStack->LoadIdentity ();
+	d3d_ProjMatrixStack->Ortho2D (0, vid.width, vid.height, 0, 0, 1);
 
-	// note - texture clamping is done per element rather than globally as the Draw_TileClear requires wrapping
-	// set up our shader
-	d3d_Flat2DFX.BeginRender ();
-	d3d_Flat2DFX.SetWPMatrix (&((*d3d_WorldMatrixStack->GetTop ()) * d3d_OrthoMatrix));
+	// modulate alpha always here
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 
-	// note - SwitchToPass doesn't take effect until we actually come to DRAW something, so we can safely issue
-	// as many of these as we want with no impact on perf
-	d3d_Flat2DFX.SwitchToPass (0);
+	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+
+	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
 
 	// do this before enabling alpha blending so that we're not alpha-blending a large part of the screen
 	// with a texture that has an alpha of 1!!!
 	SCR_SetupToDrawHUD ();
 
 	// enable alpha blending
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
 
 	// do the polyblend here for simplicity
-	Draw_PolyBlend ();
-
-	d3d_Flat2DFX.SwitchToPass (0);
+	if (!d3d_RenderDef.automap) Draw_PolyBlend ();
 }
 

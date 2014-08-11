@@ -48,7 +48,7 @@ CQMenu menu_FunName (&menu_Setup, m_other);
 
 int Menu_MultiplayerCustomDraw (int y)
 {
-	if (serialAvailable || ipxAvailable || tcpipAvailable) return y;
+	if (tcpipAvailable) return y;
 
 	Menu_PrintCenterWhite (vid.height - 80, "No Communications Available");
 
@@ -83,8 +83,8 @@ void Menu_SetupCustomEnter (void)
 	menu_soundlevel = m_sound_enter;
 
 	// copy cvars out
-	strncpy (dummy_name.string, cl_name.string, 1023);
-	strncpy (dummy_hostname.string, hostname.string, 1023);
+	Cvar_Set (&dummy_name, cl_name.string);
+	Cvar_Set (&dummy_hostname, hostname.string);
 
 	setup_shirt = setup_oldshirt = ((int) cl_color.value) >> 4;
 	setup_pants = setup_oldpants = ((int) cl_color.value) & 15;
@@ -133,7 +133,7 @@ int Menu_SetupCustomDraw (int y)
 
 	p = Draw_CachePic ("gfx/menuplyr.lmp");
 	M_BuildTranslationTable (setup_shirt * 16, setup_pants * 16);
-	Draw_PicTranslate ((vid.width - p->width) / 2, y + 8, p, translationTable);
+	Draw_PicTranslate ((vid.width - p->width) / 2, y + 8, p, translationTable, setup_shirt, setup_pants);
 
 	// check for an apply change
 	if (setup_shirt != setup_oldshirt || setup_pants != setup_oldpants ||
@@ -157,7 +157,7 @@ int Menu_TCPIPCustomDraw (int y)
 
 	y += 15;
 
-	if (serialAvailable || ipxAvailable || tcpipAvailable) return y;
+	if (tcpipAvailable) return y;
 
 	Menu_PrintCenterWhite (vid.height - 80, "No Communications Available");
 
@@ -171,8 +171,8 @@ cvar_t dummy_remoteip;
 void Menu_TCPIPCustomEnter (void)
 {
 	// copy out the port
-	sprintf (dummy_port.string, "%i", DEFAULTnet_hostport);
-	dummy_remoteip.string[0] = 0;
+	Cvar_Set (&dummy_port, va ("%i", DEFAULTnet_hostport));
+	Cvar_Set (&dummy_remoteip, "0");
 }
 
 
@@ -182,7 +182,7 @@ void Menu_TCPIPPostConfigCommon (void)
 	Cbuf_AddText ("stopdemo\n");
 
 	// retrieve the port
-	int l =  Q_atoi (dummy_port.string);
+	int l =  atoi (dummy_port.string);
 
 	// store it out
 	if (l > 65535)
@@ -507,9 +507,9 @@ void Menu_SListCustomEnter (void)
 			{
 				if (strcmp (hostcache[j].name, hostcache[i].name) < 0)
 				{
-					Q_memcpy (&temp, &hostcache[j], sizeof (hostcache_t));
-					Q_memcpy (&hostcache[j], &hostcache[i], sizeof (hostcache_t));
-					Q_memcpy (&hostcache[i], &temp, sizeof (hostcache_t));
+					memcpy (&temp, &hostcache[j], sizeof (hostcache_t));
+					memcpy (&hostcache[j], &hostcache[i], sizeof (hostcache_t));
+					memcpy (&hostcache[i], &temp, sizeof (hostcache_t));
 				}
 			}
 		}
@@ -704,7 +704,7 @@ void Menu_CustomNameCustomEnter (void)
 	menu_soundlevel = m_sound_enter;
 
 	// copy cvars out
-	strncpy (dummy_name.string, cl_name.string, 1023);
+	Cvar_Set (&dummy_name, cl_name.string);
 
 	custnamechanged = false;
 	if (custnamerow == 9) custnamerow = 8;
@@ -746,7 +746,7 @@ void Menu_InitMultiplayerMenu (void)
 	menu_Setup.AddOption (new CQMenuTitle ("Setup Player Options"));
 	menu_Setup.AddOption (new CQMenuCustomEnter (Menu_SetupCustomEnter));
 	menu_Setup.AddOption (new CQMenuCvarTextbox ("Player Name", &dummy_name));
-	menu_Setup.AddOption (new CQMenuSubMenu ("Generate Custom Name", &menu_FunName));
+	//menu_Setup.AddOption (new CQMenuSubMenu ("Generate Custom Name", &menu_FunName));
 	menu_Setup.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Setup.AddOption (new CQMenuCvarTextbox ("Host Name", &dummy_hostname, TBFLAGS_ALPHANUMERICFLAGS));
 	menu_Setup.AddOption (new CQMenuSpacer (DIVIDER_LINE));

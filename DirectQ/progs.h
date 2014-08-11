@@ -34,6 +34,21 @@ typedef union eval_s
 	int				edict;
 } eval_t;	
 
+// edict field fast lookup offsets
+extern int ed_alpha;
+extern int ed_fullbright;
+extern int ed_ammo_shells1;
+extern int ed_ammo_nails1;
+extern int ed_ammo_lava_nails;
+extern int ed_ammo_rockets1;
+extern int ed_ammo_multi_rockets;
+extern int ed_ammo_cells1;
+extern int ed_ammo_plasma;
+extern int ed_items2;
+extern int ed_gravity;
+
+#define GETEDICTFIELDVALUEFAST(ed, fieldoffset) ((fieldoffset) ? (eval_t *) ((byte *) &(ed)->v + (fieldoffset)) : NULL)
+
 typedef struct edict_s
 {
 	bool	free;
@@ -45,7 +60,12 @@ typedef struct edict_s
 	entity_state_t	baseline;
 
 	float		freetime;			// sv.time when the object was freed
-	entvars_t	v;					// C exported fields from progs
+
+	// timer for cullentities tracing
+	float		tracetimer;
+
+	// C exported fields from progs
+	entvars_t	v;
 
 	// other fields from progs come immediately after
 } edict_t;

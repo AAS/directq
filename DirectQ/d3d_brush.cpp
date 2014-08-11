@@ -18,38 +18,118 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-
+// eeewwww - this code is disgusting
+// NONE OF THIS IS SATISFACTORILY RESOLVED RIGHT NOW - wait for 1.8
 #include "quakedef.h"
 #include "d3d_quake.h"
-#include "d3d_hlsl.h"
+
+void D3D_TransformWaterSurface (msurface_t *surf);
+void R_TransformModelSurface (model_t *mod, msurface_t *surf);
 
 // OK, it happens in GLQuake which is argument for 0, but it didn't happen in
 // software, which is a bigger argument for 1.  So 1 it is.
 cvar_t r_zhack ("r_zfighthack", "1", CVAR_ARCHIVE);
+cvar_t r_instancedlight ("r_instancedlight", "0", CVAR_ARCHIVE);
 extern cvar_t r_warpspeed;
-extern cvar_t r_lightscale;
-extern bool d3d_AutomapDraw;
 
 // r_lightmap 1 uses the grey texture on account of 2 x overbrighting
 extern LPDIRECT3DTEXTURE9 r_greytexture;
+extern LPDIRECT3DTEXTURE9 r_blacktexture;
 extern cvar_t r_lightmap;
 
 texture_t *R_TextureAnimation (texture_t *base);
 void R_LightPoint (entity_t *e, float *c);
-bool R_CullBox (vec3_t mins, vec3_t maxs);
-void D3D_RotateForEntity (entity_t *e, bool shadow = false);
+void D3D_RotateForEntity (entity_t *e);
 void R_PushDlights (mnode_t *headnode);
+__inline void R_AddSurfToDrawLists (msurface_t *surf);
 
-extern msurface_t *skychain;
 
+/*
+=======================
+R_MergeBrushModelToWorld
 
-// make code make sense!!!
-#define PASS_NOTRANSNOLUMA		0
-#define PASS_NOTRANSLUMA		1
-#define PASS_LIQUIDINSTANCED	2
-
-bool R_SetupBrushEntity (entity_t *e)
+merges the surfs in a brushmodel with the world
+=======================
+*/
+bool R_MergeBrushModelToWorld (entity_t *e)
 {
+	// set currententity for R_TextureAnimation and retrieve the model pointer for easier access
+	d3d_RenderDef.currententity = e;
+	model_t *clmodel = e->model;
+
+	// setup for backface culling check
+	//VectorSubtract (r_refdef.vieworg, e->origin, modelorg);
+	//VectorSubtract (e->origin, r_refdef.vieworg, modelorg);
+
+	// setup
+	int drawsurfs = 0;
+	msurface_t *surf = &clmodel->bh->surfaces[clmodel->bh->firstmodelsurface];
+
+	// firstly we add all models to texture chains
+	for (int i = 0; i < clmodel->bh->nummodelsurfaces; i++, surf++)
+	{
+		// opaque water surfs can get an infinite texturechain on a changelevel in some maps.
+		// this ensures that each surf is only chained once.  this will be fixed properly in 1.8
+		if (surf->visframe == d3d_RenderDef.framecount) continue;
+
+		// find which side of the node we are on
+		mplane_t *pplane = surf->plane;
+		float dot = DotProduct (modelorg, pplane->normal) - pplane->dist;
+
+		// check the surface (note - this doesn't behave itself properly right now)
+		// we're gonna hope that there won't be too many of these...!
+		// if (((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) || (!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
+		{
+			// store out the surface matrix
+			surf->matrix = e->matrix;
+
+			// transform the surf by the matrix stored for the model containing it
+			// sky and liquid surfs on ALL inline bmodels get merged to the world render.  normal surfs on non-alpha
+			// inline bmodels get merged to the world render.  only normal surfs on alpha bmodels get drawn separately.
+			if (surf->flags & SURF_DRAWSKY)
+			{
+				R_TransformModelSurface (clmodel, surf);
+				R_AddSurfToDrawLists (surf);
+			}
+			else if (surf->flags & SURF_DRAWTURB)
+			{
+				D3D_TransformWaterSurface (surf);
+				R_AddSurfToDrawLists (surf);
+			}
+			else if (e->alphaval > 254)
+			{
+				R_TransformModelSurface (clmodel, surf);
+				R_AddSurfToDrawLists (surf);
+			}
+			else drawsurfs++;
+
+			// prevent infinite texturechain; see above
+			surf->visframe = d3d_RenderDef.framecount;
+		}
+	}
+
+	// no surfs got added
+	return !!(drawsurfs);
+}
+
+
+/*
+=======================
+R_PrepareBrushEntity
+
+Prepares a brushmodel entity for rendering; calculating transforms, dynamic lighting, etc.
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Note: it's not safe to store ANYTHING in either e->model or clmodel or members thereof for
+instanced bmodels going through here as these models may be shared by more than one entity!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+=======================
+*/
+bool R_PrepareBrushEntity (entity_t *e)
+{
+	// just in case...
+	d3d_RenderDef.currententity = e;
+
 	bool rotated;
 	vec3_t mins, maxs;
 	model_t *clmodel = e->model;
@@ -73,18 +153,11 @@ bool R_SetupBrushEntity (entity_t *e)
 	}
 
 	// static entities already have the leafs they are in bbox culled
-	if (!d3d_AutomapDraw)
-	{
-		if (!e->nocullbox)
-			if (R_CullBox (mins, maxs))
-				return true;
-	}
-	else
-	{
-		if (mins[2] > r_refdef.vieworg[2]) return true;
-	}
+	if (!e->nocullbox)
+		if (R_CullBox (mins, maxs))
+			return false;
 
-	// set up modelorg and matrix
+	// set up modelorg and matrix (fixme - move modelorg to entity_t)
 	VectorSubtract (r_refdef.vieworg, e->origin, modelorg);
 
 	if (rotated)
@@ -99,7 +172,7 @@ bool R_SetupBrushEntity (entity_t *e)
 		modelorg[2] = DotProduct (temp, up);
 	}
 
-	if (r_zhack.value && clmodel->name[0] == '*')
+	if (r_zhack.value && clmodel->bh->brushtype == MOD_BRUSH_INLINE)
 	{
 		// hack the origin to prevent bmodel z-fighting
 		e->origin[0] -= DIST_EPSILON;
@@ -113,19 +186,19 @@ bool R_SetupBrushEntity (entity_t *e)
 		d3d_WorldMatrixStack->Push ();
 		d3d_WorldMatrixStack->LoadIdentity ();
 		D3D_RotateForEntity (e);
-		memcpy (clmodel->matrix, d3d_WorldMatrixStack->GetTop (), sizeof (D3DXMATRIX));
+		d3d_WorldMatrixStack->GetMatrix ((D3DXMATRIX *) e->matrix);
 		d3d_WorldMatrixStack->Pop ();
 	}
 	else
 	{
 		// lightweight translation-only
-		D3DXMatrixIdentity ((D3DXMATRIX *) clmodel->matrix);
-		((D3DXMATRIX *) clmodel->matrix)->_41 = e->origin[0];
-		((D3DXMATRIX *) clmodel->matrix)->_42 = e->origin[1];
-		((D3DXMATRIX *) clmodel->matrix)->_43 = e->origin[2];
+		D3DXMatrixIdentity ((D3DXMATRIX *) e->matrix);
+		((D3DXMATRIX *) e->matrix)->_41 = e->origin[0];
+		((D3DXMATRIX *) e->matrix)->_42 = e->origin[1];
+		((D3DXMATRIX *) e->matrix)->_43 = e->origin[2];
 	}
 
-	if (r_zhack.value && clmodel->name[0] == '*')
+	if (r_zhack.value && clmodel->bh->brushtype == MOD_BRUSH_INLINE)
 	{
 		// un-hack the origin
 		e->origin[0] += DIST_EPSILON;
@@ -133,120 +206,148 @@ bool R_SetupBrushEntity (entity_t *e)
 		e->origin[2] += DIST_EPSILON;
 	}
 
+	// set up lighting for the model
+	if (clmodel->bh->brushtype == MOD_BRUSH_INLINE)
+	{
+		// calculate dynamic lighting for bmodel if it's not an instanced model
+		R_PushDlights (clmodel->bh->nodes + clmodel->bh->hulls[0].firstclipnode);
+
+		// for an inline brushmodel we merge all of it's surfaces with the world, unless it's translucent, in which
+		// case we only merge sky and liquid surfs in it with the world.  the global r_wateralpha cvar takes precedence
+		// over entity translucency here (that's tough shit, but a decision has to be made and this is mine).
+		return R_MergeBrushModelToWorld (e);
+	}
+	else
+	{
+		// get lighting information for an instanced model
+		R_LightPoint (e, e->shadelight);
+	}
+
 	// not culled
-	return false;
+	return true;
 }
 
 
 /*
-====================
-D3D_DrawInstancedBrushModels
+=======================
+R_SetInstancedStage0
 
-Draws instanced brush models using shaders to handle origin and fullbrights.
-
-Because we're letting users specify their own shaders we need to validate these to ensure that the
-expected techniques, passes and parameters are present and correct.  We could move it all to load
-time but then the risk is that people won't notice it, so instead we spam the console at run time.
-====================
+split out to keep code cleaner
+=======================
 */
-void D3D_DrawInstancedBrushModels (void)
+void R_SetInstancedStage0 (entity_t *e)
 {
-	if (!r_drawentities.value) return;
-	if (!(r_renderflags & R_RENDERINSTANCEDBRUSH)) return;
+	DWORD bsplight = D3DCOLOR_ARGB
+	(
+		BYTE_CLAMP (e->alphaval),
+		BYTE_CLAMP (e->shadelight[0]),
+		BYTE_CLAMP (e->shadelight[1]),
+		BYTE_CLAMP (e->shadelight[2])
+	);
 
-	// set the vertex buffer stream
-	d3d_Device->SetStreamSource (0, d3d_BrushModelVerts, 0, sizeof (worldvert_t));
-
-	// set up shaders
-	d3d_Device->SetVertexDeclaration (d3d_V3ST2Declaration);
-
-	d3d_InstancedBrushFX.BeginRender ();
-	d3d_InstancedBrushFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
-	d3d_InstancedBrushFX.SetTime ((cl.time * r_warpspeed.value));
-	d3d_InstancedBrushFX.SetScale (r_lightscale.value);
-
-	for (int i = 0; i < cl_numvisedicts; i++)
-	{
-		// R_TextureAnimation needs this
-		currententity = cl_visedicts[i];
-
-		// only doing instanced brush models here
-		if (currententity->model->type != mod_brush) continue;
-		if (currententity->model->name[0] == '*') continue;
-
-		// cullbox test and other setup
-		if (R_SetupBrushEntity (currententity)) continue;
-
-		float bsplight[4];
-
-		// get lighting information
-		R_LightPoint (currententity, bsplight);
-
-		// set origin in the vertex shader
-		d3d_InstancedBrushFX.SetEntMatrix ((D3DXMATRIX *) currententity->model->matrix);
-		d3d_InstancedBrushFX.SetColor4f (bsplight);
-
-		// draw the instanced model
-		int s;
-		msurface_t *surf;
-
-		for (s = 0, surf = currententity->model->bh->surfaces; s < currententity->model->bh->numsurfaces; s++, surf++)
-		{
-			// set the model correctly (is this used anymore???)
-			surf->model = currententity->model;
-
-			// note - glquake allows these so we probably should too...
-			if (surf->flags & SURF_DRAWSKY) continue;
-
-			// get the correct texture
-			texture_t *tex = R_TextureAnimation (surf->texinfo->texture);
-
-			// bind it - we don't bother sorting these by chain as they normally have at most 3-4 textures.  likewise
-			// with backface culling tests/etc (takes longer to perform the test than it does to just render the blimmin thing)
-			if (surf->flags & SURF_DRAWTURB)
-				d3d_InstancedBrushFX.SwitchToPass (PASS_LIQUIDINSTANCED);
-			else if (tex->d3d_Fullbright)
-			{
-				d3d_InstancedBrushFX.SetTexture (1, (LPDIRECT3DTEXTURE9) tex->d3d_Fullbright);
-				d3d_InstancedBrushFX.SwitchToPass (PASS_NOTRANSNOLUMA);
-			}
-			else d3d_InstancedBrushFX.SwitchToPass (PASS_NOTRANSLUMA);
-
-			if (r_lightmap.integer)
-				d3d_InstancedBrushFX.SetTexture (0, r_greytexture);
-			else d3d_InstancedBrushFX.SetTexture (0, (LPDIRECT3DTEXTURE9) tex->d3d_Texture);
-
-			c_brush_polys++;
-
-			// draw the surface directly from the vertex buffer
-			d3d_InstancedBrushFX.Draw (D3DPT_TRIANGLEFAN, surf->vboffset, surf->numedges - 2);
-		}
-	}
-
-	// take down the effect
-	d3d_InstancedBrushFX.EndRender ();
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG2, D3DTA_TEXTURE, D3DTA_CONSTANT);
+	D3D_SetTextureStageState (0, D3DTSS_CONSTANT, bsplight);
 }
 
 
-D3DXMATRIX *CachedMatrix = NULL;
-int NumMatrixSwaps = 0;
+/*
+=======================
+R_SetBrushSurfaceStates
 
-
-void D3D_RunBrushPass (int PassNum)
+Setup states for rendering brush surfaces depending on the requested flags
+Note: someflags are mutually exclusive and should not be used together unless you want weird things to happen
+=======================
+*/
+void R_SetBrushSurfaceStates (entity_t *e, int flag)
 {
+	// don't mipmap lightmaps, mipmap the world and fullbrights
+	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (1, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
+	D3D_SetTextureMipmap (2, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
+
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+	D3D_SetTexCoordIndexes (1, 0, 0);
+
+	// set up shaders
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX2);
+
+	// first stage is the lightmap (common to everything)
+	// determine the correct blend type for it - this is a bit ugly here....
+	if (e->model->bh->brushtype == MOD_BRUSH_WORLD)
+	{
+		// enforce replace mode for the world model
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+	}
+	else if (e->alphaval < 255)
+	{
+		if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.integer)
+		{
+			R_SetInstancedStage0 (e);
+			D3D_SetTextureAlphaMode (0, D3DTOP_SELECTARG1, D3DTA_CONSTANT, D3DTA_DIFFUSE);
+		}
+		else
+		{
+			D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+			D3D_SetTextureAlphaMode (0, D3DTOP_SELECTARG1, D3DTA_CONSTANT, D3DTA_DIFFUSE);
+			D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255));
+		}
+	}
+	else if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.integer)
+	{
+		R_SetInstancedStage0 (e);
+		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+	}
+	else
+	{
+		// default
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+	}
+
+	if (flag & R_RENDERNOLUMA)
+	{
+		// second stage is the texture
+		D3D_SetTextureColorMode (1, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_CURRENT);
+
+		// ensure this is down because we can make multiple successive passes
+		D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+	}
+	else if (flag & R_RENDERLUMA)
+	{
+		// second stage is the luma
+		D3D_SetTextureColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
+
+		// third stage is the texture
+		D3D_SetTextureColorMode (2, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_CURRENT);
+	}
+
+	// common
+	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+}
+
+
+/*
+=======================
+R_RefreshSurfaces
+
+runs a surface refresh on surfaces that match the specified flag
+=======================
+*/
+void R_RefreshSurfaces (entity_t *e, int flag)
+{
+	model_t *mod = e->model;
 	msurface_t *surf;
 	texture_t *tex;
 
-	d3d_BrushFX.SwitchToPass (PassNum);
+	R_SetBrushSurfaceStates (e, flag);
 
-	for (int i = 0; i < cl.worldbrush->numtextures; i++)
+	// draw 'em all
+	for (int i = 0; i < mod->bh->numtextures; i++)
 	{
-		// no texture (e2m3 gets this)
-		if (!(tex = cl.worldbrush->textures[i])) continue;
-
-		// skip over passes
-		if (PassNum == PASS_NOTRANSNOLUMA && tex->d3d_Fullbright) continue;
-		if (PassNum == PASS_NOTRANSLUMA && !tex->d3d_Fullbright) continue;
+		// no texture (e2m3 gets this) (fix me - get rid of this...!)
+		if (!(tex = mod->bh->textures[i])) continue;
 
 		// nothing to draw for this texture
 		if (!(surf = tex->texturechain)) continue;
@@ -255,168 +356,193 @@ void D3D_RunBrushPass (int PassNum)
 		if (surf->flags & SURF_DRAWSKY) continue;
 		if (surf->flags & SURF_DRAWTURB) continue;
 
-		// bind regular texture
-		if (r_lightmap.integer)
-			d3d_BrushFX.SetTexture (0, r_greytexture);
-		else d3d_BrushFX.SetTexture (0, (LPDIRECT3DTEXTURE9) tex->d3d_Texture);
+		// check luma
+		if ((flag & R_RENDERNOLUMA) && tex->d3d_Fullbright) continue;
+		if ((flag & R_RENDERLUMA) && !tex->d3d_Fullbright) continue;
 
-		// bind luma texture
-		if (tex->d3d_Fullbright) d3d_BrushFX.SetTexture (2, (LPDIRECT3DTEXTURE9) tex->d3d_Fullbright);
+		if (flag & R_RENDERNOLUMA)
+		{
+			// bind regular texture
+			if (r_lightmap.integer)
+				D3D_SetTexture (1, r_greytexture);
+			else D3D_SetTexture (1, (LPDIRECT3DTEXTURE9) tex->d3d_Texture);
+		}
+		else if (flag & R_RENDERLUMA)
+		{
+			// bind luma texture - the check above ensures that it exists!
+			D3D_SetTexture (1, (LPDIRECT3DTEXTURE9) tex->d3d_Fullbright);
 
-		// we need to track the currently cached lightmap in order to know when to render a primitive batch
-		// primitive batches are rendered when any of (1) main texture, (2) lightmap or (3) matrix changes
-		LPDIRECT3DTEXTURE9 CachedLightmap = NULL;
+			// bind regular texture
+			if (r_lightmap.integer)
+				D3D_SetTexture (2, r_greytexture);
+			else D3D_SetTexture (2, (LPDIRECT3DTEXTURE9) tex->d3d_Texture);
+		}
 
 		for (; surf; surf = surf->texturechain)
 		{
-			c_brush_polys++;
-
 			// bind the lightmap
 			// we need to send this through a getter as only d3d_rlight knows about the lightmap data type
-			LPDIRECT3DTEXTURE9 CurrentLightmap = D3D_GetLightmap (surf->d3d_Lightmap);
+			D3D_SetTexture (0, D3D_GetLightmap (surf->d3d_Lightmap));
 
-			if (CurrentLightmap != CachedLightmap)
-			{
-				d3d_BrushFX.SetTexture (1, CurrentLightmap);
-				CachedLightmap = CurrentLightmap;
-			}
-
-			if ((D3DXMATRIX *) surf->model->matrix != CachedMatrix)
-			{
-				d3d_BrushFX.SetEntMatrix ((D3DXMATRIX *) surf->model->matrix);
-				CachedMatrix = (D3DXMATRIX *) surf->model->matrix;
-
-				NumMatrixSwaps++;
-			}
-
-			if (d3d_BrushModelVerts)
-			{
-				// draw the surface directly from the vertex buffer
-				d3d_BrushFX.Draw (D3DPT_TRIANGLEFAN, surf->vboffset, surf->numedges - 2);
-			}
-			else
-			{
-				// draw from surf->polys
-			}
+			// draw the surface from surf->polys
+			D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, surf->polys->numverts - 2, surf->polys->verts, sizeof (glpolyvert_t));
+			d3d_RenderDef.brush_polys++;
 		}
 	}
+
+	// take down the constant
+	D3D_SetTextureStageState (0, D3DTSS_CONSTANT, 0xffffffff);
+
+	// it's possible to come out of here with an alpha op selected so take it down too
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+}
+
+
+/*
+=======================
+R_ClearSurfaceChains
+
+Clears all texture chains used by this given model and sets flags back to 0
+=======================
+*/
+void R_ClearSurfaceChains (model_t *mod)
+{
+	texture_t *t;
+
+	for (int i = 0; i < mod->bh->numtextures; i++)
+	{
+		// no texture (e2m3 gets this)
+		if (!(t = mod->bh->textures[i]))
+		{
+			Con_Printf ("missing texture in %s\n", mod->name);
+			continue;
+		}
+
+		// clear the chain
+		t->texturechain = NULL;
+		t->chaintail = NULL;
+		t->visframe = -1;
+	}
+
+	// clear flags (move this to d3d_RenderDef)
+	d3d_RenderDef.brushrenderflags = 0;
+}
+
+
+/*
+=======================
+R_TransformModelSurface
+
+For bmodels this transforms a surface by the given matrix, recreating the verts for it
+=======================
+*/
+void R_TransformModelSurface (model_t *mod, msurface_t *surf)
+{
+	// no matrix stored so don't transform it
+	if (!surf->matrix) return;
+
+	glpolyvert_t *p = surf->polys->verts;
+	D3DXMATRIX *m = (D3DXMATRIX *) surf->matrix;
+
+	for (int i = 0; i < surf->polys->numverts; i++, p++)
+	{
+		// rebuild the verts
+		float *vec;
+		int lindex = mod->bh->surfedges[surf->firstedge + i];
+
+		if (lindex > 0)
+			vec = mod->bh->vertexes[mod->bh->edges[lindex].v[0]].position;
+		else vec = mod->bh->vertexes[mod->bh->edges[-lindex].v[1]].position;
+
+		// transform them and copy out
+		p->xyz[0] = vec[0] * m->_11 + vec[1] * m->_21 + vec[2] * m->_31 + m->_41;
+		p->xyz[1] = vec[0] * m->_12 + vec[1] * m->_22 + vec[2] * m->_32 + m->_42;
+		p->xyz[2] = vec[0] * m->_13 + vec[1] * m->_23 + vec[2] * m->_33 + m->_43;
+	}
+}
+
+
+/*
+=======================
+R_DrawBrushModel
+
+Draws either an inline or an instanced brush model
+=======================
+*/
+bool R_DrawBrushModel (entity_t *e)
+{
+	// set currententity for R_TextureAnimation and retrieve the model pointer for easier access
+	d3d_RenderDef.currententity = e;
+	model_t *clmodel = e->model;
+
+	// setup for backface culling check
+	VectorSubtract (r_refdef.vieworg, e->origin, modelorg);
+
+	// clear all texture chains in use by this model
+	R_ClearSurfaceChains (clmodel);
+
+	// setup
+	int drawsurfs = 0;
+	msurface_t *surf = &clmodel->bh->surfaces[clmodel->bh->firstmodelsurface];
+
+	// firstly we add all models to texture chains
+	for (int i = 0; i < clmodel->bh->nummodelsurfaces; i++, surf++)
+	{
+		// this code path is only used for alpha inline bmodels and instanced bmodels; non-alpha inline bmodels
+		// get merged to the world render.  sky surfs and turb surfs on alpha inline bmodels also get merged to
+		// the world render.  we don't support sky and turb surfs on instanced bmodels.
+		if (surf->flags & SURF_DRAWSKY) continue;
+		if (surf->flags & SURF_DRAWTURB) continue;
+
+		// store out the surface matrix
+		surf->matrix = e->matrix;
+
+		// chain the surf
+		texture_t *tex = R_TextureAnimation (surf->texinfo->texture);
+
+		// link it in (add to the end of the surf texture chains so that they can be depth-clipped)
+		if (!tex->chaintail)
+			tex->texturechain = surf;
+		else tex->chaintail->texturechain = surf;
+
+		tex->chaintail = surf;
+		surf->texturechain = NULL;
+
+		// check flags
+		if (tex->d3d_Fullbright)
+			d3d_RenderDef.brushrenderflags |= R_RENDERLUMA;
+		else d3d_RenderDef.brushrenderflags |= R_RENDERNOLUMA;
+
+		// check for modification to this lightmap; done even for instanced as they may have animating lightstyles
+		D3D_CheckLightmapModification (surf);
+
+		// transform the surf by the matrix stored for the model containing it
+		R_TransformModelSurface (clmodel, surf);
+
+		// accumulate counts
+		drawsurfs++;
+	}
+
+	// no surfs got added
+	if (!drawsurfs) return false;
+
+	// draw the chained surfaces
+	if (d3d_RenderDef.brushrenderflags & R_RENDERNOLUMA) R_RefreshSurfaces (e, R_RENDERNOLUMA);
+	if (d3d_RenderDef.brushrenderflags & R_RENDERLUMA) R_RefreshSurfaces (e, R_RENDERLUMA);
+
+	return true;
 }
 
 
 void D3D_DrawWorld (void)
 {
-	// set up shaders
-	d3d_Device->SetStreamSource (0, d3d_BrushModelVerts, 0, sizeof (worldvert_t));
-	d3d_Device->SetVertexDeclaration (d3d_V3ST4Declaration);
+	entity_t ent;
+	memset (&ent, 0, sizeof (entity_t));
+	ent.model = cl.worldmodel;
+	ent.alphaval = 255;
+	ent.model->bh->brushtype = MOD_BRUSH_WORLD;
 
-	d3d_BrushFX.BeginRender ();
-	d3d_BrushFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
-	d3d_BrushFX.SetScale ((d3d_GlobalCaps.AllowA16B16G16R16 && r_64bitlightmaps.integer) ? 4.0f * r_lightscale.value : 2.0f * r_lightscale.value);
-
-	CachedMatrix = NULL;
-	NumMatrixSwaps = 0;
-
-	// the passes we need to run will depend on what we are drawing
-	if (r_renderflags & R_RENDERNOLUMA) D3D_RunBrushPass (PASS_NOTRANSNOLUMA);
-	if (r_renderflags & R_RENDERLUMA) D3D_RunBrushPass (PASS_NOTRANSLUMA);
-
-	d3d_BrushFX.EndRender ();
+	if (d3d_RenderDef.brushrenderflags & R_RENDERNOLUMA) R_RefreshSurfaces (&ent, R_RENDERNOLUMA);
+	if (d3d_RenderDef.brushrenderflags & R_RENDERLUMA) R_RefreshSurfaces (&ent, R_RENDERLUMA);
 }
-
-
-void D3D_InitSurfMinMaxs (msurface_t *surf);
-void D3D_CheckSurfMinMaxs (msurface_t *surf, float *v);
-
-
-void D3D_AddInlineBModelsToTextureChains (void)
-{
-	if (!r_drawentities.value) return;
-	if (!(r_renderflags & R_RENDERINLINEBRUSH)) return;
-
-	for (int x = 0; x < cl_numvisedicts; x++)
-	{
-		// R_TextureAnimation needs this
-		entity_t *e = cl_visedicts[x];
-		model_t *clmodel = e->model;
-
-		// only doing brushes here
-		if (clmodel->type != mod_brush) continue;
-
-		// only do inline models
-		if (clmodel->name[0] != '*') continue;
-
-		// set up, cull, matrix calc, etc
-		if (R_SetupBrushEntity (e)) continue;
-
-		// R_TextureAnimation needs this
-		currententity = e;
-
-		if (d3d_AutomapDraw)
-			;
-		else
-		{
-			// calculate dynamic lighting for bmodel
-			R_PushDlights (clmodel->bh->nodes + clmodel->bh->hulls[0].firstclipnode);
-		}
-
-		int i;
-		msurface_t *surf;
-
-		// mark the surfaces
-		for (i = 0, surf = &clmodel->bh->surfaces[clmodel->bh->firstmodelsurface]; i < clmodel->bh->nummodelsurfaces; i++, surf++)
-		{
-			// prevent surfs from being added twice, causing the texture chain to loop around on itself.
-			// this only happens during SCR_UpdateScreen calls from modal dialogs or the loading plaque,
-			// still not entirely certain why.  It's a "mods only" thing, by the way, and doesn't happen
-			// AT ALL in ID1.  This is one one the reasons why I HATE mods.
-			if (surf->visframe == r_framecount) continue;
-			surf->visframe = r_framecount;
-
-			// set the model correctly (is this used anymore???)
-			// (yes - on the instanced brush transforms)
-			surf->model = clmodel;
-
-			// find which side of the node we are on
-			float dot = DotProduct (modelorg, surf->plane->normal) - surf->plane->dist;
-
-			// draw the polygon
-			if ((((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) || (!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON))))
-			{
-				texture_t *tex = R_TextureAnimation (surf->texinfo->texture);
-
-				if (surf->flags & SURF_DRAWTURB)
-				{
-					// add to the appropriate chain (back to front)
-					surf->texturechain = tex->texturechain;
-					tex->texturechain = surf;
-
-					// flag for rendering
-					r_renderflags |= R_RENDERWATERSURFACE;
-				}
-				else if (surf->flags & SURF_DRAWSKY)
-				{
-					if (!d3d_AutomapDraw)
-					{
-						// add to the appropriate chain (back to front)
-						surf->texturechain = skychain;
-						skychain = surf;
-					}
-				}
-				else
-				{
-					// check for lightmap modifications
-					if (!d3d_AutomapDraw) D3D_CheckLightmapModification (surf);
-
-					// link it in (add to the end of the surf texture chains so that they can be depth-clipped)
-					if (!tex->chaintail)
-						tex->texturechain = surf;
-					else tex->chaintail->texturechain = surf;
-
-					tex->chaintail = surf;
-					surf->texturechain = NULL;
-				}
-			}
-		}
-	}
-}
-

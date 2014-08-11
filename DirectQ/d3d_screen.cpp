@@ -22,11 +22,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
-#include "d3d_hlsl.h"
 
-extern bool r_automap;
+
 bool D3D_DrawAutomap (void);
-extern bool d3d_AutomapDraw;
+cvar_t scr_automapinfo ("scr_automapinfo", "3", CVAR_ARCHIVE);
+cvar_t scr_automapposition ("scr_automapposition", "1", CVAR_ARCHIVE);
 
 void Menu_PrintCenterWhite (int cy, char *str);
 void Menu_PrintWhite (int cx, int cy, char *str);
@@ -165,12 +165,11 @@ void SCR_CenterPrint (char *str)
 	// with putting a textbox around the center string!
 	if (!str[0]) return;
 
-	// cheesy centerprint logging - need to do this right sometime!!!
 	// only log if the previous centerprint has already been cleared
 	if (scr_centerlog.integer && !cl.intermission && scr_centertime_off < 0.01)
 	{
 		Con_SilentPrintf ("\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");
-		Con_SilentPrintf ("%s\n", str);
+		Con_SilentPrintf ("\n%s\n\n", str);
 		Con_SilentPrintf ("\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
 
 		// ensure (required as a standard Con_Printf immediately following a centerprint will screw up the notify lines)
@@ -261,6 +260,7 @@ void SCR_CheckDrawCenterString (void)
 
 	scr_centertime_off -= host_frametime;
 
+	// bug - this will potentially print the last seen centerprint during the end intermission!!!
 	if (scr_centertime_off <= 0 && !cl.intermission) return;
 
 	if (key_dest != key_game)
@@ -487,24 +487,6 @@ void SCR_Init (void)
 }
 
 
-
-/*
-==============
-SCR_DrawRam
-==============
-*/
-void SCR_DrawRam (void)
-{
-	if (!scr_showram.value)
-		return;
-
-	if (!r_cache_thrash)
-		return;
-
-	Draw_Pic (scr_vrect.x+32, scr_vrect.y, scr_ram);
-}
-
-
 /*
 ==============
 SCR_DrawTurtle
@@ -512,8 +494,8 @@ SCR_DrawTurtle
 */
 void SCR_DrawTurtle (void)
 {
-	static int	count;
-	
+	static int	count = 0;
+
 	if (!scr_showturtle.value)
 		return;
 
@@ -721,26 +703,50 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 	LPDIRECT3DSURFACE9 surf;
 
 	// get the surface description
-	rts->GetDesc (&surfdesc);
+	HRESULT hr = rts->GetDesc (&surfdesc);
 
-	// create a surface to copy to
-	d3d_Device->CreateOffscreenPlainSurface
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to get backbuffer description\n");
+		return;
+	}
+
+	// create a surface to copy to (ensure the dest surface is the correct format!!!)
+	hr = d3d_Device->CreateOffscreenPlainSurface
 	(
 		surfdesc.Width,
 		surfdesc.Height,
-		surfdesc.Format,
+		D3DFMT_X8R8G8B8,
 		D3DPOOL_SYSTEMMEM,
 		&surf,
 		NULL
 	);
 
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to create a surface to copy to\n");
+		return;
+	}
+
 	// copy from the rendertarget to system memory
-	d3d_Device->GetRenderTargetData (rts, surf);
+	hr = D3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to copy backbuffer data\n");
+		surf->Release ();
+		return;
+	}
 
 	// lock the surface rect
-	HRESULT hr = surf->LockRect (&lockrect, NULL, 0);
+	hr = surf->LockRect (&lockrect, NULL, 0);
 
-	if (FAILED (hr)) return;
+	if (FAILED (hr))
+	{
+		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to access backbuffer data\n");
+		surf->Release ();
+		return;
+	}
 
 	// try to open it
 	FILE *f = fopen (filename, "wb");
@@ -765,6 +771,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 	fwrite (buffer, 18, 1, f);
 
 	// do each RGB triplet individually as we want to reduce from 32 bit to 24 bit
+	// (can't create with D3DFMT_R8G8B8 so this is necessary even if suboptimal)
 	for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++)
 	{
 		// retrieve the data
@@ -835,11 +842,21 @@ void SCR_ScreenShot_f (void)
 	// find a file name to save it to 
 	for (i = 0; i <= 9999; i++)
 	{
-		sprintf (checkname, "%s/%s/%s%04i.%s", com_gamedir, scr_screenshotdir.string, scr_shotnamebase.string, i, scr_screenshotformat.string);
+		_snprintf
+		(
+			checkname,
+			128,
+			"%s/%s/%s%04i.%s",
+			com_gamedir,
+			scr_screenshotdir.string,
+			scr_shotnamebase.string,
+			i,
+			scr_screenshotformat.string
+		);
 
 		// file doesn't exist
-		if (Sys_FileTime (checkname) == -1) break;
-	} 
+		if (!Sys_FileExists (checkname)) break;
+	}
 
 	if (i == 10000) 
 	{
@@ -1095,7 +1112,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 
 	char *lines[64] = {NULL};
 	int scr_modallines = 0;
-	char *textbuf = (char *) malloc (strlen (text) + 1);
+	char *textbuf = (char *) Zone_Alloc (strlen (text) + 1);
 	strcpy (textbuf, text);
 
 	lines[0] = textbuf;
@@ -1130,9 +1147,6 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 
 	// adjust positioning
 	y = (vid.height - ((scr_modallines + 5) * 10)) / 3;
-
-	// fade out background
-	Draw_FadeScreen ();
 
 	// background
 	Draw_TextBox ((vid.width - (maxline * 8)) / 2 - 16, y - 12, maxline * 8 + 16, (scr_modallines + 5) * 10 - 5);
@@ -1169,7 +1183,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 
 	if (prompt) Draw_String ((vid.width - strlen (prompt) * 8) / 2, y + 5, prompt);
 
-	free (textbuf);
+	Zone_Free (textbuf);
 }
 
 
@@ -1261,23 +1275,17 @@ void SCR_BringDownConsole (void)
 
 void SCR_SetupToDrawHUD (void)
 {
-	bool undoclear = false;
-
 	// clear any areas that we need to clear
 	// moved here from HUD.cpp so that we can batch up the state change required for it
 	// these are the same conditions as on drawing the HUD itself so we don't draw this when we shouldn't
 	if (sb_lines && vid.width > 320 && scr_con_current != vid.height && scr_viewsize.value < 120)
 	{
-		undoclear = true;
-
 		// just clear the whole sbar area
 		Draw_TileClear (0, vid.height - sb_lines, vid.width, sb_lines);
 	}
 
 	if (r_refdef.vrect.y > 0)
 	{
-		undoclear = true;
-
 		// top
 		Draw_TileClear
 		(
@@ -1299,8 +1307,6 @@ void SCR_SetupToDrawHUD (void)
 
 	if (r_refdef.vrect.x > 0)
 	{
-		undoclear = true;
-
 		// left
 		Draw_TileClear
 		(
@@ -1319,62 +1325,81 @@ void SCR_SetupToDrawHUD (void)
 			vid.height - sb_lines
 		);
 	}
-
-	// revert from the wrapping pass
-	if (undoclear) d3d_Flat2DFX.SwitchToPass (0);
 }
 
 
-bool in_SCR_UpdateScreen = false;
-
-
-void SCR_DoLoading (char *maintext, char *itemtext, int curritem, int totalitems)
+void SCR_DrawAutomapStats (void)
 {
-	// this murders the poor wee stack, so we don't bother....
-	return;
+	extern int automap_key;
+	extern float r_automap_x;
+	extern float r_automap_y;
+	extern float r_automap_z;
+	extern float r_automap_scale;
+	extern int automap_culls;
+	extern int screenshot_key;
 
-	extern bool d3d_DeviceLost;
-	extern qpic_t *conback;
-
-	// prevent calls from SCR_UpdateScreen
-	if (in_SCR_UpdateScreen) return;
-
-	// prevent calls when explicitly blocked or when we're not fully initialized yet
-	if (block_drawing) return;
-	if (!scr_initialized || !con_initialized || !d3d_Device) return;
-
-	// begin rendering; get the size of the refresh window and set up for the render
-	// this is also used for lost device recovery mode
-	D3D_BeginRendering (&glx, &gly, &glwidth, &glheight);
-
-	// if we've just lost the device we're going into recovery mode, so don't draw anything
-	if (d3d_DeviceLost) return;
-
-	// go into 2D rendering mode
-	D3D_Set2D ();
-
-	if (key_dest != key_game || cls.demoplayback || con_forcedup)
+	if (scr_automapposition.integer)
 	{
-		// console background
-		// ensure these are always valid
-		conback->width = vid.width;
-		conback->height = vid.height;
-		Draw_Pic (0, 0, conback);
+		extern LPDIRECT3DTEXTURE9 yahtexture;
+
+		// translate from automap space to screen space
+		int yahx = (((r_automap_x - r_refdef.vieworg[0]) * -1) / r_automap_scale) + (vid.width / 2);
+		int yahy = (((r_automap_y - r_refdef.vieworg[1]) * 1) / r_automap_scale) + (vid.height / 2);
+
+		// draw it
+		D3D_DrawTexturedPic (yahx - 5, yahy - 10, 36, 36, yahtexture);
 	}
 
-	// loading plaque
-	qpic_t *pic = Draw_CachePic ("gfx/loading.lmp");
-	Draw_Pic ((vid.width - pic->width) / 2, (vid.height - pic->height) / 2 - pic->height - 50, pic);
+	if (scr_automapinfo.integer & 1)
+	{
+		Draw_Fill (0, vid.height - 24, vid.width, 24, 0.0625, 0.0625, 0.0625, 0.5);
 
-	//Draw_TextBox (vid.width / 2 - 160, (vid.height - pic->height) / 2 - 35, 320, 60);
+		if (automap_key == -1)
+		{
+			Draw_String
+			(
+				16,
+				vid.height - 16,
+				"Arrow Keys: Move  Home/End: Zoom In/Out  PGUP/PGDN: Up/Down  ESC: Automap Off"
+			);
+		}
+		else
+		{
+			char *automap_bind = Key_KeynumToString (automap_key);
 
-	// info text
-	Menu_PrintCenterWhite (55, DIVIDER_LINE);
-	Menu_PrintCenterWhite (70, maintext);
-	Menu_PrintCenterWhite (80, itemtext);
+			Draw_String
+			(
+				16,
+				vid.height - 16,
+				va ("Arrow Keys: Move  Home/End: Zoom In/Out  PGUP/PGDN: Up/Down  ESC/%s: Automap Off", automap_bind)
+			);
+		}
+	}
 
-	d3d_Flat2DFX.EndRender ();
-	D3D_EndRendering ();
+	if (scr_automapinfo.integer & 2)
+	{
+		Draw_Fill (0, 0, vid.width, 24, 0.0625, 0.0625, 0.0625, 0.5);
+
+		Draw_String
+		(
+			16,
+			8,
+			va
+			(
+				"x offset: %i  y offset: %i  z offset: %i  scale: %0.1fx",
+				(int) (r_automap_x - r_refdef.vieworg[0]),
+				(int) (r_automap_y - r_refdef.vieworg[1]),
+				(int) r_automap_z,
+				r_automap_scale
+			)
+		);
+
+		if (screenshot_key != -1)
+		{
+			char *screenshot_bind = Key_KeynumToString (screenshot_key);
+			Draw_String (500, 8, va ("%s: Screenshot", screenshot_bind));
+		}
+	}
 }
 
 
@@ -1392,7 +1417,7 @@ needs almost the entire 256k of stack space!
 void M_Draw (void);
 void HUD_IntermissionOverlay (void);
 void HUD_FinaleOverlay (void);
-
+void SHOWLMP_drawall (void);
 
 void SCR_UpdateScreen (void)
 {
@@ -1432,9 +1457,6 @@ void SCR_UpdateScreen (void)
 	// if we've just lost the device we're going into recovery mode, so don't draw anything
 	if (d3d_DeviceLost) return;
 
-	// flag that we're in SCR_UpdateScreen to prevent the loading console from showing
-	in_SCR_UpdateScreen = true;
-
 	// determine size of refresh window
 	if (oldfov != scr_fov.value)
 	{
@@ -1465,9 +1487,9 @@ void SCR_UpdateScreen (void)
 	// do 3D refresh drawing, and then update the screen
 	SCR_SetUpToDrawConsole ();
 
-	d3d_AutomapDraw = D3D_DrawAutomap ();
+	d3d_RenderDef.automap = D3D_DrawAutomap ();
 
-	if (!d3d_AutomapDraw) V_RenderView ();
+	V_RenderView ();
 
 	D3D_Set2D ();
 
@@ -1486,29 +1508,28 @@ void SCR_UpdateScreen (void)
 	}
 	else if (!scr_drawmapshot)
 	{
-		if (!d3d_AutomapDraw)
+		if (!d3d_RenderDef.automap)
 		{
-			SCR_DrawRam ();
 			SCR_DrawNet ();
 			SCR_DrawTurtle ();
 			SCR_DrawPause ();
 			SCR_CheckDrawCenterString ();
 			HUD_DrawHUD ();
+			SCR_DrawConsole ();
+			SHOWLMP_drawall ();
+			M_Draw ();
 		}
-
-		SCR_DrawConsole ();	
-		M_Draw ();
+		else SCR_DrawAutomapStats ();
 	}
 
 	// this should always be drawn as an overlay to what's currently on screen
 	if (scr_drawdialog) SCR_DrawNotifyString (scr_notifytext, scr_notifycaption, scr_notifyflags);
 
-	d3d_Flat2DFX.EndRender ();
 	D3D_EndRendering ();
 
 	// take a mapshot on entry to the map, unless one already exists
 	// unless we're already in mapshot mode, in which case we'll have an infinite loop!!!
-	if (r_automapshot.value && r_framecount == 5 && !scr_drawmapshot)
+	if (r_automapshot.value && d3d_RenderDef.framecount == 5 && !scr_drawmapshot)
 	{
 		// first ensure we have a "maps" directory
 		CreateDirectory (va ("%s/maps", com_gamedir), NULL);
@@ -1518,8 +1539,5 @@ void SCR_UpdateScreen (void)
 	}
 
 	V_UpdatePalette ();
-
-	// we're not in_ SCR_UpdateScreen any more
-	in_SCR_UpdateScreen = false;
 }
 

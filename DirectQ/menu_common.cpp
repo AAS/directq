@@ -215,9 +215,7 @@ bool GetToggleState (float tmin, float tmax, float tvalue)
 
 CQMenuSpinControl::CQMenuSpinControl (char *commandtext, int *menuval, char ***stringbuf)
 {
-	if (commandtext)
-		strcpy (this->CommandText, commandtext);
-	else this->CommandText[0] = 0;
+	this->AllocCommandText (commandtext);
 
 	// this->StringBuf will be set to this->StringBufPtr[0] at runtime each time it's encountered
 	// this is to prevent creating a mess of triple indirections.
@@ -237,10 +235,7 @@ CQMenuSpinControl::CQMenuSpinControl (char *commandtext, int *menuval, char ***s
 
 CQMenuSpinControl::CQMenuSpinControl (char *commandtext, int *menuval, char **stringbuf)
 {
-	if (commandtext)
-		strcpy (this->CommandText, commandtext);
-	else this->CommandText[0] = 0;
-
+	this->AllocCommandText (commandtext);
 	this->StringBuf = stringbuf;
 	this->MenuVal = menuval;
 	this->StringBufPtr = NULL;
@@ -257,18 +252,18 @@ CQMenuSpinControl::CQMenuSpinControl (char *commandtext, int *menuval, char **st
 
 CQMenuSpinControl::CQMenuSpinControl (char *commandtext, cvar_t *menucvar, float minval, float maxval, float increment, char *zerotext, char *units)
 {
-	if (commandtext)
-		strcpy (this->CommandText, commandtext);
-	else this->CommandText[0] = 0;
-
+	this->AllocCommandText (commandtext);
 	this->MenuCvar = menucvar;
 	this->MinVal = minval;
 	this->MaxVal = maxval;
 	this->Increment = increment;
 
 	if (zerotext)
+	{
+		this->ZeroText = (char *) Zone_Alloc (strlen (zerotext));
 		strcpy (this->ZeroText, zerotext);
-	else this->ZeroText[0] = 0;
+	}
+	else this->ZeroText = NULL;
 
 	if (units)
 		strcpy (this->Units, units);
@@ -309,7 +304,7 @@ void CQMenuSpinControl::DrawCurrentOptionHighlight (int y)
 
 	int lpos = 160;
 
-	if (!this->CommandText[0])
+	if (!this->MenuCommandText[0])
 	{
 		// adjust lpos
 		lpos = 148 - strlen (this->OutputText) * 4;
@@ -327,17 +322,17 @@ void CQMenuSpinControl::Draw (int y)
 	if (this->StringBufPtr) this->StringBuf = this->StringBufPtr[0];
 
 	// text
-	if (this->CommandText[0])
-		Menu_Print (148 - strlen (this->CommandText) * 8, y, this->CommandText);
+	if (this->MenuCommandText[0])
+		Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
 	if (this->MenuCvar)
 	{
 		// build the output text
-		if (!this->MenuCvar->value && this->ZeroText[0])
+		if (!this->MenuCvar->value && this->ZeroText)
 			strcpy (this->OutputText, this->ZeroText);
 		else
 		{
-			sprintf (this->OutputText, "%g", this->MenuCvar->value);
+			_snprintf (this->OutputText, 256, "%g", this->MenuCvar->value);
 
 			if (this->Units[0] != 0)
 			{
@@ -353,7 +348,7 @@ void CQMenuSpinControl::Draw (int y)
 		else strcpy (this->OutputText, this->StringBuf[*(this->MenuVal)]);
 	}
 
-	if (!this->CommandText[0])
+	if (!this->MenuCommandText[0])
 		Menu_PrintCenterWhite (y, this->OutputText);
 	else Menu_PrintWhite (172, y, this->OutputText);
 }
@@ -426,6 +421,26 @@ void CQMenuSpinControl::Key (int k)
 			}
 
 			break;
+
+		default:
+			if (k >= 'A' && k <= 'Z') k += 32;
+
+			if (k >= 'a' && k <= 'z')
+			{
+				for (int i = 0; ; i++)
+				{
+					if (!this->StringBuf[i]) break;
+
+					if ((this->StringBuf[i][0] == k) || (this->StringBuf[i][0] == (k - 32)))
+					{
+						menu_soundlevel = m_sound_option;
+						*(this->MenuVal) = i;
+						break;
+					}
+				}
+			}
+
+			break;
 		}
 	}
 }
@@ -446,7 +461,7 @@ void CQMenuSpinControl::Key (int k)
 
 CQMenuColourBar::CQMenuColourBar (char *cmdtext, int *colour)
 {
-	strcpy (this->CommandText, cmdtext);
+	this->AllocCommandText (cmdtext);
 	this->Colour = colour;
 	this->Initial = *(this->Colour);
 	this->AcceptsInput = true;
@@ -462,7 +477,7 @@ void CQMenuColourBar::PerformEntryFunction (void)
 void CQMenuColourBar::Draw (int y)
 {
 	// text
-	Menu_Print (148 - strlen (this->CommandText) * 8, y, this->CommandText);
+	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
 	int colour = *(this->Colour);
 	int intense = colour * 16 + (colour < 8 ? 11 : 4);
@@ -534,7 +549,11 @@ void CQMenuColourBar::Key (int k)
 
 CQMenuCvarTextbox::CQMenuCvarTextbox (char *commandtext, cvar_t *menucvar, int flags)
 {
-	strncpy (this->CommandText, commandtext, 127);
+	this->AllocCommandText (commandtext);
+
+	this->InitialValue = (char *) Zone_Alloc (2);
+	this->ScratchPad = (char *) Zone_Alloc (1024);
+	this->WorkingText = (char *) Zone_Alloc (1024);
 
 	this->MenuCvar = menucvar;
 	this->AcceptsInput = (flags & TBFLAG_READONLY) ? false : true;
@@ -559,11 +578,15 @@ void CQMenuCvarTextbox::DrawCurrentOptionHighlight (int y)
 
 void CQMenuCvarTextbox::Draw (int y)
 {
+	// update the cvar from the working text
+	if (strcmp (this->MenuCvar->string, this->WorkingText))
+		Cvar_Set (this->MenuCvar, this->WorkingText);
+
 	// give some space above as well as below
 	y += 2;
 
 	// text
-	Menu_Print (148 - strlen (this->CommandText) * 8, y, this->CommandText);
+	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
 	// textbox
 	Draw_Fill (vid.width / 2 - 160 + 168, y - 1, MAX_TBLENGTH * 8 + 4, 10, 20, 255);
@@ -572,8 +595,8 @@ void CQMenuCvarTextbox::Draw (int y)
 	// current text
 	for (int i = 0; i < MAX_TBLENGTH; i++)
 	{
-		if (!this->MenuCvar->string[this->TextStart + i]) break;
-		Menu_DrawCharacter (170 + i * 8, y, this->MenuCvar->string[this->TextStart + i]);
+		if (!this->WorkingText[this->TextStart + i]) break;
+		Menu_DrawCharacter (170 + i * 8, y, this->WorkingText[this->TextStart + i]);
 	}
 
 	if (this->IsCurrent)
@@ -623,10 +646,10 @@ void CQMenuCvarTextbox::Key (int k)
 		this->TextPos++;
 		menu_soundlevel = m_sound_option;
 
-		if (this->TextPos > strlen (this->MenuCvar->string))
+		if (this->TextPos > strlen (this->WorkingText))
 		{
 			menu_soundlevel = m_sound_deny;
-			this->TextPos = strlen (this->MenuCvar->string);
+			this->TextPos = strlen (this->WorkingText);
 		}
 
 		if (this->TextPos > MAX_TBPOS)
@@ -635,9 +658,9 @@ void CQMenuCvarTextbox::Key (int k)
 			this->TextStart++;
 		}
 
-		if (this->TextStart > strlen (this->MenuCvar->string) - MAX_TBPOS)
+		if (this->TextStart > strlen (this->WorkingText) - MAX_TBPOS)
 		{
-			this->TextStart = strlen (this->MenuCvar->string) - MAX_TBPOS;
+			this->TextStart = strlen (this->WorkingText) - MAX_TBPOS;
 			menu_soundlevel = m_sound_deny;
 		}
 		break;
@@ -653,15 +676,15 @@ void CQMenuCvarTextbox::Key (int k)
 		// go to end
 		menu_soundlevel = m_sound_option;
 		this->TextPos = MAX_TBPOS;
-		if (this->TextPos > strlen (this->MenuCvar->string)) this->TextPos = strlen (this->MenuCvar->string);
+		if (this->TextPos > strlen (this->WorkingText)) this->TextPos = strlen (this->WorkingText);
 
-		this->TextStart = strlen (this->MenuCvar->string) - MAX_TBPOS;
+		this->TextStart = strlen (this->WorkingText) - MAX_TBPOS;
 		if (this->TextStart < 0) this->TextStart = 0;
 		break;
 
 	case K_DEL:
 		// prevent deletion if at end of string
-		if (RealTextPos >= strlen (this->MenuCvar->string))
+		if (RealTextPos >= strlen (this->WorkingText))
 		{
 			menu_soundlevel = m_sound_deny;
 			break;
@@ -689,8 +712,8 @@ void CQMenuCvarTextbox::Key (int k)
 
 		// delete character before cursor
 		menu_soundlevel = m_sound_option;
-		strcpy (this->ScratchPad, &this->MenuCvar->string[RealTextPos]);
-		strcpy (&this->MenuCvar->string[RealTextPos - 1], this->ScratchPad);
+		strcpy (this->ScratchPad, &this->WorkingText[RealTextPos]);
+		strcpy (&this->WorkingText[RealTextPos - 1], this->ScratchPad);
 
 		// fix up positioning
 		this->TextStart--;
@@ -713,7 +736,7 @@ void CQMenuCvarTextbox::Key (int k)
 		}
 
 		// conservative overflow prevent
-		if (strlen (this->MenuCvar->string) > 1020)
+		if (strlen (this->WorkingText) > 1020)
 		{
 			menu_soundlevel = m_sound_deny;
 			break;
@@ -747,9 +770,9 @@ void CQMenuCvarTextbox::Key (int k)
 		if (this->InsertMode)
 		{
 			// insert mode
-			strcpy (this->ScratchPad, &this->MenuCvar->string[RealTextPos]);
-			strcpy (&this->MenuCvar->string[RealTextPos + 1], this->ScratchPad);
-			this->MenuCvar->string[RealTextPos] = k;
+			strcpy (this->ScratchPad, &this->WorkingText[RealTextPos]);
+			strcpy (&this->WorkingText[RealTextPos + 1], this->ScratchPad);
+			this->WorkingText[RealTextPos] = k;
 
 			// move right
 			this->Key (K_RIGHTARROW);
@@ -757,7 +780,7 @@ void CQMenuCvarTextbox::Key (int k)
 		else
 		{
 			// overwrite mode
-			this->MenuCvar->string[RealTextPos] = k;
+			this->WorkingText[RealTextPos] = k;
 
 			// move right
 			this->Key (K_RIGHTARROW);
@@ -771,11 +794,14 @@ void CQMenuCvarTextbox::Key (int k)
 void CQMenuCvarTextbox::PerformEntryFunction (void)
 {
 	// copy cvar string to temp storage
+	Zone_Free (this->InitialValue);
+	this->InitialValue = (char *) Zone_Alloc (strlen (this->MenuCvar->string) + 1);
 	strcpy (this->InitialValue, this->MenuCvar->string);
+	strcpy (this->WorkingText, this->MenuCvar->string);
 
 	// set positions
 	this->TextStart = 0;
-	this->TextPos = strlen (this->MenuCvar->string);
+	this->TextPos = strlen (this->WorkingText);
 
 	// bound textpos as the string may be longer than the max visible
 	// this just runs a K_END on it to get things right
@@ -799,8 +825,7 @@ int CQMenuCvarTextbox::GetYAdvance (void)
 
 CQMenuSubMenu::CQMenuSubMenu (char *cmdtext, CQMenu *submenu)
 {
-	strncpy (this->CommandText, cmdtext, 127);
-
+	this->AllocCommandText (cmdtext);
 	this->SubMenu = submenu;
 	this->AcceptsInput = true;
 }
@@ -808,7 +833,7 @@ CQMenuSubMenu::CQMenuSubMenu (char *cmdtext, CQMenu *submenu)
 
 void CQMenuSubMenu::Draw (int y)
 {
-	Menu_PrintCenter (y, this->CommandText);
+	Menu_PrintCenter (y, this->MenuCommandText);
 }
 
 
@@ -828,7 +853,7 @@ void CQMenuSubMenu::Key (int k)
 
 CQMenuCommand::CQMenuCommand (char *cmdtext, menucommand_t command)
 {
-	strncpy (this->CommandText, cmdtext, 127);
+	this->AllocCommandText (cmdtext);
 
 	if (command)
 		this->Command = command;
@@ -840,7 +865,7 @@ CQMenuCommand::CQMenuCommand (char *cmdtext, menucommand_t command)
 
 void CQMenuCommand::Draw (int y)
 {
-	Menu_PrintCenter (y, this->CommandText);
+	Menu_PrintCenter (y, this->MenuCommandText);
 }
 
 
@@ -868,26 +893,23 @@ void CQMenuCommand::Key (int k)
 
 CQMenuSpacer::CQMenuSpacer (char *spacertext)
 {
-	if (spacertext)
-		strcpy (this->CommandText, spacertext);
-	else this->CommandText[0] = 0;
-
+	this->AllocCommandText (spacertext);
 	this->AcceptsInput = false;
 }
 
 
 void CQMenuSpacer::Draw (int y)
 {
-	if (this->CommandText[0])
+	if (this->MenuCommandText[0])
 	{
-		Menu_PrintCenter (y, this->CommandText);
+		Menu_PrintCenter (y, this->MenuCommandText);
 	}
 }
 
 
 int CQMenuSpacer::GetYAdvance ()
 {
-	if (this->CommandText[0])
+	if (this->MenuCommandText[0])
 		return 15;
 
 	return 5;
@@ -1030,7 +1052,7 @@ int CQMenuCustomKey::GetYAdvance ()
 
 CQMenuTitle::CQMenuTitle (char *title)
 {
-	strncpy (this->CommandText, title, 127);
+	this->AllocCommandText (title);
 	this->AcceptsInput = false;
 }
 
@@ -1038,7 +1060,7 @@ CQMenuTitle::CQMenuTitle (char *title)
 void CQMenuTitle::Draw (int y)
 {
 	// everywhere we had a title we put a spacer before it, so let's get rid of the need for that
-	Menu_PrintCenterWhite (y + 5, this->CommandText);
+	Menu_PrintCenterWhite (y + 5, this->MenuCommandText);
 	Menu_PrintCenter (y + 20, DIVIDER_LINE);
 }
 
@@ -1059,7 +1081,7 @@ int CQMenuTitle::GetYAdvance (void)
 
 CQMenuBanner::CQMenuBanner (char *pic)
 {
-	this->Pic = (char *) Heap_QMalloc (strlen (pic) + 1);
+	this->Pic = (char *) Zone_Alloc (strlen (pic) + 1);
 	strcpy (this->Pic, pic);
 	this->AcceptsInput = false;
 }
@@ -1092,7 +1114,7 @@ int CQMenuBanner::GetYAdvance (void)
 
 CQMenuCvarSlider::CQMenuCvarSlider (char *commandtext, cvar_t *menucvar, float minval, float maxval, float stepsize)
 {
-	strncpy (this->CommandText, commandtext, 127);
+	this->AllocCommandText (commandtext);
 
 	this->AcceptsInput = true;
 
@@ -1109,7 +1131,7 @@ CQMenuCvarSlider::CQMenuCvarSlider (char *commandtext, cvar_t *menucvar, float m
 void CQMenuCvarSlider::Draw (int y)
 {
 	// text
-	Menu_Print (148 - strlen (this->CommandText) * 8, y, this->CommandText);
+	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
 	// slider left
 	Menu_DrawCharacter (168, y + 1, 128);
@@ -1191,10 +1213,8 @@ CQMenuCvarExpSlider::CQMenuCvarExpSlider (char *commandtext, cvar_t *menucvar, i
 {
 	int i;
 
-	strncpy (this->CommandText, commandtext, 127);
-
+	this->AllocCommandText (commandtext);
 	this->AcceptsInput = true;
-
 	this->MenuCvar = menucvar;
 	this->Initial = initial;
 	this->Exponent = exponent;
@@ -1209,7 +1229,7 @@ CQMenuCvarExpSlider::CQMenuCvarExpSlider (char *commandtext, cvar_t *menucvar, i
 void CQMenuCvarExpSlider::Draw (int y)
 {
 	// text
-	Menu_Print (148 - strlen (this->CommandText) * 8, y, this->CommandText);
+	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
 	// slider left
 	Menu_DrawCharacter (168, y + 1, 128);
@@ -1310,8 +1330,7 @@ void CQMenuCvarExpSlider::Key (int k)
 
 CQMenuCvarToggle::CQMenuCvarToggle (char *commandtext, cvar_t *menucvar, float toggleoffvalue, float toggleonvalue)
 {
-	strncpy (this->CommandText, commandtext, 127);
-
+	this->AllocCommandText (commandtext);
 	this->AcceptsInput = true;
 	this->MenuCvar = menucvar;
 	this->ToggleOffValue = toggleoffvalue;
@@ -1330,7 +1349,7 @@ void CQMenuCvarToggle::DrawCurrentOptionHighlight (int y)
 
 void CQMenuCvarToggle::Draw (int y)
 {
-	Menu_Print (148 - strlen (this->CommandText) * 8, y, this->CommandText);
+	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
 	// update togglestate otherwise it will only reflect the initial cvar value
 	// set togglestate depending on which of on/off the value is closest to
@@ -1369,6 +1388,21 @@ void CQMenuCvarToggle::Key (int k)
 
 =====================================================================================================================================
 */
+
+void CQMenuOption::AllocCommandText (char *commandtext)
+{
+	if (commandtext)
+	{
+		this->MenuCommandText = (char *) Zone_Alloc (strlen (commandtext) + 1);
+		strcpy (this->MenuCommandText, commandtext);
+	}
+	else
+	{
+		this->MenuCommandText = (char *) Zone_Alloc (2);
+		this->MenuCommandText[0] = 0;
+	}
+}
+
 
 // these are called if none of the virtual methods are overloaded
 // standard y advance
@@ -2092,8 +2126,15 @@ void M_Draw (void)
 	{
 		Draw_ConsoleBackground (vid.height);
 		S_ExtraUpdate ();
+
+		// partial alpha
+		Draw_FadeScreen (128);
 	}
-	else Draw_FadeScreen ();
+	else
+	{
+		// full alpha
+		Draw_FadeScreen (200);
+	}
 
 	// run the draw func
 	menu_Current->Draw ();

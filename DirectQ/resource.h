@@ -34,17 +34,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // bitmaps and other images
 #define IDB_SPLASH					600
 #define IDR_CROSSHAIR				610
-
-// fx files
-#define IDR_INSTANCEDBRUSH			400
-#define IDR_BRUSH					410
-#define IDR_LIQUID					420
-#define IDR_ALIAS					430
-#define IDR_FLAT2D					440
-#define IDR_SPRITE					450
-#define IDR_PARTICLE				460
-#define IDR_UNDERWATER				470
-#define IDR_SKY						480
+#define IDR_YOUAREHERE				620
 
 // icons
 #define IDI_APPICON					900

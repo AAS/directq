@@ -77,6 +77,7 @@ public:
 	// this one is for use when we just want a dummy cvar (e.g. to take a copy of an existing one for the menus)
 	// these types are not registered and do not show up in completion lists
 	cvar_t (void);
+	~cvar_t (void);
 
 	// this one allows specifying of cvars directly by usage flags
 	// this is the preferred way and ultimately all cvars will be changed over to this
@@ -85,16 +86,9 @@ public:
 	// same as above but it allows for an explicit value cvar
 	cvar_t (char *cvarname, float initialval, int useflags = 0);
 
-	// let's not mess with char * pointers here
-	char	name[128];
-
-	// do i need this so long?
-	char	string[1024];
-
-	// value for numeric cvars (this needs to be changed to a less primitive method)
+	char	*name;
+	char	*string;
 	float	value;
-
-	// integer representation of value
 	int		integer;
 
 	// usage flags

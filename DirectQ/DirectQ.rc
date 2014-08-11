@@ -15,17 +15,7 @@ IDR_PARTICLEBLOOD6		RCDATA		"particleblood6.png"
 IDR_PARTICLEBLOOD7		RCDATA		"particleblood7.png"
 IDR_PARTICLEBLOOD8		RCDATA		"particleblood8.png"
 IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
-
-// fx files
-IDR_INSTANCEDBRUSH		RCDATA		"InstancedBrush.fx"
-IDR_BRUSH				RCDATA		"Brush.fx"
-IDR_LIQUID				RCDATA		"Liquid.fx"
-IDR_ALIAS				RCDATA		"AliasModel.fx"
-IDR_FLAT2D				RCDATA		"Flat2D.fx"
-IDR_SPRITE				RCDATA		"Sprite.fx"
-IDR_PARTICLE			RCDATA		"Particle.fx"
-IDR_UNDERWATER			RCDATA		"Underwater.fx"
-IDR_SKY				RCDATA		"Sky.fx"
+IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
 
 // icons
 IDI_APPICON				ICON			"dq.ico"

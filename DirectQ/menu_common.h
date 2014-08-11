@@ -97,7 +97,8 @@ public:
 	bool IsEnabled (void);
 
 protected:
-	char CommandText[128];
+	void AllocCommandText (char *commandtext);
+	char *MenuCommandText;
 	bool AcceptsInput;
 	int OptionTag;
 	bool Enabled;
@@ -147,7 +148,7 @@ private:
 	int *MenuVal;
 	char **StringBuf;
 	char ***StringBufPtr;
-	char ZeroText[64];
+	char *ZeroText;
 	char Units[64];
 	char OutputText[256];
 };
@@ -223,8 +224,9 @@ public:
 	void DrawCurrentOptionHighlight (int y);
 
 private:
-	char InitialValue[1024];
-	char ScratchPad[1024];
+	char *InitialValue;
+	char *ScratchPad;
+	char *WorkingText;
 
 	// properties
 	int TextStart;

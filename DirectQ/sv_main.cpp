@@ -21,7 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-cvar_t sv_antiwallhack ("sv_antiwallhack", "0", CVAR_ARCHIVE | CVAR_SERVER);
+// switched default to 1 cos of optimized tracing; name is for consistency with other engines
+cvar_t sv_antiwallhack ("sv_cullentities", "1", CVAR_ARCHIVE | CVAR_SERVER);
 
 int		sv_max_datagram = MAX_DATAGRAM; // Must be set so client will work without server
 
@@ -30,6 +31,17 @@ server_static_t	svs;
 
 // inline model names for precache - extra space for an extra digit
 char	localmodels[MAX_MODELS][6];
+
+
+edict_t *SV_AllocEdicts (int numedicts)
+{
+	sv.max_edicts += numedicts;
+	edict_t *edbuf = (edict_t *) Pool_Alloc (POOL_EDICTS, numedicts * pr_edict_size);
+
+	Con_DPrintf ("%i edicts\n", sv.max_edicts);
+
+	return edbuf;
+}
 
 
 /*
@@ -81,7 +93,7 @@ static void SV_SetProtocol_f (void)
 		return;
 	}
 
-	sv_protocol = Q_atoi (Cmd_Argv (1));
+	sv_protocol = atoi (Cmd_Argv (1));
 }
 
 cmd_t SV_SetProtocol_Cmd ("sv_protocol", SV_SetProtocol_f);
@@ -91,12 +103,16 @@ cmd_t SV_SetProtocol_Cmd ("sv_protocol", SV_SetProtocol_f);
 SV_Init
 ===============
 */
+void PR_StackInit (void);
+
 void SV_Init (void)
 {
-	int		i;
+	for (int i = 0; i < MAX_MODELS; i++) _snprintf (localmodels[i], 6, "*%i", i);
 
-	for (i = 0; i < MAX_MODELS; i++)
-		sprintf (localmodels[i], "*%i", i);
+	memset (&sv, 0, sizeof (server_t));
+
+	// any other server-side init goes here (mostly memory allocs for the large static buffers in use)
+	PR_StackInit ();
 }
 
 
@@ -260,7 +276,7 @@ void SV_SendServerinfo (client_t *client)
 	char			message[2048];
 
 	MSG_WriteByte (&client->message, svc_print);
-	sprintf (message, "%c\nVERSION %1.2f SERVER (%i CRC)", 2, VERSION, pr_crc);
+	_snprintf (message, 2048, "%c\nVERSION %1.2f SERVER (%i CRC)", 2, VERSION, pr_crc);
 	MSG_WriteString (&client->message,message);
 
 	MSG_WriteByte (&client->message, svc_serverinfo);
@@ -272,7 +288,7 @@ void SV_SendServerinfo (client_t *client)
 	else
 		MSG_WriteByte (&client->message, GAME_COOP);
 
-	sprintf (message, pr_strings + sv.edicts->v.message);
+	_snprintf (message, 2048, pr_strings + sv.edicts->v.message);
 
 	MSG_WriteString (&client->message, message);
 
@@ -445,7 +461,7 @@ int		fatbytes;
 byte	*fatpvs = NULL;
 
 // control how fat the fatpvs is
-cvar_t sv_pvsfat ("sv_pvsfat", "8", CVAR_ARCHIVE);
+cvar_t sv_pvsfat ("sv_pvsfat", "8", CVAR_ARCHIVE | CVAR_SERVER);
 
 void SV_AddToFatPVS (vec3_t org, mnode_t *node)
 {
@@ -498,9 +514,9 @@ byte *SV_FatPVS (vec3_t org)
 {
 	fatbytes = (sv.worldmodel->bh->numleafs + 31) >> 3;
 
-	if (!fatpvs) fatpvs = (byte *) malloc (fatbytes);
+	if (!fatpvs) fatpvs = (byte *) Pool_Alloc (POOL_MAP, fatbytes);
 
-	Q_memset (fatpvs, 0, fatbytes);
+	memset (fatpvs, 0, fatbytes);
 	SV_AddToFatPVS (org, sv.worldmodel->bh->nodes);
 
 	return fatpvs;
@@ -508,7 +524,9 @@ byte *SV_FatPVS (vec3_t org)
 
 //=============================================================================
 
-bool TestEntityVolumePoints (float *view, float *pt, float *mins, float *maxs);
+
+#define offsetrandom(MIN,MAX) ((rand () & 32767) * (((MAX)-(MIN)) * (1.0f / 32767.0f)) + (MIN))
+trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end);
 
 bool SV_VisibleToClient (edict_t *viewer, edict_t *seen)
 {
@@ -518,6 +536,8 @@ bool SV_VisibleToClient (edict_t *viewer, edict_t *seen)
 	// dont cull doors and plats :(
 	if (seen->v.movetype == MOVETYPE_PUSH) return true;
 
+    trace_t	tr;
+
 	vec3_t start =
 	{
 		viewer->v.origin[0],
@@ -525,8 +545,35 @@ bool SV_VisibleToClient (edict_t *viewer, edict_t *seen)
 		viewer->v.origin[2] + viewer->v.view_ofs[2]
 	};
 
-	// this uses the trace functions from the light exe
-	return TestEntityVolumePoints (start, seen->v.origin, seen->v.mins, seen->v.maxs);
+    //aim straight at the center of "seen" from our eyes
+	vec3_t end =
+	{
+		0.5f * (seen->v.mins[0] + seen->v.maxs[0]),
+		0.5f * (seen->v.mins[1] + seen->v.maxs[1]),
+		0.5f * (seen->v.mins[2] + seen->v.maxs[2])
+	};
+
+	memset (&tr, 0, sizeof (trace_t));
+	tr.fraction = 1;
+
+	// no need to do a direct line of sight test here
+	// 4 traces seems to be sufficient; most entities will be hit after 1 or 2
+	for (int i = 0; i < 4; i++)
+	{
+		end[0] = seen->v.origin[0] + offsetrandom (seen->v.mins[0], seen->v.maxs[0]);
+		end[1] = seen->v.origin[1] + offsetrandom (seen->v.mins[1], seen->v.maxs[1]);
+		end[2] = seen->v.origin[2] + offsetrandom (seen->v.mins[2], seen->v.maxs[2]);
+
+		tr = SV_ClipMoveToEntity (sv.edicts, start, vec3_origin, vec3_origin, end);
+
+		if (tr.fraction == 1)
+		{
+			seen->tracetimer = sv.time + 0.2f;
+			break;
+		}
+	}
+
+	return (seen->tracetimer > sv.time);
 }
 
 
@@ -546,6 +593,7 @@ void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node, byte *pvs)
 	int			sides;
 	int			leafnum;
 
+loc0:;
 	// ent already touches a leaf
 	if (ent->touchleaf) return;
 
@@ -556,6 +604,7 @@ void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node, byte *pvs)
 	// this is used for sending ents to the client so it needs to stay
 	if (node->contents < 0)
 	{
+loc1:;
 		leafnum = ((mleaf_t *) node) - sv.worldmodel->bh->leafs - 1;
 
 		if (pvs[leafnum >> 3] & (1 << (leafnum & 7)))
@@ -569,8 +618,30 @@ void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node, byte *pvs)
 	sides = BOX_ON_PLANE_SIDE (ent->v.absmin, ent->v.absmax, splitplane);
 
 	// recurse down the contacted sides, start dropping out if we hit anything
-	if ((sides & 1) && !ent->touchleaf) SV_FindTouchedLeafs (ent, node->children[0], pvs);
-	if ((sides & 2) && !ent->touchleaf) SV_FindTouchedLeafs (ent, node->children[1], pvs);
+	if ((sides & 1) && !ent->touchleaf && node->children[0]->contents != CONTENTS_SOLID)
+	{
+		if (!(sides & 2) && node->children[0]->contents < 0)
+		{
+			node = node->children[0];
+			goto loc1;
+		}
+		else if (!(sides & 2))
+		{
+			node = node->children[0];
+			goto loc0;
+		}
+		else SV_FindTouchedLeafs (ent, node->children[0], pvs);
+	}
+
+	if ((sides & 2) && !ent->touchleaf && node->children[1]->contents != CONTENTS_SOLID)
+	{
+		// test for a leaf and drop out if so, otherwise it's a node so go round again
+		node = node->children[1];
+
+		if (node->contents < 0)
+			goto loc1;
+		else goto loc0;	// SV_FindTouchedLeafs (ent, node, pvs);
+	}
 }
 
 
@@ -616,7 +687,7 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 			// if the entity didn't touch any leafs in the pvs don't send it to the client
 			if (!ent->touchleaf)
 			{
-				NumCulledEnts++;
+				//NumCulledEnts++;
 				continue;
 			}
 
@@ -657,15 +728,16 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		// Nehahra: Model Alpha
 		eval_t  *val;
 
-		if (val = GetEdictFieldValue (ent, "alpha"))
+		if (val = GETEDICTFIELDVALUEFAST (ent, ed_alpha))
 			alpha = val->_float;
 		else alpha = 1;
 
-		if (val = GetEdictFieldValue (ent, "fullbright"))
+		if (val = GETEDICTFIELDVALUEFAST (ent, ed_fullbright))
 			fullbright = val->_float;
 		else fullbright = 0;
 
-		if ((alpha < 1) && (alpha > 0) || fullbright) bits |= U_TRANS;
+		// only send if not protocol 15 - note - FUCKING nehahra uses protocol 15 but sends non-standard messages - FUCK FUCK FUCK
+		if (((alpha < 1) && (alpha > 0) || fullbright) && (sv.Protocol != PROTOCOL_VERSION || nehahra)) bits |= U_TRANS;
 
 		if (e >= 256) bits |= U_LONGENTITY;
 		if (bits >= 256) bits |= U_MOREBITS;
@@ -698,15 +770,15 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		if (bits & U_SKIN) MSG_WriteByte (msg, ent->v.skin);
 		if (bits & U_EFFECTS) MSG_WriteByte (msg, ent->v.effects);
 		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, ent->v.origin[0]);	
-		if (bits & U_ANGLE1) MSG_WriteAngle(msg, ent->v.angles[0]);
+		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0]);
 		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, ent->v.origin[1]);
-		if (bits & U_ANGLE2) MSG_WriteAngle(msg, ent->v.angles[1]);
+		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1]);
 		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, ent->v.origin[2]);
-		if (bits & U_ANGLE3) MSG_WriteAngle(msg, ent->v.angles[2]);
+		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2]);
 
-		if (bits & U_TRANS)
+		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION))
 		{
-			// Nehahra
+			// Nehahra/.alpha
 			MSG_WriteFloat (msg, 2);
 			MSG_WriteFloat (msg, alpha);
 			MSG_WriteFloat (msg, fullbright);
@@ -733,8 +805,8 @@ void SV_CleanupEnts (void)
 	{
 		ent->v.effects = (int)ent->v.effects & ~EF_MUZZLEFLASH;
 	}
-
 }
+
 
 /*
 ==================
@@ -792,16 +864,12 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 
 // stuff the sigil bits into the high bits of items for sbar, or else
 // mix in items2
-#ifdef QUAKE2
-	items = (int)ent->v.items | ((int)ent->v.items2 << 23);
-#else
-	val = GetEdictFieldValue(ent, "items2");
+	val = GETEDICTFIELDVALUEFAST (ent, ed_items2);
 
 	if (val)
 		items = (int)ent->v.items | ((int)val->_float << 23);
 	else
 		items = (int)ent->v.items | ((int)pr_global_struct->serverflags << 28);
-#endif
 
 	bits |= SU_ITEMS;
 	
@@ -1116,12 +1184,12 @@ void SV_CreateBaseline (void)
 		if (entnum > 0 && entnum <= svs.maxclients)
 		{
 			svent->baseline.colormap = entnum;
-			svent->baseline.modelindex = SV_ModelIndex("progs/player.mdl");
+			svent->baseline.modelindex = SV_ModelIndex ("progs/player.mdl");
 		}
 		else
 		{
 			svent->baseline.colormap = 0;
-			svent->baseline.modelindex = SV_ModelIndex(pr_strings + svent->v.model);
+			svent->baseline.modelindex = SV_ModelIndex (pr_strings + svent->v.model);
 		}
 
 		// add to the message
@@ -1245,7 +1313,7 @@ void SV_SpawnServer (char *server)
 	PR_LoadProgs ();
 
 	// bring up the worldmodel early so that we can get a count on the number of edicts needed
-	sprintf (sv.modelname, "maps/%s.bsp", server);
+	_snprintf (sv.modelname, 64, "maps/%s.bsp", server);
 	sv.worldmodel = Mod_ForName (sv.modelname, false);
 
 	if (!sv.worldmodel)
@@ -1256,41 +1324,19 @@ void SV_SpawnServer (char *server)
 	}
 
 	// clear the fat pvs
-	if (fatpvs)
-	{
-		free (fatpvs);
-		fatpvs = NULL;
-	}
+	fatpvs = NULL;
 
-	// now count our edicts - every { in the entities lump signifies a potential edict
-	// this will give some extra (as statics, lights, etc won't be counted) but that's
-	// OK as we need headroom for spawning and suchlike.  we also blow up when loading
-	// if we need to expand the array, so the headroom is important.
-	for (i = 0, sv.max_edicts = 0; ; i++)
-	{
-		// end of the entities lump
-		if (sv.worldmodel->bh->entities[i] == 0) break;
+	// reserve memory for edicts but don't commit it yet
+	// reset the memory pool for edicts
+	Pool_Reset (POOL_EDICTS, MAX_EDICTS * pr_edict_size);
+	sv.num_edicts = 0;
+	sv.max_edicts = 0;
 
-		// found an edict
-		if (sv.worldmodel->bh->entities[i] == '{') sv.max_edicts++;
-	}
-
-	// now add 64 extra and lower-bound it at 512
-	sv.max_edicts += 64;
-
-	// headroom again - changing the pointer for sv.edicts at load time is seriously bad news, so we need
-	// to ensure that it doesn't happen.  we're good to change it at run time as all accesses from there on
-	// are relative to the baseline pointer (loadtime is bad as we can have a free and change of the baseline
-	// pointer in the middle of an edict access - OUCH!)
-	if (sv.max_edicts < 512) sv.max_edicts = 512;
-
-	Con_DPrintf ("allocating %i edicts\n", sv.max_edicts);
-
-	// allocate memory for the initial batch of edicts
-	sv.edicts = (edict_t *) Heap_TagAlloc (TAG_SV_EDICTS, sv.max_edicts * pr_edict_size);
+	// alloc an initial batch of 128 edicts
+	sv.edicts = SV_AllocEdicts (128);
 
 	sv.Protocol = sv_protocol;
-	sv_max_datagram = sv_protocol == PROTOCOL_VERSION ? 1024 : MAX_DATAGRAM; // Limit packet size if old protocol
+	sv_max_datagram = sv.Protocol == PROTOCOL_VERSION ? 1024 : MAX_DATAGRAM; // Limit packet size if old protocol
 
 	sv.datagram.maxsize = MAX_DATAGRAM2;
 	sv.datagram.cursize = 0;

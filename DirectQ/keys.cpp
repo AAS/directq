@@ -160,8 +160,8 @@ char match_buf[256] = {0};
 
 void Key_PrintMatch (char *cmd)
 {
-	Q_strcpy (key_lines[edit_line] + 1, cmd);
-	key_linepos = Q_strlen (cmd) + 1;
+	strcpy (key_lines[edit_line] + 1, cmd);
+	key_linepos = strlen (cmd) + 1;
 	key_lines[edit_line][key_linepos] = ' ';
 	key_linepos++;
 	key_lines[edit_line][key_linepos] = 0;
@@ -206,7 +206,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 			if (key_lines[edit_line][i] == ' ')
 			{
 				// we can't just store the pointer as the text may have changed due to autocompletion
-				Q_strcpy (matched, &key_lines[edit_line][i + 1]);
+				strcpy (matched, &key_lines[edit_line][i + 1]);
 				break;
 			}
 		}
@@ -289,6 +289,8 @@ void Key_Console (int key)
 	extern char **spinbox_bsps;
 	extern char **skybox_menulist;
 	extern char **demolist;
+	extern char **saveloadlist;
+	extern char *gamedirs[];
 
 	if (key == K_ENTER)
 	{
@@ -317,6 +319,11 @@ void Key_Console (int key)
 			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
 			return;
 		}
+		else if (!strnicmp (&key_lines[edit_line][1], "changelevel ", 12))
+		{
+			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
+			return;
+		}
 		else if (!strnicmp (&key_lines[edit_line][1], "loadsky ", 8))
 		{
 			if (skybox_menulist) Key_ContentMatch (skybox_menulist, &contentcycle);
@@ -330,6 +337,21 @@ void Key_Console (int key)
 		else if (!strnicmp (&key_lines[edit_line][1], "timedemo ", 9))
 		{
 			if (demolist) Key_ContentMatch (demolist, &contentcycle);
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "save ", 5))
+		{
+			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "load ", 5))
+		{
+			if (saveloadlist) Key_ContentMatch (saveloadlist, &contentcycle);
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "game ", 5))
+		{
+			if (gamedirs[0]) Key_ContentMatch (gamedirs, &contentcycle);
 			return;
 		}
 		else contentcycle = 0;
@@ -423,8 +445,8 @@ void Key_Console (int key)
 				&& !key_lines[history_line][1]);
 		if (history_line == edit_line)
 			history_line = (edit_line+1)&31;
-		Q_strcpy(key_lines[edit_line], key_lines[history_line]);
-		key_linepos = Q_strlen(key_lines[edit_line]);
+		strcpy(key_lines[edit_line], key_lines[history_line]);
+		key_linepos = strlen(key_lines[edit_line]);
 		return;
 	}
 
@@ -444,8 +466,8 @@ void Key_Console (int key)
 		}
 		else
 		{
-			Q_strcpy(key_lines[edit_line], key_lines[history_line]);
-			key_linepos = Q_strlen(key_lines[edit_line]);
+			strcpy(key_lines[edit_line], key_lines[history_line]);
+			key_linepos = strlen(key_lines[edit_line]);
 		}
 		return;
 	}
@@ -519,7 +541,7 @@ void Key_Console (int key)
 
 				if (clipText)
 				{
-					textCopied = (char *) Heap_QMalloc (GlobalSize (th) + 1);
+					textCopied = (char *) Zone_Alloc (GlobalSize (th) + 1);
 					strcpy (textCopied, clipText);
 
 					// Substitutes a NULL for every token
@@ -536,7 +558,7 @@ void Key_Console (int key)
 						key_linepos += i;
 					}
 
-					Heap_QFree (textCopied);
+					Zone_Free (textCopied);
 				}
 
 				GlobalUnlock (th);
@@ -647,7 +669,7 @@ int Key_StringToKeynum (char *str)
 
 	for (kn=keynames ; kn->name ; kn++)
 	{
-		if (!Q_strcasecmp(str,kn->name))
+		if (!stricmp(str,kn->name))
 			return kn->keynum;
 	}
 	return -1;
@@ -702,14 +724,14 @@ void Key_SetBinding (int keynum, char *binding)
 	// free old bindings
 	if (keybindings[keynum])
 	{
-		Heap_QFree (keybindings[keynum]);
+		Zone_Free (keybindings[keynum]);
 		keybindings[keynum] = NULL;
 	}
 
 	// allocate memory for new binding
-	l = Q_strlen (binding);	
-	newbind = (char *) Heap_QMalloc (l + 1);
-	Q_strcpy (newbind, binding);
+	l = strlen (binding);	
+	newbind = (char *) Zone_Alloc (l + 1);
+	strcpy (newbind, binding);
 	newbind[l] = 0;
 	keybindings[keynum] = newbind;	
 }
@@ -806,9 +828,7 @@ Writes lines containing "bind key value"
 */
 void Key_WriteBindings (FILE *f)
 {
-	int		i;
-
-	for (i = 0; i < 256; i++)
+	for (int i = 0; i < 256; i++)
 	{
 		if (keybindings[i])
 		{
@@ -818,6 +838,26 @@ void Key_WriteBindings (FILE *f)
 			}
 		}
 	}
+}
+
+
+int Key_GetBinding (char *cmd)
+{
+	for (int i = 0; i < 256; i++)
+	{
+		if (keybindings[i])
+		{
+			if (*keybindings[i])
+			{
+				if (!stricmp (cmd, keybindings[i]))
+				{
+					return i;
+				}
+			}
+		}
+	}
+
+	return -1;
 }
 
 
@@ -906,6 +946,8 @@ Should NOT be called during an interrupt!
 void Menu_ToggleMenu (void);
 void M_Keydown (int key);
 void HUD_ShowDemoScores (void);
+void Cmd_ToggleAutomap_f (void);
+void Key_Automap (int key);
 
 void Key_Event (int key, bool down)
 {
@@ -953,13 +995,21 @@ void Key_Event (int key, bool down)
 		case key_message:
 			Key_Message (key);
 			break;
+
 		case key_menu:
 			M_Keydown (key);
 			break;
+
 		case key_game:
 		case key_console:
 			Menu_ToggleMenu ();
 			break;
+
+		case key_automap:
+			// always allow escape from the automap
+			Cmd_ToggleAutomap_f ();
+			break;
+
 		default:
 			Sys_Error ("Bad key_dest");
 		}
@@ -978,7 +1028,7 @@ void Key_Event (int key, bool down)
 		kb = keybindings[key];
 		if (kb && kb[0] == '+')
 		{
-			sprintf (cmd, "-%s %i\n", kb+1, key);
+			_snprintf (cmd, 1024, "-%s %i\n", kb+1, key);
 			Cbuf_AddText (cmd);
 		}
 		if (keyshift[key] != key)
@@ -986,7 +1036,7 @@ void Key_Event (int key, bool down)
 			kb = keybindings[keyshift[key]];
 			if (kb && kb[0] == '+')
 			{
-				sprintf (cmd, "-%s %i\n", kb+1, key);
+				_snprintf (cmd, 1024, "-%s %i\n", kb+1, key);
 				Cbuf_AddText (cmd);
 			}
 		}
@@ -1017,7 +1067,7 @@ void Key_Event (int key, bool down)
 		{
 			if (kb[0] == '+')
 			{	// button commands add keynum as a parm
-				sprintf (cmd, "%s %i\n", kb, key);
+				_snprintf (cmd, 1024, "%s %i\n", kb, key);
 				Cbuf_AddText (cmd);
 			}
 			else
@@ -1050,6 +1100,11 @@ void Key_Event (int key, bool down)
 	case key_console:
 		Key_Console (key);
 		break;
+
+	case key_automap:
+		Key_Automap (key);
+		break;
+
 	default:
 		Sys_Error ("Bad key_dest");
 	}

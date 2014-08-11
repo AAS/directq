@@ -18,356 +18,474 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+// directq memory functions.  funny how things come full-circle, isn't it?
 #include "quakedef.h"
 
-void Sys_PageIn (void *ptr, int size);
+/*
+========================================================================================================================
+
+		UTILITY FUNCTIONS
+
+========================================================================================================================
+*/
+
+int MemoryRoundSizeToKB (int size, int roundtok)
+{
+	// kilobytes
+	roundtok *= 1024;
+
+	for (int newsize = 0;; newsize += roundtok)
+		if (newsize >= size)
+			return newsize;
+
+	// never reached
+	return size;
+}
 
 
 /*
-====================================================================================================================================
+========================================================================================================================
 
-		QUAKE MEMORY ALLOCATION
+		CACHE MEMORY
 
-	Memory allocation is fully dynamic with no upper bounds (aside from the amount of physical memory in your machine).
+	Certain objects which are loaded per map can be cached per game as they are reusable.  The cache should
+	always be thrown out when the game changes, and may be discardable at any other time.  The cache is just a
+	wrapper around the main virtual memory system, so use Pool_Free to discard it.
 
-	Each memory allocation is assigned a "tag", which must be a positive integer (for simplicity, no technical reason).
-	Tags 0 to 100 are reserved for system startup allocations (filesystem, palette, colormap, etc).
-	Tags 101 to 500 are reserved for server and maps/models/etc.
-	Tag 666 is reserved for the sv.edicts array, as this needs special handling for expansion.
-
-	Don't use the standard library functions, as debug versions are different to release versions.
-
-====================================================================================================================================
+========================================================================================================================
 */
 
-typedef struct heapblock_s
+
+typedef struct cacheobject_s
 {
+	struct cacheobject_s *next;
 	void *data;
-	int tag;
-	int lowmark;
-	int size;
-	struct heapblock_s *next;
-} heapblock_t;
-
-// ahhh - hungarian notation, dr Hfuhruhurr would be proud...
-HANDLE hHeap = NULL;
-
-// handle for generic memory allocations just to keep them separate from the Q Heap
-HANDLE QGlobalHeap = NULL;
-
-heapblock_t *heapblocks = NULL;
-
-#define HEAP_MIN_BLOCK_SIZE		0x100000
+	char *name;
+} cacheobject_t;
 
 
-void Heap_Report_f (void)
+cacheobject_t *cachehead = NULL;
+int numcacheobjects = 0;
+
+void *Cache_Check (char *name)
 {
-	heapblock_t *hb = NULL;
-	int highesttag = 0;
-
-	// get the highest tag in use
-	for (hb = heapblocks; hb; hb = hb->next)
-		if (hb->tag > highesttag)
-			highesttag = hb->tag;
-
-	// track total used as well
-	int totalram = 0;
-
-	// check allocations for all tags
-	for (int tag = 0; tag <= highesttag; tag++)
+	for (cacheobject_t *cache = cachehead; cache; cache = cache->next)
 	{
-		// amount of RAM allocated
-		int tagram = 0;
-		int tagblocks = 0;
+		// these should never happen
+		if (!cache->name) continue;
+		if (!cache->data) continue;
 
-		// accumulate
-		for (hb = heapblocks; hb; hb = hb->next)
+		if (!stricmp (cache->name, name))
 		{
-			if (hb->tag == tag && hb->data)
-			{
-				tagram += hb->size;
-				tagblocks++;
-			}
-		}
-
-		totalram += tagram;
-
-		if (tagram)
-		{
-			if (tagram < 1024)
-				Con_Printf ("Tag %04i uses %0.2f KB RAM ", tag, (float) tagram / 1024.0f);
-			else Con_Printf ("Tag %04i uses %0.2f MB RAM ", tag, ((float) tagram / 1024.0f) / 1024.0f);
-
-			Con_Printf ("in %i blocks ", tagblocks);
-
-			// check against the well-known tags
-			if (tag == TAG_STARTUP)
-				Con_Printf ("(generic startup)");
-			else if (tag == TAG_CLIENTSTARTUP)
-				Con_Printf ("(client startup)");
-			else if (tag == TAG_FILESYSTEM)
-				Con_Printf ("(filesystem)");
-			else if (tag == TAG_BRUSHMODELS)
-				Con_Printf ("(brush models)");
-			else if (tag == TAG_ALIASMODELS)
-				Con_Printf ("(alias models)");
-			else if (tag == TAG_SPRITEMODELS)
-				Con_Printf ("(sprite models)");
-			else if (tag == TAG_CLIENTSTRUCT)
-				Con_Printf ("(client structures)");
-			else if (tag == TAG_PARTICLES)
-				Con_Printf ("(particles)");
-			else if (tag == TAG_SV_EDICTS)
-				Con_Printf ("(sv.edicts structure)");
-			else if (tag == TAG_SOUND)
-				Con_Printf ("(sounds in-game)");
-			else if (tag == TAG_SOUNDSTARTUP)
-				Con_Printf ("(sound startup)");
-			else if (tag == TAG_PROGS)
-				Con_Printf ("(Progs/QC)");
-			else if (tag == TAG_LOADMODELS)
-				Con_Printf ("(Loaded models)");
-			else if (tag == TAG_HUNKFILE)
-				Con_Printf ("(Hunkfile)");
-			else if (tag == TAG_SIZEBUF)
-				Con_Printf ("(size buffer)");
-			else if (tag > 999)
-				Con_Printf ("(temporary allocations)");
-			else if (tag > 100)
-				Con_Printf ("(per-map allocations)");
-			else Con_Printf ("(permanent allocations)");
-
-			Con_Printf ("\n");
+			Con_DPrintf ("Reusing %s from cache\n", cache->name);
+			return cache->data;
 		}
 	}
 
-	if (totalram) Con_Printf ("Total RAM used: %0.2f MB\n", ((float) totalram / 1024.0f) / 1024.0f);
-
-	// check number of blocks unused
-	int unusedblocks = 0;
-	int totalblocks = 0;
-
-	for (hb = heapblocks; hb; hb = hb->next)
-	{
-		if (!hb->data) unusedblocks++;
-		totalblocks++;
-	}
-
-	Con_Printf ("%i unused heap blocks (%i total)\n", unusedblocks, totalblocks);
+	// not found in cache
+	return NULL;
 }
 
 
-static void Heap_CheckTempTag (int tag)
+void *Cache_Alloc (char *name, void *data, int size)
 {
-	if (tag >= TAG_TEMPORARY1)
+	cacheobject_t *cache = (cacheobject_t *) Pool_Alloc (POOL_CACHE, sizeof (cacheobject_t));
+
+	// alloc on the cache
+	cache->name = (char *) Pool_Alloc (POOL_CACHE, strlen (name) + 1);
+	cache->data = Pool_Alloc (POOL_CACHE, size);
+
+	// copy in the name
+	strcpy (cache->name, name);
+
+	// count objects for reporting
+	numcacheobjects++;
+
+	// copy to the cache buffer
+	if (data) memcpy (cache->data, data, size);
+
+	// link it in
+	cache->next = cachehead;
+	cachehead = cache;
+
+	// return from the cache
+	return cache->data;
+}
+
+
+void Cache_Init (void)
+{
+	cachehead = NULL;
+	numcacheobjects = 0;
+}
+
+
+/*
+========================================================================================================================
+
+		VIRTUAL POOL BASED MEMORY SYSTEM
+
+	This is officially the future of DirectQ memory allocation.  Instead of using lots of small itty bitty memory
+	chunks we instead use a number of large "pools", each of which is reserved but not yet committed in virtual
+	memory.  We can then commit as we go, thus giving us the flexibility of (almost) unrestricted memory, but the
+	convenience of the old Hunk system (with everything consecutive in memory).
+
+========================================================================================================================
+*/
+
+int mapallocs = 0;
+
+typedef struct vpool_s
+{
+	// name for display
+	char name[24];
+
+	// max memory in this pool in mb (converted to bytes at startup)
+	int maxmem;
+
+	// new allocations will start here
+	int lowmark;
+
+	// currently allocated and committed memory
+	int highmark;
+
+	// memory is allocated in chunks of this amount of bytes
+	int chunksizekb;
+
+	// max size of highmark
+	int peaksize;
+
+	// base pointer
+	byte *membase;
+} vpool_t;
+
+// these should be declared in the same order as the #defines in heap.h
+vpool_t virtualpools[NUM_VIRTUAL_POOLS] =
+{
+	// stuff in this pool is never freed while DirectQ is running
+	{"Permanent", 32, 0, 0, 512, 0, NULL},
+
+	// stuff in these pools persists for the duration of the game
+	{"This Game", 32, 0, 0, 256, 0, NULL},
+	{"Cache", 256, 0, 0, 1024, 0, NULL},
+
+	// stuff in these pools persists for the duration of the map
+	// warpc only uses ~48 MB
+	{"This Map", 128, 0, 0, 2048, 0, NULL},
+	{"Edicts", 10, 0, 0, 256, 0, NULL},
+
+	// used for temp allocs where we don't want to worry about freeing them
+	{"Temp Allocs", 256, 0, 0, 1024, 0, NULL},
+
+	// for COM_LoadTempFile Loading
+	{"File Loads", 256, 0, 0, 2048, 0, NULL},
+
+	// spare slots
+	{"Unused", 1, 0, 0, 64, 0, NULL},
+	{"Unused", 1, 0, 0, 64, 0, NULL},
+	{"Unused", 1, 0, 0, 64, 0, NULL}
+};
+
+
+void *Pool_Alloc (int pool, int size)
+{
+	if (pool < 0 || pool >= NUM_VIRTUAL_POOLS)
+		Sys_Error ("Pool_Alloc: Invalid Pool");
+
+	vpool_t *vp = &virtualpools[pool];
+
+	// if temp file loading overflows we just reset it
+	if (pool == POOL_TEMP && (vp->lowmark + size) >= vp->maxmem)
 	{
-		// verboten in Heap_TagAlloc
-		Sys_Error ("Heap_TagAlloc: tag >= TAG_TEMPORARY1");
+		// if the temp file pool is too small to hold this allocation we just reset it
+		if (size > vp->maxmem)
+			Pool_Reset (pool, size);
+		else vp->lowmark = 0;
+	}
+
+	// not enough pool space
+	if ((vp->lowmark + size) >= vp->maxmem)
+		Sys_Error ("Pool_Alloc: Overflow");
+
+	// only pass over the commit region otherwise lots of small allocations will pass over
+	// the *entire* *buffer* every time (slooooowwwwww)
+	if ((vp->lowmark + size) >= vp->highmark)
+	{
+		if (pool == POOL_MAP) mapallocs++;
+
+		// alloc in batches
+		int newsize = MemoryRoundSizeToKB (vp->lowmark + size, vp->chunksizekb);
+
+		// this will also set the committed memory to 0 for us
+		if (!VirtualAlloc (vp->membase + vp->lowmark, newsize - vp->lowmark, MEM_COMMIT, PAGE_READWRITE))
+			Sys_Error ("Pool_Alloc: VirtualAlloc Failed");
+
+		vp->highmark = newsize;
+
+		// track peak - only used for reporting
+		if (vp->highmark > vp->peaksize) vp->peaksize = vp->highmark;
+	}
+
+	// set up
+	void *buf = (vp->membase + vp->lowmark);
+	vp->lowmark += size;
+
+	return buf;
+}
+
+
+void Pool_Reset (int pool, int newsizebytes)
+{
+	// graceful failure
+	if (pool < 0 || pool >= NUM_VIRTUAL_POOLS) return;
+
+	// easier access
+	vpool_t *vp = &virtualpools[pool];
+
+	// fully release the memory
+	if (newsizebytes <= 1)
+	{
+		// do a "fast reset", i.e. just switch the lowmark back to 0
+		// this is used for stuff like file loading where we want to avoid a full reset/realloc
+		// NOTE - if you do reallocations from this pool after a reset, and if Quake expects the data to be memset
+		// to 0, you will need to memset it yourself!!!
+		vp->lowmark = 0;
 		return;
 	}
+
+	if (vp->membase) VirtualFree (vp->membase, 0, MEM_RELEASE);
+
+	// fill in
+	vp->lowmark = 0;
+	vp->highmark = 0;
+	vp->maxmem = MemoryRoundSizeToKB (newsizebytes, 1024);
+
+	// reserve the memory for use by this pool
+	vp->membase = (byte *) VirtualAlloc (NULL, vp->maxmem, MEM_RESERVE, PAGE_NOACCESS);
+
+	// commit an initial chunk
+	Pool_Alloc (pool, vp->chunksizekb * 1024);
+	vp->lowmark = 0;
 }
 
 
-static void *Heap_PerformTagAlloc (int tag, int size)
+void Pool_Free (int pool)
 {
-	if (tag < 0)
+	// graceful failure
+	if (pool < 0 || pool >= NUM_VIRTUAL_POOLS) return;
+
+	// easier access
+	vpool_t *vp = &virtualpools[pool];
+
+	// already free
+	if (!vp->highmark) return;
+	if (!vp->membase) return;
+
+	// decommit all of the allocated pool aside from the first chunk in it
+	VirtualFree (vp->membase + (vp->chunksizekb * 1024), vp->highmark - (vp->chunksizekb * 1024), MEM_DECOMMIT);
+
+	// wipe the retained chunk
+	memset (vp->membase, 0, (vp->chunksizekb * 1024));
+
+	// reset lowmark and highmark
+	vp->lowmark = 0;
+	vp->highmark = vp->chunksizekb * 1024;
+
+	if (pool == POOL_MAP)
 	{
-		Sys_Error ("Heap_TagAlloc: tag < 0");
+		Con_DPrintf ("%i map allocations\n", mapallocs);
+		mapallocs = 0;
+	}
+
+	// reinit the cache if that was freed
+	if (pool == POOL_CACHE) Cache_Init ();
+}
+
+
+void Pool_Init (void)
+{
+	static bool vpinit = false;
+
+	// prevent being called twice (owing to maxmem conversion below)
+	if (vpinit) Sys_Error ("Pool_Init: called twice");
+
+	for (int i = 0; i < NUM_VIRTUAL_POOLS; i++)
+	{
+		// convert maxmem to bytes
+		virtualpools[i].maxmem *= (1024 * 1024);
+
+		// reserve the memory for use by this pool
+		virtualpools[i].membase = (byte *) VirtualAlloc (NULL, virtualpools[i].maxmem, MEM_RESERVE, PAGE_NOACCESS);
+
+		// check
+		if (!virtualpools[i].membase) Sys_Error ("Pool_Init: VirtualAlloc failed");
+
+		// commit one initial chunk
+		Pool_Alloc (i, virtualpools[i].chunksizekb * 1024);
+		virtualpools[i].lowmark = 0;
+	}
+
+	// init the cache
+	Cache_Init ();
+
+	// memory is up now
+	vpinit = true;
+}
+
+
+/*
+========================================================================================================================
+
+		ZONE MEMORY
+
+	The zone is used for small strings and other stuff that's dynamic in nature and would normally be handled by
+	malloc and free.  It primarily exists so that we can report on zone usage, but also so that we can avoid using
+	malloc and free, as their behaviour is runtime dependent.
+
+	The win32 Heap* functions basically operate identically to the old zone functions except they let use reserve
+	virtual memory and also do all of the tracking and other heavy lifting for us.
+
+========================================================================================================================
+*/
+
+typedef struct zblock_s
+{
+	int size;
+	void *data;
+} zblock_t;
+
+int zonesize = 0;
+int zoneblocks = 0;
+int zonepeaksize = 0;
+int zonepeakblocks = 0;
+HANDLE zoneheap = NULL;
+
+void *Zone_Alloc (int size)
+{
+	// create an initial heap for use with the zone
+	// this heap has 128K initially allocated and 32 MB reserved from the virtual address space
+	if (!zoneheap) zoneheap = HeapCreate (0, 0x20000, 0x2000000);
+
+	size += sizeof (zblock_t);
+	size = (size + 7) & ~7;
+
+	zblock_t *zb = (zblock_t *) HeapAlloc (zoneheap, HEAP_ZERO_MEMORY, size);
+
+	if (!zb)
+	{
+		Sys_Error ("Zone_Alloc failed on %i bytes", size);
 		return NULL;
 	}
 
-	if (size <= 0)
+	// force the zone block to be non-executable
+	DWORD dwdummy;
+	BOOL ret = VirtualProtect (zb, size, PAGE_READWRITE, &dwdummy);
+
+	zb->size = size;
+	zb->data = (void *) (zb + 1);
+
+	zonesize += size;
+	zoneblocks++;
+
+	if (zonesize > zonepeaksize) zonepeaksize = zonesize;
+	if (zoneblocks > zonepeakblocks) zonepeakblocks = zoneblocks;
+
+	return zb->data;
+}
+
+
+void Zone_Free (void *ptr)
+{
+	// attempt to free a NULL pointer
+	if (!ptr) return;
+	if (!zoneheap) return;
+
+	// retrieve zone block pointer
+	zblock_t *zptr = ((zblock_t *) ptr) - 1;
+
+	zonesize -= zptr->size;
+	zoneblocks--;
+
+	// release this back to the OS
+	HeapFree (zoneheap, 0, zptr);
+
+	// compact ever few frees so as to keep the zone from getting too fragmented
+	if (!(zoneblocks % 8)) HeapCompact (zoneheap, 0);
+}
+
+
+void Zone_Compact (void)
+{
+	// create an initial heap for use with the zone
+	// this heap has 128K initially allocated and 32 MB reserved from the virtual address space
+	if (!zoneheap) zoneheap = HeapCreate (0, 0x20000, 0x2000000);
+
+	// merge contiguous free blocks
+	// call this every map load; it may also be called on demand
+	HeapCompact (zoneheap, 0);
+}
+
+
+/*
+========================================================================================================================
+
+		REPORTING
+
+========================================================================================================================
+*/
+void Virtual_Report_f (void)
+{
+	int reservedmem = 0;
+	int committedmem = 0;
+	int peakmem = 0;
+	int addrspace = 0;
+
+	Con_Printf ("\n-----------------------------------------------\n");
+	Con_Printf ("Pool           Highmark     Lowmark        Peak\n");
+	Con_Printf ("-----------------------------------------------\n");
+
+	for (int i = 0; i < NUM_VIRTUAL_POOLS; i++)
 	{
-		Sys_Error ("Heap_TagAlloc: size <= 0");
-		return NULL;
+		addrspace += (virtualpools[i].maxmem / 1024) / 1024;
+
+		// don't report on pools which were never used
+		if (!virtualpools[i].peaksize) continue;
+
+		Con_Printf
+		(
+			"%-11s  %7.2f MB  %7.2f MB  %7.2f MB\n",
+			virtualpools[i].name,
+			((float) virtualpools[i].highmark / 1024.0f) / 1024.0f,
+			((float) virtualpools[i].lowmark / 1024.0f) / 1024.0f,
+			((float) virtualpools[i].peaksize / 1024.0f) / 1024.0f
+		);
+
+		reservedmem += virtualpools[i].highmark;
+		committedmem += virtualpools[i].lowmark;
+		peakmem += virtualpools[i].peaksize;
 	}
 
-	heapblock_t *hb = NULL;
+	Con_Printf ("-----------------------------------------------\n");
 
-	// allocate on DWORD boundaries
-	size = ((size + 3) & ~3);
+	Con_Printf
+	(
+		"%-11s  %7.2f MB  %7.2f MB  %7.2f MB\n",
+		"Total",
+		((float) reservedmem / 1024.0f) / 1024.0f,
+		((float) committedmem / 1024.0f) / 1024.0f,
+		((float) peakmem / 1024.0f) / 1024.0f
+	);
 
-	if (tag > 100 && tag < 1000)
-	{
-		// attempt to stuff multiple allocations into a single block
-		for (hb = heapblocks; hb; hb = hb->next)
-		{
-			// ensure that the block has data
-			if (!hb->data) continue;
-
-			// look for a matching tag
-			if (hb->tag != tag) continue;
-
-			// look for a block with sufficient free space
-			if ((hb->size - hb->lowmark) < size) continue;
-
-			// reuse space in this block
-			byte *found = &(((byte *) hb->data)[hb->lowmark]);
-			memset (found, 0, size);
-			hb->lowmark += size;
-			return found;
-		}
-	}
-
-	// look for an available block
-	for (hb = heapblocks; hb; hb = hb->next)
-	{
-		if (!hb->data)
-		{
-			hb->lowmark = 0;
-			break;
-		}
-	}
-
-	// didn't get one
-	if (!hb)
-	{
-		// allocate a new block
-		hb = (heapblock_t *) HeapAlloc (hHeap, HEAP_ZERO_MEMORY, sizeof (heapblock_t));
-
-		// link it in
-		hb->next = heapblocks;
-		hb->lowmark = 0;
-		heapblocks = hb;
-	}
-
-	// fill it in
-	hb->lowmark = size;
-
-	// never take < HEAP_MIN_BLOCK_SIZE to help optimize allocation speeds
-	if (size < HEAP_MIN_BLOCK_SIZE && tag > 100 && tag < 1000)
-		size = HEAP_MIN_BLOCK_SIZE;
-
-	hb->size = size;
-	hb->tag = tag;
-
-	// allocate data and clear it to 0
-	// (quake expects this and assumes it in many cases)
-	hb->data = HeapAlloc (hHeap, HEAP_ZERO_MEMORY, size);
-
-	if (!hb->data)
-		Sys_Error ("Heap_TagAlloc: failed to allocate %i bytes", size);
-
-	// return what we got
-	return hb->data;
+	Con_Printf ("-----------------------------------------------\n");
+	Con_DPrintf ("Reserved address space: %i MB\n", addrspace);
+	Con_Printf ("%i objects in cache\n", numcacheobjects);
+	Con_Printf ("\nZone current size: %i KB in %i blocks\n", (zonesize + 1023) / 1023, zoneblocks);
+	Con_DPrintf ("Zone peak size: %i KB in %i blocks\n", (zonepeaksize + 1023) / 1023, zonepeakblocks);
+	Con_DPrintf ("%i allocations for POOL_MAP\n", mapallocs);
 }
 
 
-void *Heap_TagAlloc (int tag, int size)
-{
-	Heap_CheckTempTag (tag);
-	return Heap_PerformTagAlloc (tag, size);
-}
+cmd_t heap_report_cmd ("heap_report", Virtual_Report_f);
 
-
-void *Heap_TempAlloc (int size)
-{
-	// so that the first call will go to 0
-	static int heap_temptag = -1;
-
-	// next tag in cycle
-	heap_temptag++;
-
-	// cycle 0 to 7
-	// heap_temptag &= 7;
-	if (heap_temptag > 7) heap_temptag = 0;
-
-	// free anything that might be using this tag
-	// (protection against two consecutive calls inadvertently freeing anything that might be currently in use)
-	Heap_TagFree (TAG_TEMPORARY1 + heap_temptag);
-
-	// alloc from current cycle
-	return Heap_PerformTagAlloc (TAG_TEMPORARY1 + heap_temptag, size);
-}
-
-
-void Heap_Free101Plus (void)
-{
-	int freedata = 0;
-
-	for (heapblock_t *hb = heapblocks; hb; hb = hb->next)
-	{
-		if (hb->tag > 100 && hb->data)
-		{
-			freedata += hb->size;
-
-			HeapFree (hHeap, 0, hb->data);
-			hb->data = NULL;
-			hb->size = 0;
-			hb->lowmark = 0;
-		}
-	}
-
-	// do something interesting with the freedata counter here...
-	Con_DPrintf ("Released %0.3f MB Heap Memory\n", (float) freedata / 1024 / 1024);
-
-	// compress unused blocks
-	freedata = HeapCompact (hHeap, 0);
-
-	// free heap is free
-	Con_DPrintf ("Largest contiguous free heap: %0.3f MB\n", (float) freedata / 1024 / 1024);
-
-	// also compress the global heap
-	HeapCompact (QGlobalHeap, 0);
-}
-
-
-void Heap_TagFree (int tag)
-{
-	int freedata = 0;
-
-	for (heapblock_t *hb = heapblocks; hb; hb = hb->next)
-	{
-		if (hb->tag == tag && hb->data)
-		{
-			freedata += hb->size;
-
-			HeapFree (hHeap, 0, hb->data);
-			hb->data = NULL;
-			hb->size = 0;
-			hb->lowmark = 0;
-		}
-	}
-
-	// because this can happen at runtime we don't compress or report
-}
-
-
-cmd_t Heap_Report_Cmd ("heap_report", Heap_Report_f);
-
-
-void Heap_Check (void)
-{
-	BOOL validheap = HeapValidate (hHeap, 0, NULL);
-
-	if (!validheap) Sys_Error ("Heap_Check: Trashed Heap");
-}
-
-
-void Heap_Init (void)
-{
-	hHeap = HeapCreate (0, 0, 0);
-
-	if (!hHeap) Sys_Error ("Heap_Init: Failed to create memory heap");
-
-	QGlobalHeap = HeapCreate (0, 0, 0);
-
-	if (!QGlobalHeap) Sys_Error ("Heap_Init: Failed to create global heap");
-}
-
-
-void *Heap_QMalloc (int size)
-{
-	byte *memptr = (byte *) malloc (size);
-
-	if (!memptr)
-	{
-		Sys_Error ("Heap_ZMalloc: failed to allocate %i bytes", size);
-		return NULL;
-	}
-
-	memset (memptr, size, 0);
-	return memptr;
-}
 
 

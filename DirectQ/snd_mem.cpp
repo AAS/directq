@@ -105,17 +105,16 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	float	stepscale;
 	sfxcache_t	*sc;
 
-	if (s->sndcache)
-	{
-		// Con_Printf ("Sound %s already loaded\n", s->name);
-		return s->sndcache;
-	}
-
-	// Con_Printf ("Loading %s\n", s->name);
+	// already loaded
+	if (s->sndcache) return s->sndcache;
 
 	// load it in
-    Q_strcpy (namebuffer, "sound/");
-    Q_strcat (namebuffer, s->name);
+    strcpy (namebuffer, "sound/");
+    strcat (namebuffer, s->name);
+
+	// look for a cached copy
+	sc = (sfxcache_t *) Cache_Check (namebuffer);
+	if (sc) return sc;
 
 	// don't load as a stack file!!!  no way!!!  never!!!
 	data = COM_LoadTempFile (namebuffer);
@@ -135,12 +134,13 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 		return NULL;
 	}
 
-	stepscale = (float)info.rate / shm->speed;	
+	stepscale = (float) info.rate / shm->speed;	
 	len = info.samples / stepscale;
 
 	len = len * info.width * info.channels;
 
-	sc = (sfxcache_t *) Heap_TagAlloc (TAG_SOUND, len + sizeof (sfxcache_t));
+	// alloc directly on the cache
+	sc = (sfxcache_t *) Cache_Alloc (namebuffer, NULL, len + sizeof (sfxcache_t));
 	s->sndcache = sc;
 
 	if (!sc) return NULL;
@@ -217,7 +217,7 @@ void FindNextChunk(char *name)
 //			Sys_Error ("FindNextChunk: %i length is past the 1 meg sanity limit", iff_chunk_len);
 		data_p -= 8;
 		last_chunk = data_p + 8 + ( (iff_chunk_len + 1) & ~1 );
-		if (!Q_strncmp((char *) data_p, name, 4))
+		if (!strncmp((char *) data_p, name, 4))
 			return;
 	}
 }
@@ -267,7 +267,7 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 
 // find "RIFF" chunk
 	FindChunk("RIFF");
-	if (!(data_p && !Q_strncmp((char *) data_p+8, "WAVE", 4)))
+	if (!(data_p && !strncmp((char *) data_p+8, "WAVE", 4)))
 	{
 		Con_DPrintf ("Missing RIFF/WAVE chunks\n");
 		return info;

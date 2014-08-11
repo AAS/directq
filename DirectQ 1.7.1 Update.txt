@@ -1,0 +1,13 @@
+DIRECTQ 1.7.1 UPDATES
+=====================
+
+* Corrected wrong version number in 1.7 update list.
+* Restored default value of r_wateralpha to 1.
+* Restored "view is inside the dlight" handling for gl_flashblend 1 mode.
+* Definitively fixed stuff showing through water surfs on a contents transition.
+* Resolved crash bug in TGA screenshots where backbuffer format was < 32 bits.
+* Fixed rare infinite texturechain lockup case.
+
+
+
+

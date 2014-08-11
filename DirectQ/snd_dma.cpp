@@ -30,6 +30,7 @@ extern DWORD ds_SoundBufferSize;
 
 
 void S_Play(void);
+void S_Play2(void);
 void S_PlayVol(void);
 void S_SoundList(void);
 void S_Update_();
@@ -154,6 +155,7 @@ S_Init
 ================
 */
 cmd_t S_Play_Cmd ("play", S_Play);
+cmd_t S_Play2_Cmd ("play2", S_Play2);
 cmd_t S_PlayVol_Cmd ("playvol", S_PlayVol);
 cmd_t S_StopAllSoundsC_Cmd ("stopsound", S_StopAllSoundsC);
 cmd_t S_SoundList_Cmd ("soundlist", S_SoundList);
@@ -172,7 +174,7 @@ void S_Init (void)
 
 	SND_InitScaletable ();
 
-	known_sfx = (sfx_t *) Heap_TagAlloc (TAG_SOUNDSTARTUP, MAX_SFX * sizeof (sfx_t));
+	known_sfx = (sfx_t *) Pool_Alloc (POOL_PERMANENT, MAX_SFX * sizeof (sfx_t));
 	num_sfx = 0;
 
 	Con_Printf ("Sound sampling rate: %i\n", shm->speed);
@@ -223,13 +225,13 @@ sfx_t *S_FindName (char *name)
 
 	if (!name) Sys_Error ("S_FindName: NULL\n");
 
-	if (Q_strlen(name) >= MAX_QPATH)
+	if (strlen(name) >= MAX_QPATH)
 		Sys_Error ("Sound name too long: %s", name);
 
 	// see if already loaded
 	for (i=0 ; i < num_sfx ; i++)
 	{
-		if (!Q_strcmp (known_sfx[i].name, name))
+		if (!strcmp (known_sfx[i].name, name))
 		{
 			known_sfx[i].sndcache = NULL;
 			return &known_sfx[i];
@@ -514,7 +516,7 @@ void S_StopAllSounds (bool clear)
 		if (channels[i].sfx)
 			channels[i].sfx = NULL;
 
-	Q_memset(channels, 0, MAX_CHANNELS * sizeof(channel_t));
+	memset(channels, 0, MAX_CHANNELS * sizeof(channel_t));
 
 	if (clear)
 		S_ClearBuffer ();
@@ -561,7 +563,7 @@ void S_ClearBuffer (void)
 		}
 	}
 
-	Q_memset(pData, clear, shm->samples * shm->samplebits/8);
+	memset(pData, clear, shm->samples * shm->samplebits/8);
 
 	ds_SecondaryBuffer8->Unlock(pData, dwSize, NULL, 0);
 }
@@ -857,27 +859,42 @@ console functions
 ===============================================================================
 */
 
-void S_Play(void)
+static void S_PlayGen (int *hash, float attn)
 {
-	static int hash=345;
 	int 	i;
-	char name[256];
+	char	name[256];
 	sfx_t	*sfx;
 	
 	i = 1;
-	while (i<Cmd_Argc())
+
+	while (i < Cmd_Argc ())
 	{
-		if (!Q_strrchr(Cmd_Argv(i), '.'))
+		if (!strrchr(Cmd_Argv(i), '.'))
 		{
-			Q_strcpy(name, Cmd_Argv(i));
-			Q_strcat(name, ".wav");
+			strcpy(name, Cmd_Argv(i));
+			strcat(name, ".wav");
 		}
 		else
-			Q_strcpy(name, Cmd_Argv(i));
+			strcpy(name, Cmd_Argv(i));
+
 		sfx = S_PrecacheSound(name);
-		S_StartSound(hash++, 0, sfx, listener_origin, 1.0, 1.0);
+		S_StartSound ((*hash)++, 0, sfx, listener_origin, 1.0, attn);
 		i++;
 	}
+}
+
+void S_Play (void)
+{
+	static int hash = 345;
+	
+	S_PlayGen (&hash, 1);
+}
+
+void S_Play2 (void)
+{
+	static int hash = 345;
+
+	S_PlayGen (&hash, 0);
 }
 
 void S_PlayVol(void)
@@ -891,15 +908,15 @@ void S_PlayVol(void)
 	i = 1;
 	while (i<Cmd_Argc())
 	{
-		if (!Q_strrchr(Cmd_Argv(i), '.'))
+		if (!strrchr(Cmd_Argv(i), '.'))
 		{
-			Q_strcpy(name, Cmd_Argv(i));
-			Q_strcat(name, ".wav");
+			strcpy(name, Cmd_Argv(i));
+			strcat(name, ".wav");
 		}
 		else
-			Q_strcpy(name, Cmd_Argv(i));
+			strcpy(name, Cmd_Argv(i));
 		sfx = S_PrecacheSound(name);
-		vol = Q_atof(Cmd_Argv(i+1));
+		vol = atof(Cmd_Argv(i+1));
 		S_StartSound(hash++, 0, sfx, listener_origin, vol, 1.0);
 		i+=2;
 	}

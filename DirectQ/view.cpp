@@ -248,12 +248,13 @@ void V_DriftPitch (void)
  
 ============================================================================== 
 */ 
- 
- 
+
+
+// default cshifts are too dark in GL so lighten them a little
 cshift_t	cshift_empty = { {130,80,50}, 0 };
-cshift_t	cshift_water = { {130,80,50}, 128 };
-cshift_t	cshift_slime = { {0,25,5}, 150 };
-cshift_t	cshift_lava = { {255,80,0}, 150 };
+cshift_t	cshift_water = { {130,80,50}, 64 };
+cshift_t	cshift_slime = { {0,25,5}, 96 };
+cshift_t	cshift_lava = { {255,80,0}, 128 };
 
 int			v_blend[4];
 
@@ -484,9 +485,6 @@ void V_UpdatePalette (void)
 	float	r,g,b,a;
 	int		ir, ig, ib;
 	bool force;
-
-	// use this instead of host_frametime here
-	extern float r_frametime;
 
 	V_CalcPowerupCshift ();
 

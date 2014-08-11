@@ -137,13 +137,13 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 	if (ent->v.solid == SOLID_BSP)
 	{
 		// explicit hulls in the BSP model
-		if (ent->v.movetype != MOVETYPE_PUSH)
-			Sys_Error ("SOLID_BSP without MOVETYPE_PUSH");
+		// Sys_Error ("SOLID_BSP without MOVETYPE_PUSH");
+		if (ent->v.movetype != MOVETYPE_PUSH) goto dont_crash;
 
-		model = sv.models[ (int)ent->v.modelindex ];
+		model = sv.models[(int) ent->v.modelindex];
 
-		if (!model || model->type != mod_brush)
-			Sys_Error ("SOLID_BSP with a non bsp model");
+		// Sys_Error ("SOLID_BSP with a non bsp model");
+		if (!model || model->type != mod_brush) goto dont_crash;
 
 		VectorSubtract (maxs, mins, size);
 		if (size[0] < 3)
@@ -158,8 +158,9 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 		VectorAdd (offset, ent->v.origin, offset);
 	}
 	else
-	{	// create a temp hull from bounding box sizes
-
+	{
+dont_crash:
+		// create a temp hull from bounding box sizes
 		VectorSubtract (ent->v.mins, maxs, hullmins);
 		VectorSubtract (ent->v.maxs, mins, hullmaxs);
 		hull = SV_HullForBox (hullmins, hullmaxs);
@@ -205,6 +206,10 @@ areanode_t *SV_CreateAreaNode (int depth, vec3_t mins, vec3_t maxs)
 	areanode_t	*anode;
 	vec3_t		size;
 	vec3_t		mins1, maxs1, mins2, maxs2;
+
+	// the server will always create 31 area nodes
+	if (sv_numareanodes == AREA_NODES)
+		Host_Error ("SV_CreateAreaNode: too many areanodes (max = %d)", AREA_NODES);
 
 	anode = &sv_areanodes[sv_numareanodes];
 	sv_numareanodes++;
@@ -276,24 +281,48 @@ SV_TouchLinks
 
 ====================
 */
-void SV_TouchLinks (edict_t *ent, areanode_t *node)
+void SV_TouchLinks ( edict_t *ent, areanode_t *node )
 {
-	link_t		*l, *next;
-	edict_t		*touch;
-	int			old_self, old_other;
+	link_t	       *l, *next;
+	edict_t	       *touch;
+	int	       old_self, old_other, touched = 0, i;
+	static edict_t *list[MAX_EDICTS]; // Static due to recursive function
 
-	// touch linked edicts
-	for (l = node->trigger_edicts.next; l != &node->trigger_edicts; l = next)
+loc0:;
+	// ensure
+	touched = 0;
+
+	// Build a list of touched edicts since linked list may change during touch
+	for (l = node->trigger_edicts.next; l != &node->trigger_edicts; l = l->next)
 	{
-		next = l->next;
 		touch = EDICT_FROM_AREA(l);
 
 		if (touch == ent) continue;
+		if (touch->free) continue;
 		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER) continue;
 
 		if (ent->v.absmin[0] > touch->v.absmax[0] || ent->v.absmin[1] > touch->v.absmax[1] || ent->v.absmin[2] > touch->v.absmax[2] ||
 			ent->v.absmax[0] < touch->v.absmin[0] || ent->v.absmax[1] < touch->v.absmin[1] || ent->v.absmax[2] < touch->v.absmin[2])
 			continue;
+
+		list[touched++] = touch;
+
+		if (touched == MAX_EDICTS)
+		{
+			Con_DPrintf ("SV_TouchLinks: ");
+			Con_DPrintf ("too many touched trigger_edicts (max = %d)\n", MAX_EDICTS);
+			break;
+		}
+	}
+
+	// touch linked edicts
+	for (i = 0; i < touched; ++i)
+	{
+		int ednum;
+
+		touch = list[i];
+
+		ednum = NUM_FOR_EDICT(touch);
 
 		old_self = pr_global_struct->self;
 		old_other = pr_global_struct->other;
@@ -303,22 +332,29 @@ void SV_TouchLinks (edict_t *ent, areanode_t *node)
 		pr_global_struct->time = sv.time;
 		PR_ExecuteProgram (touch->v.touch);
 
-		// the PR_ExecuteProgram above can alter the linked edicts
-		if (next != l->next && l->next)
-		{
-			Con_DPrintf ("Warning: fixed up link in SV_TouchLinks\n");
-			next = l->next;
-		}
-
 		pr_global_struct->self = old_self;
 		pr_global_struct->other = old_other;
 	}
-	
-	// recurse down both sides
-	if (node->axis == -1) return;
 
-	if (ent->v.absmax[node->axis] > node->dist) SV_TouchLinks (ent, node->children[0]);
-	if (ent->v.absmin[node->axis] < node->dist) SV_TouchLinks (ent, node->children[1]);
+	// recurse down both sides
+	if (node->axis == -1)
+		return;
+
+	if (ent->v.absmax[node->axis] > node->dist)
+	{
+		// order reversed to reduce code
+		if (ent->v.absmin[node->axis] < node->dist) SV_TouchLinks(ent, node->children[1]);
+		node = node->children[0];
+		goto loc0;
+	}
+	else
+	{
+		if (ent->v.absmin[node->axis] < node->dist)
+		{
+			node = node->children[1];
+			goto loc0;
+		}
+	}
 }
 
 
@@ -445,6 +481,9 @@ int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
 	dclipnode_t	*node;
 	mplane_t	*plane;
 
+	if (num < CONTENTS_CLIP)
+		num += 65536; // Hack for more clipnodes
+
 	while (num >= 0)
 	{
 		if (num < hull->firstclipnode || num > hull->lastclipnode)
@@ -454,17 +493,20 @@ int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
 
 		node = hull->clipnodes + num;
 		plane = hull->planes + node->planenum;
-		
+
 		if (plane->type < 3)
 			d = p[plane->type] - plane->dist;
 		else
 			d = DotProduct (plane->normal, p) - plane->dist;
+
 		if (d < 0)
 			num = node->children[1];
-		else
-			num = node->children[0];
+		else num = node->children[0];
+
+		if (num < CONTENTS_CLIP)
+			num += 65536; // Hack for more clipnodes
 	}
-	
+
 	return num;
 }
 
@@ -537,12 +579,17 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 	int			side;
 	float		midf;
 
-// check for empty
+loc0:;
+	if (num < CONTENTS_CLIP)
+		num += 65536; // Hack for more clipnodes
+
+	// check for empty
 	if (num < 0)
 	{
 		if (num != CONTENTS_SOLID)
 		{
 			trace->allsolid = false;
+
 			if (num == CONTENTS_EMPTY)
 				trace->inopen = true;
 			else
@@ -553,12 +600,9 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 		return true;		// empty
 	}
 
-	if (num < hull->firstclipnode || num > hull->lastclipnode)
-		Sys_Error ("SV_RecursiveHullCheck: bad node number");
+	if (num < hull->firstclipnode || num > hull->lastclipnode) Sys_Error ("SV_RecursiveHullCheck: bad node number");
 
-//
-// find the point distances
-//
+	// find the point distances
 	node = hull->clipnodes + num;
 	plane = hull->planes + node->planenum;
 
@@ -572,49 +616,36 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 		t1 = DotProduct (plane->normal, p1) - plane->dist;
 		t2 = DotProduct (plane->normal, p2) - plane->dist;
 	}
-	
-#if 1
-	if (t1 >= 0 && t2 >= 0)
-		return SV_RecursiveHullCheck (hull, node->children[0], p1f, p2f, p1, p2, trace);
-	if (t1 < 0 && t2 < 0)
-		return SV_RecursiveHullCheck (hull, node->children[1], p1f, p2f, p1, p2, trace);
-#else
-	if ( (t1 >= DIST_EPSILON && t2 >= DIST_EPSILON) || (t2 > t1 && t1 >= 0) )
-		return SV_RecursiveHullCheck (hull, node->children[0], p1f, p2f, p1, p2, trace);
-	if ( (t1 <= -DIST_EPSILON && t2 <= -DIST_EPSILON) || (t2 < t1 && t1 <= 0) )
-		return SV_RecursiveHullCheck (hull, node->children[1], p1f, p2f, p1, p2, trace);
-#endif
 
-// put the crosspoint DIST_EPSILON pixels on the near side
-	if (t1 < 0)
-		frac = (t1 + DIST_EPSILON)/(t1-t2);
-	else
-		frac = (t1 - DIST_EPSILON)/(t1-t2);
-	if (frac < 0)
-		frac = 0;
-	if (frac > 1)
-		frac = 1;
-		
-	midf = p1f + (p2f - p1f)*frac;
-	for (i=0 ; i<3 ; i++)
-		mid[i] = p1[i] + frac*(p2[i] - p1[i]);
+	if (t1 >= 0 && t2 >= 0) {num = node->children[0]; goto loc0;}
+	if (t1 < 0 && t2 < 0) {num = node->children[1]; goto loc0;}
 
+	// put the crosspoint DIST_EPSILON pixels on the near side
 	side = (t1 < 0);
 
+	// note: sending this through a #defined bound may cause it to be evaluated multiple times!!!
+	if (side)
+		frac = (t1 + DIST_EPSILON) / (t1 - t2);
+	else frac = (t1 - DIST_EPSILON) / (t1 - t2);
+
+	if (frac < 0) frac = 0;
+	if (frac > 1) frac = 1;
+
+	midf = p1f + (p2f - p1f) * frac;
+
+	for (i = 0; i < 3; i++) mid[i] = p1[i] + frac * (p2[i] - p1[i]);
+
 	// move up to the node
-	if (!SV_RecursiveHullCheck (hull, node->children[side], p1f, midf, p1, mid, trace) )
-		return false;
+	if (!SV_RecursiveHullCheck (hull, node->children[side], p1f, midf, p1, mid, trace)) return false;
 
 	// go past the node
 	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
 		return SV_RecursiveHullCheck (hull, node->children[side^1], midf, p2f, mid, p2, trace);
-	
-	if (trace->allsolid)
-		return false;		// never got out of the solid area
-		
-//==================
-// the other side of the node is solid, this is the impact point
-//==================
+
+	// never got out of the solid area
+	if (trace->allsolid) return false;
+
+	// the other side of the node is solid, this is the impact point
 	if (!side)
 	{
 		VectorCopy (plane->normal, trace->plane.normal);
@@ -622,14 +653,16 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 	}
 	else
 	{
+		// mh - vec3_origin is not evil because i initialized it!
 		VectorSubtract (vec3_origin, plane->normal, trace->plane.normal);
 		trace->plane.dist = -plane->dist;
 	}
 
-	while (SV_HullPointContents (hull, hull->firstclipnode, mid)
-	== CONTENTS_SOLID)
-	{ // shouldn't really happen, but does occasionally
+	while (SV_HullPointContents (hull, hull->firstclipnode, mid) == CONTENTS_SOLID)
+	{
+		// shouldn't really happen, but does occasionally
 		frac -= 0.1;
+
 		if (frac < 0)
 		{
 			trace->fraction = midf;
@@ -637,9 +670,11 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 			Con_DPrintf ("backup past 0\n");
 			return false;
 		}
-		midf = p1f + (p2f - p1f)*frac;
-		for (i=0 ; i<3 ; i++)
-			mid[i] = p1[i] + frac*(p2[i] - p1[i]);
+
+		midf = p1f + (p2f - p1f) * frac;
+
+		for (i = 0; i < 3; i++)
+			mid[i] = p1[i] + frac * (p2[i] - p1[i]);
 	}
 
 	trace->fraction = midf;
@@ -676,10 +711,9 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	VectorSubtract (start, offset, start_l);
 	VectorSubtract (end, offset, end_l);
 
-#ifdef QUAKE2
-	// rotate start and end into the models frame of reference
-	if (ent->v.solid == SOLID_BSP && 
-	(ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) )
+	// rotate start and end into the models frame of reference - e3m3 has angles[1] == 180 so
+	// don't assume that the world will always have angles 0
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != sv.edicts)
 	{
 		vec3_t	a;
 		vec3_t	forward, right, up;
@@ -697,15 +731,13 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 		end_l[1] = -DotProduct (temp, right);
 		end_l[2] = DotProduct (temp, up);
 	}
-#endif
 
-// trace a line through the apropriate clipping hull
-	SV_RecursiveHullCheck (hull, hull->firstclipnode, 0, 1, start_l, end_l, &trace);
+	// trace a line through the apropriate clipping hull
+	if (hull->lastclipnode < (unsigned short) CONTENTS_CLIP)
+		SV_RecursiveHullCheck (hull, hull->firstclipnode, 0, 1, start_l, end_l, &trace);
 
-#ifdef QUAKE2
-	// rotate endpos back to world frame of reference
-	if (ent->v.solid == SOLID_BSP && 
-	(ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) )
+	// rotate endpos back to world frame of reference - e3m3 has angles[1] == 180
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != sv.edicts)
 	{
 		vec3_t	a;
 		vec3_t	forward, right, up;
@@ -727,7 +759,6 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 			trace.plane.normal[2] = DotProduct (temp, up);
 		}
 	}
-#endif
 
 // fix trace up by the offset
 	if (trace.fraction != 1)
@@ -751,21 +782,44 @@ Mins and maxs enclose the entire area swept by the move
 */
 void SV_ClipToLinks ( areanode_t *node, moveclip_t *clip )
 {
-	link_t		*l, *next;
-	edict_t		*touch;
-	trace_t		trace;
+	link_t	     *l, *next;
+	edict_t	     *touch;
+	trace_t	     trace;
+	static float lastmsg = 0;
+	static int   i; // Don't waste stack space
+
+loc0:;
+	i = 0;
 
 // touch linked edicts
 	for (l = node->solid_edicts.next ; l != &node->solid_edicts ; l = next)
 	{
 		next = l->next;
 		touch = EDICT_FROM_AREA(l);
+		
+		if (++i == MAX_EDICTS)
+			Host_Error ("SV_ClipToLinks: too many solid edicts");
+
 		if (touch->v.solid == SOLID_NOT)
 			continue;
-		if (touch == clip->passedict)
-			continue;
+
+		if (clip->passedict)
+		{
+			if (touch == clip->passedict)
+				continue;
+			if (clip->passedict->v.size[0] && !touch->v.size[0])
+				continue;	// points never interact
+			if (PROG_TO_EDICT(touch->v.owner) == clip->passedict)
+				continue;	// don't clip against own missiles
+			if (PROG_TO_EDICT(clip->passedict->v.owner) == touch)
+				continue;	// don't clip against owner
+		}
+
 		if (touch->v.solid == SOLID_TRIGGER)
-			Sys_Error ("Trigger in clipping list");
+		{
+			ED_Print (touch);
+			Host_Error ("Trigger in clipping list");
+		}
 
 		if (clip->type == MOVE_NOMONSTERS && touch->v.solid != SOLID_BSP)
 			continue;
@@ -778,26 +832,16 @@ void SV_ClipToLinks ( areanode_t *node, moveclip_t *clip )
 		|| clip->boxmaxs[2] < touch->v.absmin[2] )
 			continue;
 
-		if (clip->passedict && clip->passedict->v.size[0] && !touch->v.size[0])
-			continue;	// points never interact
-
 	// might intersect, so do an exact clip
 		if (clip->trace.allsolid)
 			return;
-		if (clip->passedict)
-		{
-		 	if (PROG_TO_EDICT(touch->v.owner) == clip->passedict)
-				continue;	// don't clip against own missiles
-			if (PROG_TO_EDICT(clip->passedict->v.owner) == touch)
-				continue;	// don't clip against owner
-		}
 
 		if ((int)touch->v.flags & FL_MONSTER)
 			trace = SV_ClipMoveToEntity (touch, clip->start, clip->mins2, clip->maxs2, clip->end);
 		else
 			trace = SV_ClipMoveToEntity (touch, clip->start, clip->mins, clip->maxs, clip->end);
-		if (trace.allsolid || trace.startsolid ||
-		trace.fraction < clip->trace.fraction)
+
+		if (trace.allsolid || trace.startsolid || trace.fraction < clip->trace.fraction)
 		{
 			trace.ent = touch;
 		 	if (clip->trace.startsolid)
@@ -811,15 +855,22 @@ void SV_ClipToLinks ( areanode_t *node, moveclip_t *clip )
 		else if (trace.startsolid)
 			clip->trace.startsolid = true;
 	}
-	
+
 // recurse down both sides
 	if (node->axis == -1)
 		return;
 
-	if ( clip->boxmaxs[node->axis] > node->dist )
-		SV_ClipToLinks ( node->children[0], clip );
-	if ( clip->boxmins[node->axis] < node->dist )
-		SV_ClipToLinks ( node->children[1], clip );
+	if (clip->boxmaxs[node->axis] > node->dist)
+	{
+		if (clip->boxmins[node->axis] < node->dist) SV_ClipToLinks (node->children[1], clip);
+		node = node->children[0];
+		goto loc0;
+	}
+	else if (clip->boxmins[node->axis] < node->dist)
+	{
+		node = node->children[1];
+		goto loc0;
+	}
 }
 
 

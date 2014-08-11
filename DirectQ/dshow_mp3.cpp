@@ -255,7 +255,7 @@ bool DS_FindTrack (const char *trackdir, const char *musicdir, int track, bool l
 
 	// build the path to search
 	// we don't need this for FindFirstFile/FindNextFile, but we do for DirectShow
-	sprintf (MusicPath, "%s\\%s", trackdir, musicdir);
+	_snprintf (MusicPath, 256, "%s\\%s", trackdir, musicdir);
 
 	WIN32_FIND_DATA FindFileData;
 	HANDLE hFind = INVALID_HANDLE_VALUE;
@@ -373,4 +373,9 @@ void DS_ChangeVolume (void)
 	DSManager->AdjustVolume ();
 }
 
+
+// these are just to soak up nehahra abuse
+void NehahraAbuseMeBaby (void) {}
+cmd_t Cmd_PlayMod ("playmod", NehahraAbuseMeBaby);
+cmd_t Cmd_StopMod ("stopmod", NehahraAbuseMeBaby);
 

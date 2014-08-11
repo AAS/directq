@@ -73,16 +73,25 @@ typedef struct entity_s
 	int			alphaval;
 
 	// light averaging
-	float		last_shadelight[3];
+	float		shadelight[3];
 
 	// false if the entity is to be subjected to bbox culling
 	bool		nocullbox;
+
+	// true if this was a static ent that has been removed
+	bool		staticremoved;
+
+	// distance from client (for depth sorting)
+	float		dist;
 
 	// FIXME: could turn these into a union
 	int						trivial_accept;
 	struct mnode_s			*topnode;		// for bmodels, first world node
 											//  that splits bmodel, or NULL if
 											//  not split
+
+	// the matrix used for transforming this entity
+	void		*matrix;
 } entity_t;
 
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
@@ -156,7 +165,6 @@ void R_TeleportSplash (vec3_t org);
 // surface cache related
 //
 extern	int		reinit_surfcache;	// if 1, surface cache is currently empty and
-extern bool	r_cache_thrash;	// set if thrashing the surface cache
 
 int	D_SurfaceCacheForRes (int width, int height);
 void D_DeleteSurfaceCache (void);

@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "menu_common.h"
+#include "d3d_quake.h"
 
 CQMenu menu_HUD (&menu_Options, m_hudoptions);
 
@@ -706,7 +707,7 @@ void HUD_DrawFrags (void)
 
 		// draw number
 		f = s->frags;
-		sprintf (num, "%3i",f);
+		_snprintf (num, 12, "%3i",f);
 
 		Draw_Character (xofs + (x + 1) * 8, y, num[0]);
 		Draw_Character (xofs + (x + 2) * 8, y, num[1]);
@@ -725,7 +726,7 @@ void HUD_DrawFrags (void)
 
 void HUD_DeathmatchOverlay (void)
 {
-	char str[80];
+	char str[127];
 	int l, i, x, y, f, k;
 	qpic_t *pic;
 	scoreboard_t *s;
@@ -742,7 +743,7 @@ void HUD_DeathmatchOverlay (void)
 	y = 32 + pic->height + 8;
 
 	// level name
-	strcpy (str, cl.levelname);
+	strncpy (str, cl.levelname, 127);
 
 	l = strlen (str);
 
@@ -780,7 +781,7 @@ void HUD_DeathmatchOverlay (void)
 
 		// draw number
 		f = s->frags;
-		sprintf (num, "%3i", f);
+		_snprintf (num, 12, "%3i", f);
 
 		Draw_Character (x + 8 , y, num[0]);
 		Draw_Character (x + 16 , y, num[1]);
@@ -803,7 +804,7 @@ void HUD_DeathmatchOverlay (void)
 
 void HUD_SoloScoreboard (char *picname, double solotime)
 {
-	char str[80];
+	char str[128];
 	int minutes, seconds, tens, units;
 	int l;
 	int i;
@@ -827,7 +828,7 @@ void HUD_SoloScoreboard (char *picname, double solotime)
 	SBY = 48 + pic->height + 10;
 
 	// level name
-	strcpy (str, cl.levelname);
+	strncpy (str, cl.levelname, 127);
 
 	l = strlen (str);
 
@@ -845,21 +846,27 @@ void HUD_SoloScoreboard (char *picname, double solotime)
 
 	if (cl.gametype != GAME_DEATHMATCH)
 	{
-		// kill count
-		sprintf (str, "Monsters: %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
+		// kill count - remake quake compatibility
+		if (cl.stats[STAT_TOTALMONSTERS] == 0)
+			_snprintf (str, 80, "Monsters: %i", cl.stats[STAT_MONSTERS]);
+		else _snprintf (str, 80, "Monsters: %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
+
 		l = strlen (str);
 		SBY += 12;
 		Draw_String (SBX - l * 4, SBY, str);
 
-		// secrets count
-		sprintf (str, "Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+		// secrets count - remake quake compatibility
+		if (cl.stats[STAT_TOTALSECRETS] == 0)
+			_snprintf (str, 80, "Secrets: %i", cl.stats[STAT_SECRETS]);
+		else _snprintf (str, 80, "Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+
 		l = strlen (str);
 		SBY += 12;
 		Draw_String (SBX - l * 4, SBY, str);
 	}
 
 	// time elapsed
-	sprintf (str, "Time: %i:%i%i", minutes, tens, units);
+	_snprintf (str, 80, "Time: %i:%i%i", minutes, tens, units);
 	l = strlen (str);
 	SBY += 12;
 	Draw_String (SBX - l * 4, SBY, str);
@@ -1181,7 +1188,7 @@ void HUD_DrawAmmoCounts (int ac1, int ac2, int ac3, int ac4, int ActiveWeapon)
 
 	for (int i = 0; i < 4; i++)
 	{
-		sprintf (num, "%3i", ActiveAmmo[i]);
+		_snprintf (num, 10, "%3i", ActiveAmmo[i]);
 
 		if (num[0] != ' ') Draw_Character (x, y, 18 + num[0] - '0');
 		if (num[1] != ' ') Draw_Character (x + 8, y, 18 + num[1] - '0');
@@ -1372,7 +1379,7 @@ void HUD_DrawTeamColors (void)
 
 	// draw number
 	f = s->frags;
-	sprintf (num, "%3i", f);
+	_snprintf (num, 12, "%3i", f);
 
 	if (top == 8)
 	{
@@ -1478,7 +1485,7 @@ void HUD_MiniDeathmatchOverlay (void)
 
 		// draw number
 		f = s->frags;
-		sprintf (num, "%3i", f);
+		_snprintf (num, 12, "%3i", f);
 
 		Draw_Character (x + 8, y, num[0]);
 		Draw_Character (x + 16, y, num[1]);
@@ -1513,11 +1520,9 @@ void HUD_DrawFPS (bool force)
 	{
 		if (cls.state == ca_connected && 0)
 		{
-			extern float r_frametime;
-
-			if (r_frametime < 0.0015015f)
+			if (d3d_RenderDef.frametime < 0.0015015f)
 				fps = 666;
-			else fps = (int) (1.0f / r_frametime);
+			else fps = (int) (1.0f / d3d_RenderDef.frametime);
 		}
 		else
 		{
@@ -1529,7 +1534,7 @@ void HUD_DrawFPS (bool force)
 
 	if (scr_showfps.value || force)
 	{
-		sprintf (str, "%4i fps", fps);
+		_snprintf (str, 16, "%4i fps", fps);
 		Draw_String (x, y, str);
 	}
 }
@@ -1544,7 +1549,7 @@ void HUD_DrawClock (bool force)
 		int minutes = cl.time / 60;
 		int seconds = ((int) cl.time) % 60;
 
-		sprintf (str, "%02i:%i%i", minutes, seconds / 10, seconds % 10);
+		_snprintf (str, 9, "%02i:%i%i", minutes, seconds / 10, seconds % 10);
 	}
 	else return;
 
@@ -1571,7 +1576,7 @@ void HUD_DrawHUD (void)
 	static char oldhud[128] = {0};
 
 	// i suppose one strcmp per frame is ok...
-	if (Q_strcmp (oldhud, hud_defaulthud.string) && hud_autoload.value)
+	if (strcmp (oldhud, hud_defaulthud.string) && hud_autoload.value)
 	{
 		// this is a hack to suppress "Execing..." when the HUD loads
 		con_initialized = false;
@@ -1950,7 +1955,7 @@ void HUD_DummyMiniDMOverlay (void)
 		Draw_Fill (x, y + 1, 40, 3, HUD_ColorForMap (i * 3));
 		Draw_Fill (x, y + 4, 40, 4, HUD_ColorForMap (i + 6));
 
-		sprintf (num, "%3i", 10);
+		_snprintf (num, 10, "%3i", 10);
 
 		Draw_Character (x + 8, y, num[0]);
 		Draw_Character (x + 16, y, num[1]);

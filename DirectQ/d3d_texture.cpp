@@ -24,11 +24,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include <assert.h>
 
-// used for generating md5 hashes
-#include <wincrypt.h>
 
+// leave this at 1 cos texture caching will resolve loading time issues
+cvar_t gl_compressedtextures ("gl_texture_compression", 1, CVAR_ARCHIVE);
+
+cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
 
 LPDIRECT3DTEXTURE9 d3d_CurrentTexture[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+d3d_texture_t *d3d_FreeTextures = NULL;
+int d3d_NumFreeTextures = 0;
+#define D3D_MAX_FREE_TEXTURES 128
 d3d_texture_t *d3d_Textures = NULL;
 
 void D3D_ReleaseLightmaps (void);
@@ -39,6 +44,8 @@ extern LPDIRECT3DTEXTURE9 playertextures[];
 extern LPDIRECT3DTEXTURE9 char_texture;
 extern LPDIRECT3DTEXTURE9 solidskytexture;
 extern LPDIRECT3DTEXTURE9 alphaskytexture;
+extern LPDIRECT3DTEXTURE9 simpleskytexture;
+LPDIRECT3DTEXTURE9 yahtexture;
 
 // for palette hackery
 extern PALETTEENTRY texturepal[];
@@ -60,69 +67,29 @@ int D3D_PowerOf2Size (int size)
 
 void D3D_InitTextures (void)
 {
-	// this used to register a cvar; it does nothing now.  we'll keep it in case we ever want to put something in here.
+	// create a block of free textures
+	d3d_FreeTextures = (d3d_texture_t *) Pool_Alloc (POOL_PERMANENT, D3D_MAX_FREE_TEXTURES * sizeof (d3d_texture_t));
+	d3d_NumFreeTextures = D3D_MAX_FREE_TEXTURES;
 }
 
 
 void D3D_HashTexture (image_t *image)
 {
-	// generate an MD5 hash of an image's data
-	HCRYPTPROV hCryptProv;
-	HCRYPTHASH hHash;
+	int datalen = image->height * image->width;
 
-	// acquire the cryptographic context (can we cache this?)
-	if (CryptAcquireContext (&hCryptProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT | CRYPT_MACHINE_KEYSET))
-	{
-		// create a hashing algorithm (can we cache this?)
-		if (CryptCreateHash (hCryptProv, CALG_MD5, 0, 0, &hHash))
-		{
-			int datalen = image->height * image->width;
+	if (image->flags & IMAGE_32BIT) datalen *= 4;
 
-			if (image->flags & IMAGE_32BIT) datalen *= 4;
-
-			// hash the data
-			if (CryptHashData (hHash, image->data, datalen, 0))
-			{
-				DWORD dwHashLen = 16;
-
-				// retrieve the hash
-				if (CryptGetHashParam (hHash, HP_HASHVAL, image->hash, &dwHashLen, 0)) 
-				{
-					// hashed OK
-				}
-				else
-				{
-					// oh crap
- 					Sys_Error ("D3D_HashTexture: CryptGetHashParam failed");
-				}
-			}
-			else
-			{
-				// oh crap
-				Sys_Error ("D3D_HashTexture: CryptHashData failed");
-			}
-
-			CryptDestroyHash (hHash); 
-		}
-		else
-		{
-			// oh crap
-			Sys_Error ("D3D_HashTexture: CryptCreateHash failed");
-		}
-
-	    CryptReleaseContext (hCryptProv, 0);
-	}
-	else
-	{
-		// oh crap
-		Sys_Error ("D3D_HashTexture: CryptAcquireContext failed");
-	}
+	// call into here instead
+	COM_HashData (image->hash, image->data, datalen);
 }
 
 
 D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 {
 	D3DFORMAT TextureFormat = D3DFMT_X8R8G8B8;
+
+	// disable compression
+	if (!gl_compressedtextures.value) flags |= IMAGE_NOCOMPRESS;
 
 	if (flags & IMAGE_ALPHA)
 	{
@@ -214,7 +181,7 @@ typedef struct pcx_s
 	char	filler[58];
 } pcx_t;
 
-bool D3D_LoadPCX (FILE *f, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
+bool D3D_LoadPCX (HANDLE fh, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 {
 	pcx_t pcx;
 	byte *pcx_rgb;
@@ -222,23 +189,23 @@ bool D3D_LoadPCX (FILE *f, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 
 	// seek to end of file (or end of file in PAK)
 	// can't use SEEK_END because the file might be in a PAK
-	fseek (f, len, SEEK_CUR);
-	fseek (f, -768, SEEK_CUR);
+	SetFilePointer (fh, len, NULL, FILE_CURRENT);
+	SetFilePointer (fh, -768, NULL, FILE_CURRENT);
 
 	// now we can read the palette
-	fread (palette, 1, 768, f);
+	COM_FReadFile (fh, palette, 768);
 
 	// rewind to start pos (essential for PAK support)
-	fseek (f, -len, SEEK_CUR);
+	SetFilePointer (fh, -len, NULL, FILE_CURRENT);
 
 	// and now we can read the header in
-	fread (&pcx, sizeof (pcx_t), 1, f);
+	COM_FReadFile (fh, &pcx, sizeof (pcx_t));
 
 	// the caller must handle fclose here
 	if (pcx.manufacturer != 0x0a || pcx.version != 5 || pcx.encoding != 1 || pcx.bits_per_pixel != 8) return false;
 
 	// alloc memory to hold it (extra space for fake TGA header - see below)
-	pcx_rgb = (byte *) Heap_QMalloc ((pcx.xmax + 1) * (pcx.ymax + 1) * 4 + 18);
+	pcx_rgb = (byte *) Pool_Alloc (POOL_TEMP, (pcx.xmax + 1) * (pcx.ymax + 1) * 4 + 18);
 
 	// because we want to support PAK files here we can't seek from the end.
 	// we could make a mess of offsets/etc from the file length, but instead we'll just keep it simple
@@ -248,13 +215,13 @@ bool D3D_LoadPCX (FILE *f, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 
 		for (int x = 0; x <= pcx.xmax;)
 		{
-			int dataByte = fgetc (f);
+			int dataByte = COM_FReadChar (fh);
 			int runLength;
 
 			if ((dataByte & 0xC0) == 0xC0)
 			{
 				runLength = dataByte & 0x3F;
-				dataByte = fgetc (f);
+				dataByte = COM_FReadChar (fh);
 			}
 			else runLength = 1;
 
@@ -291,19 +258,19 @@ bool D3D_LoadPCX (FILE *f, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 	// attempt to load it (this will generate miplevels for us too)
 	HRESULT hr = D3D_CreateExternalTexture (tex, (pcx.xmax + 1) * (pcx.ymax + 1) * 4 + 18, pcx_rgb, flags);
 
-	// ensure that the buffer is released before checking for success, as otherwise we'll leak it
-	Heap_QFree (pcx_rgb);
+	// close before checking
+	COM_FCloseFile (&fh);
 
 	if (FAILED (hr)) return false;
 
-	fclose (f);
 	return true;
 }
 
 
 bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags)
 {
-	char workingname[256];
+	// add 3 for handling links.
+	char workingname[259];
 
 	// copy the name out so that we can safely modify it
 	strncpy (workingname, filename, 255);
@@ -333,10 +300,10 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 			}
 		}
 
-		FILE *f;
-		int filelen = COM_FOpenFile (workingname, &f);
+		HANDLE fh = INVALID_HANDLE_VALUE;
+		int filelen = COM_FOpenFile (workingname, &fh);
 
-		if (!f) continue;
+		if (fh == INVALID_HANDLE_VALUE) continue;
 
 		// make this a bit more robust that i == 0
 		if (!strcmp (TextureExtensions[i], "link"))
@@ -346,13 +313,26 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 			{
 				if (workingname[c] == '/' || workingname[c] == '\\')
 				{
-					fscanf (f, "%s", &workingname[c + 1]);
+					for (int cc = 0; ; cc++)
+					{
+						char fc = COM_FReadChar (fh);
+
+						if (fc == '\n' || fc < 1 || fc == '\r') break;
+
+						workingname[c + cc + 1] = fc;
+						workingname[c + cc + 2] = 0;
+					}
+
 					break;
 				}
 			}
 
 			// done with the file
-			fclose (f);
+			COM_FCloseFile (&fh);
+
+			// the system needs an extension so let's just give it a dummy one
+			// (the above process causes the extension to be lost
+			COM_DefaultExtension (workingname, ".blah");
 
 			// skip the rest; we check link first so that it will fall through to the other standard types
 			continue;
@@ -360,21 +340,21 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 		else if (!strcmp (TextureExtensions[i], "pcx"))
 		{
 			// D3DX can't handle PCX formats so we have our own loader
-			if (D3D_LoadPCX (f, tex, flags, filelen)) return true;
+			if (D3D_LoadPCX (fh, tex, flags, filelen)) return true;
 
 			// we may want to add other formats after PCX...
-			fclose (f);
+			COM_FCloseFile (&fh);
 			continue;
 		}
 
 		// allocate a buffer to hold it
-		byte *filebuf = (byte *) Heap_QMalloc (filelen);
+		byte *filebuf = (byte *) Pool_Alloc (POOL_TEMP, filelen);
 
 		// read it all in
-		fread (filebuf, filelen, 1, f);
+		COM_FReadFile (fh, filebuf, filelen);
 
 		// done with the file
-		fclose (f);
+		COM_FCloseFile (&fh);
 
 		// attempt to load it (this will generate miplevels for us too)
 		HRESULT hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
@@ -385,15 +365,10 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 			// so try it again without compression before giving up
 			hr = D3D_CreateExternalTexture (tex, filelen, filebuf, (flags | IMAGE_NOCOMPRESS));
 
-			if (FAILED (hr))
-			{
-				Heap_QFree (filebuf);
-				continue;
-			}
+			if (FAILED (hr)) continue;
 		}
 
 		// load succeeded
-		Heap_QFree (filebuf);
 		return true;
 	}
 
@@ -472,7 +447,7 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 
 	// d3d specifies that compressed formats should be a multiple of 4
 	// would you believe marcher has a 1x1 texture in it?
-	if ((scaled.width % 4) || (scaled.height % 4)) image->flags |= IMAGE_NOCOMPRESS;
+	if ((scaled.width < 4) || (scaled.height < 4)) image->flags |= IMAGE_NOCOMPRESS;
 
 	// sky can have large flat spaces of the same colour, meaning it doesn't compress so good
 	if (!strnicmp (image->identifier, "sky", 3)) image->flags |= IMAGE_NOCOMPRESS;
@@ -707,7 +682,7 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (image_t *image)
 		if (image->flags != t->TexImage.flags) continue;
 
 		// compare the hash and reuse if it matches
-		if (!memcmp (image->hash, t->TexImage.hash, 16))
+		if (COM_CheckHash (image->hash, t->TexImage.hash))
 		{
 			// set last usage to 0
 			t->LastUsage = 0;
@@ -722,8 +697,11 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (image_t *image)
 
 	if (!freetex)
 	{
-		// create a new one
-		tex = (d3d_texture_t *) Heap_QMalloc (sizeof (d3d_texture_t));
+		// check for free textures
+		if (d3d_NumFreeTextures <= 0) D3D_InitTextures ();
+
+		// take a texture off the texture list
+		tex = &d3d_FreeTextures[--d3d_NumFreeTextures];
 
 		// link it in
 		tex->next = d3d_Textures;
@@ -749,34 +727,34 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (image_t *image)
 	}
 
 	// check for textures that have the same name but different data, and amend the name by the QRP standard
-	if (!memcmp (image->hash, plat_top1_cable, 16))
+	if (COM_CheckHash (image->hash, plat_top1_cable))
 		strcat (image->identifier, "_cable");
-	else if (!memcmp (image->hash, plat_top1_bolt, 16))
+	else if (COM_CheckHash (image->hash, plat_top1_bolt))
 		strcat (image->identifier, "_bolt");
-	else if (!memcmp (image->hash, metal5_2_arc, 16))
+	else if (COM_CheckHash (image->hash, metal5_2_arc))
 		strcat (image->identifier, "_arc");
-	else if (!memcmp (image->hash, metal5_2_x, 16))
+	else if (COM_CheckHash (image->hash, metal5_2_x))
 		strcat (image->identifier, "_x");
-	else if (!memcmp (image->hash, metal5_4_arc, 16))
+	else if (COM_CheckHash (image->hash, metal5_4_arc))
 		strcat (image->identifier, "_arc");
-	else if (!memcmp (image->hash, metal5_4_double, 16))
+	else if (COM_CheckHash (image->hash, metal5_4_double))
 		strcat (image->identifier, "_double");
-	else if (!memcmp (image->hash, metal5_8_back, 16))
+	else if (COM_CheckHash (image->hash, metal5_8_back))
 		strcat (image->identifier, "_back");
-	else if (!memcmp (image->hash, metal5_8_rune, 16))
+	else if (COM_CheckHash (image->hash, metal5_8_rune))
 		strcat (image->identifier, "_rune");
-	else if (!memcmp (image->hash, sky_blue_solid, 16))
+	else if (COM_CheckHash (image->hash, sky_blue_solid))
 		strcpy (image->identifier, "sky4_solid");
-	else if (!memcmp (image->hash, sky_blue_alpha, 16))
+	else if (COM_CheckHash (image->hash, sky_blue_alpha))
 		strcpy (image->identifier, "sky4_alpha");
-	else if (!memcmp (image->hash, sky_purp_solid, 16))
+	else if (COM_CheckHash (image->hash, sky_purp_solid))
 		strcpy (image->identifier, "sky1_solid");
-	else if (!memcmp (image->hash, sky_purp_alpha, 16))
+	else if (COM_CheckHash (image->hash, sky_purp_alpha))
 		strcpy (image->identifier, "sky1_alpha");
 
 	// hack the colour for certain models
 	// fix white line at base of shotgun shells box
-	if (!memcmp (image->hash, ShotgunShells, 16))
+	if (COM_CheckHash (image->hash, ShotgunShells))
 		memcpy (image->data, image->data + 32 * 31, 32);
 
 	COM_CheckContentDirectory (&gl_texturedir, false);
@@ -837,13 +815,36 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (miptex_t *mt, int flags)
 {
 	image_t image;
 
-	image.data = (byte *) (mt + 1);
+	image.data = ((byte *) mt) + mt->offsets[0];
 	image.flags = flags;
 	image.height = mt->height;
 	image.width = mt->width;
 	image.palette = d_8to24table;
 
 	strcpy (image.identifier, mt->name);
+
+	if (image.flags & IMAGE_LUMA)
+	{
+		// check the *second* miplevel for luma pixels, but the actual luma that is uploaded will be based on the first
+		// there are still some mods that have crap textures even after this, but at least this catches some of them.
+		int size = (mt->width / 2) * (mt->height / 2);
+		byte *data = ((byte *) mt) + mt->offsets[1];
+
+		for (int i = 0; i < size; i++)
+		{
+			// alpha is not luma
+			if (data[i] == 255) continue;
+
+			// see do we get a luma
+			// note - we still check for luma texels in D3D_LoadTexture as it's fully
+			// possible for the second to have them but the first not to, e.g. if bad colour matching
+			// was done on the texture when it was originally created.
+			if (data[i] > 223) return D3D_LoadTexture (&image);
+		}
+
+		// no luma
+		return NULL;
+	}
 
 	return D3D_LoadTexture (&image);
 }
@@ -899,6 +900,7 @@ void D3D_ReleaseTextures (void)
 	SAFE_RELEASE (char_texture);
 	SAFE_RELEASE (solidskytexture);
 	SAFE_RELEASE (alphaskytexture);
+	SAFE_RELEASE (simpleskytexture);
 	SAFE_RELEASE (d3d_MapshotTexture);
 	SAFE_RELEASE (R_PaletteTexture);
 	SAFE_RELEASE (r_blacktexture);
@@ -916,19 +918,20 @@ void D3D_FlushTextures (void)
 {
 	int numflush = 0;
 
+	// sanity check
+	if (gl_maxtextureretention.value < 2) Cvar_Set (&gl_maxtextureretention, 2);
+
 	for (d3d_texture_t *tex = d3d_Textures; tex; tex = tex->next)
 	{
 		// all textures just loaded in the cache will have lastusage set to 0
 		// incremenent lastusage for types we want to flush.
-		// alias models are no longer cached between maps.
+		// alias and sprite models are cached between maps so don't ever free them
 		if (tex->TexImage.flags & IMAGE_BSP) tex->LastUsage++;
-		if (tex->TexImage.flags & IMAGE_ALIAS) tex->LastUsage++;
-		if (tex->TexImage.flags & IMAGE_SPRITE) tex->LastUsage++;
 
 		// always preserve these types irrespective
 		if (tex->TexImage.flags & IMAGE_PRESERVE) tex->LastUsage = 0;
 
-		if (tex->LastUsage > 3 && tex->d3d_Texture)
+		if (tex->LastUsage > gl_maxtextureretention.value && tex->d3d_Texture)
 		{
 			// if the texture hasn't been used in 4 maps, we flush it
 			// this means that texture flushes will start happening about exm4

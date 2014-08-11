@@ -84,212 +84,17 @@ void Sys_PageIn (void *ptr, int size)
 }
 
 
-/*
-===============================================================================
-
-FILE IO
-
-===============================================================================
-*/
-
-typedef struct sys_handle_s
-{
-	int num;
-	FILE *file;
-	struct sys_handle_s *next;
-} sys_handle_t;
-
-sys_handle_t *active_handles = NULL;
-int num_handles = 1;
-
-sys_handle_t *findhandle (int hnum)
-{
-	// search for a match
-	for (sys_handle_t *h = active_handles; h; h = h->next)
-	{
-		if (h->num == hnum)
-		{
-			// got it
-			return h;
-		}
-	}
-
-	// no match
-	Sys_Error ("findhandle: could not find handle for num %i\n", hnum);
-	return NULL;
-}
-
-
-sys_handle_t *findhandle (void)
-{
-	int i;
-	sys_handle_t *h;
-
-	// search for an unused one
-	for (h = active_handles; h; h = h->next)
-	{
-		if (!h->file)
-		{
-			// unused
-			Con_DPrintf ("Used handle %i\n", h->num);
-			return h;
-		}
-	}
-
-	// alloc a new handle
-	h = (sys_handle_t *) Heap_QMalloc (sizeof (sys_handle_t));
-
-	if (!h)
-	{
-		Sys_Error ("findhandle: failed to alloc a file handle");
-		return NULL;
-	}
-
-	// link it in
-	h->next = active_handles;
-	active_handles = h;
-
-	Con_DPrintf ("Allocated %i handles\n", num_handles);
-
-	// fill in props
-	h->file = NULL;
-	h->num = num_handles++;
-
-	// return the handle we got
-	return h;
-}
-
-
-/*
-================
-filelength
-================
-*/
-int filelength (FILE *f)
-{
-	int		pos;
-	int		end;
-
-	pos = ftell (f);
-	fseek (f, 0, SEEK_END);
-	end = ftell (f);
-	fseek (f, pos, SEEK_SET);
-
-	return end;
-}
-
-int Sys_FileOpenRead (char *path, int *hndl)
-{
-	int		retval;
-	sys_handle_t *h;
-
-	h = findhandle ();
-
-	h->file = fopen (path, "rb");
-
-	if (!h->file)
-	{
-		*hndl = -1;
-		retval = -1;
-	}
-	else
-	{
-		*hndl = h->num;
-		retval = filelength (h->file);
-	}
-
-	return retval;
-}
-
-int Sys_FileOpenWrite (char *path)
-{
-	sys_handle_t *h;
-
-	h = findhandle ();
-
-	h->file = fopen (path, "wb");
-
-	if (!h->file)
-		Sys_Error ("Error opening %s: %s", path, strerror(errno));
-
-	return h->num;
-}
-
-void Sys_FileClose (int handle)
-{
-	sys_handle_t *h = findhandle (handle);
-
-	// prevent double-close
-	if (h->file)
-	{
-		// null it as well so that it becomes valid for a future findhandle ()
-		fclose (h->file);
-		h->file = NULL;
-	}
-}
-
-void Sys_FileSeek (int handle, int position)
-{
-	sys_handle_t *h = findhandle (handle);
-
-	if (!h->file)
-	{
-		Sys_Error ("Sys_FileSeek: file not open");
-		return;
-	}
-
-	fseek (h->file, position, SEEK_SET);
-}
-
-int Sys_FileRead (int handle, void *dest, int count)
-{
-	int x;
-	sys_handle_t *h = findhandle (handle);
-
-	if (!h->file)
-	{
-		Sys_Error ("Sys_FileRead: file not open");
-		return -1;
-	}
-
-	x = fread (dest, 1, count, h->file);
-	return x;
-}
-
-int Sys_FileWrite (int handle, void *data, int count)
-{
-	int x;
-	sys_handle_t *h = findhandle (handle);
-
-	if (!h->file)
-	{
-		Sys_Error ("Sys_FileWrite: file not open");
-		return -1;
-	}
-
-	x = fwrite (data, 1, count, h->file);
-	return x;
-}
-
-
-int	Sys_FileTime (char *path)
+int	Sys_FileExists (char *path)
 {
 	FILE	*f;
-	int		retval;
 
-	f = fopen (path, "rb");
-
-	if (f)
+	if ((f = fopen (path, "rb")))
 	{
 		fclose (f);
-		retval = 1;
-	}
-	else
-	{
-		retval = -1;
+		return 1;
 	}
 
-	return retval;
+	return 0;
 }
 
 void Sys_mkdir (char *path)
@@ -297,7 +102,7 @@ void Sys_mkdir (char *path)
 	char fullpath[256];
 
 	// silly me - this doesn't need quotes around a directory name with spaces
-	sprintf (fullpath, "%s/%s", com_gamedir, path);
+	_snprintf (fullpath, 256, "%s/%s", com_gamedir, path);
 
 	for (int i = 0; ; i++)
 	{
@@ -317,20 +122,6 @@ SYSTEM IO
 
 ===============================================================================
 */
-
-/*
-================
-Sys_MakeCodeWriteable
-================
-*/
-void Sys_MakeCodeWriteable (unsigned long startaddr, unsigned long length)
-{
-	DWORD  flOldProtect;
-
-	if (!VirtualProtect((LPVOID)startaddr, length, PAGE_READWRITE, &flOldProtect))
-   		Sys_Error("Protection change failed\n");
-}
-
 
 void Sys_SetFPCW (void)
 {
@@ -422,7 +213,7 @@ void Sys_Error (char *error, ...)
 	}
 
 	va_start (argptr, error);
-	vsprintf (text, error, argptr);
+	_vsnprintf (text, 1024, error, argptr);
 	va_end (argptr);
 
 	QC_DebugOutput ("Sys_Error: %s", text);
@@ -550,7 +341,7 @@ void Sys_InitFloatTime (void)
 
 	if (j)
 	{
-		curtime = (double) (Q_atof(com_argv[j+1]));
+		curtime = (double) (atof(com_argv[j+1]));
 	}
 	else
 	{
@@ -658,8 +449,8 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	InitializeCriticalSection (&TheCS);
 	EnterCriticalSection (&TheCS);
 
-	// init memory heap
-	Heap_Init ();
+	// init memory pool
+	Pool_Init ();
 
 	global_hInstance = hInstance;
 	global_nCmdShow = nCmdShow;
@@ -667,8 +458,8 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if (!GetCurrentDirectory (sizeof (cwd), cwd))
 		Sys_Error ("Couldn't determine current directory");
 
-	if (cwd[Q_strlen(cwd)-1] == '/' || cwd[Q_strlen(cwd)-1] == '\\')
-		cwd[Q_strlen(cwd)-1] = 0;
+	if (cwd[strlen(cwd)-1] == '/' || cwd[strlen(cwd)-1] == '\\')
+		cwd[strlen(cwd)-1] = 0;
 
 	parms.basedir = cwd;
 	parms.cachedir = NULL;

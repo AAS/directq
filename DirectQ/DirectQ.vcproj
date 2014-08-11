@@ -72,6 +72,8 @@
 				GenerateDebugInformation="true"
 				ProgramDatabaseFile="$(OutDir)/DirectQ.pdb"
 				SubSystem="2"
+				StackReserveSize="4194304"
+				StackCommitSize="4194304"
 				LargeAddressAware="1"
 				TerminalServerAware="1"
 				RandomizedBaseAddress="1"
@@ -256,7 +258,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\d3d_hlsl.cpp"
+				RelativePath=".\d3d_matrix.cpp"
 				>
 			</File>
 			<File
@@ -289,6 +291,10 @@
 			</File>
 			<File
 				RelativePath=".\d3d_sprite.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\d3d_state.cpp"
 				>
 			</File>
 			<File
@@ -364,10 +370,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\net_vcr.cpp"
-				>
-			</File>
-			<File
 				RelativePath=".\net_win.cpp"
 				>
 			</File>
@@ -428,7 +430,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\trace.cpp"
+				RelativePath=".\unzip.c"
 				>
 			</File>
 			<File
@@ -487,10 +489,6 @@
 			</File>
 			<File
 				RelativePath=".\cvar.h"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_hlsl.h"
 				>
 			</File>
 			<File
@@ -562,10 +560,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\net_vcr.h"
-				>
-			</File>
-			<File
 				RelativePath=".\net_wins.h"
 				>
 			</File>
@@ -615,6 +609,10 @@
 			</File>
 			<File
 				RelativePath=".\sys.h"
+				>
+			</File>
+			<File
+				RelativePath=".\unzip.h"
 				>
 			</File>
 			<File

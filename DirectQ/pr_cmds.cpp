@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // QuakeC debugger
 cvar_t qc_debug ("qc_debug", "0");
+cvar_t sv_permagibs ("sv_permagibs", "0", CVAR_ARCHIVE | CVAR_SERVER);
 
 void QC_DebugOutput (char *debugtext, ...)
 {
@@ -32,7 +33,7 @@ void QC_DebugOutput (char *debugtext, ...)
 	char string[1024];
 
 	va_start (argptr, debugtext);
-	vsprintf (string, debugtext, argptr);
+	_vsnprintf (string, 1024, debugtext, argptr);
 	va_end (argptr);
 
 	static int qc_olddebug = 0;
@@ -890,6 +891,7 @@ void PF_localcmd (void)
 
 	str = G_STRING(OFS_PARM0);
 	QC_DebugOutput ("Execing cmd \"%s\"", str);
+
 	Cbuf_AddText (str);
 }
 
@@ -925,8 +927,10 @@ void PF_cvar_set (void)
 	val = G_STRING(OFS_PARM1);
 
 	QC_DebugOutput ("Setting cvar \"%s\" to \"%s\"", var, val);
+
 	Cvar_Set (var, val);
 }
+
 
 /*
 =================
@@ -987,9 +991,9 @@ void PF_ftos (void)
 	v = G_FLOAT (OFS_PARM0);
 
 	if (v == (int) v)
-		sprintf (pr_string_temp, "%d", (int) v);
+		_snprintf (pr_string_temp, 128, "%d", (int) v);
 	else
-		sprintf (pr_string_temp, "%f", v);
+		_snprintf (pr_string_temp, 128, "%f", v);
 
 	G_INT (OFS_RETURN) = pr_string_temp - pr_strings;
 }
@@ -1003,13 +1007,13 @@ void PF_fabs (void)
 
 void PF_vtos (void)
 {
-	sprintf (pr_string_temp, "'%5.1f %5.1f %5.1f'", G_VECTOR(OFS_PARM0)[0], G_VECTOR(OFS_PARM0)[1], G_VECTOR(OFS_PARM0)[2]);
+	_snprintf (pr_string_temp, 128, "'%5.1f %5.1f %5.1f'", G_VECTOR(OFS_PARM0)[0], G_VECTOR(OFS_PARM0)[1], G_VECTOR(OFS_PARM0)[2]);
 	G_INT(OFS_RETURN) = pr_string_temp - pr_strings;
 }
 
 void PF_etos (void)
 {
-	sprintf (pr_string_temp, "entity %i", G_EDICTNUM(OFS_PARM0));
+	_snprintf (pr_string_temp, 128, "entity %i", G_EDICTNUM(OFS_PARM0));
 	G_INT(OFS_RETURN) = pr_string_temp - pr_strings;
 }
 
@@ -1025,6 +1029,18 @@ void PF_Remove (void)
 	edict_t	*ed;
 	
 	ed = G_EDICT(OFS_PARM0);
+
+	if (sv_permagibs.value)
+	{
+		// permanent gibs
+		model_t *mod = sv.models[(int) ed->v.modelindex];
+
+		if (mod)
+			if (mod->type == mod_alias)
+				if (!strnicmp (mod->name, "progs/gib", 9))
+					return;
+	}
+
 	ED_Free (ed);
 }
 
@@ -1202,12 +1218,12 @@ void PF_droptofloor (void)
 	edict_t		*ent;
 	vec3_t		end;
 	trace_t		trace;
-	
+
 	ent = PROG_TO_EDICT(pr_global_struct->self);
 
 	VectorCopy (ent->v.origin, end);
 	end[2] -= 256;
-	
+
 	trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, end, false, ent);
 
 	if (trace.fraction == 1 || trace.allsolid)
@@ -1332,6 +1348,7 @@ void PF_nextent (void)
 	}
 }
 
+
 /*
 =============
 PF_aim
@@ -1367,7 +1384,6 @@ void PF_aim (void)
 		VectorCopy (pr_global_struct->v_forward, G_VECTOR(OFS_RETURN));
 		return;
 	}
-
 
 // try all possible entities
 	VectorCopy (dir, bestdir);
@@ -1465,18 +1481,45 @@ PF_changepitch
 */
 void PF_changepitch (void)
 {
-#if 0
-	edict_t		*ent;
-	float		ideal, current, move, speed;
-	
-	ent = G_EDICT(OFS_PARM0);
-	current = anglemod( ent->v.angles[0] );
-	ideal = ent->v.idealpitch;
-	speed = ent->v.pitch_speed;
-	
+	edict_t	*ent;
+	float	ideal, current, move, speed;
+	eval_t	*val;
+
+	ent = G_EDICT (OFS_PARM0);
+
+	if (ent == sv.edicts)
+	{
+		// attempt to modify the world entity; just fail silently
+		// EdictErr ("PF_changepitch", "modify", true, ent);
+		return;
+	}
+
+	current = anglemod (ent->v.angles[0]);
+
+	extern int ed_idealpitch;
+	extern int ed_pitch_speed;
+
+	if (val = GETEDICTFIELDVALUEFAST (ent, ed_idealpitch))
+		ideal = val->_float;
+	else
+	{
+		PR_RunError ("PF_changepitch: .float idealpitch and .float pitch_speed must be defined to use changepitch");
+		return;
+	}
+
+	if (val = GETEDICTFIELDVALUEFAST (ent, ed_pitch_speed))
+		speed = val->_float;
+	else
+	{
+		PR_RunError ("PF_changepitch: .float idealpitch and .float pitch_speed must be defined to use changepitch");
+		return;
+	}
+
 	if (current == ideal)
 		return;
+
 	move = ideal - current;
+
 	if (ideal > current)
 	{
 		if (move >= 180)
@@ -1487,6 +1530,7 @@ void PF_changepitch (void)
 		if (move <= -180)
 			move = move + 360;
 	}
+
 	if (move > 0)
 	{
 		if (move > speed)
@@ -1497,9 +1541,8 @@ void PF_changepitch (void)
 		if (move < -speed)
 			move = -speed;
 	}
-	
+
 	ent->v.angles[0] = anglemod (current + move);
-#endif
 }
 
 
@@ -1662,146 +1705,6 @@ void PF_changelevel (void)
 }
 
 
-#ifdef QUAKE2
-#define	CONTENT_WATER	-3
-#define CONTENT_SLIME	-4
-#define CONTENT_LAVA	-5
-
-#define FL_IMMUNE_WATER	131072
-#define	FL_IMMUNE_SLIME	262144
-#define FL_IMMUNE_LAVA	524288
-
-#define	CHAN_VOICE	2
-#define	CHAN_BODY	4
-
-#define	ATTN_NORM	1
-
-void PF_WaterMove (void)
-{
-	edict_t		*self;
-	int			flags;
-	int			waterlevel;
-	int			watertype;
-	float		drownlevel;
-	float		damage = 0.0;
-
-	self = PROG_TO_EDICT(pr_global_struct->self);
-
-	if (self->v.movetype == MOVETYPE_NOCLIP)
-	{
-		self->v.air_finished = sv.time + 12;
-		G_FLOAT(OFS_RETURN) = damage;
-		return;
-	}
-
-	if (self->v.health < 0)
-	{
-		G_FLOAT(OFS_RETURN) = damage;
-		return;
-	}
-
-	if (self->v.deadflag == DEAD_NO)
-		drownlevel = 3;
-	else
-		drownlevel = 1;
-
-	flags = (int)self->v.flags;
-	waterlevel = (int)self->v.waterlevel;
-	watertype = (int)self->v.watertype;
-
-	if (!(flags & (FL_IMMUNE_WATER + FL_GODMODE)))
-		if (((flags & FL_SWIM) && (waterlevel < drownlevel)) || (waterlevel >= drownlevel))
-		{
-			if (self->v.air_finished < sv.time)
-				if (self->v.pain_finished < sv.time)
-				{
-					self->v.dmg = self->v.dmg + 2;
-					if (self->v.dmg > 15)
-						self->v.dmg = 10;
-//					T_Damage (self, world, world, self.dmg, 0, FALSE);
-					damage = self->v.dmg;
-					self->v.pain_finished = sv.time + 1.0;
-				}
-		}
-		else
-		{
-			if (self->v.air_finished < sv.time)
-//				sound (self, CHAN_VOICE, "player/gasp2.wav", 1, ATTN_NORM);
-				SV_StartSound (self, CHAN_VOICE, "player/gasp2.wav", 255, ATTN_NORM);
-			else if (self->v.air_finished < sv.time + 9)
-//				sound (self, CHAN_VOICE, "player/gasp1.wav", 1, ATTN_NORM);
-				SV_StartSound (self, CHAN_VOICE, "player/gasp1.wav", 255, ATTN_NORM);
-			self->v.air_finished = sv.time + 12.0;
-			self->v.dmg = 2;
-		}
-	
-	if (!waterlevel)
-	{
-		if (flags & FL_INWATER)
-		{	
-			// play leave water sound
-//			sound (self, CHAN_BODY, "misc/outwater.wav", 1, ATTN_NORM);
-			SV_StartSound (self, CHAN_BODY, "misc/outwater.wav", 255, ATTN_NORM);
-			self->v.flags = (float)(flags &~FL_INWATER);
-		}
-		self->v.air_finished = sv.time + 12.0;
-		G_FLOAT(OFS_RETURN) = damage;
-		return;
-	}
-
-	if (watertype == CONTENT_LAVA)
-	{	// do damage
-		if (!(flags & (FL_IMMUNE_LAVA + FL_GODMODE)))
-			if (self->v.dmgtime < sv.time)
-			{
-				if (self->v.radsuit_finished < sv.time)
-					self->v.dmgtime = sv.time + 0.2;
-				else
-					self->v.dmgtime = sv.time + 1.0;
-//				T_Damage (self, world, world, 10*self.waterlevel, 0, TRUE);
-				damage = (float)(10*waterlevel);
-			}
-	}
-	else if (watertype == CONTENT_SLIME)
-	{	// do damage
-		if (!(flags & (FL_IMMUNE_SLIME + FL_GODMODE)))
-			if (self->v.dmgtime < sv.time && self->v.radsuit_finished < sv.time)
-			{
-				self->v.dmgtime = sv.time + 1.0;
-//				T_Damage (self, world, world, 4*self.waterlevel, 0, TRUE);
-				damage = (float)(4*waterlevel);
-			}
-	}
-	
-	if ( !(flags & FL_INWATER) )
-	{	
-
-// player enter water sound
-		if (watertype == CONTENT_LAVA)
-//			sound (self, CHAN_BODY, "player/inlava.wav", 1, ATTN_NORM);
-			SV_StartSound (self, CHAN_BODY, "player/inlava.wav", 255, ATTN_NORM);
-		if (watertype == CONTENT_WATER)
-//			sound (self, CHAN_BODY, "player/inh2o.wav", 1, ATTN_NORM);
-			SV_StartSound (self, CHAN_BODY, "player/inh2o.wav", 255, ATTN_NORM);
-		if (watertype == CONTENT_SLIME)
-//			sound (self, CHAN_BODY, "player/slimbrn2.wav", 1, ATTN_NORM);
-			SV_StartSound (self, CHAN_BODY, "player/slimbrn2.wav", 255, ATTN_NORM);
-
-		self->v.flags = (float)(flags | FL_INWATER);
-		self->v.dmgtime = 0;
-	}
-	
-	if (! (flags & FL_WATERJUMP) )
-	{
-//		self.velocity = self.velocity - 0.8*self.waterlevel*frametime*self.velocity;
-		VectorMA (self->v.velocity, -0.8 * self->v.waterlevel * host_frametime, self->v.velocity, self->v.velocity);
-	}
-
-	G_FLOAT(OFS_RETURN) = damage;
-}
-#endif
-
-
 void PF_sin (void)
 {
 	G_FLOAT(OFS_RETURN) = sin(G_FLOAT(OFS_PARM0));
@@ -1820,7 +1723,8 @@ void PF_sqrt (void)
 
 void PF_Fixme (void)
 {
-	PR_RunError ("unimplemented bulitin");
+	// don't crash
+	Con_SafePrintf ("PF_Fixme: unimplemented bulitin\n");
 }
 
 
@@ -1845,7 +1749,7 @@ int pr_numbuiltins;
 
 void PR_InitBuiltIns (void)
 {
-	pr_builtins = (builtin_t *) Heap_QMalloc (sizeof (builtin_t) * PR_MAX_BUILTINS);
+	pr_builtins = (builtin_t *) Pool_Alloc (POOL_PERMANENT, sizeof (builtin_t) * PR_MAX_BUILTINS);
 
 	// set all builtins to unimplemented
 	for (int i = 0; i < PR_MAX_BUILTINS; i++)

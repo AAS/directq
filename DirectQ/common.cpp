@@ -20,14 +20,99 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // common.c -- misc functions used in client and server
 
 #include "quakedef.h"
+#include "unzip.h"
 #include <vector>
 #include <algorithm>
 
-template <class T> qListWrapper<T>::~qListWrapper (void)
+
+// used for generating md5 hashes
+#include <wincrypt.h>
+
+
+static bool listsortascorder = false;
+
+static int COM_ListSortFunc (const void *a, const void *b)
 {
-	// cascade destructors
-	if (this->next) delete this->next;
+	if (listsortascorder)
+	{
+		char *a1 = *((char **) a);
+		char *b1 = *((char **) b);
+		return strcmp (a1, b1);
+	}
+	else
+	{
+		char *a1 = *((char **) b);
+		char *b1 = *((char **) a);
+		return strcmp (a1, b1);
+	}
 }
+
+// sort a null terminated string list
+void COM_SortStringList (char **stringlist, bool ascending)
+{
+	int listlen;
+
+	// find the length of the list
+	for (listlen = 0; ; listlen++)
+		if (!stringlist[listlen]) break;
+
+	listsortascorder = ascending;
+	qsort (stringlist, listlen, sizeof (char *), COM_ListSortFunc);
+}
+
+
+// MD5 hashes
+void COM_HashData (byte *hash, const void *data, int size)
+{
+	// generate an MD5 hash of an image's data
+	HCRYPTPROV hCryptProv;
+	HCRYPTHASH hHash;
+
+	// acquire the cryptographic context (can we cache this?)
+	if (CryptAcquireContext (&hCryptProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT | CRYPT_MACHINE_KEYSET))
+	{
+		// create a hashing algorithm (can we cache this?)
+		if (CryptCreateHash (hCryptProv, CALG_MD5, 0, 0, &hHash))
+		{
+			// hash the data
+			if (CryptHashData (hHash, (const BYTE *) data, size, 0))
+			{
+				DWORD dwHashLen = 16;
+
+				// retrieve the hash
+				if (CryptGetHashParam (hHash, HP_HASHVAL, hash, &dwHashLen, 0)) 
+				{
+					// hashed OK
+				}
+				else
+				{
+					// oh crap
+ 					Sys_Error ("COM_HashData: CryptGetHashParam failed");
+				}
+			}
+			else
+			{
+				// oh crap
+				Sys_Error ("COM_HashData: CryptHashData failed");
+			}
+
+			CryptDestroyHash (hHash); 
+		}
+		else
+		{
+			// oh crap
+			Sys_Error ("COM_HashData: CryptCreateHash failed");
+		}
+
+	    CryptReleaseContext (hCryptProv, 0);
+	}
+	else
+	{
+		// oh crap
+		Sys_Error ("COM_HashData: CryptAcquireContext failed");
+	}
+}
+
 
 #define NUM_SAFE_ARGVS  7
 
@@ -57,32 +142,12 @@ char	**com_argv;
 #define CMDLINE_LENGTH	256
 char	com_cmdline[CMDLINE_LENGTH];
 
-bool		standard_quake = true, rogue = false, hipnotic = false, quoth = false;
+bool		standard_quake = true, rogue = false, hipnotic = false, quoth = false, nehahra = false;
 
 cvar_t com_hipnotic ("com_hipnotic", 0.0f);
 cvar_t com_rogue ("com_rogue", 0.0f);
 cvar_t com_quoth ("com_quoth", 0.0f);
-
-// this graphic needs to be in the pak file to use registered features
-unsigned short pop[] =
-{
- 0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000
-,0x0000,0x0000,0x6600,0x0000,0x0000,0x0000,0x6600,0x0000
-,0x0000,0x0066,0x0000,0x0000,0x0000,0x0000,0x0067,0x0000
-,0x0000,0x6665,0x0000,0x0000,0x0000,0x0000,0x0065,0x6600
-,0x0063,0x6561,0x0000,0x0000,0x0000,0x0000,0x0061,0x6563
-,0x0064,0x6561,0x0000,0x0000,0x0000,0x0000,0x0061,0x6564
-,0x0064,0x6564,0x0000,0x6469,0x6969,0x6400,0x0064,0x6564
-,0x0063,0x6568,0x6200,0x0064,0x6864,0x0000,0x6268,0x6563
-,0x0000,0x6567,0x6963,0x0064,0x6764,0x0063,0x6967,0x6500
-,0x0000,0x6266,0x6769,0x6a68,0x6768,0x6a69,0x6766,0x6200
-,0x0000,0x0062,0x6566,0x6666,0x6666,0x6666,0x6562,0x0000
-,0x0000,0x0000,0x0062,0x6364,0x6664,0x6362,0x0000,0x0000
-,0x0000,0x0000,0x0000,0x0062,0x6662,0x0000,0x0000,0x0000
-,0x0000,0x0000,0x0000,0x0061,0x6661,0x0000,0x0000,0x0000
-,0x0000,0x0000,0x0000,0x0000,0x6500,0x0000,0x0000,0x0000
-,0x0000,0x0000,0x0000,0x0000,0x6400,0x0000,0x0000,0x0000
-};
+cvar_t com_nehahra ("com_nehahra", 0.0f);
 
 bool IsTimeout (float *PrevTime, float WaitTime)
 {
@@ -144,301 +209,6 @@ void InsertLinkAfter (link_t *l, link_t *after)
 	l->next->prev = l;
 }
 
-/*
-============================================================================
-
-					LIBRARY REPLACEMENT FUNCTIONS
-
-============================================================================
-*/
-
-void Q_memset (void *dest, int fill, int count)
-{
-	int             i;
-	
-	if ( (((long)dest | count) & 3) == 0)
-	{
-		count >>= 2;
-		fill = fill | (fill<<8) | (fill<<16) | (fill<<24);
-		for (i=0 ; i<count ; i++)
-			((int *)dest)[i] = fill;
-	}
-	else
-		for (i=0 ; i<count ; i++)
-			((byte *)dest)[i] = fill;
-}
-
-void Q_memcpy (void *dest, void *src, int count)
-{
-	int             i;
-	
-	if (( ( (long)dest | (long)src | count) & 3) == 0 )
-	{
-		count>>=2;
-		for (i=0 ; i<count ; i++)
-			((int *)dest)[i] = ((int *)src)[i];
-	}
-	else
-		for (i=0 ; i<count ; i++)
-			((byte *)dest)[i] = ((byte *)src)[i];
-}
-
-int Q_memcmp (void *m1, void *m2, int count)
-{
-	while(count)
-	{
-		count--;
-		if (((byte *)m1)[count] != ((byte *)m2)[count])
-			return -1;
-	}
-	return 0;
-}
-
-void Q_strcpy (char *dest, char *src)
-{
-	while (*src)
-	{
-		*dest++ = *src++;
-	}
-	*dest++ = 0;
-}
-
-void Q_strncpy (char *dest, char *src, int count)
-{
-	while (*src && count--)
-	{
-		*dest++ = *src++;
-	}
-	if (count)
-		*dest++ = 0;
-}
-
-int Q_strlen (char *str)
-{
-	int             count;
-	
-	count = 0;
-	while (str[count])
-		count++;
-
-	return count;
-}
-
-char *Q_strrchr(char *s, char c)
-{
-    int len = Q_strlen(s);
-    s += len;
-    while (len--)
-	if (*--s == c) return s;
-    return 0;
-}
-
-void Q_strcat (char *dest, char *src)
-{
-	dest += Q_strlen(dest);
-	Q_strcpy (dest, src);
-}
-
-int Q_strcmp (char *s1, char *s2)
-{
-	while (1)
-	{
-		if (*s1 != *s2)
-			return -1;              // strings not equal    
-		if (!*s1)
-			return 0;               // strings are equal
-		s1++;
-		s2++;
-	}
-	
-	return -1;
-}
-
-int Q_strncmp (char *s1, char *s2, int count)
-{
-	while (1)
-	{
-		if (!count--)
-			return 0;
-		if (*s1 != *s2)
-			return -1;              // strings not equal    
-		if (!*s1)
-			return 0;               // strings are equal
-		s1++;
-		s2++;
-	}
-	
-	return -1;
-}
-
-int Q_strncasecmp (char *s1, char *s2, int n)
-{
-	int             c1, c2;
-	
-	while (1)
-	{
-		c1 = *s1++;
-		c2 = *s2++;
-
-		if (!n--)
-			return 0;               // strings are equal until end point
-		
-		if (c1 != c2)
-		{
-			if (c1 >= 'a' && c1 <= 'z')
-				c1 -= ('a' - 'A');
-			if (c2 >= 'a' && c2 <= 'z')
-				c2 -= ('a' - 'A');
-			if (c1 != c2)
-				return -1;              // strings not equal
-		}
-		if (!c1)
-			return 0;               // strings are equal
-//              s1++;
-//              s2++;
-	}
-	
-	return -1;
-}
-
-int Q_strcasecmp (char *s1, char *s2)
-{
-	return Q_strncasecmp (s1, s2, 99999);
-}
-
-int Q_atoi (char *str)
-{
-	int             val;
-	int             sign;
-	int             c;
-	
-	if (*str == '-')
-	{
-		sign = -1;
-		str++;
-	}
-	else
-		sign = 1;
-		
-	val = 0;
-
-//
-// check for hex
-//
-	if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X') )
-	{
-		str += 2;
-		while (1)
-		{
-			c = *str++;
-			if (c >= '0' && c <= '9')
-				val = (val<<4) + c - '0';
-			else if (c >= 'a' && c <= 'f')
-				val = (val<<4) + c - 'a' + 10;
-			else if (c >= 'A' && c <= 'F')
-				val = (val<<4) + c - 'A' + 10;
-			else
-				return val*sign;
-		}
-	}
-	
-//
-// check for character
-//
-	if (str[0] == '\'')
-	{
-		return sign * str[1];
-	}
-	
-//
-// assume decimal
-//
-	while (1)
-	{
-		c = *str++;
-		if (c <'0' || c > '9')
-			return val*sign;
-		val = val*10 + c - '0';
-	}
-	
-	return 0;
-}
-
-
-float Q_atof (char *str)
-{
-	double			val;
-	int             sign;
-	int             c;
-	int             decimal, total;
-	
-	if (*str == '-')
-	{
-		sign = -1;
-		str++;
-	}
-	else
-		sign = 1;
-		
-	val = 0;
-
-//
-// check for hex
-//
-	if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X') )
-	{
-		str += 2;
-		while (1)
-		{
-			c = *str++;
-			if (c >= '0' && c <= '9')
-				val = (val*16) + c - '0';
-			else if (c >= 'a' && c <= 'f')
-				val = (val*16) + c - 'a' + 10;
-			else if (c >= 'A' && c <= 'F')
-				val = (val*16) + c - 'A' + 10;
-			else
-				return val*sign;
-		}
-	}
-	
-//
-// check for character
-//
-	if (str[0] == '\'')
-	{
-		return sign * str[1];
-	}
-	
-//
-// assume decimal
-//
-	decimal = -1;
-	total = 0;
-	while (1)
-	{
-		c = *str++;
-		if (c == '.')
-		{
-			decimal = total;
-			continue;
-		}
-		if (c <'0' || c > '9')
-			break;
-		val = val*10 + c - '0';
-		total++;
-	}
-
-	if (decimal == -1)
-		return val*sign;
-	while (total > decimal)
-	{
-		val /= 10;
-		total--;
-	}
-	
-	return val*sign;
-}
 
 /*
 ============================================================================
@@ -580,7 +350,7 @@ void MSG_WriteString (sizebuf_t *sb, char *s)
 	if (!s)
 		SZ_Write (sb, "", 1);
 	else
-		SZ_Write (sb, s, Q_strlen(s)+1);
+		SZ_Write (sb, s, strlen(s)+1);
 }
 
 void MSG_WriteCoord (sizebuf_t *sb, float f)
@@ -709,7 +479,7 @@ char *MSG_ReadString (void)
 			break;
 		string[l] = c;
 		l++;
-	} while (l < sizeof(string)-1);
+	} while (l < sizeof(string) - 1);
 	
 	string[l] = 0;
 	
@@ -735,7 +505,7 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	if (startsize < 256)
 		startsize = 256;
 
-	buf->data = (byte *) Heap_TagAlloc (TAG_SIZEBUF, startsize);
+	buf->data = (byte *) Pool_Alloc (POOL_PERMANENT, startsize);
 	buf->maxsize = startsize;
 	buf->cursize = 0;
 }
@@ -771,20 +541,20 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 void SZ_Write (sizebuf_t *buf, void *data, int length)
 {
-	Q_memcpy (SZ_GetSpace(buf,length),data,length);         
+	memcpy (SZ_GetSpace(buf,length),data,length);         
 }
 
 void SZ_Print (sizebuf_t *buf, char *data)
 {
 	int             len;
 	
-	len = Q_strlen(data)+1;
+	len = strlen(data)+1;
 
 // byte * cast to keep VC++ happy
 	if (buf->data[buf->cursize-1])
-		Q_memcpy ((byte *)SZ_GetSpace(buf, len),data,len); // no trailing 0
+		memcpy ((byte *)SZ_GetSpace(buf, len),data,len); // no trailing 0
 	else
-		Q_memcpy ((byte *)SZ_GetSpace(buf, len-1)-1,data,len); // write over trailing 0
+		memcpy ((byte *)SZ_GetSpace(buf, len-1)-1,data,len); // write over trailing 0
 }
 
 
@@ -1052,7 +822,7 @@ int COM_CheckParm (char *parm)
 	{
 		if (!com_argv[i])
 			continue;               // NEXTSTEP sometimes clears appkit vars.
-		if (!Q_strcmp (parm,com_argv[i]))
+		if (!strcmp (parm,com_argv[i]))
 			return i;
 	}
 		
@@ -1071,37 +841,47 @@ being registered.
 */
 void COM_CheckRegistered (void)
 {
-	int             h;
-	unsigned short  check[128];
-	int                     i;
+	HANDLE fh = INVALID_HANDLE_VALUE;
+	unsigned short check[128];
+	int i;
 
 	// allow this in shareware too
 	Cvar_Set ("cmdline", com_cmdline);
 
-	COM_OpenFile ("gfx/pop.lmp", &h);
+	COM_FOpenFile ("gfx/pop.lmp", &fh);
 	static_registered = 0;
 
-	if (h == -1)
+	if (fh == INVALID_HANDLE_VALUE)
 	{
-		Con_Printf ("Playing shareware version.\n");
+		Con_SafePrintf ("Playing shareware version.\n");
 		return;
 	}
 
-	Sys_FileRead (h, check, sizeof (check));
-	COM_CloseFile (h);
+	DWORD rcheck;
 
-	for (i = 0; i < 128; i++)
+	ReadFile (fh, check, sizeof (check), &rcheck, NULL);
+	COM_FCloseFile (&fh);
+
+	if (rcheck != sizeof (check))
 	{
-		if (pop[i] != (unsigned short) BigShort (check[i]))
-		{
-			Con_Printf ("Corrupted pop.lmp file - reverting to shareware.");
-			return;
-		}
+		Con_SafePrintf ("Corrupted pop.lmp file - reverting to shareware.");
+		return;
+	}
+
+	// generate a hash of the pop.lmp data
+	byte pophash[16];
+	byte realpop[] = {11, 131, 239, 192, 65, 30, 123, 93, 203, 147, 122, 30, 66, 173, 55, 227};
+	COM_HashData (pophash, check, sizeof (check));
+
+	if (!COM_CheckHash (pophash, realpop))
+	{
+		Con_SafePrintf ("Corrupted pop.lmp file - reverting to shareware.");
+		return;
 	}
 
 	Cvar_Set ("registered", "1");
 	static_registered = 1;
-	Con_Printf ("Playing registered version.\n");
+	Con_SafePrintf ("Playing registered version.\n");
 }
 
 
@@ -1141,7 +921,7 @@ void COM_InitArgv (int argc, char **argv)
 	{
 		largv[com_argc] = argv[com_argc];
 
-		if (!Q_strcmp ("-safe", argv[com_argc]))
+		if (!strcmp ("-safe", argv[com_argc]))
 			safe = true;
 	}
 
@@ -1205,23 +985,32 @@ va
 
 does a varargs printf into a temp buffer, so I don't need to have
 varargs versions of all text functions.
-FIXME: make this buffer size safe someday
 
-FIXME!!!!!!!  I've lost the circulating buffers here!!!
+FIXME: make varargs versions of some text functions which use this more commonly
 ============
 */
 char *va (char *format, ...)
 {
 	va_list argptr;
-	static char string[16][8192];
+	static char **string = NULL;
 	static int bufnum = 0;
+
+	if (!string)
+	{
+		string = (char **) Pool_Alloc (POOL_PERMANENT, 16 * sizeof (char *));
+
+		// we can reduce to 1024 now that we're using the safe(r) version
+		for (int i = 0; i < 16; i++)
+			string[i] = (char *) Pool_Alloc (POOL_PERMANENT, 1024 * sizeof (char));
+	}
 
 	bufnum++;
 
 	if (bufnum > 15) bufnum = 0;
 
+	// make the buffer safe
 	va_start (argptr, format);
-	vsprintf (string[bufnum], format, argptr);
+	_vsnprintf (string[bufnum], 1024, format, argptr);
 	va_end (argptr);
 
 	return string[bufnum];
@@ -1257,7 +1046,7 @@ int     com_filesize;
 typedef struct
 {
 	char    name[MAX_QPATH];
-	int             filepos, filelen;
+	int     filepos, filelen;
 } packfile_t;
 
 typedef struct pack_s
@@ -1267,6 +1056,15 @@ typedef struct pack_s
 	int             numfiles;
 	packfile_t      *files;
 } pack_t;
+
+
+typedef struct pk3_s
+{
+	char			filename[MAX_OSPATH];
+	int             numfiles;
+	packfile_t      *files;
+} pk3_t;
+
 
 //
 // on disk
@@ -1292,6 +1090,7 @@ typedef struct searchpath_s
 {
 	char    filename[MAX_OSPATH];
 	pack_t  *pack;          // only one of filename / pack will be used
+	pk3_t *pk3;
 	struct searchpath_s *next;
 } searchpath_t;
 
@@ -1317,29 +1116,6 @@ void COM_Path_f (void)
 		}
 		else Con_Printf ("%s\n", s->filename);
 	}
-}
-
-
-/*
-============
-COM_WriteFile
-
-The filename will be prefixed by the current game directory
-============
-*/
-void COM_WriteFile (char *filename, void *data, int len)
-{
-	int             handle;
-	char    name[MAX_OSPATH];
-	
-	sprintf (name, "%s/%s", com_gamedir, filename);
-
-	handle = Sys_FileOpenWrite (name);
-
-	if (handle == -1) return;
-
-	Sys_FileWrite (handle, data, len);
-	Sys_FileClose (handle);
 }
 
 
@@ -1398,7 +1174,7 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 		int size = FileList.size ();
 
 		for (int i = 0; i < size; i++)
-			free (FileList[i]);
+			Zone_Free (FileList[i]);
 
 		FileList.clear ();
 	}
@@ -1422,7 +1198,25 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
 				if (CheckExists (FileList, &pak->files[i].name[dirlen])) continue;
 
-				char *filename = (char *) malloc (strlen (&pak->files[i].name[dirlen]) + 1);
+				char *filename = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
+				strcpy (filename, &pak->files[i].name[dirlen]);
+				FileList.push_back (filename);
+			}
+		}
+		else if (search->pk3)
+		{
+			pk3_t *pak = search->pk3;
+
+			for (int i = 0; i < pak->numfiles; i++)
+			{
+				int filelen = strlen (pak->files[i].name);
+
+				if (filelen < typelen + dirlen) continue;
+				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
+				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
+				if (CheckExists (FileList, &pak->files[i].name[dirlen])) continue;
+
+				char *filename = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
 				strcpy (filename, &pak->files[i].name[dirlen]);
 				FileList.push_back (filename);
 			}
@@ -1433,7 +1227,7 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 			HANDLE hFind = INVALID_HANDLE_VALUE;
 			char find_filter[MAX_PATH];
 
-			sprintf (find_filter, "%s/%s*%s", search->filename, basedir, filetype);
+			_snprintf (find_filter, 260, "%s/%s*%s", search->filename, basedir, filetype);
 
 			for (int i = 0; ; i++)
 			{
@@ -1460,7 +1254,7 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
 				if (CheckExists (FileList, FindFileData.cFileName)) continue;
 
-				char *filename = (char *) malloc (strlen (FindFileData.cFileName) + 1);
+				char *filename = (char *) Zone_Alloc (strlen (FindFileData.cFileName) + 1);
 				strcpy (filename, FindFileData.cFileName);
 				FileList.push_back (filename);
 			} while (FindNextFile (hFind, &FindFileData));
@@ -1475,137 +1269,313 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 }
 
 
-/*
-===========
-COM_FindFile
-
-Finds the file in the search path.
-Sets com_filesize and one of handle or file
-===========
-*/
-int COM_FindFile (char *filename, int *handle, FILE **file)
+HANDLE COM_MakeTempFile (char *tmpfile)
 {
-	searchpath_t    *search;
-	char            netpath[MAX_OSPATH];
-	pack_t          *pak;
-	int                     i;
-	int                     findtime;
+	char fpath1[MAX_PATH];
+	char fpath2[MAX_PATH];
 
+	if (!GetTempPath (MAX_PATH, fpath1))
+	{
+		// oh crap
+		return NULL;
+	}
+
+	// ensure it exists
+	CreateDirectory (fpath1, NULL);
+
+	// for convenience we keep all temp files under a "DirectQ" subdir
+	_snprintf (fpath2, MAX_PATH, "%s\\DirectQ", fpath1);
+	CreateDirectory (fpath2, NULL);
+
+	// copy out the full new path to the directory and replace any '/' with '\\'
+	_snprintf (fpath1, MAX_PATH, "%s\\%s", fpath2, tmpfile);
+
+	for (int i = 0; ; i++)
+	{
+		if (fpath1[i] == 0) break;
+		if (fpath1[i] == '/') fpath1[i] = '\\';
+	}
+
+	// remove the file name
+	for (int i = strlen (fpath1) - 1; i; i--)
+	{
+		if (fpath1[i] == '\\')
+		{
+			fpath1[i] = 0;
+			break;
+		}
+	}
+
+	// create the full path
+	for (int i = strlen (fpath2) + 1; ; i++)
+	{
+		if (fpath1[i] == 0) break;
+
+		if (fpath1[i] == '\\')
+		{
+			fpath1[i] = 0;
+			CreateDirectory (fpath1, NULL);
+			fpath1[i] = '\\';
+		}
+	}
+
+	// the above doesn't create the last item in the path so do it here
+	CreateDirectory (fpath1, NULL);
+
+	// because we modified the full filename buffer above we need to reconstruct it before going any further
+	_snprintf (fpath1, MAX_PATH, "%s\\%s", fpath2, tmpfile);
+
+	// create the file - see http://blogs.msdn.com/larryosterman/archive/2004/04/19/116084.aspx for
+	// further info on the flags chosen here.  while researching this I came across this beautiful quote:
+	// "in linux i can simply mount \\straw\gambler to /home/gambler after a reinstall and all my files 
+	// and settings are there".  this is an affliction that seems to plague Linux bois everywhere - a 
+	// tendency to only focus on what *they* want, to the exclusion of the rest of the world.  in a proper
+	// modern and rational OS your aunt Mabel and a Business Studies student with no IT aptitude should be
+	// able to do these things too... so do grow up.
+	HANDLE hf = CreateFile
+	(
+		fpath1,
+		GENERIC_READ | GENERIC_WRITE,
+		FILE_SHARE_READ,
+		NULL,
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+		NULL
+	);
+
+	if (hf == INVALID_HANDLE_VALUE)
+	{
+		//printf ("hf == INVALID_HANDLE_VALUE\n");
+		return NULL;
+	}
+
+	return hf;
+}
+
+
+HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
+{
+	// initial scan ensures the file is present before opening the zip (perf)
+	for (int i = 0; i < pk3->numfiles; i++)
+		if (!stricmp (pk3->files[i].name, filename))
+			goto unzOK;
+
+	// not present
+	return INVALID_HANDLE_VALUE;
+
+unzOK:;
+	unzFile			uf = NULL;
+	int				err;
+	unz_global_info gi;
+	unz_file_info	file_info;
+
+	uf = unzOpen (pk3->filename);
+	err = unzGetGlobalInfo (uf, &gi);
+
+	if (err == UNZ_OK)
+	{
+		char filename_inzip[64];
+
+		unzGoToFirstFile (uf);
+
+		for (int i = 0; i < gi.number_entry; i++)
+		{
+			err = unzOpenCurrentFile (uf);
+
+			if (err != UNZ_OK) goto unzError;
+
+			err = unzGetCurrentFileInfo (uf, &file_info, filename_inzip, sizeof (filename_inzip), NULL, 0, NULL, 0);
+
+			if (err == UNZ_OK)
+			{
+				if (!stricmp (filename_inzip, filename))
+				{
+					// got it, so unzip it to the temp folder
+					byte unztemp[1024];
+					DWORD byteswritten;
+
+					HANDLE pk3handle = COM_MakeTempFile (filename);
+
+					for (;;)
+					{
+						int bytesread = unzReadCurrentFile (uf, unztemp, 1024);
+
+						if (bytesread < 0)
+						{
+							unzCloseCurrentFile (uf);
+							COM_FCloseFile (&pk3handle);
+							goto unzError;
+						}
+
+						if (bytesread == 0) break;
+
+						WriteFile (pk3handle, unztemp, bytesread, &byteswritten, NULL);
+					}
+
+					unzCloseCurrentFile (uf);
+					unzClose (uf);
+					return pk3handle;
+				}
+			}
+
+			unzGoToNextFile (uf);
+		}
+	}
+
+unzError:;
+	// didn't find it
+	unzClose (uf);
+	return INVALID_HANDLE_VALUE;
+}
+
+
+int COM_FWriteFile (void *fh, void *buf, int len)
+{
+	DWORD byteswritten;
+
+	BOOL ret = WriteFile ((HANDLE) fh, buf, len, &byteswritten, NULL);
+
+	if (ret && byteswritten == len)
+		return 1;
+	else return 0;
+}
+
+
+int COM_FReadFile (void *fh, void *buf, int len)
+{
+	DWORD bytesread;
+
+	BOOL ret = ReadFile ((HANDLE) fh, buf, len, &bytesread, NULL);
+
+	if (ret)
+		return (int) bytesread;
+	else return -1;
+}
+
+
+int COM_FReadChar (void *fh)
+{
+	char rc;
+	DWORD bytesread;
+
+	BOOL ret = ReadFile ((HANDLE) fh, &rc, 1, &bytesread, NULL);
+
+	if (ret && bytesread == 1)
+		return (int) (byte) rc;
+	else return -1;
+}
+
+
+int COM_FOpenFile (char *filename, void *hf)
+{
 	// don't error out here
-	if (file && handle) {Con_Printf ("COM_FindFile: both handle and file set"); goto FileNotFound;}
-	if (!file && !handle) {Con_Printf ("COM_FindFile: neither handle or file set"); goto FileNotFound;}
+	if (!hf)
+	{
+		Con_Printf ("COM_FOpenFile: hFile not set");
+		com_filesize = -1;
+		return -1;
+	}
+
+	// silliness here and above is needed because common.h doesn't know what a HANDLE is
+	HANDLE *hFile = (HANDLE *) hf;
+
+	// ensure for the close test below
+	*hFile = INVALID_HANDLE_VALUE;
 
 	// search pak files second
-	for (search = com_searchpaths; search; search = search->next)
+	for (searchpath_t *search = com_searchpaths; search; search = search->next)
 	{
+		// ensure...
+		if (*hFile != INVALID_HANDLE_VALUE) COM_FCloseFile (hFile);
+		*hFile = INVALID_HANDLE_VALUE;
+		com_filesize = -1;
+
 		if (search->pack)
 		{
 			// look through all the pak file elements
-			pak = search->pack;
+			pack_t *pak = search->pack;
 
-			for (i = 0; i < pak->numfiles; i++)
+			for (int i = 0; i < pak->numfiles; i++)
 			{
 				if (!stricmp (pak->files[i].name, filename))
 				{
-					if (handle)
-					{
-						*handle = pak->handle;
-						Sys_FileSeek (pak->handle, pak->files[i].filepos);
-					}
-					else
-					{
-						// open a new file on the pakfile
-						*file = fopen (pak->filename, "rb");
+					// note - we need to share read access because e.g. a demo could result in 2 simultaneous
+					// reads, one for the .dem file and one for a .bsp file
+					*hFile = CreateFile
+					(
+						pak->filename,
+						GENERIC_READ,
+						FILE_SHARE_READ,
+						NULL,
+						OPEN_EXISTING,
+						FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+						NULL
+					);
 
-						// quake bug?  what if (!*file)?
-						if (*file)
-							fseek (*file, pak->files[i].filepos, SEEK_SET);
-						else continue;
+					// this can happen if a PAK file was enumerated on startup but deleted while running
+					if (*hFile == INVALID_HANDLE_VALUE)
+					{
+						DWORD dwerr = GetLastError ();
+						continue;
 					}
+
+					SetFilePointer (*hFile, pak->files[i].filepos, NULL, FILE_BEGIN);
 
 					com_filesize = pak->files[i].filelen;
-
 					return com_filesize;
 				}
 			}
 		}
+		else if (search->pk3)
+		{
+			HANDLE pk3handle = COM_UnzipPK3FileToTemp (search->pk3, filename);
+
+			if (pk3handle != INVALID_HANDLE_VALUE)
+			{
+				*hFile = pk3handle;
+				SetFilePointer (*hFile, 0, NULL, FILE_BEGIN);
+				com_filesize = GetFileSize (*hFile, NULL);
+				return com_filesize;
+			}
+		}
 		else
 		{
+			char netpath[MAX_OSPATH];
+
 			// check for a file in the directory tree
-			sprintf (netpath, "%s/%s", search->filename, filename);
+			_snprintf (netpath, 128, "%s/%s", search->filename, filename);
 
-			findtime = Sys_FileTime (netpath);
+			// note - we need to share read access because e.g. a demo could result in 2 simultaneous
+			// reads, one for the .dem file and one for a .bsp file
+			*hFile = CreateFile
+			(
+				netpath,
+				GENERIC_READ,
+				FILE_SHARE_READ,
+				NULL,
+				OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+				NULL
+			);
 
-			if (findtime == -1) continue;
+			if (*hFile == INVALID_HANDLE_VALUE) continue;
 
-			com_filesize = Sys_FileOpenRead (netpath, &i);
-
-			if (handle)
-				*handle = i;
-			else
-			{
-				Sys_FileClose (i);
-				*file = fopen (netpath, "rb");
-			}
-
+			com_filesize = GetFileSize (*hFile, NULL);
 			return com_filesize;
 		}
 	}
 
-FileNotFound:;
-	if (handle)
-		*handle = -1;
-	else
-		*file = NULL;
-
+	// not found
+	*hFile = INVALID_HANDLE_VALUE;
 	com_filesize = -1;
 	return -1;
 }
 
 
-/*
-===========
-COM_OpenFile
-
-filename never has a leading slash, but may contain directory walks
-returns a handle and a length
-it may actually be inside a pak file
-===========
-*/
-int COM_OpenFile (char *filename, int *handle)
+void COM_FCloseFile (void *fh)
 {
-	return COM_FindFile (filename, handle, NULL);
-}
-
-/*
-===========
-COM_FOpenFile
-
-If the requested file is inside a packfile, a new FILE * will be opened
-into the file.
-===========
-*/
-int COM_FOpenFile (char *filename, FILE **file)
-{
-	return COM_FindFile (filename, NULL, file);
-}
-
-/*
-============
-COM_CloseFile
-
-If it is a pak file handle, don't really close it
-============
-*/
-void COM_CloseFile (int h)
-{
-	searchpath_t    *s;
-	
-	for (s = com_searchpaths ; s ; s=s->next)
-		if (s->pack && s->pack->handle == h)
-			return;
-			
-	Sys_FileClose (h);
+	CloseHandle (*((HANDLE *) fh));
+	*((HANDLE *) fh) = INVALID_HANDLE_VALUE;
 }
 
 
@@ -1619,38 +1589,37 @@ Always appends a 0 byte.
 */
 static byte *COM_LoadFile (char *path, int usehunk)
 {
-	int     h;
-	byte    *buf;
-	int     len;
-
-	buf = NULL;     // quiet compiler warning
+	HANDLE	fh = INVALID_HANDLE_VALUE;
+	byte    *buf = NULL;
 
 	// look for it in the filesystem or pack files
-	len = COM_OpenFile (path, &h);
+	int len = COM_FOpenFile (path, &fh);
 
-	if (h == -1)
-		return NULL;
+	if (fh == INVALID_HANDLE_VALUE) return NULL;
 
 	if (usehunk == 1)
-		buf = (byte *) Heap_TagAlloc (TAG_HUNKFILE, len + 1);
+		buf = (byte *) Pool_Alloc (POOL_GAME, len + 1);
 	else if (usehunk == 2)
-		buf = (byte *) Heap_TempAlloc (len + 1);
+		buf = (byte *) Pool_Alloc (POOL_LOADFILE, len + 1);
 	else
 	{
 		Con_DPrintf ("COM_LoadFile: bad usehunk\n");
+		COM_FCloseFile (&fh);
 		return NULL;
 	}
 
 	if (!buf)
 	{
 		Con_DPrintf ("COM_LoadFile: not enough space for %s", path);
+		COM_FCloseFile (&fh);
 		return NULL;
 	}
 
 	((byte *) buf)[len] = 0;
+	DWORD rlen = 0;
 
-	Sys_FileRead (h, buf, len);
-	COM_CloseFile (h);
+	ReadFile (fh, buf, len, &rlen, NULL);
+	COM_FCloseFile (&fh);
 
 	return buf;
 }
@@ -1684,19 +1653,18 @@ pack_t *COM_LoadPackFile (char *packfile)
 	packfile_t *newfiles;
 	int numpackfiles;
 	pack_t *pack;
-	int packhandle;
+	FILE *packfp;
 	dpackfile_t *info;
 	unsigned short crc;
 
-	if (Sys_FileOpenRead (packfile, &packhandle) == -1)
-		return NULL;
-
-	Sys_FileRead (packhandle, (void *) &header, sizeof (header));
+	// read and validate the header
+	if (!(packfp = fopen (packfile, "rb"))) return NULL;
+	fread (&header, sizeof (header), 1, packfp);
 
 	if (header.id[0] != 'P' || header.id[1] != 'A' || header.id[2] != 'C' || header.id[3] != 'K')
 	{
 		Con_Printf ("%s is not a packfile", packfile);
-		Sys_FileClose (packhandle);
+		fclose (packfp);
 		return NULL;
 	}
 
@@ -1705,28 +1673,45 @@ pack_t *COM_LoadPackFile (char *packfile)
 
 	numpackfiles = header.dirlen / sizeof (dpackfile_t);
 
-	newfiles = (packfile_t *) Heap_TagAlloc (TAG_FILESYSTEM, numpackfiles * sizeof (packfile_t));
-	info = (dpackfile_t *) Heap_TempAlloc (numpackfiles * sizeof (dpackfile_t));
+	newfiles = (packfile_t *) Pool_Alloc (POOL_GAME, numpackfiles * sizeof (packfile_t));
+	info = (dpackfile_t *) Pool_Alloc (POOL_TEMP, numpackfiles * sizeof (dpackfile_t));
 
-	Sys_FileSeek (packhandle, header.dirofs);
-	Sys_FileRead (packhandle, (void *) info, header.dirlen);
+	fseek (packfp, header.dirofs, SEEK_SET);
+	fread (info, header.dirlen, 1, packfp);
+	fclose (packfp);
 
 	// parse the directory
 	for (i = 0; i < numpackfiles; i++)
 	{
-		strcpy (newfiles[i].name, info[i].name);
+		strncpy (newfiles[i].name, info[i].name, 63);
 		newfiles[i].filepos = LittleLong (info[i].filepos);
 		newfiles[i].filelen = LittleLong (info[i].filelen);
 	}
 
-	pack = (pack_t *) Heap_TagAlloc (TAG_FILESYSTEM, sizeof (pack_t));
-	strcpy (pack->filename, packfile);
-	pack->handle = packhandle;
+	pack = (pack_t *) Pool_Alloc (POOL_GAME, sizeof (pack_t));
+	strncpy (pack->filename, packfile, 127);
 	pack->numfiles = numpackfiles;
 	pack->files = newfiles;
 
 	Con_Printf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
 	return pack;
+}
+
+
+bool COM_FindExtension (char *filename, char *ext)
+{
+	int fl = strlen (filename);
+	int el = strlen (ext);
+
+	if (el >= fl) return false;
+
+	for (int i = 0; ; i++)
+	{
+		if (!filename[i]) break;
+		if (!stricmp (&filename[i], ext)) return true;
+	}
+
+	return false;
 }
 
 
@@ -1740,19 +1725,18 @@ then loads and adds pak1.pak pak2.pak ...
 */
 void COM_AddGameDirectory (char *dir)
 {
-	int i;
 	searchpath_t *search;
-	pack_t *pak;
 	char pakfile[MAX_OSPATH];
 
-	strcpy (com_gamedir, dir);
+	// copy to com_gamedir so that the last gamedir added will be the one used
+	strncpy (com_gamedir, dir, 127);
 
 	// add any pak files in the format pak0.pak pak1.pak, ...
 	WIN32_FIND_DATA FindFileData;
 	HANDLE hFind = INVALID_HANDLE_VALUE;
 
-	// look for a file
-	sprintf (pakfile, "%s/*.pak", dir);
+	// look for a file (take all files so that we can also load PK3s)
+	_snprintf (pakfile, 128, "%s/*.*", dir);
 	hFind = FindFirstFile (pakfile, &FindFileData);
 
 	if (hFind == INVALID_HANDLE_VALUE)
@@ -1765,17 +1749,84 @@ void COM_AddGameDirectory (char *dir)
 		// add all the pak files
 		do
 		{
-			// load the pak file
-			sprintf (pakfile, "%s/%s", dir, FindFileData.cFileName);
-			pak = COM_LoadPackFile (pakfile);
-
-			if (pak)
+			if (COM_FindExtension (FindFileData.cFileName, ".pak"))
 			{
-				// link it in
-				search = (searchpath_t *) Heap_TagAlloc (TAG_FILESYSTEM, sizeof (searchpath_t));
-				search->pack = pak;
-				search->next = com_searchpaths;
-				com_searchpaths = search;
+				// load the pak file
+				_snprintf (pakfile, 128, "%s/%s", dir, FindFileData.cFileName);
+				pack_t *pak = COM_LoadPackFile (pakfile);
+
+				if (pak)
+				{
+					// link it in
+					search = (searchpath_t *) Pool_Alloc (POOL_GAME, sizeof (searchpath_t));
+					search->pack = pak;
+					search->pk3 = NULL;
+					search->next = com_searchpaths;
+					com_searchpaths = search;
+				}
+			}
+			else if (COM_FindExtension (FindFileData.cFileName, ".zip") || COM_FindExtension (FindFileData.cFileName, ".pk3"))
+			{
+				unzFile			uf;
+				int				err;
+				unz_global_info gi;
+				unz_file_info	file_info;
+
+				// load the pak file
+				_snprintf (pakfile, 128, "%s/%s", dir, FindFileData.cFileName);
+				uf = unzOpen (pakfile);
+				err = unzGetGlobalInfo (uf, &gi);
+
+				if (err == UNZ_OK)
+				{
+					pk3_t *pk3 = (pk3_t *) Pool_Alloc (POOL_GAME, sizeof (pk3_t));
+					char filename_inzip[64];
+					int good_files = 0;
+
+					pk3->numfiles = gi.number_entry;
+					strncpy (pk3->filename, pakfile, 127);
+					pk3->files = (packfile_t *) Pool_Alloc (POOL_GAME, sizeof (packfile_t) * pk3->numfiles);
+
+					unzGoToFirstFile (uf);
+
+					for (int i = 0; i < gi.number_entry; i++)
+					{
+						err = unzGetCurrentFileInfo (uf, &file_info, filename_inzip, sizeof (filename_inzip), NULL, 0, NULL, 0);
+
+						if (err == UNZ_OK)
+						{
+							// length and pos are unused
+							strncpy (pk3->files[i].name, filename_inzip, 63);
+							pk3->files[i].filelen = 0;
+							pk3->files[i].filepos = 0;
+
+							// flag a good file here
+							good_files++;
+						}
+						else
+						{
+							// bad entry
+							pk3->files[i].name[0] = 0;
+							pk3->files[i].filelen = 0;
+							pk3->files[i].filepos = 0;
+						}
+
+						unzGoToNextFile (uf);
+					}
+
+					if (good_files)
+					{
+						// link it in
+						search = (searchpath_t *) Pool_Alloc (POOL_GAME, sizeof (searchpath_t));
+						search->pack = NULL;
+						search->pk3 = pk3;
+						search->next = com_searchpaths;
+						com_searchpaths = search;
+						Con_Printf ("Added packfile %s (%i files)\n", pk3->filename, pk3->numfiles);
+					}
+				}
+
+				unzClose (uf);
 			}
 		} while (FindNextFile (hFind, &FindFileData));
 
@@ -1786,9 +1837,11 @@ void COM_AddGameDirectory (char *dir)
 	// add the directory to the search path
 	// this is done last as using a linked list will search in the reverse order to which they
 	// are added, so we ensure that the filesystem overrides pak files
-	search = (searchpath_t *) Heap_TagAlloc (TAG_FILESYSTEM, sizeof(searchpath_t));
-	strcpy (search->filename, dir);
+	search = (searchpath_t *) Pool_Alloc (POOL_GAME, sizeof(searchpath_t));
+	strncpy (search->filename, dir, 127);
 	search->next = com_searchpaths;
+	search->pack = NULL;
+	search->pk3 = NULL;
 	com_searchpaths = search;
 }
 
@@ -1822,7 +1875,8 @@ void S_ClearSounds (void);
 void Menu_MapsPopulate (void);
 void Menu_DemoPopulate (void);
 void Menu_LoadAvailableSkyboxes (void);
-
+void D3D_SetDefaultStates (void);
+void SHOWLMP_newgame (void);
 
 bool COM_StringContains (char *str1, char *str2)
 {
@@ -1848,10 +1902,11 @@ void COM_UnloadAllStuff (void)
 
 	// start with a clean filesystem
 	com_searchpaths = NULL;
-	Heap_TagFree (TAG_FILESYSTEM);
 
 	// drop everything we need to drop
-	Heap_TagFree (TAG_HUNKFILE);
+	Pool_Free (POOL_GAME);
+	Pool_Free (POOL_CACHE);
+	SHOWLMP_newgame ();
 	CL_Disconnect_f ();
 	D3D_ReleaseTextures ();
 
@@ -1889,6 +1944,8 @@ void COM_LoadAllStuff (void)
 
 void COM_LoadGame (char *gamename)
 {
+	SCR_UpdateScreen ();
+
 	if (host_initialized)
 	{
 		// store out our configuration before we go to the new game
@@ -1906,8 +1963,8 @@ void COM_LoadGame (char *gamename)
 	int i = COM_CheckParm ("-basedir");
 
 	if (i && i < com_argc-1)
-		strcpy (basedir, com_argv[i + 1]);
-	else strcpy (basedir, host_parms.basedir);
+		strncpy (basedir, com_argv[i + 1], 127);
+	else strncpy (basedir, host_parms.basedir, 127);
 
 	int j = strlen (basedir);
 
@@ -1922,9 +1979,10 @@ void COM_LoadGame (char *gamename)
 	if (COM_StringContains (gamename, "rogue")) Cvar_Set (&com_rogue, 1);
 	if (COM_StringContains (gamename, "hipnotic")) Cvar_Set (&com_hipnotic, 1);
 	if (COM_StringContains (gamename, "quoth")) Cvar_Set (&com_quoth, 1);
+	if (COM_StringContains (gamename, "nehahra")) Cvar_Set (&com_nehahra, 1);
 
 	// check status of add-ons; nothing yet...
-	rogue = hipnotic = quoth = false;
+	rogue = hipnotic = quoth = nehahra = false;
 	standard_quake = true;
 
 	if (com_rogue.value)
@@ -1947,6 +2005,12 @@ void COM_LoadGame (char *gamename)
 		standard_quake = false;
 	}
 
+	if (com_nehahra.value)
+	{
+		nehahra = true;
+		standard_quake = false;
+	}
+
 	// now add the base directory (ID1) (lowest priority)
 	COM_AddGameDirectory (va ("%s/%s", basedir, GAMENAME));
 
@@ -1954,6 +2018,7 @@ void COM_LoadGame (char *gamename)
 	if (rogue) COM_AddGameDirectory (va ("%s/rogue", basedir));
 	if (hipnotic) COM_AddGameDirectory (va ("%s/hipnotic", basedir));
 	if (quoth) COM_AddGameDirectory (va ("%s/quoth", basedir));
+	if (nehahra) COM_AddGameDirectory (va ("%s/nehahra", basedir));
 
 	// add any other games in the list (everything else gets highest priority)
 	char *thisgame = gamename;
@@ -1991,6 +2056,7 @@ void COM_LoadGame (char *gamename)
 		if (!stricmp (thisgame, "rogue")) loadgame = false;
 		if (!stricmp (thisgame, "hipnotic")) loadgame = false;
 		if (!stricmp (thisgame, "quoth")) loadgame = false;
+		if (!stricmp (thisgame, "nehahra")) loadgame = false;
 		if (!stricmp (thisgame, GAMENAME)) loadgame = false;
 
 		// only load it if it hasn't already been loaded
@@ -2011,29 +2077,17 @@ void COM_LoadGame (char *gamename)
 	// reload everything that needs to be reloaded
 	COM_LoadAllStuff ();
 
-	// not disabled any more
-	scr_disabled_for_loading = false;
-
-	// force a vid_restart to flush anything else video-wise
-	Cbuf_InsertText ("vid_restart\n");
-	Cbuf_Execute ();
-
 	Con_Printf ("\n");
-
-	/*
-	not quite working...
-	// restart the demo loop
-	cls.demoplayback = false;
-	cls.demonum = 0;
-
-	// hack to force the console to toggle off
-	key_dest = key_game;
-	Con_ToggleConsole_f ();
-	*/
 
 	// reload the configs as they may have changed
 	Cbuf_InsertText ("exec quake.rc\n");
 	Cbuf_Execute ();
+
+	// not disabled any more
+	scr_disabled_for_loading = false;
+
+	// force a stop of the demo loop in case we change while the game is running
+	cls.demonum = -1;
 }
 
 
@@ -2080,6 +2134,7 @@ void COM_InitFilesystem (void)
 	if (COM_CheckParm ("-rogue")) Cvar_Set (&com_rogue, 1);
 	if (COM_CheckParm ("-hipnotic")) Cvar_Set (&com_hipnotic, 1);
 	if (COM_CheckParm ("-quoth")) Cvar_Set (&com_quoth, 1);
+	if (COM_CheckParm ("-nehahra")) Cvar_Set (&com_nehahra, 1);
 
 	// -game <gamedir>
 	// adds gamedir as an override game
