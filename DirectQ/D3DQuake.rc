@@ -1,0 +1,8 @@
+#include <windows.h>
+#include "resource.h"
+
+// Icon Resources
+IDI_ICON1               ICON                    "D3DQuake.ico"
+
+// Bitmap Resources
+IDB_BITMAP1			BITMAP			"splash.bmp"

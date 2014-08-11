@@ -1,0 +1,43 @@
+DirectQ 1.1 Point Release
+=========================
+
+Advance Warning: This release doesn't contain *any* of the new stuff I've been working on recently.  Instead, this has a few critical bug fixes and restoration of basic GLQuake functionality.  I've felt that the release was necessary as the initial version proved to be quite popular, but also had some right showstoppers in it.
+
+Here's what's been done:
+
+* Renamed to "DirectQ" to avoid confusion over the name.
+* Reverted to Visual C++ 2003 to (hopefully) prevent PF_VarString crash on changelevel.
+* Fixed crash in video menu when more than 27 modes are available.
+* Removed all "ChangeDisplaySettings" calls to fix crash when Alt-Tabbing.
+* Added splash screen so that you know which version you have.
+* Fixed crash on dedicated server startup.
+* Made DirectInput the default, use -nodinput to disable.
+* Rewrote DirectInput code to use C++ style.
+* Rewrote mouse code to use immediate mode rather than buffered mode.
+* Added mousewheel support to DirectInput.
+* Added 8-button mouse support to DirectInput.
+* Added m_look cvar to give mouse looking.
+* Changed m_forward default to 0.
+* Added m_boost cvar to give additional boost to DirectInput without affecting sensitivity value.
+* Renamed K_AUX buttons to K_JOY (it's what they are, after all).
+* Added 4 K_POV buttons to keep POV hats separate from the joystick buttons.
+* Added previous weapon option to keys menu.
+* Removed _windowed_mouse cvar.
+* Added "colour" command (same as "color").
+* Fixed team colours are greyscale.
+* Adjusted all projections to the correct aspect for the selected resolution.
+* Added scalable 2D widget drawing (gl_conscale, 0 to 1).
+* Fixed widescreen FOV.
+* Removed alias models from the caching system.
+* Fixed remaining Alt-Tab crashes.
+* Added "vid_restart" command.
+* Cleaned out a lot of legacy code from draw, surf and vidnt.
+* Fixed window centering so it works properly on widescreen monitors.
+* Cleaned out unused header files.
+* Increased MINIMUM_WIN_MEMORY to 16 MB and MAXIMUM_WIN_MEMORY to 64 MB.
+* Fixed water and sky surfaces on inline brush models not being rendered.
+* Removed original Quake (all versions) crash when health goes below -19.
+* Changed mode enumeration to be more WinQuake-like.
+* Added Z-fail sky sphere warp (r_oldsky 0).
+* Restored gl_clear functionality.
+
