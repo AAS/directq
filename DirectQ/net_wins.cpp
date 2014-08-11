@@ -44,14 +44,14 @@ WSADATA		winsockdata;
 
 //=============================================================================
 
-static DWORD dwBlockTime;
+static double dBlockTime;
 
 BOOL PASCAL FAR BlockingHook (void)
 {
 	MSG		msg;
 	BOOL	ret;
 
-	if ((Sys_Milliseconds () - dwBlockTime) > 2000)
+	if ((Sys_FloatTime () - dBlockTime) > 2)
 	{
 		WSACancelBlockingCall ();
 		return FALSE;
@@ -84,7 +84,7 @@ void WINS_GetLocalAddress()
 	if (gethostname (buff, MAXHOSTNAMELEN) == SOCKET_ERROR)
 		return;
 
-	dwBlockTime = Sys_Milliseconds ();
+	dBlockTime = Sys_FloatTime ();
 	WSASetBlockingHook (BlockingHook);
 	local = gethostbyname (buff);
 	WSAUnhookBlockingHook();

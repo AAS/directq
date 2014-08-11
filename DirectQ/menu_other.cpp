@@ -63,6 +63,7 @@ extern cvar_t r_waterwarptime;
 extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
 extern cvar_t v_gamma;
+extern cvar_t lm_gamma;
 extern cvar_t vid_contrast;
 extern cvar_t r_waterwarp;
 extern cvar_t r_wateralpha;
@@ -272,7 +273,6 @@ char *key_bindnames[][2] =
 	{"+quickshaft",		"Quick Shaft"},
 	{"bestsafe",		"Best Safe Weapon"},
 	{"lastweapon",		"Last Weapon"},
-	{"toggleautomap",	"Automap On/Off"}
 };
 
 
@@ -360,7 +360,6 @@ void Menu_UnbindAction (char *action)
 	for (int j = 0; j < 256; j++)
 	{
 		if (!(b = keybindings[j])) continue;
-
 		if (!strncmp (b, action, l)) Key_SetBinding (j, "");
 	}
 }
@@ -1226,6 +1225,7 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Dynamic Light Style", &flashblend_num, flashblend_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("MDL Light Scale", &r_aliaslightscale, 0, 5, 0.1));
+	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Lightmap Gamma", &lm_gamma, 1.75, 0.25, 0.05));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Particles"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Particle Style", &particle_num, particle_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Particle Size", &r_particlesize, 0.5, 10, 0.5));
@@ -1310,7 +1310,7 @@ int Menu_HelpCustomDraw (int y)
 {
 	if (nehahra && !menu_advanced.integer && !nehdemo)
 	{
-		Menu_PrintCenterWhite (vid.height / 2 - 32, "Nehahra Credits Unavailable");
+		Menu_PrintCenterWhite (vid.currsize->height / 2 - 32, "Nehahra Credits Unavailable");
 		return y;
 	}
 	else
@@ -1319,7 +1319,7 @@ int Menu_HelpCustomDraw (int y)
 
 		Draw_Pic
 		(
-			(vid.width - menu_help_lmp[menu_HelpPage]->width) >> 1,
+			(vid.currsize->width - menu_help_lmp[menu_HelpPage]->width) >> 1,
 			y,
 			menu_help_lmp[menu_HelpPage]
 		);
@@ -1538,7 +1538,7 @@ void Menu_MapsOnHover (int initialy, int y, int itemnum)
 	else Menu_PrintCenterWhite (272, initialy, "(unknown)");
 
 	Menu_PrintCenter (272, initialy + 35, DIVIDER_LINE);
-	Draw_Mapshot (va ("maps/%s", menu_mapslist[itemnum].bspname), (vid.width - 320) / 2 + 208, initialy + 55);
+	Draw_Mapshot (va ("maps/%s", menu_mapslist[itemnum].bspname), (vid.currsize->width - 320) / 2 + 208, initialy + 55);
 	Menu_PrintCenter (272, initialy + 195, DIVIDER_LINE);
 	Menu_DoMapInfo (272, initialy + 200, itemnum);
 }
@@ -1974,7 +1974,7 @@ int Menu_DemoCustomDraw2 (int y)
 
 	if (democmd_num == 2)
 	{
-		Draw_Mapshot (va ("maps/%s", spinbox_bsps[demo_mapnum]), (vid.width - 320) / 2 + 96, y);
+		Draw_Mapshot (va ("maps/%s", spinbox_bsps[demo_mapnum]), (vid.currsize->width - 320) / 2 + 96, y);
 		y += 130;
 		Menu_DoMapInfo (160, y, demo_mapnum, false);
 	}
@@ -2026,8 +2026,8 @@ int Menu_DemoCustomDraw2 (int y)
 		}
 
 		if (dsi.mapname)
-			Draw_Mapshot (va ("maps/%s", dsi.mapname), (vid.width - 320) / 2 + 96, y);
-		else Draw_Mapshot (NULL, (vid.width - 320) / 2 + 96, y);
+			Draw_Mapshot (va ("maps/%s", dsi.mapname), (vid.currsize->width - 320) / 2 + 96, y);
+		else Draw_Mapshot (NULL, (vid.currsize->width - 320) / 2 + 96, y);
 
 		y += 130;
 
@@ -2155,7 +2155,7 @@ int Menu_MapsCustomDraw2 (int y)
 int Menu_MapsCustomDraw3 (int y)
 {
 	y += 5;
-	Draw_Mapshot (va ("maps/%s", spinbox_bsps[menumapselectedbsp]), (vid.width - 320) / 2 + 96, y);
+	Draw_Mapshot (va ("maps/%s", spinbox_bsps[menumapselectedbsp]), (vid.currsize->width - 320) / 2 + 96, y);
 	y += 130;
 	Menu_DoMapInfo (160, y, menumapselectedbsp);
 

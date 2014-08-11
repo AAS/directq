@@ -63,7 +63,6 @@ char *IsURLContainer (char *filename)
 	fclose (f);
 
 	if (!strnicmp (urlname, "http://", 7)) return urlname;
-
 	if (!strnicmp (urlname, "https://", 8)) return urlname;
 
 	return NULL;
@@ -149,13 +148,9 @@ public:
 
 		// set up everything
 		if (FAILED (hr = CoCreateInstance (CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, IID_IGraphBuilder, (void **) &this->ds_Graph))) return;
-
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaControl, (void **) &this->ds_Control))) return;
-
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IBasicAudio, (void **) &this->ds_Audio))) return;
-
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaEvent, (void **) &this->ds_Event))) return;
-
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaPosition, (void **) &this->ds_Position))) return;
 
 		// it's initialized now
@@ -204,9 +199,7 @@ public:
 
 		// ensure that we can process events
 		if (!this->Initialized) return;
-
 		if (!this->Playing) return;
-
 		if ((++checkframe) & 7) return;
 
 		// we could be streaming over the web or paused so we need to check position

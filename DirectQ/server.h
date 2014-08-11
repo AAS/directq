@@ -27,6 +27,9 @@ typedef struct
 	bool	changelevel_issued;	// cleared when at SV_SpawnServer
 } server_static_t;
 
+extern float sv_frame;
+float SV_PlaneDist (struct mplane_s *plane, float *org);
+
 //=============================================================================
 
 typedef enum {ss_loading, ss_active} server_state_t;
@@ -38,10 +41,8 @@ typedef struct
 	bool	paused;
 	bool	loadgame;			// handle connections specially
 
-	float		lastchecktime;
-	float		time;
-
-	DWORD		dwTime;				// 
+	double		lastchecktime;
+	double		time;
 
 	int			lastcheck;			// used by PF_checkclient
 
@@ -67,7 +68,7 @@ typedef struct
 	sizebuf_t	signon;
 	byte		signon_buf[MAX_MSGLEN - 2]; //8192
 
-	float frametime;
+	double frametime;
 
 	int		signondiff;		// Track extra bytes due to >256 model support, kludge
 	int		Protocol;
@@ -86,7 +87,7 @@ typedef struct client_s
 	bool		privileged;			// can execute any host command
 	bool		sendsignon;			// only valid before spawned
 
-	float			last_message;		// reliable messages must be sent
+	double			last_message;		// reliable messages must be sent
 										// periodically
 
 	struct qsocket_s *netconnection;	// communications handle
@@ -247,7 +248,7 @@ void SV_AddClientToServer (struct qsocket_s	*ret);
 void SV_ClientPrintf (char *fmt, ...);
 void SV_BroadcastPrintf (char *fmt, ...);
 
-void SV_Physics (DWORD dwFrameTime);
+void SV_Physics (double frametime);
 
 bool SV_CheckBottom (edict_t *ent);
 bool SV_movestep (edict_t *ent, vec3_t move, bool relink);

@@ -25,30 +25,41 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // a pixel can be one, two, or four bytes
 typedef byte pixel_t;
 
-typedef struct vrect_s
-{
-	int				x, y, width, height;
-	struct vrect_s	*pnext;
-} vrect_t;
 
-typedef struct
+typedef struct sizedef_s
+{
+	unsigned		width;
+	unsigned		height;
+} sizedef_t;
+
+typedef struct viddef_s
 {
 	pixel_t			*colormap;		// 256 * VID_GRADES size
 	bool			fullbright[256];	// true if a colour at this index is fullbright
 	unsigned		rowbytes;	// may be > width if displayed in a window
-	unsigned		width;
-	unsigned		height;
 	float			aspect;		// width / height -- < 0 is taller than wide
+
+	sizedef_t		consize;	// further scaled by scr_conscale
+	sizedef_t		sbarsize;	// further scaled by scr_sbarscale
+	sizedef_t		menusize;	// further scaled by scr_menuscale
+	sizedef_t		ref3dsize;	// size of the 3D refresh window
+	sizedef_t		*currsize;	// current size we're using in the 2D refresh
+
+	// number of lines used for the status bar including all scaling factors/etc
+	// (so that we don't need to recalc it every time we need it, and so that we can always get it any time we need it)
+	int				sbar_lines;
+
 	int				recalc_refdef;	// if true, recalc vid-based stuff
 } viddef_t;
 
 extern	viddef_t	vid;				// global video state
 
+// 2D scaling size and offsets
+void D3DDraw_SetSize (sizedef_t *size);
+void D3DDraw_SetOfs (int x, int y);
+
 void	VID_Shutdown (void);
 // Called at shutdown
-
-void	VID_Update (vrect_t *rects);
-// flushes the given rectangles from the view buffer to the screen
 
 int VID_SetMode (int modenum, unsigned char *palette);
 // sets the mode; only used by the Quake engine for resetting to mode 0 (the

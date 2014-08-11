@@ -26,13 +26,36 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // texture chaining
 #define LIGHTMAP_WIDTH		256
 #define LIGHTMAP_HEIGHT		256
-#define MAX_LIGHTMAPS		256
 
 int LightmapWidth = -1;
 int LightmapHeight = -1;
+
 LPDIRECT3DTEXTURE9 d3d_Lightmaps[MAX_LIGHTMAPS];
 int d3d_NumLightmaps = 0;
 
+byte lm_gammatable[256];
+
+void D3DLight_BuildGammaTable (cvar_t *var)
+{
+	float gammaval = var->value;
+
+	if (gammaval < 0.25f) gammaval = 0.25f;
+	if (gammaval > 1.75f) gammaval = 1.75f;
+
+	for (int i = 0; i < 256; i++)
+	{
+		// the same gamma calc as GLQuake had some "gamma creep" where DirectQ would gradually get brighter
+		// the more it was run; this hopefully fixes it once and for all
+		float f = pow ((float) i / 255.0f, gammaval);
+		float inf = f * 255 + 0.5;
+
+		// return what we got
+		lm_gammatable[i] = BYTE_CLAMP ((int) inf);
+	}
+}
+
+
+cvar_t lm_gamma ("lm_gamma", "1", CVAR_ARCHIVE, D3DLight_BuildGammaTable);
 
 /*
 ========================================================================================================================
@@ -44,6 +67,18 @@ int d3d_NumLightmaps = 0;
 
 void D3DAlpha_AddToList (dlight_t *dl);
 
+// oh well; at least it lets me reuse the declaration...
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_DrawDecl;
+
+typedef struct r_coronavertex_s
+{
+	// oh well; at least it lets me reuse the declaration...
+	float x, y, z;
+	D3DCOLOR c;
+	float dummy[2];
+} r_coronavertex_t;
+
+
 cvar_t gl_flashblend ("gl_flashblend", "0", CVAR_ARCHIVE);
 cvar_t r_coronas ("r_coronas", "0", CVAR_ARCHIVE);
 cvar_t r_coronadetail ("r_coronadetail", "16", CVAR_ARCHIVE);
@@ -51,12 +86,11 @@ cvar_t r_coronaradius ("r_coronaradius", "1", CVAR_ARCHIVE);
 cvar_t r_coronaintensity ("r_coronaintensity", "1", CVAR_ARCHIVE);
 
 bool r_coronastateset = false;
+int d3d_CoronaState = 0;
 
 #define CORONA_ONLY				1
 #define LIGHTMAP_ONLY			2
 #define CORONA_PLUS_LIGHTMAP	3
-
-int d3d_CoronaState = 0;
 
 void D3DLight_SetCoronaState (void)
 {
@@ -72,18 +106,6 @@ void D3DLight_SetCoronaState (void)
 		d3d_CoronaState = CORONA_PLUS_LIGHTMAP;
 	else d3d_CoronaState = LIGHTMAP_ONLY;
 }
-
-
-// oh well; at least it lets me reuse the declaration...
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_DrawDecl;
-
-typedef struct r_coronavertex_s
-{
-	// oh well; at least it lets me reuse the declaration...
-	float x, y, z;
-	D3DCOLOR c;
-	float dummy[2];
-} r_coronavertex_t;
 
 
 // fixme - move these to a vertex buffer
@@ -102,7 +124,7 @@ void D3DLight_BeginCoronas (void)
 	r_coronastateset = false;
 
 	// fix up cvars
-	if (r_coronadetail.integer < 2) Cvar_Set (&r_coronadetail, 2.0f);
+	if (r_coronadetail.integer < 6) Cvar_Set (&r_coronadetail, 6.0f);
 	if (r_coronadetail.integer > 256) Cvar_Set (&r_coronadetail, 256.0f);
 
 	if (r_coronaradius.integer < 0) Cvar_Set (&r_coronaradius, 0.0f);
@@ -127,7 +149,9 @@ void D3DLight_FlushCoronas (void)
 		D3DHLSL_CheckCommit ();
 
 		// maintaining a VBO for this seems too much like hard work so we won't
-		// ...although we reallu should cos DIPUP is too slow...
+		// ...although we really should cos DIPUP is too slow...
+		// although it needs a fully dynamic VBO to work right and - per MS - maintaining a dynamic VBO is
+		// roughly equivalent to -UP for this kind of vertex count, so let's just leave it be...
 		d3d_Device->DrawIndexedPrimitiveUP
 			(D3DPT_TRIANGLELIST, 0, r_numcoronavertexes,
 			r_numcoronaindexes / 3,
@@ -204,9 +228,9 @@ void D3DLight_DrawCorona (dlight_t *dl)
 
 	// catch anything that's too small before it's even drawn
 	if (rad <= 0) return;
-	if (r_coronaintensity.value < 0) return;
+	if (r_coronaintensity.value <= 0) return;
 
-	VectorSubtract (dl->origin, r_viewvectors.origin, v);
+	VectorSubtract (dl->origin, r_refdef.vieworigin, v);
 	float dist = Length (v);
 
 	// fixme - optimize this out before adding... (done - ish)
@@ -222,14 +246,11 @@ void D3DLight_DrawCorona (dlight_t *dl)
 	if (!r_coronastateset)
 	{
 		// unbind all streams because we're going to UP mode here
-		D3D_SetStreamSource (0, NULL, 0, 0);
-		D3D_SetStreamSource (1, NULL, 0, 0);
-		D3D_SetStreamSource (2, NULL, 0, 0);
-		D3D_SetIndices (NULL);
+		D3D_UnbindStreams ();
 
 		// switch shader (just reuse this)
 		// note that because of the blend mode used coronas don;t need special handling for fog ;)
-		D3DHLSL_SetPass (FX_PASS_DRAWCOLORED);
+		D3DHLSL_SetPass (FX_PASS_CORONA);
 
 		// changed blend mode
 		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_ONE);
@@ -371,11 +392,12 @@ void D3D_AddDynamicLights (msurface_t *surf)
 		local[0] -= surf->texturemins[0];
 		local[1] -= surf->texturemins[1];
 
+		// DirectQ uses dynamic light colours > 255 so scale them back down to the approx correct range
 		float dlrgb[] =
 		{
-			(float) cl_dlights[lnum].rgb[0] * r_dynamic.value,
-			(float) cl_dlights[lnum].rgb[1] * r_dynamic.value,
-			(float) cl_dlights[lnum].rgb[2] * r_dynamic.value
+			(float) cl_dlights[lnum].rgb[0] * r_dynamic.value * 0.666f,
+			(float) cl_dlights[lnum].rgb[1] * r_dynamic.value * 0.666f,
+			(float) cl_dlights[lnum].rgb[2] * r_dynamic.value * 0.666f
 		};
 
 		unsigned *bl = d3d_BlockLights;
@@ -398,9 +420,10 @@ void D3D_AddDynamicLights (msurface_t *surf)
 
 				if (dist < minlight)
 				{
-					bl[0] += (rad - dist) * dlrgb[0];
+					// swap to BGR
+					bl[0] += (rad - dist) * dlrgb[2];
 					bl[1] += (rad - dist) * dlrgb[1];
-					bl[2] += (rad - dist) * dlrgb[2];
+					bl[2] += (rad - dist) * dlrgb[0];
 				}
 			}
 		}
@@ -524,19 +547,12 @@ R_MarkLights
 */
 void R_MarkLights (dlight_t *light, int num, mnode_t *node)
 {
-	mplane_t	*splitplane;
-	float		dist;
-	msurface_t	*surf;
-	int			i;
-	int			sidebit;
-
 	// hey!  no goto!!!
 	while (1)
 	{
 		if (node->contents < 0) return;
 
-		splitplane = node->plane;
-		dist = DotProduct (light->origin, splitplane->normal) - splitplane->dist;
+		float dist = SV_PlaneDist (node->plane, light->origin);
 
 		if (dist > light->radius)
 		{
@@ -554,9 +570,9 @@ void R_MarkLights (dlight_t *light, int num, mnode_t *node)
 	}
 
 	// mark the polygons
-	surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface;
+	msurface_t *surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface;
 
-	for (i = 0; i < node->numsurfaces; i++, surf++)
+	for (int i = 0; i < node->numsurfaces; i++, surf++)
 	{
 		// no lights on these
 		if (surf->flags & SURF_DRAWTURB) continue;
@@ -595,6 +611,7 @@ void R_PushDlights (mnode_t *headnode)
 		if (l->die < cl.time || !l->radius)
 			continue;
 
+		sv_frame--;
 		R_MarkLights (l, i, headnode);
 	}
 }
@@ -722,9 +739,10 @@ loc0:;
 				}
 
 				// somebody's just taking the piss here...
-				color[0] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
+				// (lightmap is BGR so swap back to RGB)
+				color[2] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
 				color[1] += (float) ((int) ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)));
-				color[2] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
+				color[0] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
 			}
 
 			// success
@@ -757,13 +775,6 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 	vec3_t start;
 	vec3_t end;
 
-	if (!cl.worldmodel->brushhdr->lightdata)
-	{
-		// no light data (consistency with world)
-		c[0] = c[1] = c[2] = (256 >> r_overbright.integer);
-		return;
-	}
-
 	// using bbox center point can give black models as it's now adjusted for the 
 	// correct frame bbox, so just revert back to good ol' origin
 	VectorCopy (e->origin, start);
@@ -773,50 +784,52 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 	end[1] = start[1];
 	end[2] = start[2] - 2048;
 
-	// initially nothing
-	c[0] = c[1] = c[2] = 0;
 	lightplane = NULL;
 
-	// get lighting
-	R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
-
-	if (cl.maxclients < 2)
+	// keep MDL lighting consistent with the world
+	if (r_fullbright.integer || !cl.worldmodel->brushhdr->lightdata)
+		c[0] = c[1] = c[2] = 255 * (256 >> r_overbright.integer);
+	else
 	{
-		// add ambient factor (SP only)
-		c[0] += r_ambient.value;
-		c[1] += r_ambient.value;
-		c[2] += r_ambient.value;
-	}
+		// clear to ambient
+		if (cl.maxclients > 1 || r_ambient.integer < 1)
+			c[0] = c[1] = c[2] = 0;
+		else c[0] = c[1] = c[2] = r_ambient.integer * (256 >> r_overbright.integer);
 
-	// add dynamic lights
-	if (r_dynamic.value && (d3d_CoronaState != CORONA_ONLY))
-	{
-		for (int lnum = 0; lnum < MAX_DLIGHTS; lnum++)
+		// add dynamic lights first (consistency with the world)
+		if (r_dynamic.value && (d3d_CoronaState != CORONA_ONLY))
 		{
-			if (cl_dlights[lnum].die >= cl.time)
+			for (int lnum = 0; lnum < MAX_DLIGHTS; lnum++)
 			{
-				VectorSubtract (e->origin, cl_dlights[lnum].origin, dist);
-
-				add = (cl_dlights[lnum].radius - Length (dist));
-
-				if (add > 0)
+				if (cl_dlights[lnum].die >= cl.time)
 				{
-					c[0] += (add * cl_dlights[lnum].rgb[0]) * r_dynamic.value;
-					c[1] += (add * cl_dlights[lnum].rgb[1]) * r_dynamic.value;
-					c[2] += (add * cl_dlights[lnum].rgb[2]) * r_dynamic.value;
+					VectorSubtract (e->origin, cl_dlights[lnum].origin, dist);
+
+					add = (cl_dlights[lnum].radius - Length (dist));
+
+					if (add > 0)
+					{
+						// DirectQ uses dynamic light colours > 255 so scale them back down to the approx correct range
+						c[0] += (add * cl_dlights[lnum].rgb[0]) * r_dynamic.value * 0.666f;
+						c[1] += (add * cl_dlights[lnum].rgb[1]) * r_dynamic.value * 0.666f;
+						c[2] += (add * cl_dlights[lnum].rgb[2]) * r_dynamic.value * 0.666f;
+					}
 				}
 			}
 		}
+
+		// add lighting from lightmaps
+		R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
 	}
 
 	// keep MDL lighting consistent with the world
 	for (int i = 0; i < 3; i++)
 	{
 		int rgb = ((int) (c[i] + 0.5f)) >> (7 + r_overbright.integer);
-		c[i] = (float) BYTE_CLAMP (rgb);
+		c[i] = (float) lm_gammatable[BYTE_CLAMP (rgb)];
 	}
 
-	// minimum light values (should these be done before or after dynamics???)
+	// set minimum light values
 	if (e == &cl.viewent) R_MinimumLight (c, 72);
 	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, 24);
 	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, 72);
@@ -832,12 +845,45 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 ====================================================================================================================
 */
 
-void D3DLight_BuildLightmap (msurface_t *surf, LPDIRECT3DTEXTURE9 lm)
+__inline void D3DLight_ClearToAmbient (unsigned *bl, int size, int amb)
+{
+	int s = size * 3;
+	int n = (s + 7) >> 3;
+
+	switch (s % 8)
+	{
+	case 0: do {*bl++ = amb;
+	case 7: *bl++ = amb;
+	case 6: *bl++ = amb;
+	case 5: *bl++ = amb;
+	case 4: *bl++ = amb;
+	case 3: *bl++ = amb;
+	case 2: *bl++ = amb;
+	case 1: *bl++ = amb;
+	} while (--n > 0);
+	}
+}
+
+
+#define DUFFLIGHT_NOGAMMA \
+	t = *bl++ >> shift; *dest++ = BYTE_CLAMP (t); \
+	t = *bl++ >> shift; *dest++ = BYTE_CLAMP (t); \
+	t = *bl++ >> shift; *dest++ = BYTE_CLAMP (t); \
+	*dest++ = 255;
+
+#define DUFFLIGHT_WITHGAMMA \
+	t = *bl++ >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
+	t = *bl++ >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
+	t = *bl++ >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
+	*dest++ = 255;
+
+void D3DLight_BuildLightmap (msurface_t *surf, int texnum)
 {
 	// cache these at the levels they were created or updated at
 	surf->overbright = r_overbright.integer;
 	surf->fullbright = r_fullbright.integer;
 	surf->ambient = r_ambient.integer;
+	surf->lm_gamma = lm_gamma.value;
 
 	int size = surf->smax * surf->tmax;
 	byte *lightmap = surf->samples;
@@ -845,44 +891,13 @@ void D3DLight_BuildLightmap (msurface_t *surf, LPDIRECT3DTEXTURE9 lm)
 
 	// set to full bright if no light data
 	if (r_fullbright.integer || !cl.worldmodel->brushhdr->lightdata)
-	{
-		bl = d3d_BlockLights;
-
-		for (int i = 0; i < size; i++, bl += 3)
-		{
-			// ensure correct scale for overbrighting
-			bl[0] = 255 * (256 >> r_overbright.integer);
-			bl[1] = 255 * (256 >> r_overbright.integer);
-			bl[2] = 255 * (256 >> r_overbright.integer);
-		}
-	}
+		D3DLight_ClearToAmbient (d3d_BlockLights, size, 255 * (256 >> r_overbright.integer));
 	else
 	{
+		// clear to ambient
 		if (cl.maxclients > 1 || r_ambient.integer < 1)
-		{
-			bl = d3d_BlockLights;
-
-			// no ambient light in multiplayer
-			for (int i = 0; i < size; i++, bl += 3)
-			{
-				bl[0] = 0;
-				bl[1] = 0;
-				bl[2] = 0;
-			}
-		}
-		else
-		{
-			bl = d3d_BlockLights;
-			unsigned int amb = r_ambient.integer * (256 >> r_overbright.integer);
-
-			// clear to ambient light
-			for (int i = 0; i < size; i++, bl += 3)
-			{
-				bl[0] = amb;
-				bl[1] = amb;
-				bl[2] = amb;
-			}
-		}
+			D3DLight_ClearToAmbient (d3d_BlockLights, size, 0);
+		else D3DLight_ClearToAmbient (d3d_BlockLights, size, r_ambient.integer * (256 >> r_overbright.integer));
 
 		// add all the dynamic lights first
 		if (surf->dlightframe == d3d_RenderDef.framecount)
@@ -900,16 +915,24 @@ void D3DLight_BuildLightmap (msurface_t *surf, LPDIRECT3DTEXTURE9 lm)
 			for (int maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
 			{
 				unsigned int scale = d_lightstylevalue[surf->styles[maps]];
+				int n = ((size * 3) + 7) >> 3;
 
-				surf->cached_light[maps] = scale;
 				bl = d3d_BlockLights;
 
-				for (int i = 0; i < size; i++, bl += 3, lightmap += 3)
+				switch ((size * 3) % 8)
 				{
-					bl[0] += lightmap[0] * scale;
-					bl[1] += lightmap[1] * scale;
-					bl[2] += lightmap[2] * scale;
+				case 0: do {*bl++ += scale * *lightmap++;
+				case 7: *bl++ += scale * *lightmap++;
+				case 6: *bl++ += scale * *lightmap++;
+				case 5: *bl++ += scale * *lightmap++;
+				case 4: *bl++ += scale * *lightmap++;
+				case 3: *bl++ += scale * *lightmap++;
+				case 2: *bl++ += scale * *lightmap++;
+				case 1: *bl++ += scale * *lightmap++;
+				} while (--n > 0);
 				}
+
+				surf->cached_light[maps] = scale;
 			}
 		}
 	}
@@ -917,6 +940,7 @@ void D3DLight_BuildLightmap (msurface_t *surf, LPDIRECT3DTEXTURE9 lm)
 	int t;
 	int shift = 7 + r_overbright.integer;
 	D3DLOCKED_RECT lockrect;
+	LPDIRECT3DTEXTURE9 lm = d3d_Lightmaps[texnum];
 
 	// this lets us get into and out of the lock as quickly as possible and also minimizes the lock size
 	// we also can't rely on the driver to optimize when dirty updates happen so we manage it ourselves
@@ -929,15 +953,44 @@ void D3DLight_BuildLightmap (msurface_t *surf, LPDIRECT3DTEXTURE9 lm)
 	byte *dest = (byte *) lockrect.pBits;
 	bl = d3d_BlockLights;
 
-	for (int i = 0; i < surf->tmax; i++, dest += stride)
+	if (lm_gamma.value == 1)
 	{
-		for (int j = 0; j < surf->smax; j++, dest += 4, bl += 3)
+		for (int i = 0; i < surf->tmax; i++, dest += stride)
 		{
-			// because dest is a hardware resource we must update it in order
-			t = bl[2] >> shift; dest[0] = BYTE_CLAMP (t);
-			t = bl[1] >> shift; dest[1] = BYTE_CLAMP (t);
-			t = bl[0] >> shift; dest[2] = BYTE_CLAMP (t);
-			dest[3] = 255;
+			int n = (surf->smax + 7) >> 3;
+
+			switch (surf->smax % 8)
+			{
+			case 0: do {DUFFLIGHT_NOGAMMA;
+			case 7: DUFFLIGHT_NOGAMMA;
+			case 6: DUFFLIGHT_NOGAMMA;
+			case 5: DUFFLIGHT_NOGAMMA;
+			case 4: DUFFLIGHT_NOGAMMA;
+			case 3: DUFFLIGHT_NOGAMMA;
+			case 2: DUFFLIGHT_NOGAMMA;
+			case 1: DUFFLIGHT_NOGAMMA;
+			} while (--n > 0);
+			}
+		}
+	}
+	else
+	{
+		for (int i = 0; i < surf->tmax; i++, dest += stride)
+		{
+			int n = (surf->smax + 7) >> 3;
+
+			switch (surf->smax % 8)
+			{
+			case 0: do {DUFFLIGHT_WITHGAMMA;
+			case 7: DUFFLIGHT_WITHGAMMA;
+			case 6: DUFFLIGHT_WITHGAMMA;
+			case 5: DUFFLIGHT_WITHGAMMA;
+			case 4: DUFFLIGHT_WITHGAMMA;
+			case 3: DUFFLIGHT_WITHGAMMA;
+			case 2: DUFFLIGHT_WITHGAMMA;
+			case 1: DUFFLIGHT_WITHGAMMA;
+			} while (--n > 0);
+			}
 		}
 	}
 
@@ -997,17 +1050,8 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 		// reuse any lightmaps which were previously allocated
 		if (!d3d_Lightmaps[texnum])
 		{
-			hr = d3d_Device->CreateTexture
-			(
-				LightmapWidth,
-				LightmapHeight,
-				1,
-				0,
-				D3DFMT_X8R8G8B8,
-				D3DPOOL_MANAGED,
-				&d3d_Lightmaps[texnum],
-				NULL
-			);
+			hr = d3d_Device->CreateTexture (LightmapWidth,
+				LightmapHeight, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &d3d_Lightmaps[texnum], NULL);
 
 			// if we can't create a managed pool texture we're kinda fucked
 			if (FAILED (hr)) Sys_Error ("D3DLight_CreateSurfaceLightmap : Failed to create a texture in D3DPOOL_MANAGED");
@@ -1023,17 +1067,17 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 		{
 			brushpolyvert_t *vert = &surf->verts[i];
 
-			vert->lm[0] = DotProduct (vert->xyz, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
-			vert->lm[0] -= surf->texturemins[0];
-			vert->lm[0] += (int) surf->LightRect.left * 16;
-			vert->lm[0] += 8;
-			vert->lm[0] /= (float) (LightmapWidth * 16);
+			vert->st[1][0] = DotProduct (vert->xyz, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
+			vert->st[1][0] -= surf->texturemins[0];
+			vert->st[1][0] += (int) surf->LightRect.left * 16;
+			vert->st[1][0] += 8;
+			vert->st[1][0] /= (float) (LightmapWidth * 16);
 
-			vert->lm[1] = DotProduct (vert->xyz, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
-			vert->lm[1] -= surf->texturemins[1];
-			vert->lm[1] += (int) surf->LightRect.top * 16;
-			vert->lm[1] += 8;
-			vert->lm[1] /= (float) (LightmapHeight * 16);
+			vert->st[1][1] = DotProduct (vert->xyz, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
+			vert->st[1][1] -= surf->texturemins[1];
+			vert->st[1][1] += (int) surf->LightRect.top * 16;
+			vert->st[1][1] += 8;
+			vert->st[1][1] /= (float) (LightmapHeight * 16);
 		}
 
 		// ensure no dlight update happens and rebuild the lightmap fully
@@ -1044,7 +1088,7 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 		surf->LightmapTextureNum = texnum;
 		surf->d3d_LightmapTex = d3d_Lightmaps[texnum];
 
-		D3DLight_BuildLightmap (surf, d3d_Lightmaps[texnum]);
+		D3DLight_BuildLightmap (surf, texnum);
 
 		// this is a valid area
 		return;
@@ -1133,6 +1177,10 @@ void D3DLight_BuildLightmapTextureChains (brushhdr_t *hdr)
 
 void D3DLight_BuildAllLightmaps (void)
 {
+	// build the default lightmaps gamma table (ensures that we have valid values in lm_gammatable even
+	// if the cvar is not changed - which will be the case on initial map load)
+	D3DLight_BuildGammaTable (&lm_gamma);
+
 	if (LightmapWidth < 0 || LightmapHeight < 0)
 	{
 		LightmapWidth = LIGHTMAP_WIDTH;
@@ -1166,17 +1214,8 @@ void D3DLight_BuildAllLightmaps (void)
 	{
 		// note - we set the end of the precache list to NULL in cl_parse to ensure this test is valid
 		if (!(mod = cl.model_precache[j])) break;
-
-		mod->cacheent = NULL;
-
 		if (mod->type != mod_brush) continue;
-
-		// alloc space for caching the entity state
-		if (mod->name[0] == '*')
-		{
-			mod->cacheent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
-			continue;
-		}
+		if (mod->name[0] == '*') continue;
 
 		// build the lightmaps by texturechains - using sorts seems to give higher r_speeds
 		// counts somehow; could probably fix it but why bother when there's another way?
@@ -1218,6 +1257,7 @@ void D3DLight_CheckSurfaceForModification (d3d_modelsurf_t *ms)
 	if (surf->overbright != r_overbright.integer) goto ModifyLightmap;
 	if (surf->fullbright != r_fullbright.integer) goto ModifyLightmap;
 	if (surf->ambient != r_ambient.integer) goto ModifyLightmap;
+	if (surf->lm_gamma != lm_gamma.value) goto ModifyLightmap;
 
 	// no lightmap modifications
 	if (!r_dynamic.value) return;
@@ -1247,7 +1287,7 @@ void D3DLight_CheckSurfaceForModification (d3d_modelsurf_t *ms)
 
 ModifyLightmap:;
 	// rebuild the lightmap
-	D3DLight_BuildLightmap (surf, d3d_Lightmaps[surf->LightmapTextureNum]);
+	D3DLight_BuildLightmap (surf, surf->LightmapTextureNum);
 }
 
 
@@ -1258,3 +1298,4 @@ void D3DLight_ReleaseLightmaps (void)
 		SAFE_RELEASE (d3d_Lightmaps[i]);
 	}
 }
+

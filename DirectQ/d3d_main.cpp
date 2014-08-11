@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 
 cvar_t gl_fullbrights ("gl_fullbrights", "1", CVAR_ARCHIVE);
+cvar_t r_draworder ("r_draworder", "1");
 
 void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf)
 {
@@ -30,9 +31,10 @@ void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFE
 
 	// ensure
 	usage |= D3DUSAGE_WRITEONLY;
+	D3DPOOL defpool = d3d_GlobalCaps.supportHardwareTandL ? D3DPOOL_DEFAULT : D3DPOOL_SYSTEMMEM;
 
 	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
-	hr = d3d_Device->CreateVertexBuffer (length, usage | swprocflag, 0, D3DPOOL_DEFAULT, buf, NULL);
+	hr = d3d_Device->CreateVertexBuffer (length, usage | swprocflag, 0, defpool, buf, NULL);
 	if (SUCCEEDED (hr)) return;
 
 	hr = d3d_Device->CreateVertexBuffer (length, D3DUSAGE_WRITEONLY | swprocflag, 0, D3DPOOL_MANAGED, buf, NULL);
@@ -43,7 +45,7 @@ void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFE
 
 	if (!d3d_GlobalCaps.supportHardwareTandL)
 	{
-		hr = d3d_Device->CreateVertexBuffer (length, usage, 0, D3DPOOL_DEFAULT, buf, NULL);
+		hr = d3d_Device->CreateVertexBuffer (length, usage, 0, defpool, buf, NULL);
 		if (SUCCEEDED (hr)) return;
 
 		hr = d3d_Device->CreateVertexBuffer (length, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, buf, NULL);
@@ -65,9 +67,10 @@ void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUF
 
 	// ensure
 	usage |= D3DUSAGE_WRITEONLY;
+	D3DPOOL defpool = d3d_GlobalCaps.supportHardwareTandL ? D3DPOOL_DEFAULT : D3DPOOL_SYSTEMMEM;
 
 	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
-	hr = d3d_Device->CreateIndexBuffer (length, usage | swprocflag, D3DFMT_INDEX16, D3DPOOL_DEFAULT, buf, NULL);
+	hr = d3d_Device->CreateIndexBuffer (length, usage | swprocflag, D3DFMT_INDEX16, defpool, buf, NULL);
 	if (SUCCEEDED (hr)) return;
 
 	hr = d3d_Device->CreateIndexBuffer (length, D3DUSAGE_WRITEONLY | swprocflag, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
@@ -78,7 +81,7 @@ void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUF
 
 	if (!d3d_GlobalCaps.supportHardwareTandL)
 	{
-		hr = d3d_Device->CreateIndexBuffer (length, usage, D3DFMT_INDEX16, D3DPOOL_DEFAULT, buf, NULL);
+		hr = d3d_Device->CreateIndexBuffer (length, usage, D3DFMT_INDEX16, defpool, buf, NULL);
 		if (SUCCEEDED (hr)) return;
 
 		hr = d3d_Device->CreateIndexBuffer (length, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
@@ -176,120 +179,8 @@ void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib)
 }
 
 
-// use unit scales that are also used in most map editors
-cvar_t r_automapscroll_x ("r_automapscroll_x", -64.0f, CVAR_ARCHIVE);
-cvar_t r_automapscroll_y ("r_automapscroll_y", -64.0f, CVAR_ARCHIVE);
-cvar_t r_automapscroll_z ("r_automapscroll_z", 32.0f, CVAR_ARCHIVE);
-
-bool r_automap;
 extern bool scr_drawmapshot;
 
-// default automap viewpoint
-// x and y are updated on entry to the automap
-float r_automap_x = 0;
-float r_automap_y = 0;
-float r_automap_z = 0;
-float r_automap_scale = 5;
-int automap_key = -1;
-int screenshot_key = -1;
-
-void Cmd_ToggleAutomap_f (void)
-{
-	if (cls.state != ca_connected) return;
-
-	r_automap = !r_automap;
-
-	// toggle a paused state
-	if (key_dest == key_automap)
-		key_dest = key_game;
-	else key_dest = key_automap;
-
-	// find which key is bound to the automap
-	automap_key = Key_GetBinding ("toggleautomap");
-
-	// find any other key defs we want to allow
-	screenshot_key = Key_GetBinding ("screenshot");
-
-	r_automap_x = r_refdef.vieworg[0];
-	r_automap_y = r_refdef.vieworg[1];
-	r_automap_z = 0;
-}
-
-
-void Key_Automap (int key)
-{
-	switch (key)
-	{
-	case K_PGUP:
-		r_automap_z += r_automapscroll_z.value;
-		break;
-
-	case K_PGDN:
-		r_automap_z -= r_automapscroll_z.value;
-		break;
-
-	case K_UPARROW:
-		r_automap_y -= r_automapscroll_y.value;
-		break;
-
-	case K_DOWNARROW:
-		r_automap_y += r_automapscroll_y.value;
-		break;
-
-	case K_LEFTARROW:
-		r_automap_x += r_automapscroll_x.value;
-		break;
-
-	case K_RIGHTARROW:
-		r_automap_x -= r_automapscroll_x.value;
-		break;
-
-	case K_HOME:
-		r_automap_scale -= 0.5f;
-		break;
-
-	case K_END:
-		r_automap_scale += 0.5f;
-		break;
-
-	default:
-
-		if (key == automap_key)
-			Cmd_ToggleAutomap_f ();
-		else if (key == screenshot_key)
-		{
-			Cbuf_InsertText ("screenshot\n");
-			Cbuf_Execute ();
-		}
-
-		break;
-	}
-
-	if (r_automap_scale < 0.5) r_automap_scale = 0.5;
-	if (r_automap_scale > 20) r_automap_scale = 20;
-}
-
-
-cmd_t Cmd_ToggleAutomap ("toggleautomap", Cmd_ToggleAutomap_f);
-
-int c_automapsurfs = 0;
-
-bool D3D_DrawAutomap (void)
-{
-	if (!r_automap) return false;
-	if (cls.state != ca_connected) return false;
-	if (scr_drawmapshot) return false;
-	if (cl.intermission == 1 && key_dest == key_game) return false;
-	if (cl.intermission == 2 && key_dest == key_game) return false;
-
-	c_automapsurfs = 0;
-	return true;
-}
-
-
-void D3D_AutomapReset (void)
-{
-}
 
 void D3DLight_SetCoronaState (void);
 void RotatePointAroundVector (vec3_t dst, const vec3_t dir, const vec3_t point, float degrees);
@@ -309,8 +200,6 @@ void D3DAlias_RenderAliasModels (void);
 
 void D3D_PrepareAliasModel (entity_t *e);
 void D3DLight_AddCoronas (void);
-
-void D3D_AutomapReset (void);
 
 DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 float d3d_OverbrightModulate = 2.0f;
@@ -347,7 +236,6 @@ cvar_t	r_lightmap ("r_lightmap", "0");
 cvar_t	r_shadows ("r_shadows", "0", CVAR_ARCHIVE);
 cvar_t	r_wateralpha ("r_wateralpha", 1.0f);
 cvar_t	r_dynamic ("r_dynamic", "1");
-cvar_t	r_novis ("r_novis", "0");
 
 cvar_t	gl_cull ("gl_cull", "1");
 cvar_t	gl_smoothmodels ("gl_smoothmodels", "1");
@@ -356,38 +244,21 @@ cvar_t	gl_polyblend ("gl_polyblend", "1");
 cvar_t	gl_nocolors ("gl_nocolors", "0");
 cvar_t	gl_doubleeyes ("gl_doubleeys", "1");
 cvar_t	gl_clear ("gl_clear", "0");
+cvar_t	r_clearcolor ("r_clearcolor", "0");
 
-// hmmm- this does nothing yet...
-cvar_t gl_underwaterfog ("gl_underwaterfog", 1, CVAR_ARCHIVE);
+// renamed this because I had chosen a bad default... (urff)
+cvar_t gl_underwaterfog ("r_underwaterfog", 0.0f, CVAR_ARCHIVE);
 
-cvar_t r_lockfrustum ("r_lockfrustum", 0.0f);
-cvar_t r_wireframe ("r_wireframe", 0.0f);
-
-extern float r_automap_x;
-extern float r_automap_y;
-extern float r_automap_z;
-extern float r_automap_scale;
-int automap_culls = 0;
-cvar_t r_automap_nearclip ("r_automap_nearclip", "48", CVAR_ARCHIVE);
-
-bool R_AutomapCull (vec3_t emins, vec3_t emaxs)
+void R_ForceRecache (cvar_t *var)
 {
-	// assume it's going to be culled
-	automap_culls++;
-
-	// too near
-	if (emins[2] > (r_refdef.vieworg[2] + r_automap_nearclip.integer + r_automap_z)) return true;
-
-	// check against screen dimensions which have been scaled and translated to automap space
-	if (emaxs[0] < frustum[0].dist) return 1;
-	if (emins[0] > frustum[1].dist) return 1;
-	if (emaxs[1] < frustum[2].dist) return 1;
-	if (emins[1] > frustum[3].dist) return 1;
-
-	// not culled
-	automap_culls--;
-	return false;
+	d3d_RenderDef.BuildSurfaces = true;
+	d3d_RenderDef.oldviewleaf = NULL;
 }
+
+cvar_t r_novis ("r_novis", "0", 0, R_ForceRecache);
+cvar_t r_lockpvs ("r_lockpvs", "0", 0, R_ForceRecache);
+cvar_t r_lockfrustum ("r_lockfrustum", 0.0f, 0, R_ForceRecache);
+cvar_t r_wireframe ("r_wireframe", 0.0f);
 
 
 void D3D_BeginVisedicts (void)
@@ -545,80 +416,13 @@ R_CullBox
 Returns true if the box is completely outside the frustum
 =================
 */
-bool R_CullBox (vec3_t emins, vec3_t emaxs)
+bool R_CullBox (vec3_t emins, vec3_t emaxs, mplane_t *frustumplanes)
 {
-	// different culling for the automap
-	if (d3d_RenderDef.automap) return R_AutomapCull (emins, emaxs);
-
 	for (int i = 0; i < 4; i++)
-		if (BoxOnPlaneSide (emins, emaxs, frustum + i) == 2)
+		if (BOX_ON_PLANE_SIDE (emins, emaxs, &frustumplanes[i]) == 2)
 			return true;
 
 	return false;
-}
-
-
-bool R_CullBox (mnode_t *node)
-{
-	// different culling for the automap
-	if (d3d_RenderDef.automap) return R_AutomapCull (node->mins, node->maxs);
-
-	// if the node's parent was fully outside the frustum then the node is also fully outside the frustum
-	// (note that this should be a trivial reject case as the children of nodes fully outside should never be traversed)
-	if (node->parent && node->parent->bops == FULLY_OUTSIDE_FRUSTUM)
-	{
-		node->bops = FULLY_OUTSIDE_FRUSTUM;
-		return true;
-	}
-
-	// if the node's parent was fully inside the frustum then the node is also fully inside the frustum
-	if (node->parent && node->parent->bops == FULLY_INSIDE_FRUSTUM)
-	{
-		node->bops = FULLY_INSIDE_FRUSTUM;
-		return false;
-	}
-
-	// the node's parent intersected the frustum (or the node has no parent) so run a full check
-	// BoxOnPlaneSide result flags are unknown
-	node->bops = FRUSTUM_UNDEFINED;
-
-	// need to check all 4 sides
-	for (int i = 0; i < 4; i++)
-	{
-		// if the parent is inside the frustum on this side then so is this node
-		if (node->parent && node->parent->sides[i] == INSIDE_FRUSTUM)
-		{
-			node->sides[i] = INSIDE_FRUSTUM;
-			continue;
-		}
-
-		// do this right
-		static int bopstable[] = {0x00, 0x01, 0x10, 0x11};
-
-		// need to check (this was |= which was a bug)
-		node->sides[i] = bopstable[BoxOnPlaneSide (node->mins, node->maxs, frustum + i)];
-
-		// if the node is outside the frustum on any side then the entire node is rejected
-		// (is this valid???  one side could be outside but another inside???)
-		// (in fact this whole function looks to be fucked)
-		if (node->sides[i] == OUTSIDE_FRUSTUM)
-		{
-			node->bops = FULLY_OUTSIDE_FRUSTUM;
-			return true;
-		}
-
-		if (node->sides[i] == INTERSECT_FRUSTUM)
-		{
-			// if any side intersects the frustum we mark it all as intersecting so that we can do comparisons more cleanly
-			node->bops = FULLY_INTERSECT_FRUSTUM;
-			return false;
-		}
-	}
-
-	// only cull if the final node is fully outside
-	if (node->bops == FULLY_OUTSIDE_FRUSTUM)
-		return true;
-	else return false;
 }
 
 
@@ -675,7 +479,7 @@ void R_SetupFrame (void)
 
 	// current viewleaf
 	d3d_RenderDef.oldviewleaf = d3d_RenderDef.viewleaf;
-	d3d_RenderDef.viewleaf = Mod_PointInLeaf (r_refdef.vieworg, cl.worldmodel);
+	d3d_RenderDef.viewleaf = Mod_PointInLeaf (r_refdef.vieworigin, cl.worldmodel);
 
 	d3d_RenderDef.fov_x = r_refdef.fov_x;
 	d3d_RenderDef.fov_y = r_refdef.fov_y;
@@ -751,7 +555,7 @@ void D3D_SetupProjection (float fovx, float fovy, float zn, float zf)
 
 	if (r_waterwarp.value > 1)
 	{
-		int contents = Mod_PointInLeaf (r_viewvectors.origin, cl.worldmodel)->contents;
+		int contents = Mod_PointInLeaf (r_refdef.vieworigin, cl.worldmodel)->contents;
 
 		if (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA)
 		{
@@ -769,17 +573,6 @@ void D3D_ExtractFrustum (void)
 	// retain the old frustum unless we're in the first few frames in which case we want one to be done
 	// as a baseline
 	if (r_lockfrustum.integer && d3d_RenderDef.framecount > 5) return;
-
-	if (d3d_RenderDef.automap)
-	{
-		// scale and translate to automap space for R_AutomapCull
-		// normal, dist, type are unused here
-		frustum[0].dist = r_automap_x - ((vid.width / 2) * r_automap_scale);
-		frustum[1].dist = r_automap_x + ((vid.width / 2) * r_automap_scale);
-		frustum[2].dist = r_automap_y - ((vid.height / 2) * r_automap_scale);
-		frustum[3].dist = r_automap_y + ((vid.height / 2) * r_automap_scale);
-		return;
-	}
 
 	// frustum 0 (right plane)
 	frustum[0].normal[0] = d3d_ModelViewProjMatrix._14 - d3d_ModelViewProjMatrix._11;
@@ -806,7 +599,7 @@ void D3D_ExtractFrustum (void)
 		VectorNormalize (frustum[i].normal);
 
 		frustum[i].type = PLANE_ANYZ;
-		frustum[i].dist = DotProduct (r_viewvectors.origin, frustum[i].normal); //FIXME: shouldn't this always be zero?
+		frustum[i].dist = DotProduct (r_refdef.vieworigin, frustum[i].normal); //FIXME: shouldn't this always be zero?
 		frustum[i].signbits = SignbitsForPlane (&frustum[i]);
 	}
 }
@@ -819,8 +612,18 @@ D3D_PrepareRender
 */
 int D3DRTT_RescaleDimension (int dim);
 
+vec3_t r_oldorigin;
+vec3_t r_oldangles;
+
 void D3DMain_SetupD3D (void)
 {
+	if (memcmp (r_oldorigin, r_refdef.vieworigin, sizeof (vec3_t)) || memcmp (r_oldangles, r_refdef.viewangles, sizeof (vec3_t)))
+	{
+		memcpy (r_oldorigin, r_refdef.vieworigin, sizeof (vec3_t));
+		memcpy (r_oldangles, r_refdef.viewangles, sizeof (vec3_t));
+		d3d_RenderDef.BuildSurfaces = true;
+	}
+
 	// r_wireframe 1 is cheating in multiplayer
 	if (r_wireframe.integer)
 	{
@@ -856,7 +659,6 @@ void D3DMain_SetupD3D (void)
 	D3DMatrix_Identity (&d3d_ProjMatrix);
 
 	DWORD clearcolor = 0xff000000;
-	extern cvar_t r_lockpvs;
 
 	// select correct color clearing mode
 	// and mode that clears the color buffer needs to change the HUD
@@ -866,90 +668,44 @@ void D3DMain_SetupD3D (void)
 		// (note - this should really be a palette index)
 		clearcolor = 0xff1f1f1f;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		HUD_Changed ();
 		// Con_Printf ("Clear to grey\n");
 	}
 	else if (r_wireframe.integer)
 	{
 		clearcolor = 0xff1f1f1f;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		HUD_Changed ();
 	}
 	else if (r_lockfrustum.integer || r_lockpvs.integer)
 	{
 		// set to orange for r_lockfrustum, r_lockpvs, etc tests
 		clearcolor = 0xffff8000;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		HUD_Changed ();
 	}
 	else if (gl_clear.value)
 	{
-		clearcolor = 0xff000000;
+		clearcolor = d3d_QuakePalette.standard32[r_clearcolor.integer & 255];
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		HUD_Changed ();
 	}
 
-	// projection matrix depends on drawmode
-	if (d3d_RenderDef.automap)
-	{
-		// change clear color to black and force a clear
-		clearcolor = 0xff000000;
-		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		HUD_Changed ();
+	extern float r_farclip;
 
-		// nothing has been culled yet
-		automap_culls = 0;
+	// put z going up (this is done in the world matrix so that view is kept clean and we can derive the view vectors from it)
+	D3DMatrix_Rotate (&d3d_WorldMatrix, 1, 0, 0, -90);
+	D3DMatrix_Rotate (&d3d_WorldMatrix, 0, 0, 1, 90);
 
-		float maxdepth = cl.worldmodel->maxs[2];
+	// rotate camera by angles
+	D3DMatrix_Rotate (&d3d_ViewMatrix, 1, 0, 0, -r_refdef.viewangles[2]);
+	D3DMatrix_Rotate (&d3d_ViewMatrix, 0, 1, 0, -r_refdef.viewangles[0]);
+	D3DMatrix_Rotate (&d3d_ViewMatrix, 0, 0, 1, -r_refdef.viewangles[1]);
 
-		if (fabs (cl.worldmodel->mins[2]) > maxdepth) maxdepth = fabs (cl.worldmodel->mins[2]);
+	// translate camera by origin
+	D3DMatrix_Translate (&d3d_ViewMatrix, -r_refdef.vieworigin[0], -r_refdef.vieworigin[1], -r_refdef.vieworigin[2]);
 
-		maxdepth += 100;
-
-		// set a near clipping plane based on the refdef vieworg
-		// here we retain the same space as the world coords
-		D3DMatrix_OrthoOffCenterRH
-		(
-			&d3d_ProjMatrix,
-			0,
-			vid.width * r_automap_scale,
-			0,
-			vid.height * r_automap_scale,
-			-maxdepth,
-			maxdepth
-		);
-
-		// translate camera by origin
-		D3DMatrix_Translate
-		(
-			&d3d_WorldMatrix,
-			-(r_automap_x - (vid.width / 2) * r_automap_scale),
-			-(r_automap_y - (vid.height / 2) * r_automap_scale),
-			-r_refdef.vieworg[2]
-		);
-	}
-	else
-	{
-		extern float r_farclip;
-
-		// put z going up (this is done in the world matrix so that view is kept clean and we can derive the view vectors from it)
-		D3DMatrix_Rotate (&d3d_WorldMatrix, 1, 0, 0, -90);
-		D3DMatrix_Rotate (&d3d_WorldMatrix, 0, 0, 1, 90);
-
-		// rotate camera by angles
-		D3DMatrix_Rotate (&d3d_ViewMatrix, 1, 0, 0, -r_refdef.viewangles[2]);
-		D3DMatrix_Rotate (&d3d_ViewMatrix, 0, 1, 0, -r_refdef.viewangles[0]);
-		D3DMatrix_Rotate (&d3d_ViewMatrix, 0, 0, 1, -r_refdef.viewangles[1]);
-
-		// translate camera by origin
-		D3DMatrix_Translate (&d3d_ViewMatrix, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
-
-		// create an initial projection matrix for deriving the frustum from; as Quake only culls against the top/bottom/left/right
-		// planes we don't need to worry about the far clipping distance yet; we'll just set it to what it was last frame so it has
-		// a good chance of being as close as possible anyway.  this will be set for real as soon as we gather surfaces together in
-		// the refresh (which we can't do before this as we need to frustum cull there, and we don't know what the frustum is yet!)
-		D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip);
-	}
+	// create an initial projection matrix for deriving the frustum from; as Quake only culls against the top/bottom/left/right
+	// planes we don't need to worry about the far clipping distance yet; we'll just set it to what it was last frame so it has
+	// a good chance of being as close as possible anyway.  this will be set for real as soon as we gather surfaces together in
+	// the refresh (which we can't do before this as we need to frustum cull there, and we don't know what the frustum is yet!)
+	D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip);
 
 	// derive these properly
 	r_viewvectors.forward[0] = d3d_ViewMatrix._11;
@@ -964,11 +720,6 @@ void D3DMain_SetupD3D (void)
 	r_viewvectors.up[1] = d3d_ViewMatrix._23;
 	r_viewvectors.up[2] = d3d_ViewMatrix._33;
 
-	// make this the untransformed origin vector
-	r_viewvectors.origin[0] = r_refdef.vieworg[0];
-	r_viewvectors.origin[1] = r_refdef.vieworg[1];
-	r_viewvectors.origin[2] = r_refdef.vieworg[2];
-
 	// calculate concatenated final matrix for use by shaders
 	// because it's only needed once per frame instead of once per vertex we can save some vs instructions
 	D3DMatrix_Multiply (&d3d_ModelViewProjMatrix, &d3d_ViewMatrix, &d3d_WorldMatrix);
@@ -980,20 +731,22 @@ void D3DMain_SetupD3D (void)
 	// we only need to clear if we're rendering 3D
 	// we clear *before* we set the viewport as clearing a subrect of the rendertarget is slower
 	// than just clearing the full thing - see IDirect3DDevice9::Clear in the SDK
-	d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
 
-	// figure the sbar height at the active mode scale
-	int sbheight = sb_lines;
-	sbheight *= d3d_CurrentMode.Height;
-	sbheight /= vid.height;
+	if (r_draworder.value)
+	{
+		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
+		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	}
+	else
+	{
+		d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 0.0f, 1);
+		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
+	}
 
 	// set up the scaled viewport taking account of the status bar area
 	if (d3d_RenderDef.RTT)
-		D3D_SetViewport (0, 0, D3DRTT_RescaleDimension (d3d_CurrentMode.Width), D3DRTT_RescaleDimension (d3d_CurrentMode.Height - sbheight), 0, 1);
-	else D3D_SetViewport (0, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height - sbheight, 0, 1);
-
-	// depth testing and writing
-	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+		D3D_SetViewport (0, 0, D3DRTT_RescaleDimension (vid.ref3dsize.width), D3DRTT_RescaleDimension (vid.ref3dsize.height), 0, 1);
+	else D3D_SetViewport (0, 0, vid.ref3dsize.width, vid.ref3dsize.height, 0, 1);
 
 	// backface culling
 	D3D_BackfaceCull (D3DCULL_CCW);
@@ -1033,14 +786,8 @@ void D3D_DeathBlend (void)
 	// no death blend initially
 	cl.cshifts[CSHIFT_DEATH].percent = 0;
 
-	// don't draw it if in the automap or not connected
-	if (d3d_RenderDef.automap) return;
 	if (cls.state != ca_connected) return;
-
-	// console is full screen
-	if (scr_con_current == vid.height) return;
-
-	// no death in intermission
+	if (scr_con_current == 100) return;
 	if (cl.intermission) return;
 
 	// don't draw it in multiplayer as some people might like to take a good
@@ -1086,6 +833,9 @@ void D3D_DeathBlend (void)
 
 
 cvar_t r_truecontentscolour ("r_truecontentscolour", "1", CVAR_ARCHIVE);
+
+float r_underwaterfogcolours[4];
+
 
 void D3D_UpdateContentsColor (void)
 {
@@ -1156,6 +906,20 @@ void D3D_UpdateContentsColor (void)
 		d3d_RenderDef.lastgoodcontents = NULL;
 		break;
 	}
+
+	if (gl_underwaterfog.value && cl.cshifts[CSHIFT_CONTENTS].percent)
+	{
+		// derive an underwater fog colour from the contents shift
+		r_underwaterfogcolours[0] = (float) cl.cshifts[CSHIFT_CONTENTS].destcolor[0] / 255.0f;
+		r_underwaterfogcolours[1] = (float) cl.cshifts[CSHIFT_CONTENTS].destcolor[1] / 255.0f;
+		r_underwaterfogcolours[2] = (float) cl.cshifts[CSHIFT_CONTENTS].destcolor[2] / 255.0f;
+		r_underwaterfogcolours[3] = (float) cl.cshifts[CSHIFT_CONTENTS].percent / 100.0f;
+
+		// reduce the contents shift
+		cl.cshifts[CSHIFT_CONTENTS].percent *= 2;
+		cl.cshifts[CSHIFT_CONTENTS].percent /= 3;
+	}
+	else r_underwaterfogcolours[3] = 0;
 
 	// add the death blend to the cshifts
 	D3D_DeathBlend ();
@@ -1248,33 +1012,6 @@ void R_SetupEntitiesOnList (void)
 int r_speedstime = -1;
 
 
-void D3D_AddExtraInlineModelsToListsForAutomap (void)
-{
-	if (!d3d_RenderDef.automap) return;
-
-	for (int i = 1; i < MAX_MODELS; i++)
-	{
-		model_t *m = cl.model_precache[i];
-
-		// end of the list
-		if (!m) break;
-
-		// no entity cached
-		if (!m->cacheent) continue;
-
-		// model was never seen by the player
-		if (!m->wasseen) continue;
-
-		// model was already added to the list
-		if (m->cacheent->visframe == d3d_RenderDef.framecount) continue;
-
-		// add it to the list and mark as visible
-		m->cacheent->visframe = d3d_RenderDef.framecount;
-		D3D_AddVisEdict (m->cacheent);
-	}
-}
-
-
 /*
 ================
 R_RenderView
@@ -1284,6 +1021,7 @@ r_refdef must be set before the first call
 */
 
 cvar_t r_skyfog ("r_skyfog", 0.5f, CVAR_ARCHIVE);
+void D3DHLSL_EnableFog (bool enabled);
 
 void D3DRMain_HLSLSetup (void)
 {
@@ -1292,59 +1030,72 @@ void D3DRMain_HLSLSetup (void)
 	extern cvar_t gl_fogenable;
 	extern cvar_t gl_fogdensityscale;
 
-	// basic params for drawing the world
+	// select the appropriate shaders to use
+	if (d3d_FogDensity > 0 || r_underwaterfogcolours[3] > 0)
+		D3DHLSL_EnableFog (true);
+	else D3DHLSL_EnableFog (false);
+
+	// add basic params for drawing the world
 	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
 	D3DHLSL_SetFogMatrix (&d3d_ViewMatrix);
 
 	D3DHLSL_SetFloat ("Overbright", d3d_OverbrightModulate);
-	D3DHLSL_SetFloatArray ("r_origin", r_viewvectors.origin, 3);
+	D3DHLSL_SetFloatArray ("r_origin", r_refdef.vieworigin, 3);
 	D3DHLSL_SetFloatArray ("viewangles", r_refdef.viewangles, 3);
 
-	D3DHLSL_SetFloatArray ("FogColor", d3d_FogColor, 4);
-
-	if (nehahra)
+	if (r_underwaterfogcolours[3] > 0)
 	{
-		// nehahra assumes that sky is drawn at a more or less infinite distance
-		// and we try to replicate the original within a reasonable tolerance
-		if (d3d_FogDensity > 0 && gl_fogenable.value)
-			D3DHLSL_SetFloat ("SkyFog", 0.025f);
-		else D3DHLSL_SetFloat ("SkyFog", 1.0f);
-
-		// nehahra fog divides by 100
-		if (gl_fogdensityscale.value > 0)
-			D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
-		else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 100.0f));
+		// Con_Printf ("enabled underwater fog\n");
+		// approximate; looks OK
+		D3DHLSL_SetFloatArray ("FogColor", r_underwaterfogcolours, 4);
+		D3DHLSL_SetFloat ("SkyFog", 0.025f);
+		D3DHLSL_SetFloat ("FogDensity", r_underwaterfogcolours[3] / 640.0f);
 	}
 	else
 	{
-		if (d3d_FogDensity > 0 && r_skyfog.value > 0 && gl_fogenable.value)
-			D3DHLSL_SetFloat ("SkyFog", 1.0f - r_skyfog.value);
-		else D3DHLSL_SetFloat ("SkyFog", 1.0f);
+		D3DHLSL_SetFloatArray ("FogColor", d3d_FogColor, 4);
 
-		// fitz fog divides by 64
-		if (gl_fogdensityscale.value > 0)
-			D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
-		else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 64.0f));
+		if (nehahra)
+		{
+			// nehahra assumes that sky is drawn at a more or less infinite distance
+			// and we try to replicate the original within a reasonable tolerance
+			if (d3d_FogDensity > 0 && gl_fogenable.value)
+				D3DHLSL_SetFloat ("SkyFog", 0.025f);
+			else D3DHLSL_SetFloat ("SkyFog", 1.0f);
+
+			// nehahra fog divides by 100
+			if (gl_fogdensityscale.value > 0)
+				D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
+			else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 100.0f));
+		}
+		else
+		{
+			if (d3d_FogDensity > 0 && r_skyfog.value > 0 && gl_fogenable.value)
+				D3DHLSL_SetFloat ("SkyFog", 1.0f - r_skyfog.value);
+			else D3DHLSL_SetFloat ("SkyFog", 1.0f);
+
+			// fitz fog divides by 64
+			if (gl_fogdensityscale.value > 0)
+				D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
+			else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 64.0f));
+		}
 	}
 }
 
 
 void R_RenderView (void)
 {
-	d3d_RenderDef.framecount++;
-
-	DWORD dwTime1, dwTime2;
+	double dTime1 = 0, dTime2 = 0;
 
 	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldmodel->brushhdr) return;
 
 	if (r_norefresh.value)
 	{
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0xff332200, 1.0f, 1);
-		HUD_Changed ();
 		return;
 	}
 
-	if (r_speeds.value) dwTime1 = Sys_Milliseconds ();
+	if (r_speeds.value) dTime1 = Sys_FloatTime ();
 
 	// initialize stuff
 	D3DLight_SetCoronaState ();
@@ -1352,7 +1103,6 @@ void R_RenderView (void)
 	D3DWarp_InitializeTurb ();
 	D3D_UpdateContentsColor ();
 	D3D_PrepareOverbright ();
-	D3D_AddExtraInlineModelsToListsForAutomap ();
 
 	// set up to render
 	D3DMain_SetupD3D ();
@@ -1385,8 +1135,8 @@ void R_RenderView (void)
 
 	if (r_speeds.value)
 	{
-		dwTime2 = Sys_Milliseconds ();
-		r_speedstime = dwTime2 - dwTime1;
+		dTime2 = Sys_FloatTime ();
+		r_speedstime = (int) ((dTime2 - dTime1) * 1000.0);
 	}
 	else r_speedstime = -1;
 }

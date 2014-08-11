@@ -273,16 +273,12 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 
 				// fail silently
 				if (!start) break;
-
 				if (com_token[0] == '}') break;
 
 				// interpret - these are stored as floats in the save file
 				if (!stricmp (keyname, "total_secrets")) total_secrets = (int) (atof (com_token) + 0.1f);
-
 				if (!stricmp (keyname, "found_secrets")) num_secrets = (int) (atof (com_token) + 0.1f);
-
 				if (!stricmp (keyname, "total_monsters")) total_kills = (int) (atof (com_token) + 0.1f);
-
 				if (!stricmp (keyname, "killed_monsters")) num_kills = (int) (atof (com_token) + 0.1f);
 			}
 		}
@@ -394,13 +390,9 @@ void Menu_SaveLoadAddSave (WIN32_FIND_DATA *savefile)
 {
 	// not interested in these types
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) return;
-
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) return;
-
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) return;
-
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) return;
-
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return;
 
 	// attempt to open it
@@ -593,6 +585,25 @@ void Menu_LoadCustomEnter (void)
 
 void Draw_Mapshot (char *name, int x, int y);
 
+char *Menu_SaveLoadDecodeName (char *namein)
+{
+	char *nameout = (char *) scratchbuf;
+
+	strcpy (nameout, namein);
+
+	for (int i = strlen (nameout); i; i--)
+	{
+		if (nameout[i] == '.')
+		{
+			nameout[i] = 0;
+			break;
+		}
+	}
+
+	return nameout;
+}
+
+
 void Menu_SaveLoadOnHover (int initialy, int y, int itemnum)
 {
 	// highlight bar
@@ -602,39 +613,52 @@ void Menu_SaveLoadOnHover (int initialy, int y, int itemnum)
 	if (!ActiveSaveInfoArray[itemnum]->SaveInfo.filename[0])
 	{
 		// new savegame
-		Draw_Mapshot (NULL, (vid.width - 320) / 2 + 208, initialy + 8);
+		Draw_Mapshot (NULL, (vid.currsize->width - 320) / 2 + 208, initialy + 8);
 		Menu_PrintWhite (220, initialy + 145, "Current Stats");
 		Menu_Print (218, initialy + 160, DIVIDER_LINE);
+		Menu_Print (220, initialy + 175, "Kills:");
+		Menu_Print (220, initialy + 187, "Secrets:");
 
 		// remake quake compatibility
 		if (cl.stats[STAT_TOTALMONSTERS] == 0)
-			Menu_Print (220, initialy + 175, va ("Kills:   %i", cl.stats[STAT_MONSTERS]));
-		else Menu_Print (220, initialy + 175, va ("Kills:   %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]));
+			Menu_PrintWhite (220, initialy + 175, va ("         %i", cl.stats[STAT_MONSTERS]));
+		else Menu_PrintWhite (220, initialy + 175, va ("         %i/%i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]));
 
 		// remake quake compatibility
 		if (cl.stats[STAT_TOTALSECRETS] == 0)
-			Menu_Print (220, initialy + 187, va ("Secrets: %i", cl.stats[STAT_SECRETS]));
-		else Menu_Print (220, initialy + 187, va ("Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]));
+			Menu_PrintWhite (220, initialy + 187, va ("         %i", cl.stats[STAT_SECRETS]));
+		else Menu_PrintWhite (220, initialy + 187, va ("         %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]));
 
-		Menu_Print (220, initialy + 199, va ("Skill:   %s", SkillNames[(int) skill.value]));
+		Menu_Print (220, initialy + 199, "Skill:");
+		Menu_PrintWhite (220, initialy + 199, va ("         %s", SkillNames[(int) skill.value]));
 
 		int seconds = (int) (cl.time);
 		int minutes = (int) (cl.time / 60);
 		seconds -= minutes * 60;
 
-		Menu_Print (220, initialy + 211, va ("Time:    %02i:%02i", minutes, seconds));
+		Menu_Print (220, initialy + 211, "Time:");
+		Menu_PrintWhite (220, initialy + 211, va ("         %02i:%02i", minutes, seconds));
 	}
 	else
 	{
 		// existing save game
-		Draw_Mapshot (va ("%s%s", host_savedir.string, ActiveSaveInfoArray[itemnum]->SaveInfo.filename), (vid.width - 320) / 2 + 208, initialy + 8);
+		Draw_Mapshot (va ("%s%s", host_savedir.string, ActiveSaveInfoArray[itemnum]->SaveInfo.filename), (vid.currsize->width - 320) / 2 + 208, initialy + 8);
 		Menu_PrintWhite (220, initialy + 145, "Savegame Info");
 		Menu_Print (218, initialy + 160, DIVIDER_LINE);
-		Menu_Print (220, initialy + 175, va ("Kills:   %s", ActiveSaveInfoArray[itemnum]->SaveInfo.kills));
-		Menu_Print (220, initialy + 187, va ("Secrets: %s", ActiveSaveInfoArray[itemnum]->SaveInfo.secrets));
-		Menu_Print (220, initialy + 199, va ("Skill:   %s", SkillNames[ActiveSaveInfoArray[itemnum]->SaveInfo.skill]));
-		Menu_Print (220, initialy + 211, va ("Time:    %s", ActiveSaveInfoArray[itemnum]->SaveInfo.time));
-		Menu_Print (220, initialy + 223, va ("%s", ActiveSaveInfoArray[itemnum]->SaveInfo.savetime));
+
+		Menu_Print (220, initialy + 175, "Name:    ");
+		Menu_Print (220, initialy + 187, "Kills:   ");
+		Menu_Print (220, initialy + 199, "Secrets: ");
+		Menu_Print (220, initialy + 211, "Skill:   ");
+		Menu_Print (220, initialy + 223, "Time:    ");
+
+		Menu_PrintWhite (220, initialy + 175, va ("         %s", Menu_SaveLoadDecodeName (ActiveSaveInfoArray[itemnum]->SaveInfo.filename)));
+		Menu_PrintWhite (220, initialy + 187, va ("         %s", ActiveSaveInfoArray[itemnum]->SaveInfo.kills));
+		Menu_PrintWhite (220, initialy + 199, va ("         %s", ActiveSaveInfoArray[itemnum]->SaveInfo.secrets));
+		Menu_PrintWhite (220, initialy + 211, va ("         %s", SkillNames[ActiveSaveInfoArray[itemnum]->SaveInfo.skill]));
+		Menu_PrintWhite (220, initialy + 223, va ("         %s", ActiveSaveInfoArray[itemnum]->SaveInfo.time));
+
+		Menu_Print (220, initialy + 235, va ("%s", ActiveSaveInfoArray[itemnum]->SaveInfo.savetime));
 	}
 }
 
@@ -715,7 +739,11 @@ void Menu_SaveLoadOnEnter (int itemnum)
 			// generate a new save name
 			for (i = 0; i < 99999; i++)
 			{
-				FILE *f = fopen (va ("%s/%s%05i.sav", com_gamedir, host_savedir.string, host_savenamebase.string, i), "r");
+				FILE *f = NULL;
+
+				if (host_savedir.string && host_savedir.string[0])
+					f = fopen (va ("%s/%s%s%05i.sav", com_gamedir, host_savedir.string, host_savenamebase.string, i), "r");
+				else f = fopen (va ("%s/%s%05i.sav", com_gamedir, host_savenamebase.string, i), "r");
 
 				if (!f)
 				{
@@ -838,7 +866,7 @@ int Menu_SaveLoadCustomDraw (int y)
 	}
 
 	if (ActiveScrollbox)
-		y = ActiveScrollbox->DrawItems ((vid.width - 320) / 2 - 24, y);
+		y = ActiveScrollbox->DrawItems ((vid.currsize->width - 320) / 2 - 24, y);
 
 	return y;
 }
@@ -847,7 +875,6 @@ int Menu_SaveLoadCustomDraw (int y)
 void Menu_SaveLoadCustomKey (int key)
 {
 	if (!SaveInfoList) return;
-
 	if (!ActiveScrollbox) return;
 
 	// get what the position is when we come in here

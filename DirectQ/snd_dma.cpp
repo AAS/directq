@@ -417,29 +417,23 @@ void SND_Spatialize(channel_t *ch)
 
 void S_StartSound(int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float fvol, float attenuation)
 {
-	channel_t *target_chan, *check;
+	channel_t *target_chan;
 	sfxcache_t	*sc;
 	int		vol;
-	int		ch_idx;
 	int		skip;
 
-	if (!sound_started)
-		return;
-
-	if (!sfx)
-		return;
-
-	if (nosound.value)
-		return;
+	if (!sound_started) return;
+	if (!sfx) return;
+	if (nosound.value) return;
 
 	vol = fvol*255;
 
-// pick a channel to play on
+	// pick a channel to play on
 	target_chan = SND_PickChannel(entnum, entchannel);
 	if (!target_chan)
 		return;
-		
-// spatialize
+
+	// spatialize
 	memset (target_chan, 0, sizeof(*target_chan));
 	VectorCopy2 (target_chan->origin, origin);
 	target_chan->dist_mult = attenuation / sound_nominal_clip_dist.value;
@@ -451,39 +445,25 @@ void S_StartSound(int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float f
 	if (!target_chan->leftvol && !target_chan->rightvol)
 		return;		// not audible at all
 
-// new channel
+	// new channel
 	sc = S_LoadSound (sfx);
+
 	if (!sc)
 	{
 		target_chan->sfx = NULL;
 		return;		// couldn't load the sound's data
 	}
 
+	// no looping on entity sounds
+	sc->loopstart = -1;
+
 	target_chan->sfx = sfx;
 	target_chan->pos = 0.0;
-    target_chan->end = paintedtime + sc->length;	
-
-// if an identical sound has also been started this frame, offset the pos
-// a bit to keep it from just making the first one louder
-	check = &channels[NUM_AMBIENTS];
-    for (ch_idx=NUM_AMBIENTS; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS; ch_idx++, check++)
-    {
-		if (check == target_chan)
-			continue;
-		if (check->sfx == sfx && !check->pos)
-		{
-			skip = rand () % (int)(0.1*shm->speed);
-			if (skip >= target_chan->end)
-				skip = target_chan->end - 1;
-			target_chan->pos += skip;
-			target_chan->end -= skip;
-			break;
-		}
-		
-	}
+    target_chan->end = paintedtime + sc->length;
 }
 
-void S_StopSound(int entnum, int entchannel)
+
+void S_StopSound (int entnum, int entchannel)
 {
 	int i;
 
@@ -502,10 +482,9 @@ void S_StopSound(int entnum, int entchannel)
 
 void CDAudio_Stop (void);
 
+
 void S_StopAllSounds (bool clear)
 {
-	int		i;
-
 	// stop these as well
 	CDAudio_Stop ();
 
@@ -514,7 +493,7 @@ void S_StopAllSounds (bool clear)
 
 	total_channels = MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS;	// no statics
 
-	for (i = 0; i < MAX_CHANNELS; i++)
+	for (int i = 0; i < MAX_CHANNELS; i++)
 		if (channels[i].sfx)
 			channels[i].sfx = NULL;
 
@@ -545,7 +524,7 @@ void S_ClearBuffer (void)
 
 	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &pData, &dwSize, NULL, NULL, 0)) return;
 
-	memset (pData, clear, shm->samples * shm->samplebits / 8);
+	memset (pData, clear, dwSize);
 	ds_SecondaryBuffer8->Unlock (pData, dwSize, NULL, 0);
 }
 
@@ -588,8 +567,9 @@ void S_StaticSound (sfx_t *sfx, vec3_t origin, float vol, float attenuation)
 	VectorCopy2 (ss->origin, origin);
 	ss->master_vol = vol;
 	ss->dist_mult = (attenuation/64) / sound_nominal_clip_dist.value;
+	ss->pos = 0;
     ss->end = paintedtime + sc->length;	
-	
+
 	SND_Spatialize (ss);
 }
 
@@ -693,44 +673,6 @@ void S_Update (vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 
 		// respatialize channel
 		SND_Spatialize (ch);
-
-		// no volume
-		if (ch->leftvol < 1 && ch->rightvol < 1) continue;
-
-		// try to combine static sounds with a previous channel of the same
-		// sound effect so we don't mix five torches every frame
-		if (i >= MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS)
-		{
-			// see if it can just use the last one
-			if (combine && combine->sfx == ch->sfx)
-			{
-				combine->leftvol += ch->leftvol;
-				combine->rightvol += ch->rightvol;
-				ch->leftvol = ch->rightvol = 0;
-				continue;
-			}
-
-			// search for one
-			combine = channels + MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS;
-
-			for (j = MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS; j < i; j++, combine++)
-				if (combine->sfx == ch->sfx)
-					break;
-
-			if (j == total_channels)
-				combine = NULL;
-			else
-			{
-				if (combine != ch)
-				{
-					combine->leftvol += ch->leftvol;
-					combine->rightvol += ch->rightvol;
-					ch->leftvol = ch->rightvol = 0;
-				}
-
-				continue;
-			}
-		}
 	}
 
 	// debugging output

@@ -44,6 +44,9 @@ extern cvar_t g_gamma;
 extern cvar_t b_gamma;
 extern cvar_t r_anisotropicfilter;
 extern cvar_t vid_vsync;
+extern cvar_t r_surfacebatchcutoff;
+
+cvar_t dummy_batchcutoff;
 
 char *filtermodes[] = {"None", "Point", "Linear", NULL};
 
@@ -87,7 +90,6 @@ void VID_ApplyModeChange (void)
 
 	Cvar_Set (&vid_vsync, dummy_vsync);
 	SCR_UpdateScreen ();
-	HUD_Changed ();
 
 	// position the selection back up one as the "apply" option is no longer valid
 	menu_Video.Key (K_UPARROW);
@@ -388,6 +390,8 @@ void Menu_VideoEncodeVideoMode (void)
 
 int Menu_VideoCustomDraw (int y)
 {
+	Cvar_Set (&r_surfacebatchcutoff, dummy_batchcutoff.value);
+
 	// encode the selected mode options into a video mode number that we can compare with the current mode
 	Menu_VideoEncodeVideoMode ();
 
@@ -433,6 +437,13 @@ int Menu_VideoCustomDraw (int y)
 
 void Menu_VideoCustomEnter (void)
 {
+	dummy_batchcutoff.value = r_surfacebatchcutoff.value;
+
+	if (dummy_batchcutoff.value < 0)
+		dummy_batchcutoff.value = 0;
+	else if (dummy_batchcutoff.value > 1000000)
+		dummy_batchcutoff.value = 1000000;
+
 	// decode the video mode and set currently selected stuff
 	Menu_VideoDecodeVideoMode ();
 
@@ -517,9 +528,15 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
 	}
 
-	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Video.AddOption (new CQMenuCvarToggle ("Optimize MDL Files", &r_optimizealiasmodels, 0, 1));
-	menu_Video.AddOption (new CQMenuCvarToggle ("Cache Mesh to Disk", &r_cachealiasmodels, 0, 1));
+	menu_Video.AddOption (new CQMenuSpinControl ("Surface Batch Cutoff", &dummy_batchcutoff, 0, 1000000, 10, NULL, NULL));
+
+	// only expose these on hardware T&L parts as there have been reports of them being slower with software T&L
+	if (d3d_GlobalCaps.supportHardwareTandL)
+	{
+		menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+		menu_Video.AddOption (new CQMenuCvarToggle ("Optimize MDL Files", &r_optimizealiasmodels, 0, 1));
+		menu_Video.AddOption (new CQMenuCvarToggle ("Cache Mesh to Disk", &r_cachealiasmodels, 0, 1));
+	}
 }
 
 

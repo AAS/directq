@@ -27,9 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "pr_class.h"
 
 
-// nehahra stuffcmds this (...and it can go fuck right off in my opinion...)
-cvar_t r_waterripple ("r_waterripple", "0");
-
 // nehahra cutscene - fixme - need to find a way to skip a cutscene while playing
 cvar_t cutscene ("cutscene", "1", CVAR_ARCHIVE);
 
@@ -148,6 +145,8 @@ void SHOWLMP_drawall (void)
 	if (!nehahra) return;
 
 	if (!showlmp) showlmp = (showlmp_t *) GameZone->Alloc (sizeof (showlmp_t) * SHOWLMP_MAXLABELS);
+
+	D3DDraw_SetSize (&vid.sbarsize);
 
 	// evil evil evil evil
 	// ugly ugly ugly ugly

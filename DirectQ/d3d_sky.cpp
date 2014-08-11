@@ -23,8 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 
 // surface interface
-void D3DBrush_SetBuffers (void);
-void D3DBrush_FlushSurfaces (void);
+void D3DBrush_Begin (void);
+void D3DBrush_End (void);
 void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent);
 
 /*
@@ -49,8 +49,40 @@ cvar_t r_skybackscroll ("r_skybackscroll", 8, CVAR_ARCHIVE);
 cvar_t r_skyfrontscroll ("r_skyfrontscroll", 16, CVAR_ARCHIVE);
 cvar_t r_skyalpha ("r_skyalpha", 1, CVAR_ARCHIVE);
 
-d3d_modelsurf_t *r_skysurfaces = NULL;
+#define MAX_SKY_SURFACES 65536
+
+d3d_modelsurf_t *r_skysurfaces[MAX_SKY_SURFACES];
 int r_numskysurfaces = 0;
+int r_worldsky = 0;
+
+void D3DSKy_NewMap (void)
+{
+	for (int i = 0; i < MAX_SKY_SURFACES; i++)
+	{
+		if (i < 4096)
+			r_skysurfaces[i] = (d3d_modelsurf_t *) MainHunk->Alloc (sizeof (d3d_modelsurf_t));
+		else r_skysurfaces[i] = NULL;
+	}
+}
+
+
+void D3DSky_Clear (void)
+{
+	r_numskysurfaces = 0;
+}
+
+
+void D3DSky_MarkWorld (void)
+{
+	r_worldsky = r_numskysurfaces;
+}
+
+
+void D3DSky_SetEntities (void)
+{
+	r_numskysurfaces = r_worldsky;
+}
+
 
 void D3DSky_Begin (void)
 {
@@ -99,15 +131,17 @@ void D3DSky_AddSurfaceToRender (msurface_t *surf, entity_t *ent)
 		// initialize sky for the frame
 		if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
 		if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
-
-		// heh; cool.
-		r_skysurfaces = (d3d_modelsurf_t *) scratchbuf;
 	}
+
+	if (r_numskysurfaces >= MAX_SKY_SURFACES) return;
+
+	if (!r_skysurfaces[r_numskysurfaces])
+		r_skysurfaces[r_numskysurfaces] = (d3d_modelsurf_t *) MainHunk->Alloc (sizeof (d3d_modelsurf_t));
 
 	// because the far clipping plane of the final projection matrix is dependent on the surface
 	// dists we can't actually draw sky just yet, so instead we gather the surfs together and draw later
-	r_skysurfaces[r_numskysurfaces].surf = surf;
-	r_skysurfaces[r_numskysurfaces].ent = ent;
+	r_skysurfaces[r_numskysurfaces]->surf = surf;
+	r_skysurfaces[r_numskysurfaces]->ent = ent;
 	r_numskysurfaces++;
 }
 
@@ -117,16 +151,15 @@ void D3DSky_FinalizeSky (void)
 	if (r_numskysurfaces)
 	{
 		// this is always done even if the relevant modes are not selected so that things will be correct
-		D3DBrush_SetBuffers ();
+		D3DBrush_Begin ();
 		D3DSky_Begin ();
 
 		// now that we've got everything fixed up and set right we can draw the sky
 		for (int i = 0; i < r_numskysurfaces; i++)
-			D3DBrush_SubmitSurface (r_skysurfaces[i].surf, r_skysurfaces[i].ent);
+			D3DBrush_SubmitSurface (r_skysurfaces[i]->surf, r_skysurfaces[i]->ent);
 
 		// draw anything left over
-		D3DBrush_FlushSurfaces ();
-		r_numskysurfaces = 0;
+		D3DBrush_End ();
 	}
 }
 

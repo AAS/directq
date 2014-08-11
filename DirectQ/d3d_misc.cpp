@@ -222,11 +222,6 @@ void R_SetLeafContents (void)
 		R_RecursiveLeafContents (cl.worldmodel->brushhdr->nodes);
 	}
 
-	// mark as unseen to keep the automap valid
-	for (int i = 0; i < cl.worldmodel->brushhdr->numleafs; i++) cl.worldmodel->brushhdr->leafs[i].seen = false;
-
-	for (int i = 0; i < cl.worldmodel->brushhdr->numnodes; i++) cl.worldmodel->brushhdr->nodes[i].seen = false;
-
 	d3d_RenderDef.visframecount = 0;
 }
 
@@ -240,12 +235,14 @@ void Menu_RemoveMenu (void);
 void D3DSky_RevalidateSkybox (void);
 void D3D_ModelSurfsBeginMap (void);
 void Fog_ParseWorldspawn (void);
-void IN_ClearStates (void);
+void IN_ClearMouseState (void);
 void D3DAlias_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
 void Mod_InitForMap (model_t *mod);
-void D3DTexture_DefineChains (void);
 void R_SetDefaultLightStyles (void);
+void D3DSKy_NewMap (void);
+void D3DTexture_RegisterChains (void);
+void D3DBrush_CreateVBOs (void);
 
 void R_ParseForNehahra (void)
 {
@@ -270,7 +267,6 @@ void R_NewMap (void)
 	// world entity baseline
 	memset (&d3d_RenderDef.worldentity, 0, sizeof (entity_t));
 	d3d_RenderDef.worldentity.model = cl.worldmodel;
-	cl.worldmodel->cacheent = &d3d_RenderDef.worldentity;
 	d3d_RenderDef.worldentity.alphaval = 255;
 
 	// fix up the worldmodel surfaces so it's consistent and we can reuse code
@@ -296,7 +292,7 @@ void R_NewMap (void)
 	D3DAlpha_NewMap ();
 	Fog_ParseWorldspawn ();
 	D3DAlias_CreateBuffers ();
-	D3DTexture_DefineChains ();
+	D3DSKy_NewMap ();
 
 	// release cached skins to save memory
 	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);
@@ -307,6 +303,8 @@ void R_NewMap (void)
 	CL_InitTEnts ();
 	S_InitAmbients ();
 	LOC_LoadLocations ();
+	D3DTexture_RegisterChains ();
+	D3DBrush_CreateVBOs ();
 
 	// see do we need to switch off the menus or console
 	if (key_dest != key_game && (cls.demoplayback || cls.demorecording || cls.timedemo))
@@ -333,10 +331,13 @@ void R_NewMap (void)
 	d3d_RenderDef.visframecount = 0;
 
 	// flush all the input buffers and go back to a default state
-	IN_ClearStates ();
+	IN_ClearMouseState ();
 
 	// go to the next registration sequence
 	d3d_RenderDef.RegistrationSequence++;
+
+	// force a surface build on the first frame
+	d3d_RenderDef.BuildSurfaces = true;
 }
 
 

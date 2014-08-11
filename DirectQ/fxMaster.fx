@@ -131,8 +131,31 @@ DrawVert VSDrawColored (DrawVert Input)
 {
 	DrawVert Output;
 
-	// gross hack for bboxes
+	Output.Position = mul (Input.Position, WorldMatrix);
+	Output.Color = Input.Color;
+	Output.Tex0 = Input.Tex0;	// hack for hlsl compiler...
+
+	return (Output);
+}
+
+
+DrawVert VSDrawBBoxes (DrawVert Input)
+{
+	DrawVert Output;
+
 	Output.Position = mul (mul (Input.Position, EntMatrix), WorldMatrix);
+	Output.Color = Input.Color;
+	Output.Tex0 = Input.Tex0;	// hack for hlsl compiler...
+
+	return (Output);
+}
+
+
+DrawVert VSDrawCorona (DrawVert Input)
+{
+	DrawVert Output;
+
+	Output.Position = mul (Input.Position, WorldMatrix);
 	Output.Color = Input.Color;
 	Output.Tex0 = Input.Tex0;	// hack for hlsl compiler...
 
@@ -605,6 +628,7 @@ struct PSLiquidVert
 #endif
 };
 
+float2 ripple;
 
 float4 LiquidPS (PSLiquidVert Input) : COLOR0
 {
@@ -630,6 +654,33 @@ PSLiquidVert LiquidVS (VSLiquidVert Input)
 	Output.Position = mul (Input.Position, WorldMatrix);
 #ifdef hlsl_fog
 	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
+#endif
+	Output.Texcoord0 = Input.Texcoord;
+
+	// fixme - add an OnChange callback to r_warpfactor and premultiply this in the vertexes (we have a second texcoord so we can)
+	// probably not that big a deal though, but nonetheless.
+	Output.Texcoord1 = Input.Texcoord.yx * warpfactor + warptime;
+
+	return (Output);
+}
+
+
+PSLiquidVert LiquidVSRipple (VSLiquidVert Input)
+{
+	PSLiquidVert Output;
+
+	float4 nv = float4
+	(
+		Input.Position.x,
+		Input.Position.y,
+		Input.Position.z + ripple.x * sin (Input.Position.x * 0.05f + ripple.y) * sin (Input.Position.z * 0.05f + ripple.y),
+		Input.Position.w
+	);
+
+	// this is friendlier for preshaders
+	Output.Position = mul (nv, WorldMatrix);
+#ifdef hlsl_fog
+	Output.FogPosition = mul (nv, ModelViewMatrix);
 #endif
 	Output.Texcoord0 = Input.Texcoord;
 
@@ -987,6 +1038,24 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 VSAliasVSViewModel ();
 		PixelShader = compile ps_2_0 PSAliasLumaNoLuma ();
+	}
+
+	pass FX_PASS_CORONA
+	{
+		VertexShader = compile vs_2_0 VSDrawCorona ();
+		PixelShader = compile ps_2_0 PSDrawColored ();
+	}
+
+	pass FX_PASS_BBOXES
+	{
+		VertexShader = compile vs_2_0 VSDrawBBoxes ();
+		PixelShader = compile ps_2_0 PSDrawColored ();
+	}
+
+	pass FX_PASS_LIQUID_RIPPLE
+	{
+		VertexShader = compile vs_2_0 LiquidVSRipple ();
+		PixelShader = compile ps_2_0 LiquidPS ();
 	}
 }
 

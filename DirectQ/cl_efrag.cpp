@@ -16,178 +16,127 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
-// cl_tent.c -- client side temporary entities
+
+// a lot of this crap is probably unnecessary but we'll clean it out gradually instead of doing a grand sweep
 
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
+
 void D3D_AddVisEdict (entity_t *ent);
 
 
-efrag_t		**lastlink;
-vec3_t		r_emins, r_emaxs;
-entity_t	*r_addent;
-
-efrag_t		*free_efrags = NULL;
-mnode_t	*r_pefragtopnode = NULL;
-
-
-void R_InitEfrags (void)
+typedef struct efrag_s
 {
-	free_efrags = NULL;
-}
+	struct entity_s		*entity;
+	struct efrag_s		*leafnext;
+} efrag_t;
 
 
-#define EXTRA_EFRAGS	64
-
-efrag_t *R_GetEFrag (void)
+// let's get rid of some more globals...
+typedef struct r_efragdef_s
 {
-	int i;
+	vec3_t		mins, maxs;
+	entity_t	*addent;
 
-	if (free_efrags)
-	{
-		efrag_t *ef = free_efrags;
-		free_efrags = free_efrags->entnext;
-		return ef;
-	}
-
-	free_efrags = (efrag_t *) MainHunk->Alloc (EXTRA_EFRAGS * sizeof (efrag_t));
-
-	for (i = 0; i < EXTRA_EFRAGS - 1; i++)
-		free_efrags[i].entnext = &free_efrags[i + 1];
-
-	free_efrags[i].entnext = NULL;
-
-	return R_GetEFrag ();
-}
+	mnode_t	*topnode;
+} r_efragdef_t;
 
 
-void R_SplitEntityOnNode (mnode_t *node)
+void R_SplitEntityOnNode (mnode_t *node, r_efragdef_t *ed)
 {
-	efrag_t		*ef;
-	mplane_t	*splitplane;
-	mleaf_t		*leaf;
-	int			sides;
-
 	if (node->contents == CONTENTS_SOLID) return;
 
 	// add an efrag if the node is a leaf
 	if (node->contents < 0)
 	{
-		if (!r_pefragtopnode)
-			r_pefragtopnode = node;
+		if (!ed->topnode)
+			ed->topnode = node;
 
-		leaf = (mleaf_t *) node;
+		mleaf_t *leaf = (mleaf_t *) node;
 
-		// grab an efrag off the free list
-		ef = R_GetEFrag ();
-		ef->entity = r_addent;
-
-		// add the entity link
-		*lastlink = ef;
-		lastlink = &ef->entnext;
-		ef->entnext = NULL;
+		// efrags can be just allocated as required without needing to be pulled from a list (cleaner)
+		efrag_t *ef = (efrag_t *) MainHunk->Alloc (sizeof (efrag_t));
+		ef->entity = ed->addent;
 
 		// set the leaf links
-		ef->leaf = leaf;
 		ef->leafnext = leaf->efrags;
 		leaf->efrags = ef;
 
 		return;
 	}
 
-	splitplane = node->plane;
-	sides = BOX_ON_PLANE_SIDE (r_emins, r_emaxs, splitplane);
+	int sides = BOX_ON_PLANE_SIDE (ed->mins, ed->maxs, node->plane);
 
 	if (sides == 3)
 	{
 		// split on this plane
-		// if this is the first splitter of this bmodel, remember it
-		if (!r_pefragtopnode)
-			r_pefragtopnode = node;
+		// if this is the first splitter of this model, remember it
+		if (!ed->topnode)
+			ed->topnode = node;
 	}
 
 	// recurse down the contacted sides
-	if (sides & 1) R_SplitEntityOnNode (node->children[0]);
-	if (sides & 2) R_SplitEntityOnNode (node->children[1]);
+	if (sides & 1) R_SplitEntityOnNode (node->children[0], ed);
+	if (sides & 2) R_SplitEntityOnNode (node->children[1], ed);
 }
 
 
 void R_AddEfrags (entity_t *ent)
 {
-	model_t		*entmodel;
-	int			i;
-
 	// entities with no model won't get drawn
 	if (!ent->model) return;
 
 	// never add the world
 	if (ent == cl_entities[0]) return;
 
-	r_addent = ent;
+	r_efragdef_t ed;
 
-	lastlink = &ent->efrag;
-	r_pefragtopnode = NULL;
+	// init the efrag definition struct so that we can avoid more ugly globals
+	ed.topnode = NULL;
+	ed.addent = ent;
 
-	entmodel = ent->model;
+	VectorAdd (ent->origin, ent->model->mins, ed.mins);
+	VectorAdd (ent->origin, ent->model->maxs, ed.maxs);
 
-	for (i = 0; i < 3; i++)
-	{
-		r_emins[i] = ent->origin[i] + entmodel->mins[i];
-		r_emaxs[i] = ent->origin[i] + entmodel->maxs[i];
-	}
+	R_SplitEntityOnNode (cl.worldmodel->brushhdr->nodes, &ed);
 
-	R_SplitEntityOnNode (cl.worldmodel->brushhdr->nodes);
-
-	ent->topnode = r_pefragtopnode;
+	ent->topnode = ed.topnode;
 }
 
 
 void R_StoreEfrags (efrag_t **ppefrag)
 {
-	entity_t	*pent;
-	model_t		*clmodel;
-	efrag_t		*pefrag;
+	efrag_t *pefrag = NULL;
 
 	while ((pefrag = *ppefrag) != NULL)
 	{
-		pent = pefrag->entity;
 		ppefrag = &pefrag->leafnext;
-		clmodel = pent->model;
 
 		// some progs might try to send static ents with no model through here...
-		if (!clmodel) continue;
+		if (!pefrag->entity->model) continue;
 
-		// only add static entities on frames during which a full entity relink occurs otherwise we'll just keep on appending
-		// them and appending them to the list, and as the scene runs faster things will only get worse (this was horrible)
-		if (pent->relinkfame != d3d_RenderDef.relinkframe)
+		// prevent adding twice
+		if (pefrag->entity->visframe == d3d_RenderDef.framecount) continue;
+		if (pefrag->entity->relinkframe == d3d_RenderDef.relinkframe) continue;
+
+		switch (pefrag->entity->model->type)
 		{
-			switch (clmodel->type)
-			{
-			case mod_alias:
-			case mod_brush:
-			case mod_sprite:
-				pent = pefrag->entity;
+		case mod_alias:
+		case mod_brush:
+		case mod_sprite:
+			// add it to the visible edicts list
+			D3D_AddVisEdict (pefrag->entity);
+			break;
 
-				if (pent->visframe != d3d_RenderDef.framecount)
-				{
-					// add it to the visible edicts list
-					D3D_AddVisEdict (pent);
-
-					// mark that we've recorded this entity for this frame
-					pent->visframe = d3d_RenderDef.framecount;
-				}
-
-				break;
-
-			default:
-				break;
-			}
-
-			// mark this static as now having been relinked
-			pent->relinkfame = d3d_RenderDef.relinkframe;
+		default:
+			break;
 		}
+
+		// mark that we've recorded this entity for this frame
+		pefrag->entity->visframe = d3d_RenderDef.framecount;
+		pefrag->entity->relinkframe = d3d_RenderDef.relinkframe;
 	}
 }
 

@@ -118,6 +118,9 @@ void D3DHLSL_SetLastLerp (float val);
 #define FX_PASS_ALIAS_VIEWMODEL_NOLUMA		21
 #define FX_PASS_ALIAS_VIEWMODEL_LUMA		22
 #define FX_PASS_ALIAS_VIEWMODEL_LUMA_NOLUMA	23
+#define FX_PASS_CORONA						24
+#define FX_PASS_BBOXES						25
+#define FX_PASS_LIQUID_RIPPLE				26
 
 
 void D3DHLSL_Init (void);
@@ -127,7 +130,7 @@ void D3DHLSL_Shutdown (void);
 extern cvar_t gl_fullbrights;
 
 // this one wraps DIP so that I can check for commit and anything else i need to do before drawing
-void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumIndexes);
+void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumPrimitives);
 
 
 // crap from the old glquake.h
@@ -274,7 +277,6 @@ typedef struct d3d_renderdef_s
 	mleaf_t *viewleaf;
 	mleaf_t *oldviewleaf;
 	int *lastgoodcontents;
-	bool automap;
 
 	// normal opaque entities
 	entity_t **visedicts;
@@ -291,6 +293,9 @@ typedef struct d3d_renderdef_s
 	// actual fov used for rendering
 	float fov_x;
 	float fov_y;
+
+	// true of the surfaces list needs rebuilding
+	bool BuildSurfaces;
 } d3d_renderdef_t;
 
 extern d3d_renderdef_t d3d_RenderDef;
@@ -313,14 +318,15 @@ void D3D_SetSamplerState (UINT sampler, D3DSAMPLERSTATETYPE type, DWORD state);
 void D3D_SetVertexDeclaration (LPDIRECT3DVERTEXDECLARATION9 vd);
 void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset, DWORD stride, UINT freq = 1);
 void D3D_SetIndices (LPDIRECT3DINDEXBUFFER9 ib);
+void D3D_UnbindStreams (void);
 
 void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE texfilter, D3DTEXTUREFILTERTYPE mipfilter = D3DTEXF_NONE);
 void D3D_SetTextureAddress (DWORD stage, DWORD mode);
 
 void D3D_AlignCubeMapFaceTexels (LPDIRECT3DSURFACE9 surf, D3DCUBEMAP_FACES face);
 
-bool R_CullBox (mnode_t *node);
-bool R_CullBox (vec3_t mins, vec3_t maxs);
+bool R_CullBox (vec3_t mins, vec3_t maxs, mplane_t *frustumplanes);
+extern mplane_t	frustum[];
 
 float Lerp (float l1, float l2, float lerpfactor);
 
@@ -394,3 +400,5 @@ public:
 
 
 extern cvar_t d3d_usinginstancing;
+
+#define MAX_LIGHTMAPS		256

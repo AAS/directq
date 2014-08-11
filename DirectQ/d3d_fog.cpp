@@ -104,17 +104,6 @@ void Fog_Update (float density, float r, float g, float b)
 }
 
 
-void D3DHLSL_EnableFog (bool enabled);
-
-void Fog_FrameCheck (void)
-{
-	// select the appropriate shaders to use
-	if (d3d_FogDensity > 0)
-		D3DHLSL_EnableFog (true);
-	else D3DHLSL_EnableFog (false);
-}
-
-
 void Fog_ParseWorldspawn (void)
 {
 	char key[128], value[4096];

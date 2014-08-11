@@ -568,11 +568,6 @@ cvar_t sv_novis ("sv_novis", "0", CVAR_SERVER);
 
 void SV_AddToFatPVS (vec3_t org, mnode_t *node)
 {
-	int		i;
-	byte	*pvs;
-	mplane_t	*plane;
-	float	d;
-
 	while (1)
 	{
 		// if this is a leaf, accumulate the pvs bits
@@ -580,17 +575,15 @@ void SV_AddToFatPVS (vec3_t org, mnode_t *node)
 		{
 			if (node->contents != CONTENTS_SOLID)
 			{
-				pvs = Mod_LeafPVS ((mleaf_t *) node, sv.worldmodel);
+				byte *pvs = Mod_LeafPVS ((mleaf_t *) node, sv.worldmodel);
 
-				for (i = 0; i < fatbytes; i++) fatpvs[i] |= pvs[i];
+				for (int i = 0; i < fatbytes; i++) fatpvs[i] |= pvs[i];
 			}
 
 			return;
 		}
 
-		plane = node->plane;
-
-		d = DotProduct (org, plane->normal) - plane->dist;
+		float d = SV_PlaneDist (node->plane, org);
 
 		if (d > sv_pvsfat.integer)
 			node = node->children[0];
@@ -626,77 +619,6 @@ byte *SV_FatPVS (vec3_t org)
 	return fatpvs;
 }
 
-//=============================================================================
-
-
-/*
-===============
-SV_FindTouchedLeafs
-
-moved to here, deferred find until we hit actual sending to client, and
-added test vs client pvs in finding.
-
-note - if directq is being used as a server, this may increase the server processing
-===============
-*/
-void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node, byte *pvs)
-{
-	mplane_t	*splitplane;
-	int			sides;
-	int			leafnum;
-
-loc0:;
-
-	// ent already touches a leaf
-	if (ent->touchleaf) return;
-
-	// hit solid
-	if (node->contents == CONTENTS_SOLID) return;
-
-	// add an efrag if the node is a leaf
-	// this is used for sending ents to the client so it needs to stay
-	if (node->contents < 0)
-	{
-loc1:;
-		leafnum = ((mleaf_t *) node) - sv.worldmodel->brushhdr->leafs - 1;
-
-		if ((pvs[leafnum >> 3] & (1 << (leafnum & 7))) || sv_novis.integer)
-			ent->touchleaf = true;
-
-		return;
-	}
-
-	// NODE_MIXED
-	splitplane = node->plane;
-	sides = BOX_ON_PLANE_SIDE (ent->v.absmin, ent->v.absmax, splitplane);
-
-	// recurse down the contacted sides, start dropping out if we hit anything
-	if ((sides & 1) && !ent->touchleaf && node->children[0]->contents != CONTENTS_SOLID)
-	{
-		if (!(sides & 2) && node->children[0]->contents < 0)
-		{
-			node = node->children[0];
-			goto loc1;
-		}
-		else if (!(sides & 2))
-		{
-			node = node->children[0];
-			goto loc0;
-		}
-		else SV_FindTouchedLeafs (ent, node->children[0], pvs);
-	}
-
-	if ((sides & 2) && !ent->touchleaf && node->children[1]->contents != CONTENTS_SOLID)
-	{
-		// test for a leaf and drop out if so, otherwise it's a node so go round again
-		node = node->children[1];
-
-		if (node->contents < 0)
-			goto loc1;
-		else goto loc0;	// SV_FindTouchedLeafs (ent, node, pvs);
-	}
-}
-
 
 /*
 =============
@@ -708,7 +630,6 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 {
 	int		e, i;
 	int		bits;
-	byte	*pvs;
 	vec3_t	org;
 	float	miss, fullbright;
 	edict_t	*ent;
@@ -720,12 +641,12 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 
 	// find the client's PVS
 	VectorAdd (clent->v.origin, clent->v.view_ofs, org);
-	pvs = SV_FatPVS (org);
+
+	sv_frame--;
+	byte *pvs = SV_FatPVS (org);
 
 	// send over all entities (excpet the client) that touch the pvs
 	ent = NEXT_EDICT (SVProgs->EdictPointers[0]);
-
-	int NumCulledEnts = 0;
 
 	for (e = 1; e < SVProgs->NumEdicts; e++, ent = NEXT_EDICT (ent))
 	{
@@ -735,19 +656,13 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 			// ignore ents without visible models
 			if (!ent->v.modelindex || !SVProgs->Strings[ent->v.model]) continue;
 
-			// link to PVS leafs - deferred to here so that we can compare leafs that are touched to the PVS.
-			// this is less optimal on one hand as it now needs to be done separately for each client, rather than once
-			// only (covering all clients), but more optimal on the other as it only needs to hit one leaf and will
-			// start dropping out of the recursion as soon as it does so.  on balance it should be more optimal overall.
-			ent->touchleaf = false;
-			SV_FindTouchedLeafs (ent, sv.worldmodel->brushhdr->nodes, pvs);
+			// ignore if not touching a PV leaf
+			for (i = 0; i < ent->num_leafs; i++)
+				if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i] & 7)))
+					break;
 
-			// if the entity didn't touch any leafs in the pvs don't send it to the client
-			if (!ent->touchleaf && !sv_novis.integer)
-			{
-				//NumCulledEnts++;
-				continue;
-			}
+			// not visible
+			if (i == ent->num_leafs) continue;
 		}
 
 		// send an update
@@ -759,9 +674,9 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (ent->v.origin[2] != ent->baseline.origin[2]) bits |= U_ORIGIN3;
 
 		// only transmit angles if changed from the baseline
-		if (ent->v.angles[0] != ent->baseline.angles[0]) bits |= U_ANGLE1;
-		if (ent->v.angles[1] != ent->baseline.angles[1]) bits |= U_ANGLE2;
-		if (ent->v.angles[2] != ent->baseline.angles[2]) bits |= U_ANGLE3;
+		if (ent->v.angles[0] != ent->baseline.angles[0]) bits |= U_ANGLES1;
+		if (ent->v.angles[1] != ent->baseline.angles[1]) bits |= U_ANGLES2;
+		if (ent->v.angles[2] != ent->baseline.angles[2]) bits |= U_ANGLES3;
 
 		// check everything else
 		if (ent->v.movetype == MOVETYPE_STEP) bits |= U_NOLERP;
@@ -860,11 +775,11 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (bits & U_SKIN) MSG_WriteByte (msg, ent->v.skin);
 		if (bits & U_EFFECTS) MSG_WriteByte (msg, ent->v.effects);
 		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, ent->v.origin[0], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0], sv.Protocol, sv.PrototcolFlags, 0);
+		if (bits & U_ANGLES1) MSG_WriteAngle (msg, ent->v.angles[0], sv.Protocol, sv.PrototcolFlags, 0);
 		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, ent->v.origin[1], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1], sv.Protocol, sv.PrototcolFlags, 1);
+		if (bits & U_ANGLES2) MSG_WriteAngle (msg, ent->v.angles[1], sv.Protocol, sv.PrototcolFlags, 1);
 		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, ent->v.origin[2], sv.Protocol, sv.PrototcolFlags);
-		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2], sv.Protocol, sv.PrototcolFlags, 2);
+		if (bits & U_ANGLES3) MSG_WriteAngle (msg, ent->v.angles[2], sv.Protocol, sv.PrototcolFlags, 2);
 		if (bits & U_ALPHA) MSG_WriteByte (msg, alpha);
 		if (bits & U_FRAME2) MSG_WriteByte (msg, (int) ent->v.frame >> 8);
 		if (bits & U_MODEL2) MSG_WriteByte (msg, (int) ent->v.modelindex >> 8);
@@ -1561,8 +1476,7 @@ void SV_SpawnServer (char *server)
 
 	sv.state = ss_loading;
 	sv.paused = false;
-	sv.dwTime = 1000;
-	sv.time = 1.0f;
+	sv.time = 1.0;
 	sv.models[1] = sv.worldmodel;
 
 	// clear world interaction links
@@ -1611,8 +1525,8 @@ void SV_SpawnServer (char *server)
 	sv.state = ss_active;
 
 	// run two frames to allow everything to settle
-	SV_Physics (100);
-	SV_Physics (100);
+	SV_Physics (0.1);
+	SV_Physics (0.1);
 
 	// create a baseline for more efficient communications
 	SV_CreateBaseline ();

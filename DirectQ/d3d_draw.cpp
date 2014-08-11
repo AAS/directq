@@ -28,7 +28,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void D3DMain_CreateBuffers (void);
 extern LPDIRECT3DINDEXBUFFER9 d3d_MainIBO;
 
-
 typedef struct drawrect_s
 {
 	float sl;
@@ -57,6 +56,9 @@ cvar_t r_smoothcharacters ("r_smoothcharacters", "0", CVAR_ARCHIVE);
 LPDIRECT3DVERTEXBUFFER9 d3d_DrawVBO = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_DrawDecl = NULL;
 
+
+int d3d_DrawOfs_x = 0;
+int d3d_DrawOfs_y = 0;
 
 typedef struct d3d_drawvertex_s
 {
@@ -132,8 +134,8 @@ void D3DDraw_SetBuffers (void)
 
 __inline void D3DDraw_Vertex (d3d_drawvertex_t *vert, float x, float y, D3DCOLOR c, float s, float t)
 {
-	vert->x = x;
-	vert->y = y;
+	vert->x = x + d3d_DrawOfs_x;
+	vert->y = y + d3d_DrawOfs_y;
 	vert->z = 0;
 
 	vert->c = c;
@@ -398,13 +400,12 @@ void Scrap_Upload (void)
 	}
 }
 
+void SCR_RefdefCvarChange (cvar_t *blah);
 
-cvar_t gl_conscale ("gl_conscale", "1", CVAR_ARCHIVE);
-
-// fitz compatibility
-cvar_alias_t scr_menuscale ("scr_menuscale", &gl_conscale);
-cvar_alias_t scr_sbarscale ("scr_sbarscale", &gl_conscale);
-cvar_alias_t scr_conscale ("scr_conscale", &gl_conscale);
+cvar_t gl_conscale ("gl_conscale", "1", CVAR_ARCHIVE, SCR_RefdefCvarChange);
+cvar_t scr_sbarscale ("scr_sbarscale", "1", CVAR_ARCHIVE, SCR_RefdefCvarChange);
+cvar_t scr_menuscale ("scr_menuscale", "1", CVAR_ARCHIVE, SCR_RefdefCvarChange);
+cvar_t scr_conscale ("scr_conscale", "1", CVAR_ARCHIVE, SCR_RefdefCvarChange);
 
 char *gfxlmps[] =
 {
@@ -472,6 +473,7 @@ byte *failsafedata = NULL;
 qpic_t *draw_failsafe = NULL;
 
 
+// temp bugfix - externals are just not loaded for these (we'll do it right next time)
 qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 {
 	if (pic->width < 1 || pic->height < 1)
@@ -506,10 +508,10 @@ qpic_t *Draw_LoadPicData (char *name, qpic_t *pic, bool allowscrap)
 	// backtile doesn't go in the scrap because it wraps
 	// the conback is unpadded as it has edge artefacts otherwise
 	if (!strcmp (name, "gfx/conback.lmp"))
-		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, 0);
+		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_NOEXTERN);
 	else if (!strcmp (name, "gfx/backtile.blah") || !allowscrap)
-		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
-	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE | IMAGE_SCRAP);
+		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE | IMAGE_NOEXTERN);
+	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE | IMAGE_SCRAP | IMAGE_NOEXTERN);
 
 	if (!tex)
 	{
@@ -602,8 +604,8 @@ noscrap_reload:;
 noscrap:;
 	// reload with no scrap
 	if (!strcmp (name, "gfx/conback.lmp"))
-		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, 0);
-	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE);
+		tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_NOEXTERN);
+	else tex = D3D_LoadTexture (name, pic->width, pic->height, pic->data, IMAGE_ALPHA | IMAGE_PADDABLE | IMAGE_NOEXTERN);
 
 	goto noscrap_reload;
 }
@@ -1034,9 +1036,9 @@ __inline int Draw_PrepareCharacter (int x, int y, int num)
 
 	// check for offscreen
 	if (y <= -8) return 0;
-	if (y >= vid.height) return 0;
+	if (y >= vid.currsize->height) return 0;
 	if (x <= -8) return 0;
-	if (x >= vid.width) return 0;
+	if (x >= vid.currsize->width) return 0;
 
 	// ok to draw
 	return num;
@@ -1108,7 +1110,7 @@ of the code.
 */
 void Draw_DebugChar (char num)
 {
-	Draw_Character (vid.width - 20, 20, num);
+	Draw_Character (vid.currsize->width - 20, 20, num);
 }
 
 
@@ -1230,29 +1232,29 @@ void Draw_Crosshair (int x, int y)
 void Draw_TextBox (int x, int y, int width, int height)
 {
 	// corners
-	Draw_Pic (x, y, box_tl);
-	Draw_Pic (x + width + 8, y, box_tr);
-	Draw_Pic (x, y + height + 8, box_bl);
-	Draw_Pic (x + width + 8, y + height + 8, box_br);
+	Draw_SubPic (x + 4, y + 4, box_tl, 4, 4, box_tl->width - 4, box_tl->height - 4);
+	Draw_SubPic (x + width + 8, y + 4, box_tr, 0, 4, box_tr->width - 4, box_tr->height - 4);
+	Draw_SubPic (x + 4, y + height + 8, box_bl, 4, 0, box_bl->width - 4, box_bl->height - 4);
+	Draw_SubPic (x + width + 8, y + height + 8, box_br, 0, 0, box_br->width - 4, box_br->height - 4);
 
 	// left and right sides
 	for (int i = 8; i < height; i += 8)
 	{
-		Draw_Pic (x, y + i, box_ml);
-		Draw_Pic (x + width + 8, y + i, box_mr);
+		Draw_SubPic (x + 4, y + i, box_ml, 4, 0, box_ml->width - 4, box_ml->height);
+		Draw_SubPic (x + width + 8, y + i, box_mr, 0, 0, box_mr->width - 4, box_mr->height);
 	}
 
 	// top and bottom sides
 	for (int i = 16; i < width; i += 8)
 	{
-		Draw_Pic (x + i - 8, y, box_tm);
-		Draw_Pic (x + i - 8, y + height + 8, box_bm);
+		Draw_SubPic (x + i - 8, y + 4, box_tm, 0, 4, box_tm->width, box_tm->height - 4);
+		Draw_SubPic (x + i - 8, y + height + 8, box_bm, 0, 0, box_bm->width, box_bm->height - 4);
 	}
 
-	Draw_Pic (x + width - 8, y, box_tm);
-	Draw_Pic (x + width - 8, y + height + 8, box_bm);
-	Draw_Pic (x, y + height, box_ml);
-	Draw_Pic (x + width + 8, y + height, box_mr);
+	Draw_SubPic (x + width - 8, y + 4, box_tm, 0, 4, box_tm->width, box_tm->height - 4);
+	Draw_SubPic (x + width - 8, y + height + 8, box_bm, 0, 0, box_bm->width, box_bm->height - 4);
+	Draw_SubPic (x + 4, y + height, box_ml, 4, 0, box_ml->width - 4, box_ml->height);
+	Draw_SubPic (x + width + 8, y + height, box_mr, 0, 0, box_mr->width - 4, box_mr->height);
 
 	// fill (ugly as a box of frogs...)
 	for (int i = 16; i < width; i += 8)
@@ -1407,20 +1409,16 @@ Draw_ConsoleBackground
 
 ================
 */
-void Draw_ConsoleBackground (int lines)
+void Draw_ConsoleBackground (int percent)
 {
-	float alpha = 1.125f - ((float) vid.height - (float) lines) / (float) vid.height;
+	float alpha = (float) percent / 75.0f;
 	glpic_t *gl = (glpic_t *) conback->data;
 	D3DCOLOR consolecolor = D3DCOLOR_ARGB (BYTE_CLAMPF (alpha), 255, 255, 255);
 
 	// the conback image is unpadded so use regular texcoords
-	drawrect_t rect = {0, ((float) vid.height - (float) lines) / (float) vid.height, 1, 1};
+	drawrect_t rect = {0, 1.0f - ((float) percent / 100.0f), 1, 1};
 
-	D3DDraw_SubmitQuad (0, 0, vid.width, lines, consolecolor, gl->tex, &rect);
-
-	// force an update of anything that may have been covered by the console
-	// because hud elements may be arbitrarily located we just update all of it
-	HUD_Changed ();
+	D3DDraw_SubmitQuad (0, 0, vid.currsize->width, (float) vid.currsize->height * ((float) percent / 100.0f), consolecolor, gl->tex, &rect);
 }
 
 
@@ -1453,13 +1451,13 @@ void Draw_TileClear (void)
 	// do it proper for left-aligned HUDs
 	if (scr_centersbar.integer)
 	{
-		int width = (vid.width - 320) >> 1;
+		int width = (vid.currsize->width - 320) >> 1;
 		int offset = width + 320;
 
-		Draw_TileClear (0, vid.height - sb_lines, width, sb_lines);
-		Draw_TileClear (offset, vid.height - sb_lines, width, sb_lines);
+		Draw_TileClear (0, vid.currsize->height - sb_lines, width, sb_lines);
+		Draw_TileClear (offset, vid.currsize->height - sb_lines, width, sb_lines);
 	}
-	else Draw_TileClear (320, vid.height - sb_lines, vid.width - 320, sb_lines);
+	else Draw_TileClear (320, vid.currsize->height - sb_lines, vid.currsize->width - 320, sb_lines);
 }
 
 
@@ -1512,8 +1510,7 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (int alpha)
 {
-	D3DDraw_SubmitQuad (0, 0, vid.width, vid.height, D3DCOLOR_ARGB (BYTE_CLAMP (alpha), 0, 0, 0));
-	HUD_Changed ();
+	D3DDraw_SubmitQuad (0, 0, vid.currsize->width, vid.currsize->height, D3DCOLOR_ARGB (BYTE_CLAMP (alpha), 0, 0, 0));
 }
 
 
@@ -1526,15 +1523,10 @@ Draw_PolyBlend
 */
 void Draw_PolyBlend (void)
 {
-	if (d3d_RenderDef.automap) return;
 	if (!gl_polyblend.value) return;
 	if (v_blend[3] < 1) return;
 
-	// who knows if this helps?  Not I.
-	D3DMATRIX m;
-	D3DMatrix_Identity (&m);
-	D3DMatrix_OrthoOffCenterRH (&m, 0, vid.width >> 3, vid.height >> 3, 0, 0, 1);
-	D3DHLSL_SetWorldMatrix (&m);
+	D3DDraw_SetSize (&vid.sbarsize);
 
 	DWORD blendcolor = D3DCOLOR_ARGB
 	(
@@ -1545,7 +1537,7 @@ void Draw_PolyBlend (void)
 	);
 
 	// don't go down into sbar territory
-	D3DDraw_SubmitQuad (0, 0, vid.width >> 3, (vid.height - sb_lines) >> 3, blendcolor);
+	D3DDraw_SubmitQuad (0, 0, vid.sbarsize.width, vid.sbarsize.height - sb_lines, blendcolor);
 
 	// this needs to flush immediately as state is changing immediately after it
 	D3DDraw_Flush ();
@@ -1584,11 +1576,6 @@ void D3DDraw_Begin2D (void)
 	// enforce upload of any textures that went into the scrap
 	Scrap_Upload ();
 
-	// this is a gross hack for bboxes
-	D3DMATRIX m;
-	D3DMatrix_Identity (&m);
-	D3DHLSL_SetEntMatrix (&m);
-
 	// disable depth testing and writing
 	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
 	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
@@ -1615,23 +1602,18 @@ void D3DDraw_Begin2D (void)
 	// set up shader for drawing; always force a pass switch first time
 	d3d_DrawState.ShaderPass = FX_PASS_NOTBEGUN;
 	d3d_DrawState.color2D = 0xffffffff;
-
-	// set the correct filtering mode to use; don't use linear if we're at normal screen size
-	if (vid.width == d3d_CurrentMode.Width && vid.height == d3d_CurrentMode.Height)
-		d3d_DrawState.DrawFilter = D3DTEXF_POINT;
-	else d3d_DrawState.DrawFilter = d3d_TexFilter;
+	d3d_DrawState.DrawFilter = d3d_TexFilter;
 
 	// set up the vertex and index buffers we'll use for drawing
 	D3DDraw_SetBuffers ();
+
+	// clear size to force a recache as the world matrix always needs to be updated for the first 2D draw
+	vid.currsize = NULL;
 
 	// do the polyblends here for simplicity
 	// note - this is a good bit faster with this code than doing them in r_main
 	// note 2 - the gun model code assumes that it's the last thing drawn in the 3D view
 	Draw_PolyBlend ();
-
-	// now set the real ortho matrix we;ll use for everything else
-	D3DMatrix_OrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
-	D3DHLSL_SetWorldMatrix (&m);
 }
 
 
@@ -1640,3 +1622,34 @@ void D3DDraw_End2D (void)
 	D3DDraw_Flush ();
 	d3d_DrawState.color2D = 0xffffffff;
 }
+
+
+void D3DDraw_SetSize (sizedef_t *size)
+{
+	if (vid.currsize && vid.currsize->width == size->width && vid.currsize->height == size->height)
+		return;
+
+	// flush any pending drawing because this is a state change
+	D3DDraw_Flush ();
+
+	// reset the size to that which we're going to use
+	D3DMATRIX m;
+	D3DMatrix_Identity (&m);
+	D3DMatrix_OrthoOffCenterRH (&m, 0, size->width, size->height, 0, 0, 1);
+	D3DHLSL_SetWorldMatrix (&m);
+
+	// and store it out
+	vid.currsize = size;
+}
+
+
+void D3DDraw_SetOfs (int x, int y)
+{
+	// flush any pending drawing because this is a state change
+	D3DDraw_Flush ();
+
+	d3d_DrawOfs_x = x;
+	d3d_DrawOfs_y = y;
+}
+
+

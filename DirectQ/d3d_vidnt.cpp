@@ -80,20 +80,33 @@ HWND d3d_Window;
 
 modestate_t	modestate = MS_UNINIT;
 
+void D3DVid_Restart_f (void);
+bool vid_queuerestart = false;
+
+void D3DVid_QueueRestart (cvar_t *var)
+{
+	// rather than restart immediately we notify the renderer that it will need to restart as soon as it comes up
+	// this should hopefully fix a lot of crap during startup (and generally speed startup up a LOT)
+	vid_queuerestart = true;
+}
+
+
 // video cvars
+void D3DVid_SetActiveGamma (cvar_t *var);
+
 // force an invalid mode on initial entry
 cvar_t		vid_mode ("vid_mode", "-666", CVAR_ARCHIVE);
-cvar_t		d3d_mode ("d3d_mode", "-1", CVAR_ARCHIVE);
+cvar_t		d3d_mode ("d3d_mode", "-1", CVAR_ARCHIVE, D3DVid_QueueRestart);
 cvar_t		vid_wait ("vid_wait", "0");
-cvar_t		v_gamma ("gamma", "1", CVAR_ARCHIVE);
-cvar_t		r_gamma ("r_gamma", "1", CVAR_ARCHIVE);
-cvar_t		g_gamma ("g_gamma", "1", CVAR_ARCHIVE);
-cvar_t		b_gamma ("b_gamma", "1", CVAR_ARCHIVE);
-cvar_t		vid_vsync ("vid_vsync", "0", CVAR_ARCHIVE);
-cvar_t		vid_contrast ("contrast", "1", CVAR_ARCHIVE);
-cvar_t		r_contrast ("r_contrast", "1", CVAR_ARCHIVE);
-cvar_t		g_contrast ("g_contrast", "1", CVAR_ARCHIVE);
-cvar_t		b_contrast ("b_contrast", "1", CVAR_ARCHIVE);
+cvar_t		v_gamma ("gamma", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		r_gamma ("r_gamma", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		g_gamma ("g_gamma", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		b_gamma ("b_gamma", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		vid_vsync ("vid_vsync", "0", CVAR_ARCHIVE, D3DVid_QueueRestart);
+cvar_t		vid_contrast ("contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		r_contrast ("r_contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		g_contrast ("g_contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		b_contrast ("b_contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
 
 cvar_t d3d_usinginstancing ("r_instancing", "1", CVAR_ARCHIVE);
 
@@ -130,6 +143,7 @@ d3d_ModeDesc_t *d3d_ModeList = NULL;
 int d3d_NumModes = 0;
 int d3d_NumWindowedModes = 0;
 
+RECT WorkArea;
 D3DDISPLAYMODE d3d_DesktopMode;
 D3DDISPLAYMODE d3d_CurrentMode;
 
@@ -144,16 +158,14 @@ void ClearAllStates (void);
 void AppActivate (BOOL fActive, BOOL minimize);
 
 
-void D3DVid_Restart_f (void);
-
-
 void D3DVid_ClearScreen (void)
 {
 	if (d3d_Device)
 	{
+		// this represents another frame
+		d3d_RenderDef.framecount++;
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 		d3d_Device->Present (NULL, NULL, NULL, NULL);
-		HUD_Changed ();
 	}
 }
 
@@ -231,12 +243,13 @@ void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
 	{
 		modestate = MS_WINDOWED;
 
+		// center it properly in the working area
 		SetWindowPos
 		(
 			d3d_Window,
 			HWND_TOP,
-			(d3d_DesktopMode.Width - mode->Width) / 2,
-			(d3d_DesktopMode.Height - mode->Height) / 3,
+			((WorkArea.right - WorkArea.left) - width) / 2,
+			((WorkArea.bottom - WorkArea.top) - height) / 2,
 			0,
 			0,
 			SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW | SWP_DRAWFRAME
@@ -278,27 +291,27 @@ D3DFORMAT D3DVid_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 
 		// check that the format exists
 		hr = d3d_Object->CheckDeviceFormat
-			 (
-				 D3DADAPTER_DEFAULT,
-				 D3DDEVTYPE_HAL,
-				 ModeFormat,
-				 D3DUSAGE_DEPTHSTENCIL,
-				 D3DRTYPE_SURFACE,
-				 d3d_AllowedDepthFormats[i]
-			 );
+		(
+			D3DADAPTER_DEFAULT,
+			D3DDEVTYPE_HAL,
+			ModeFormat,
+			D3DUSAGE_DEPTHSTENCIL,
+			D3DRTYPE_SURFACE,
+			d3d_AllowedDepthFormats[i]
+		);
 
 		// format does not exist
 		if (FAILED (hr)) continue;
 
 		// check that the format is compatible
 		hr = d3d_Object->CheckDepthStencilMatch
-			 (
-				 D3DADAPTER_DEFAULT,
-				 D3DDEVTYPE_HAL,
-				 ModeFormat,
-				 ModeFormat,
-				 d3d_AllowedDepthFormats[i]
-			 );
+		(
+			D3DADAPTER_DEFAULT,
+			D3DDEVTYPE_HAL,
+			ModeFormat,
+			ModeFormat,
+			d3d_AllowedDepthFormats[i]
+		);
 
 		// format is not compatible
 		if (FAILED (hr)) continue;
@@ -509,6 +522,9 @@ bool vid_restarted = false;
 
 void D3DVid_Restart_f (void)
 {
+	// video can't be restarted yet
+	if (!d3d_Device) return;
+
 	// if we're attempting to change a fullscreen mode we need to validate it first
 	if (d3d_CurrentMode.Format != D3DFMT_UNKNOWN && d3d_CurrentMode.RefreshRate != 0)
 	{
@@ -651,8 +667,6 @@ void D3DVid_EnumerateVideoModes (void)
 	// get the size of the desktop working area.  this is used instead of the desktop resolution for
 	// determining if a mode is valid for windowed operation, as the desktop size gives 768 as a
 	// valid height in an 800 high display, meaning that the taskbar will hide parts of the DirectQ window.
-	RECT WorkArea;
-
 	SystemParametersInfo (SPI_GETWORKAREA, 0, &WorkArea, 0);
 
 	int MaxWindowWidth = WorkArea.right - WorkArea.left;
@@ -1430,8 +1444,8 @@ void D3DVid_CreateWindow (D3DDISPLAYMODE *mode)
 		(
 			d3d_Window,
 			HWND_TOP,
-			(d3d_DesktopMode.Width - mode->Width) / 2,
-			(d3d_DesktopMode.Height - mode->Height) / 3,
+			((WorkArea.right - WorkArea.left) - width) / 2,
+			((WorkArea.bottom - WorkArea.top) - height) / 2,
 			0,
 			0,
 			SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW | SWP_DRAWFRAME
@@ -1465,6 +1479,7 @@ void D3DVid_SetVideoMode (D3DDISPLAYMODE *mode)
 	scr_disabled_for_loading = true;
 	CDAudio_Pause ();
 
+	// much of this is now bullshit as we're now getting a 640x480 mode initially
 	// if neither width nor height were specified we take it from the d3d_mode cvar
 	// this then passes through to the find best... functions so that the rest of the mode is filled in
 	if (mode->Width == 0 && mode->Height == 0) D3DVid_FindModeForVidMode (mode);
@@ -1848,12 +1863,6 @@ void D3DVid_CheckVidMode (void)
 	d3d_CurrentMode.Height = findmode->d3d_Mode.Height;
 	d3d_CurrentMode.RefreshRate = findmode->d3d_Mode.RefreshRate;
 	d3d_CurrentMode.Width = findmode->d3d_Mode.Width;
-
-	// restart video
-	D3DVid_Restart_f ();
-
-	// update the refdef
-	vid.recalc_refdef = 1;
 }
 
 
@@ -1883,7 +1892,7 @@ int D3DVid_AdjustContrast (float contrastval, int baseval)
 }
 
 
-void D3DVid_SetActiveGamma (void)
+void D3DVid_SetActiveGamma (cvar_t *var)
 {
 	// create a valid baseline for everything to work from
 	for (int i = 0; i < 256; i++)
@@ -1929,59 +1938,7 @@ void D3DVid_SetActiveGamma (void)
 }
 
 
-void D3DVid_CheckGamma (void)
-{
-	// these values are to force a change on first run
-	static int oldvgamma = -1;
-	static int oldrgamma = -1;
-	static int oldggamma = -1;
-	static int oldbgamma = -1;
-	static int oldcontrast = -1;
-	static int oldrcontrast = -1;
-	static int oldgcontrast = -1;
-	static int oldbcontrast = -1;
-
-	// didn't change - call me paranoid about floats!!!
-	if ((int) (v_gamma.value * 100) == oldvgamma &&
-		(int) (r_gamma.value * 100) == oldrgamma &&
-		(int) (g_gamma.value * 100) == oldggamma &&
-		(int) (b_gamma.value * 100) == oldbgamma &&
-		(int) (vid_contrast.value * 100) == oldcontrast &&
-		(int) (r_contrast.value * 100) == oldrcontrast &&
-		(int) (g_contrast.value * 100) == oldgcontrast &&
-		(int) (b_contrast.value * 100) == oldbcontrast)
-	{
-		// didn't change
-		return;
-	}
-
-	// store back
-	oldvgamma = (int) (v_gamma.value * 100);
-	oldrgamma = (int) (r_gamma.value * 100);
-	oldggamma = (int) (g_gamma.value * 100);
-	oldbgamma = (int) (b_gamma.value * 100);
-	oldcontrast = (int) (vid_contrast.value * 100);
-	oldrcontrast = (int) (r_contrast.value * 100);
-	oldgcontrast = (int) (g_contrast.value * 100);
-	oldbcontrast = (int) (b_contrast.value * 100);
-
-	D3DVid_SetActiveGamma ();
-}
-
-
-void D3DVid_CheckVSync (void)
-{
-	static int old_vsync = vid_vsync.integer;
-
-	if (old_vsync != vid_vsync.integer)
-	{
-		old_vsync = vid_vsync.integer;
-		D3DVid_Restart_f ();
-	}
-}
-
-
-void Host_Frame (DWORD time);
+void Host_Frame (double time);
 
 void D3DVid_RecoverLostDevice (void)
 {
@@ -1998,7 +1955,7 @@ void D3DVid_RecoverLostDevice (void)
 	{
 		// run a frame to keep everything ticking along
 		Sys_SendKeyEvents ();
-		Host_Frame (20);
+		Host_Frame (0.02);
 
 		// yield CPU for a while
 		Sleep (20);
@@ -2014,9 +1971,6 @@ void D3DVid_RecoverLostDevice (void)
 
 			// the device is no longer lost
 			Con_DPrintf ("recovered lost device\n");
-
-			// force an update of areas that aren't normally updated in the main refresh
-			HUD_Changed ();
 
 			// restore states (this is ugly)
 			block_drawing = was_blocked;
@@ -2048,19 +2002,21 @@ void D3DVid_RecoverLostDevice (void)
 }
 
 
-void Fog_FrameCheck (void);
-
 void D3DVid_BeginRendering (void)
 {
 	// video is not restarted by default
 	vid_restarted = false;
 
-	// check for any changes to any display properties
-	// if we need to restart video we must skip drawing this frame
-	D3DVid_CheckGamma ();
-	D3DVid_CheckVidMode (); if (vid_restarted) return;
-	D3DVid_CheckVSync (); if (vid_restarted) return;
-	Fog_FrameCheck ();
+	// check if a restart request has been queued; run it if so, and optionally skip the rest of this frame
+	if (vid_queuerestart)
+	{
+		// fixme - move device creation to first time through here...?
+		vid_queuerestart = false;
+		vid.recalc_refdef = 1;
+		D3DVid_CheckVidMode ();
+		D3DVid_Restart_f ();
+		return;
+	}
 
 	// force lighting calcs off; this is done every frame and it will be filtered if necessary
 	D3D_SetRenderState (D3DRS_LIGHTING, FALSE);
@@ -2077,14 +2033,12 @@ void D3DVid_BeginRendering (void)
 void D3DVid_EndRendering (void)
 {
 	// unbind everything
-	D3D_SetStreamSource (0, NULL, 0, 0);
-	D3D_SetStreamSource (1, NULL, 0, 0);
-	D3D_SetStreamSource (2, NULL, 0, 0);
-
-	D3D_SetIndices (NULL);
+	D3D_UnbindStreams ();
 	D3D_SetVertexDeclaration (NULL);
 
+	// count frames here so that we match present calls with the actual real framerate
 	d3d_Device->EndScene ();
+	d3d_RenderDef.framecount++;
 
 	if ((hr = d3d_Device->Present (NULL, NULL, NULL, NULL)) == D3DERR_DEVICELOST)
 		D3DVid_RecoverLostDevice ();
@@ -2095,91 +2049,5 @@ void D3DVid_Finish (void)
 {
 	// bollocks!
 }
-
-
-/*
-=========================================================================================================================================
-
-		VERTICAL SYNC DETECTION
-
-	Here we attempt to detect any vsync settings in a driver control panel.  D3D doesn't seem to have a way of detecting this so
-	instead we'll break into some OpenGL, run some frames in a double-buffered context, see how long they take and make a guess
-	based on that.  This should be done as early as possible in the program (but after the timer is initialized) so that a D3D
-	device isn't active while it's running.  We could potentially rework this as a splash screen at some point in time???
-
-=========================================================================================================================================
-*/
-
-#include <gl/gl.h>
-#pragma comment (lib, "opengl32.lib")
-
-void D3DVid_DetectVSync (HWND hWnd)
-{
-	int pf = 0;
-	HGLRC hRC = NULL;
-	HDC hDC = GetDC (hWnd);
-
-	PIXELFORMATDESCRIPTOR pfd =
-	{
-		sizeof (PIXELFORMATDESCRIPTOR),
-		1,
-		PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
-		PFD_TYPE_RGBA,
-		32,
-		0, 0, 0, 0, 0, 0,
-		0,
-		0,
-		0,
-		0, 0, 0, 0,
-		24,
-		0,
-		0,
-		PFD_MAIN_PLANE,
-		0,
-		0, 0, 0
-	};
-
-	if (!(pf = ChoosePixelFormat (hDC, &pfd))) return;
-	if (!SetPixelFormat (hDC, pf, &pfd)) return;
-	if (!(hRC = wglCreateContext (hDC))) return;
-
-	if (!wglMakeCurrent (hDC, hRC))
-	{
-		wglDeleteContext (hRC);
-		return;
-	}
-
-	// run some dummy frames to warm it up as otherwise the first frame or so might be unusually long
-	for (int i = 0; i < 4; i++)
-	{
-		glClear (GL_DEPTH_BUFFER_BIT);
-		glFinish ();
-		SwapBuffers (hDC);
-	}
-
-	DWORD start = Sys_Milliseconds ();
-
-	// now do it for real
-	for (int i = 0; i < 4; i++)
-	{
-		glClear (GL_DEPTH_BUFFER_BIT);
-		glFinish ();
-		SwapBuffers (hDC);
-	}
-
-	DWORD end = Sys_Milliseconds ();
-
-	wglMakeCurrent (NULL, NULL);
-	wglDeleteContext (hRC);
-	ReleaseDC (hWnd, hDC);
-
-	// we're running 4 frames so if vsync is enabled in the driver control panel
-	// a difference of > 20ms is good for detecting refresh rates up to 200 hz.
-	if (end - start > 20)
-		Cvar_Set (&vid_vsync, 1.0f);
-	else Cvar_Set (&vid_vsync, 0.0f);
-}
-
-
 
 

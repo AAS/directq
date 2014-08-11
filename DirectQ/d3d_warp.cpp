@@ -23,7 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 
 // surface interface
-void D3DBrush_SetBuffers (void);
+void D3DBrush_Begin (void);
+void D3DBrush_End (void);
 void D3DBrush_FlushSurfaces (void);
 void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent);
 
@@ -52,10 +53,15 @@ cvar_t r_warpspeed ("r_warpspeed", 4, CVAR_ARCHIVE);
 cvar_t r_warpscale ("r_warpscale", 8, CVAR_ARCHIVE);
 cvar_t r_warpfactor ("r_warpfactor", 2, CVAR_ARCHIVE);
 
+// for nehahra and anyone who wants them...
+cvar_t r_waterripple ("r_waterripple", 0.0f, CVAR_ARCHIVE);
+cvar_t r_nowaterripple ("r_nowaterripple", 1.0f, CVAR_ARCHIVE);
+
 // lock water/slime/tele/lava alpha sliders
 cvar_t r_lockalpha ("r_lockalpha", "1");
 
 float warptime = 10;
+float ripplefactors[2] = {0, 0};
 
 void D3DWarp_InitializeTurb (void)
 {
@@ -87,23 +93,47 @@ void D3DWarp_InitializeTurb (void)
 	D3DHLSL_SetFloat ("warptime", warptime * 0.0039215f);
 	D3DHLSL_SetFloat ("warpfactor", r_warpfactor.value * 64.0f * 0.0039215f);
 	D3DHLSL_SetFloat ("warpscale", r_warpscale.value * 2.0f * (1.0f / 64.0f));
+
+	// determine if we're rippling
+	if (r_waterripple.value && !r_nowaterripple.value)
+	{
+		ripplefactors[0] = r_waterripple.value;
+		ripplefactors[1] = cl.time * 3.0f;
+	}
+	else
+	{
+		ripplefactors[0] = 0;
+		ripplefactors[1] = 0;
+	}
+
+	D3DHLSL_SetFloatArray ("ripple", ripplefactors, 2);
 }
 
 
 LPDIRECT3DTEXTURE9 previouswarptexture = NULL;
 int previouswarpalpha = -1;
 
+cvar_t r_mipwater ("r_mipwater", "1", CVAR_ARCHIVE);
+
 void D3DWarp_SetupTurbState (void)
 {
-	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
+	// how anyone could think this looks better is beyond me, but oh well, people do...
+	// (I suppose it's OK for teleports, but making the general case suffer in order to handle a special case seems iffy)
+	if (r_mipwater.integer)
+		D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
+	else D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
+
 	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
 	D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
 	D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 
 	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// warping
 
-	D3DBrush_SetBuffers ();
-	D3DHLSL_SetPass (FX_PASS_LIQUID);
+	D3DBrush_Begin ();
+
+	if (r_waterripple.value && !r_nowaterripple.value)
+		D3DHLSL_SetPass (FX_PASS_LIQUID_RIPPLE);
+	else D3DHLSL_SetPass (FX_PASS_LIQUID);
 
 	previouswarptexture = NULL;
 	previouswarpalpha = -1;
@@ -112,7 +142,7 @@ void D3DWarp_SetupTurbState (void)
 
 void D3DWarp_TakeDownTurbState (void)
 {
-	D3DBrush_FlushSurfaces ();
+	D3DBrush_End ();
 }
 
 
@@ -190,35 +220,41 @@ void D3DWarp_DrawSurface (d3d_modelsurf_t *modelsurf)
 }
 
 
-void D3DWarp_DrawWaterSurfaces (d3d_modelsurf_t **modelsurfs, int nummodelsurfs)
+void D3DWarp_DrawWaterSurfaces (d3d_modelsurf_t **chains, int numchains)
 {
 	bool stateset = false;
 
-	// even if we're fully alpha we still pass through here so that we can add items to the alpha list
-	for (int i = 0; i < nummodelsurfs; i++)
+	for (int i = 0; i < numchains; i++)
 	{
-		d3d_modelsurf_t *ms = modelsurfs[i];
-		msurface_t *surf = ms->surf;
+		if (!chains[i]) continue;
 
-		if (!(surf->flags & SURF_DRAWTURB)) continue;
-
-		// skip over alpha surfaces - automatic skip unless the surface explicitly overrides it (same path)
-		if ((surf->flags & SURF_DRAWLAVA) && d3d_LavaAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
-		if ((surf->flags & SURF_DRAWTELE) && d3d_TeleAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
-		if ((surf->flags & SURF_DRAWSLIME) && d3d_SlimeAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
-		if ((surf->flags & SURF_DRAWWATER) && d3d_WaterAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
-
-		// determine if we need a state update; this is just for setting the
-		// initial state; we always update the texture on a texture change
-		// we check in here because we might be skipping some of these surfaces if they have alpha set
-		if (!stateset)
+		for (d3d_modelsurf_t *ms = chains[i]; ms; ms = ms->next)
 		{
-			D3DWarp_SetupTurbState ();
-			stateset = true;
+			msurface_t *surf = ms->surf;
+
+			if (!(surf->flags & SURF_DRAWTURB)) continue;
+
+			// skip over alpha surfaces - automatic skip unless the surface explicitly overrides it (same path)
+			if ((surf->flags & SURF_DRAWLAVA) && d3d_LavaAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
+			if ((surf->flags & SURF_DRAWTELE) && d3d_TeleAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
+			if ((surf->flags & SURF_DRAWSLIME) && d3d_SlimeAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
+			if ((surf->flags & SURF_DRAWWATER) && d3d_WaterAlpha < 255) {D3D_EmitModelSurfToAlpha (ms); continue;}
+
+			// determine if we need a state update; this is just for setting the
+			// initial state; we always update the texture on a texture change
+			// we check in here because we might be skipping some of these surfaces if they have alpha set
+			if (!stateset)
+			{
+				D3DWarp_SetupTurbState ();
+				stateset = true;
+			}
+
+			// this one used for both alpha and non-alpha
+			D3DWarp_DrawSurface (ms);
 		}
 
-		// this one used for both alpha and non-alpha
-		D3DWarp_DrawSurface (ms);
+		// NULL the chain here
+		chains[i] = NULL;
 	}
 
 	// determine if we need to take down state
@@ -344,14 +380,12 @@ cvar_t r_waterwarpspeed ("r_waterwarpspeed", 1.0f, CVAR_ARCHIVE);
 cvar_t r_waterwarpscale ("r_waterwarpscale", 16.0f, CVAR_ARCHIVE);
 cvar_t r_waterwarpfactor ("r_waterwarpfactor", 12.0f, CVAR_ARCHIVE);
 
-
 void D3DRTT_BeginScene (void)
 {
 	d3d_RenderDef.RTT = false;
 
 	// ensure that this fires only if we're actually running a map
 	if (cls.state != ca_connected) return;
-	if (d3d_RenderDef.automap) return;
 
 	// check if we're underwater first
 	if (r_waterwarp.integer != 666)
@@ -362,9 +396,9 @@ void D3DRTT_BeginScene (void)
 		if (!cl.worldmodel) return;
 		if (!cl.worldmodel->brushhdr->nodes) return;
 
-		// r_refdef.vieworg is set in V_RenderView so it can be reliably tested here
+		// r_refdef.vieworigin is set in V_RenderView so it can be reliably tested here
 		// fixme - only eval this once
-		mleaf_t *viewleaf = Mod_PointInLeaf (r_refdef.vieworg, cl.worldmodel);
+		mleaf_t *viewleaf = Mod_PointInLeaf (r_refdef.vieworigin, cl.worldmodel);
 
 		// these content types don't have a warp
 		// we can't check cl.inwater because it's true if partially submerged and it may have some latency from the server
@@ -428,8 +462,6 @@ void D3DRTT_EndScene (void)
 
 	// set up shader for drawing
 	D3DHLSL_SetWorldMatrix (&m);
-
-	D3DHLSL_SetPass (FX_PASS_UNDERWATER);
 	D3DHLSL_SetTexture (0, d3d_RTTTexture);
 	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// edge biasing
 	D3DHLSL_SetTexture (2, d3d_WaterWarpTexture);	// warping
@@ -439,11 +471,10 @@ void D3DRTT_EndScene (void)
 	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
 	D3D_SetTextureMipmap (2, D3DTEXF_LINEAR, D3DTEXF_NONE);
 
+	D3DHLSL_SetPass (FX_PASS_UNDERWATER);
+
 	// unbind because we're going to use DPUP here
-	D3D_SetStreamSource (0, NULL, 0, 0);
-	D3D_SetStreamSource (0, NULL, 0, 0);
-	D3D_SetStreamSource (0, NULL, 0, 0);
-	D3D_SetIndices (NULL);
+	D3D_UnbindStreams ();
 
 	// default blend for when there is no v_blend
 	DWORD blendcolor = D3DCOLOR_ARGB (0, 255, 255, 255);
@@ -460,18 +491,14 @@ void D3DRTT_EndScene (void)
 		);
 	}
 
-	// figure the sbar height at the active mode scale
-	int sbheight = sb_lines;
-	sbheight *= d3d_CurrentMode.Height;
-	sbheight /= vid.height;
-
-	float th = (float) D3DRTT_RescaleDimension (d3d_CurrentMode.Height - sbheight) / (float) D3DRTT_RescaleDimension (d3d_CurrentMode.Height);
+	// this is percentage of height to use for the t coord
+	float th = (float) D3DRTT_RescaleDimension (vid.ref3dsize.height) / (float) D3DRTT_RescaleDimension (d3d_CurrentMode.Height);
 
 	// update our RTT verts
 	D3DRTT_SetVertex (&d3d_RTTVerts[0], 0, 0, 0, 0, 0, 0);
-	D3DRTT_SetVertex (&d3d_RTTVerts[1], d3d_CurrentMode.Width, 0, 1, 0, 1, 0);
-	D3DRTT_SetVertex (&d3d_RTTVerts[2], d3d_CurrentMode.Width, d3d_CurrentMode.Height - sbheight, 1, th, 1, 1);
-	D3DRTT_SetVertex (&d3d_RTTVerts[3], 0, d3d_CurrentMode.Height - sbheight, 0, th, 0, 1);
+	D3DRTT_SetVertex (&d3d_RTTVerts[1], vid.ref3dsize.width, 0, 1, 0, 1, 0);
+	D3DRTT_SetVertex (&d3d_RTTVerts[2], vid.ref3dsize.width, vid.ref3dsize.height, 1, th, 1, 1);
+	D3DRTT_SetVertex (&d3d_RTTVerts[3], 0, vid.ref3dsize.height, 0, th, 0, 1);
 
 	// set up the correct color for the RTT
 	d3d_RTTVerts[0].c = blendcolor;
@@ -506,9 +533,6 @@ void D3DRTT_EndScene (void)
 
 	// disable polyblend because we're going to get it for free with RTT
 	v_blend[3] = 0;
-
-	// ensure that the HUD draws properly
-	HUD_Changed ();
 }
 
 

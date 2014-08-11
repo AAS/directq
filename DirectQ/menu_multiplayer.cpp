@@ -53,7 +53,7 @@ int Menu_MultiplayerCustomDraw (int y)
 {
 	if (tcpipAvailable) return y;
 
-	Menu_PrintCenterWhite (vid.height - 80, "No Communications Available");
+	Menu_PrintCenterWhite (vid.currsize->height - 80, "No Communications Available");
 
 	return y;
 }
@@ -132,15 +132,16 @@ int Menu_SetupCustomDraw (int y)
 	extern qpic_t *gfx_bigbox_lmp;
 	extern qpic_t *gfx_menuplyr_lmp;
 
-	Draw_Pic ((vid.width - gfx_bigbox_lmp->width) / 2, y, gfx_bigbox_lmp);
+	Draw_Pic ((vid.currsize->width - gfx_bigbox_lmp->width) / 2, y, gfx_bigbox_lmp);
 	newy += gfx_bigbox_lmp->height + 5;
 
 	M_BuildTranslationTable (setup_shirt * 16, setup_pants * 16);
-	Draw_PicTranslate ((vid.width - gfx_menuplyr_lmp->width) / 2, y + 8, gfx_menuplyr_lmp, translationTable, setup_shirt, setup_pants);
+	Draw_PicTranslate ((vid.currsize->width - gfx_menuplyr_lmp->width) / 2, y + 8, gfx_menuplyr_lmp, translationTable, setup_shirt, setup_pants);
 
 	// check for an apply change
 	if (setup_shirt != setup_oldshirt || setup_pants != setup_oldpants ||
-			strcmp (dummy_name.string, cl_name.string) || strcmp (dummy_hostname.string, hostname.string))
+		strcmp (dummy_name.string, cl_name.string) ||
+		strcmp (dummy_hostname.string, hostname.string))
 		menu_Setup.EnableMenuOptions (TAG_SETUPAPPLY);
 	else menu_Setup.DisableMenuOptions (TAG_SETUPAPPLY);
 
@@ -179,7 +180,7 @@ int Menu_TCPIPCustomDraw (int y)
 
 	if (tcpipAvailable) return y;
 
-	Menu_PrintCenterWhite (vid.height - 80, "No Communications Available");
+	Menu_PrintCenterWhite (vid.currsize->height - 80, "No Communications Available");
 
 	return y;
 }
@@ -404,7 +405,7 @@ void Menu_SListOnHover (int initialy, int y, int itemnum)
 	hostcache_t *hc = &hostcache[itemnum];
 
 	// rest of info
-	Draw_Mapshot (va ("maps/%s", hc->map), (vid.width - 320) / 2 + 208, initialy + 8);
+	Draw_Mapshot (va ("maps/%s", hc->map), (vid.currsize->width - 320) / 2 + 208, initialy + 8);
 	Menu_PrintWhite (228, initialy + 145, "Server Info");
 	Menu_Print (218, initialy + 160, DIVIDER_LINE);
 
@@ -452,7 +453,7 @@ int Menu_NetErrorCustomDraw (int y)
 {
 	if (Net_ErrorReturnTime < realtime) return y;
 
-	Draw_TextBox ((vid.width / 2) - 175, 80, 334, 90);
+	Draw_TextBox ((vid.currsize->width / 2) - 175, 80, 334, 90);
 	Menu_PrintCenterWhite (100, "Connection Error");
 	Menu_PrintCenter (115, DIVIDER_LINE);
 	Menu_PrintCenter (130, "Failed to connect to remote server");
@@ -534,7 +535,7 @@ int Menu_SListCustomDraw (int y)
 	if (!MenuSListScrollbox) return y;
 
 	// draw through the scrollbox provider
-	MenuSListScrollbox->DrawItems ((vid.width - 320) / 2 - 24, y);
+	MenuSListScrollbox->DrawItems ((vid.currsize->width - 320) / 2 - 24, y);
 
 	return y;
 }
@@ -561,8 +562,8 @@ int Menu_CustomNameCustomDraw (int y)
 
 	// prompt and textbox - these replicate the code in CQMenuCvarTextbox::Draw
 	Menu_Print (148 - strlen ("Player Name") * 8, y, "Player Name");
-	Draw_Fill (vid.width / 2 - 160 + 168, y - 1, MAX_TBLENGTH * 8 + 4, 10, 20, 255);
-	Draw_Fill (vid.width / 2 - 160 + 169, y, MAX_TBLENGTH * 8 + 2, 8, 0, 192);
+	Draw_Fill (vid.currsize->width / 2 - 160 + 168, y - 1, MAX_TBLENGTH * 8 + 4, 10, 20, 255);
+	Draw_Fill (vid.currsize->width / 2 - 160 + 169, y, MAX_TBLENGTH * 8 + 2, 8, 0, 192);
 
 	// name - use white print to avoid adding 128
 	Menu_PrintWhite (170, y, funname);
@@ -573,7 +574,7 @@ int Menu_CustomNameCustomDraw (int y)
 	Menu_PrintCenter (y, DIVIDER_LINE);
 	y += 15;
 
-	Draw_TextBox (((vid.width / 2) - 256) - 16, y - 5, 520, 128);
+	Draw_TextBox (((vid.currsize->width / 2) - 256) - 16, y - 5, 520, 128);
 	y += 10;
 
 	for (int cy = 0, cc = 0; cy < 8; cy++)
@@ -584,9 +585,9 @@ int Menu_CustomNameCustomDraw (int y)
 			if (!cx && !cy) continue;
 
 			if (cy == custnamerow && cx == custnamecol)
-				Menu_HighlightGeneric (((vid.width / 2) - 256) + (cx * 16) - 2, y - 2, 12, 12);
+				Menu_HighlightGeneric (((vid.currsize->width / 2) - 256) + (cx * 16) - 2, y - 2, 12, 12);
 
-			Draw_Character (((vid.width / 2) - 256) + (cx * 16), y, cc);
+			Draw_Character (((vid.currsize->width / 2) - 256) + (cx * 16), y, cc);
 		}
 
 		y += 15;
@@ -741,7 +742,7 @@ void Menu_DoMapInfo (int x, int y, int itemnum, bool showcdtrack = true);
 int Menu_GameConfigCustomDraw (int y)
 {
 	y += 5;
-	Draw_Mapshot (va ("maps/%s", spinbox_bsps[map_number]), (vid.width - 320) / 2 + 96, y);
+	Draw_Mapshot (va ("maps/%s", spinbox_bsps[map_number]), (vid.currsize->width - 320) / 2 + 96, y);
 	y += 130;
 	Menu_DoMapInfo (160, y, map_number);
 
@@ -756,7 +757,7 @@ int Menu_GameConfigCustomDraw (int y)
 int Menu_GameConfigCustomDraw1 (int y)
 {
 	// hide the mapshot if we don't have enough vertical real-estate
-	if (vid.height > 500)
+	if (vid.currsize->height > 500)
 		menu_GameConfig.ShowMenuOptions (TAG_TALLSCREEN);
 	else menu_GameConfig.HideMenuOptions (TAG_TALLSCREEN);
 

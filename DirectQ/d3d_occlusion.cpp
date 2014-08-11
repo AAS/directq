@@ -191,13 +191,13 @@ void D3DOQ_CreateBuffers (void)
 
 bool D3DOQ_ViewInsideBBox (entity_t *ent)
 {
-	if (r_viewvectors.origin[0] < ent->mins[0]) return false;
-	if (r_viewvectors.origin[1] < ent->mins[1]) return false;
-	if (r_viewvectors.origin[2] < ent->mins[2]) return false;
+	if (r_refdef.vieworigin[0] < ent->mins[0]) return false;
+	if (r_refdef.vieworigin[1] < ent->mins[1]) return false;
+	if (r_refdef.vieworigin[2] < ent->mins[2]) return false;
 
-	if (r_viewvectors.origin[0] > ent->maxs[0]) return false;
-	if (r_viewvectors.origin[1] > ent->maxs[1]) return false;
-	if (r_viewvectors.origin[2] > ent->maxs[2]) return false;
+	if (r_refdef.vieworigin[0] > ent->maxs[0]) return false;
+	if (r_refdef.vieworigin[1] > ent->maxs[1]) return false;
+	if (r_refdef.vieworigin[2] > ent->maxs[2]) return false;
 
 	// inside
 	return true;
@@ -302,7 +302,7 @@ void D3DOQ_RunQueries (void)
 				D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 				D3D_SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
 
-				D3DHLSL_SetPass (FX_PASS_DRAWCOLORED);
+				D3DHLSL_SetPass (FX_PASS_BBOXES);
 				D3D_SetVertexDeclaration (d3d_OQDecl);
 
 				stateset = true;
@@ -408,7 +408,7 @@ void D3DOC_ShowBBoxes (void)
 			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 			D3D_SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
 
-			D3DHLSL_SetPass (FX_PASS_DRAWCOLORED);
+			D3DHLSL_SetPass (FX_PASS_BBOXES);
 			D3D_SetVertexDeclaration (d3d_OQDecl);
 
 			if (r_showbboxes.integer > 1)

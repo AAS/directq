@@ -222,13 +222,7 @@ void HUD_Init (void)
 }
 
 
-int hud_updates = 0;
 void Draw_TileClear (void);
-
-void HUD_Changed (void)
-{
-	hud_updates = 0;
-}
 
 
 /*
@@ -299,9 +293,6 @@ cvar_alias_t showfps ("showfps", &scr_showfps);
 // set to true to draw all items whether we have them or not (testing)
 bool hud_drawfull = false;
 
-// needed for crosshair drawing
-extern vrect_t scr_vrect;
-
 
 int HUD_GetX (huditem_t *hi)
 {
@@ -310,12 +301,12 @@ int HUD_GetX (huditem_t *hi)
 	if (hi->flags & HUD_CENTERX)
 	{
 		if (!scr_centersbar.integer && cl_sbar.integer < 2)
-			xpos += 160;
-		else return (vid.width / 2) + xpos;
+			xpos += 160;	// the HUD elements are 320 wide
+		else return (vid.currsize->width / 2) + xpos;
 	}
 
 	if (xpos < 0)
-		return vid.width + xpos;
+		return vid.currsize->width + xpos;
 	else return xpos;
 }
 
@@ -323,10 +314,10 @@ int HUD_GetX (huditem_t *hi)
 int HUD_GetY (huditem_t *hi)
 {
 	if (hi->flags & HUD_CENTERY)
-		return (vid.height / 2) + hi->y;
+		return (vid.currsize->height / 2) + hi->y;
 
 	if (hi->y < 0)
-		return vid.height + hi->y;
+		return vid.currsize->height + hi->y;
 	else return hi->y;
 }
 
@@ -405,7 +396,7 @@ void HUD_DividerLine (int y, int len)
 	}
 
 	str[len] = 0;
-	Draw_String ((vid.width / 2) - (len * 4) - 4, y, str);
+	Draw_String ((vid.currsize->width / 2) - (len * 4) - 4, y, str);
 }
 
 
@@ -517,13 +508,32 @@ void HUD_DrawFrags (void)
 }
 
 
-void HUD_DrawLevelName (int x, int y)
+char *HUD_GetMapName (void)
+{
+	char *mapname = (char *) scratchbuf;
+
+	strcpy (mapname, &cl.worldmodel->name[5]);
+
+	for (int i = strlen (mapname); i; i--)
+	{
+		if (mapname[i] == '.')
+		{
+			mapname[i] = 0;
+			break;
+		}
+	}
+
+	return mapname;
+}
+
+
+void HUD_DrawLevelName (char *levelname, int x, int y)
 {
 	// matches max com_token
 	char str[1024];
 
 	// level name
-	Q_strncpy (str, cl.levelname, 1023);
+	Q_strncpy (str, levelname, 1023);
 
 	// deal with 'cute' messages in the level name (die die die)
 	for (int i = 0;; i++)
@@ -616,17 +626,17 @@ void HUD_DeathmatchOverlay (void)
 	int top, bottom;
 	char num[12];
 
-	Draw_Pic ((vid.width - gfx_ranking_lmp->width) / 2, 32, gfx_ranking_lmp);
+	Draw_Pic ((vid.currsize->width - gfx_ranking_lmp->width) / 2, 32, gfx_ranking_lmp);
 
 	// base X
-	x = vid.width / 2;
+	x = vid.currsize->width / 2;
 
 	// starting Y
 	y = 32 + gfx_ranking_lmp->height + 8;
 
-	HUD_DrawLevelName (x, y);
-
+	HUD_DrawLevelName (va ("%s (%s)", cl.levelname, HUD_GetMapName ()), x, y);
 	y += 12;
+
 	HUD_DividerLine (y, 16);
 
 	// time elapsed
@@ -661,7 +671,7 @@ void HUD_DeathmatchOverlay (void)
 	y += 12;
 	HUD_DividerLine (y, 16);
 
-	x = 80 + ((vid.width - 320) >> 1);
+	x = 80 + ((vid.currsize->width - 320) * 0.5);
 	y += 12;
 
 	for (i = 0; i < l; i++)
@@ -725,18 +735,18 @@ void HUD_SoloScoreboard (qpic_t *pic, float solotime)
 	int SBX;
 	int SBY;
 
-	Draw_Pic ((vid.width - pic->width) / 2, 48, pic);
+	Draw_Pic ((vid.currsize->width - pic->width) / 2, 48, pic);
 
 	// base X
-	SBX = vid.width / 2;
+	SBX = vid.currsize->width / 2;
 
 	// starting Y
 	SBY = 48 + pic->height + 10;
 
 	// level name
-	HUD_DrawLevelName (SBX, SBY);
-
+	HUD_DrawLevelName (va ("%s (%s)", cl.levelname, HUD_GetMapName ()), SBX, SBY);
 	SBY += 12;
+
 	HUD_DividerLine (SBY, 16);
 
 	if (cl.gametype != GAME_DEATHMATCH)
@@ -817,10 +827,7 @@ void HUD_DrawFace (int ActiveItems, int HealthStat)
 		else f = HealthStat / 20;
 
 		if (cl.time <= cl.faceanimtime)
-		{
-			HUD_Changed ();
 			anim = 1;
-		}
 		else anim = 0;
 
 		facepic = sb_faces[f][anim];
@@ -1061,8 +1068,6 @@ void HUD_DrawPowerUpTimers (int ActiveItems)
 				// we need to scrunch these together a little to make room
 				if (str[0] != ' ') Draw_Character (x + 1, y - (cl_sbar.integer > 1 ? 12 : 20), 18 + str[0] - '0');
 				if (str[1] != ' ') Draw_Character (x + 7, y - (cl_sbar.integer > 1 ? 12 : 20), 18 + str[1] - '0');
-
-				HUD_Changed ();
 			}
 		}
 
@@ -1138,9 +1143,7 @@ void HUD_DrawAmmoCounts (int ac1, int ac2, int ac3, int ac4, int ActiveWeapon)
 		_snprintf (num, 10, "%3i", ActiveAmmo[i]);
 
 		if (num[0] != ' ') Draw_Character (x, y, 18 + num[0] - '0');
-
 		if (num[1] != ' ') Draw_Character (x + 8, y, 18 + num[1] - '0');
-
 		if (num[2] != ' ') Draw_Character (x + 16, y, 18 + num[2] - '0');
 
 		x += hud_ammocount[cl_sbar.integer].hx;
@@ -1176,11 +1179,7 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 					flashon = 1;
 				else flashon = 0;
 			}
-			else
-			{
-				HUD_Changed ();
-				flashon = (flashon % 5) + 2;
-			}
+			else flashon = (flashon % 5) + 2;
 
 			// handle wider lightning gun pic
 			if (cl_sbar.value > 1)
@@ -1215,11 +1214,7 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 						flashon = 1;
 					else flashon = 0;
 				}
-				else
-				{
-					HUD_Changed ();
-					flashon = (flashon % 5) + 2;
-				}
+				else flashon = (flashon % 5) + 2;
 
 				// check grenade launcher
 				switch (i)
@@ -1528,11 +1523,11 @@ void HUD_DrawFPS (void)
 
 		_snprintf (str, 16, "%4i fps", (int) (fps + 0.5f));
 
-		int x = vid.width - (strlen (str) * 8 + 4);
+		int x = vid.currsize->width - (strlen (str) * 8 + 4);
 
 		if (cl_sbar.integer > 2)
-			Draw_String (x, vid.height - y1, str);
-		else Draw_String (x, vid.height - y2, str);
+			Draw_String (x, vid.currsize->height - y1, str);
+		else Draw_String (x, vid.currsize->height - y2, str);
 	}
 }
 
@@ -1557,8 +1552,8 @@ void HUD_DrawClock (void)
 
 	// positioning
 	if (cl_sbar.integer > 2)
-		Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y1, str);
-	else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - y2, str);
+		Draw_String (vid.currsize->width - (strlen (str) * 8 + 4), vid.currsize->height - y1, str);
+	else Draw_String (vid.currsize->width - (strlen (str) * 8 + 4), vid.currsize->height - y2, str);
 }
 
 
@@ -1571,10 +1566,8 @@ void HUD_DrawOSDItems (void)
 
 void HUD_DrawHUD (void)
 {
-	static int old_hud = -1;
-
 	// no HUD conditions
-	if (scr_con_current == vid.height) return;	// fixme - this is a pretty crap way of deciding if we're in a map
+	if (scr_con_current == 100) return;	// fixme - this is a pretty crap way of deciding if we're in a map
 	if (scr_viewsize.value > 111) return;
 	if (cl.intermission) return;
 	if (cls.state != ca_connected) return;
@@ -1585,19 +1578,15 @@ void HUD_DrawHUD (void)
 	// hack (why?)
 	if (!cl.levelname) return;
 
+	// set our scaling factor here
+	D3DDraw_SetSize (&vid.sbarsize);
+
 	// bound sbar
 	if (cl_sbar.integer < 0) Cvar_Set (&cl_sbar, "0");
 	if (cl_sbar.integer > 3) Cvar_Set (&cl_sbar, "3");
 
-	if (old_hud != cl_sbar.integer)
-	{
-		// does this duplicate a test in d3d_screen?
-		old_hud = cl_sbar.integer;
-		HUD_Changed ();
-	}
-
-	// add crosshair drawing here because it's drawn over the main view
-	HUD_DrawCrossHair (scr_vrect.x + scr_vrect.width / 2, scr_vrect.y + scr_vrect.height / 2);
+	// add crosshair drawing here because it's drawn over the main view (offset so it's correctly centered)
+	HUD_DrawCrossHair (vid.currsize->width / 2, (vid.currsize->height - sb_lines) / 2);
 
 	// OSD Items (always draw even if dead)
 	HUD_DrawOSDItems ();
@@ -1615,15 +1604,8 @@ void HUD_DrawHUD (void)
 		}
 	}
 
-	// check if it needs to be redrawn
-	if (cl_sbar.integer < 1)
-	{
-		// need to update both draw buffers so pageflipping works right
-		if (hud_updates >= 2) return;
-	}
-
+	// the HUD always redraws every frame as doing so allows fast clears to work properly
 	Draw_TileClear ();
-	hud_updates++;
 
 	// draw elements
 	// note - team colors must be drawn after the face as they overlap in the default layout
@@ -1683,6 +1665,8 @@ void HUD_DrawStuffGotten (int x, int y, int numstuff, int totalstuff)
 
 void HUD_IntermissionOverlay (void)
 {
+	D3DDraw_SetSize (&vid.sbarsize);
+
 #if 1
 	if (cl.gametype == GAME_DEATHMATCH)
 		HUD_DeathmatchOverlay ();
@@ -1734,11 +1718,13 @@ void HUD_IntermissionOverlay (void)
 
 void HUD_FinaleOverlay (int y)
 {
+	D3DDraw_SetSize (&vid.sbarsize);
+
 	if (cl.gametype == GAME_DEATHMATCH)
 		HUD_DeathmatchOverlay ();
 	else
 	{
-		Draw_Pic ((vid.width - gfx_finale_lmp->width) / 2, y - gfx_finale_lmp->height - 16, gfx_finale_lmp);
+		Draw_Pic ((vid.currsize->width - gfx_finale_lmp->width) / 2, y - gfx_finale_lmp->height - 16, gfx_finale_lmp);
 		HUD_DividerLine (y - 12, 16);
 	}
 }

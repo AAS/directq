@@ -28,6 +28,6 @@ void IN_Commands (void);
 void IN_JoyMove (usercmd_t *cmd, float movetime);
 void IN_MouseMove (usercmd_t *cmd, float movetime);
 
-void IN_ClearStates (void);
+void IN_ClearMouseState (void);
 void IN_SetMouseState (bool fullscreen);
 

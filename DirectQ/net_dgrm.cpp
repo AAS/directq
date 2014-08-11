@@ -100,8 +100,8 @@ void NET_Ban_f (void)
 
 		if (((struct in_addr *) &banAddr)->s_addr)
 		{
-			strcpy (addrStr, inet_ntoa (* (struct in_addr *) &banAddr));
-			strcpy (maskStr, inet_ntoa (* (struct in_addr *) &banMask));
+			strcpy (addrStr, inet_ntoa (*(struct in_addr *) &banAddr));
+			strcpy (maskStr, inet_ntoa (*(struct in_addr *) &banMask));
 			print ("Banning %s [%s]\n", addrStr, maskStr);
 		}
 		else
@@ -552,7 +552,7 @@ static void Test_Poll (void *blah)
 		net_message.cursize = len;
 
 		MSG_BeginReading ();
-		control = BigLong (* ((int *) net_message.data));
+		control = BigLong (*((int *) net_message.data));
 		MSG_ReadLong ();
 
 		if (control == -1)
@@ -706,7 +706,7 @@ static void Test2_Poll (void *blah)
 	net_message.cursize = len;
 
 	MSG_BeginReading ();
-	control = BigLong (* ((int *) net_message.data));
+	control = BigLong (*((int *) net_message.data));
 	MSG_ReadLong();
 
 	if (control == -1)
@@ -871,7 +871,7 @@ static void Rcon_Poll (void *blah)
 	net_message.cursize = len;
 
 	MSG_BeginReading ();
-	control = BigLong (* ((int *) net_message.data));
+	control = BigLong (*((int *) net_message.data));
 	MSG_ReadLong ();
 
 	if (control == -1)
@@ -1106,7 +1106,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	net_message.cursize = len;
 
 	MSG_BeginReading ();
-	control = BigLong (* ((int *) net_message.data));
+	control = BigLong (*((int *) net_message.data));
 	MSG_ReadLong ();
 
 	if (control == -1)
@@ -1473,7 +1473,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 			continue;
 
 		MSG_BeginReading ();
-		control = BigLong (* ((int *) net_message.data));
+		control = BigLong (*((int *) net_message.data));
 		MSG_ReadLong ();
 
 		if (control == -1)
@@ -1640,7 +1640,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 				net_message.cursize = ret;
 				MSG_BeginReading ();
 
-				control = BigLong (* ((int *) net_message.data));
+				control = BigLong (*((int *) net_message.data));
 				MSG_ReadLong ();
 
 				if (control == -1)

@@ -1442,14 +1442,14 @@ SV_Physics
 
 ================
 */
-void SV_Physics (DWORD dwFrameTime)
+void SV_Physics (double frametime)
 {
 	int		i;
 	edict_t	*ent;
 
 	// this one needs to be kept rock steady as it's the master timer for events on both the
 	// client and the server.  changing it to an event timer is a big no-no.
-	sv.frametime = (float) dwFrameTime / 1000.0f;
+	sv.frametime = frametime;
 
 	// let the progs know that a new frame has started
 	SVProgs->GlobalStruct->self = EDICT_TO_PROG (SVProgs->EdictPointers[0]);
@@ -1491,9 +1491,8 @@ void SV_Physics (DWORD dwFrameTime)
 	if (SVProgs->GlobalStruct->force_retouch)
 		SVProgs->GlobalStruct->force_retouch--;
 
-	// because this is an accumulated time we must accumulate it without precision loss
-	sv.dwTime += dwFrameTime;
-	sv.time = (float) sv.dwTime / 1000.0f;
+	// accumulate the time as a double
+	sv.time += frametime;
 }
 
 

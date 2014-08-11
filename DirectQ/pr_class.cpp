@@ -26,6 +26,28 @@ cvar_t	pr_builtin_remap ("pr_builtin_remap", "0");
 // 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes  end
 
 
+// swimmonster_start_go
+// swimmonster_start
+dfunction_t *ED_FindFunction (char *name);
+
+dfunction_t *swimmonster_real = NULL;
+dfunction_t *swimmonster_start = NULL;
+dfunction_t *swimmonster_start_go = NULL;
+int fishcount;
+int realfish;
+
+void PR_FixupFish (void)
+{
+	// if we've counted fish twice we drop off the real number to get the correct total
+	if (fishcount == 2)
+	{
+		SVProgs->GlobalStruct->total_monsters -= realfish;
+		Con_DPrintf ("Fixing up fish (%i)\n", realfish);
+		fishcount = 0;
+	}
+}
+
+
 char *pr_opnames[] =
 {
 	"DONE", "MUL_F", "MUL_V", "MUL_FV", "MUL_VF", "DIV", "ADD_F", "ADD_V", "SUB_F", "SUB_V", "EQ_F", "EQ_V", "EQ_S",
@@ -221,6 +243,13 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	FindEdictFieldOffsets ();
+
+	swimmonster_real = ED_FindFunction ("swimmonster_start");
+	swimmonster_start = ED_FindFunction ("swimmonster_start");
+	swimmonster_start_go = ED_FindFunction ("swimmonster_start_go");
+
+	fishcount = 0;
+	realfish = 0;
 }
 
 
@@ -554,6 +583,20 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 int CProgsDat::EnterFunction (dfunction_t *f)
 {
 	int i, j, c, o;
+
+	// fish count fix
+	if (f == swimmonster_start_go)
+	{
+		fishcount++;
+		swimmonster_start_go = NULL;
+	}
+	else if (f == swimmonster_start)
+	{
+		fishcount++;
+		swimmonster_start = NULL;
+	}
+	else if (f == swimmonster_real)
+		realfish++;
 
 	this->Stack[this->StackDepth].s = this->XStatement;
 	this->Stack[this->StackDepth].f = this->XFunction;

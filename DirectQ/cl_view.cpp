@@ -544,20 +544,20 @@ void V_BoundOffsets (void)
 
 	// absolutely bound refresh reletive to entity clipping hull
 	// so the view can never be inside a solid wall
-	if (r_refdef.vieworg[0] < ent->origin[0] - 14)
-		r_refdef.vieworg[0] = ent->origin[0] - 14;
-	else if (r_refdef.vieworg[0] > ent->origin[0] + 14)
-		r_refdef.vieworg[0] = ent->origin[0] + 14;
+	if (r_refdef.vieworigin[0] < ent->origin[0] - 14)
+		r_refdef.vieworigin[0] = ent->origin[0] - 14;
+	else if (r_refdef.vieworigin[0] > ent->origin[0] + 14)
+		r_refdef.vieworigin[0] = ent->origin[0] + 14;
 
-	if (r_refdef.vieworg[1] < ent->origin[1] - 14)
-		r_refdef.vieworg[1] = ent->origin[1] - 14;
-	else if (r_refdef.vieworg[1] > ent->origin[1] + 14)
-		r_refdef.vieworg[1] = ent->origin[1] + 14;
+	if (r_refdef.vieworigin[1] < ent->origin[1] - 14)
+		r_refdef.vieworigin[1] = ent->origin[1] - 14;
+	else if (r_refdef.vieworigin[1] > ent->origin[1] + 14)
+		r_refdef.vieworigin[1] = ent->origin[1] + 14;
 
-	if (r_refdef.vieworg[2] < ent->origin[2] - 22)
-		r_refdef.vieworg[2] = ent->origin[2] - 22;
-	else if (r_refdef.vieworg[2] > ent->origin[2] + 30)
-		r_refdef.vieworg[2] = ent->origin[2] + 30;
+	if (r_refdef.vieworigin[2] < ent->origin[2] - 22)
+		r_refdef.vieworigin[2] = ent->origin[2] - 22;
+	else if (r_refdef.vieworigin[2] > ent->origin[2] + 30)
+		r_refdef.vieworigin[2] = ent->origin[2] + 30;
 }
 
 /*
@@ -629,7 +629,7 @@ void V_CalcIntermissionRefdef (void)
 	// view is the weapon model (only visible from inside body)
 	view = &cl.viewent;
 
-	VectorCopy (ent->origin, r_refdef.vieworg);
+	VectorCopy (ent->origin, r_refdef.vieworigin);
 	VectorCopy (ent->angles, r_refdef.viewangles);
 	view->model = NULL;
 
@@ -670,15 +670,15 @@ void V_CalcRefdef (void)
 	bob = V_CalcBob ();
 
 	// refresh position
-	VectorCopy (ent->origin, r_refdef.vieworg);
-	r_refdef.vieworg[2] += cl.viewheight + bob;
+	VectorCopy (ent->origin, r_refdef.vieworigin);
+	r_refdef.vieworigin[2] += cl.viewheight + bob;
 
 	// never let it sit exactly on a node line, because a water plane can
 	// dissapear when viewed with the eye exactly on it.
 	// the server protocol only specifies to 1/16 pixel, so add 1/32 in each axis
-	r_refdef.vieworg[0] += 1.0 / 32;
-	r_refdef.vieworg[1] += 1.0 / 32;
-	r_refdef.vieworg[2] += 1.0 / 32;
+	r_refdef.vieworigin[0] += 1.0 / 32;
+	r_refdef.vieworigin[1] += 1.0 / 32;
+	r_refdef.vieworigin[2] += 1.0 / 32;
 
 	VectorCopy (cl.viewangles, r_refdef.viewangles);
 	V_CalcViewRoll ();
@@ -692,7 +692,7 @@ void V_CalcRefdef (void)
 	AngleVectors (angles, &av);
 
 	for (i = 0; i < 3; i++)
-		r_refdef.vieworg[i] += scr_ofsx.value * av.forward[i] + scr_ofsy.value * av.right[i] + scr_ofsz.value * av.up[i];
+		r_refdef.vieworigin[i] += scr_ofsx.value * av.forward[i] + scr_ofsy.value * av.right[i] + scr_ofsz.value * av.up[i];
 
 	V_BoundOffsets ();
 
@@ -742,7 +742,7 @@ void V_CalcRefdef (void)
 		if (oldz > ent->origin[2]) oldz = ent->origin[2];
 		if (ent->origin[2] - oldz > STEP_DELTA) oldz = ent->origin[2] - STEP_DELTA;
 
-		r_refdef.vieworg[2] += oldz - ent->origin[2];
+		r_refdef.vieworigin[2] += oldz - ent->origin[2];
 		view->origin[2] += oldz - ent->origin[2];
 		// Con_Printf ("smmothing stair step-ups\n");
 	}
@@ -760,8 +760,6 @@ The player's clipping box goes from (-16 -16 -24) to (16 16 32) from
 the entity origin, so any view position inside that will be valid
 ==================
 */
-extern vrect_t	scr_vrect;
-
 void V_RenderView (void)
 {
 	if (con_forcedup) return;

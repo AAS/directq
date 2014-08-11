@@ -97,10 +97,15 @@ void Con_ToggleConsole_f (void)
 		}
 		else
 		{
+			S_ClearBuffer ();
 			M_Menu_Main_f ();
 		}
 	}
-	else key_dest = key_console;
+	else
+	{
+		S_ClearBuffer ();
+		key_dest = key_console;
+	}
 
 	SCR_EndLoadingPlaque ();
 	memset (con_times, 0, sizeof (con_times));
@@ -169,7 +174,7 @@ void Con_CheckResize (void)
 {
 	int		i, j, width, oldwidth, oldtotallines, numlines, numchars;
 
-	width = (vid.width >> 3) - 2;
+	width = (vid.consize.width >> 3) - 2;
 
 	if (width == con_linewidth)
 		return;
@@ -482,7 +487,7 @@ void Con_Printf (char *fmt, ...)
 	Con_PrintfCommon (msg, false);
 
 	// take a copy for the menus
-	if (key_dest == key_menu) Menu_PutConsolePrintInbuffer (msg);
+	if (key_dest == key_menu && msg[0]) Menu_PutConsolePrintInbuffer (msg);
 }
 
 
@@ -610,6 +615,8 @@ void Con_DrawNotify (void)
 		text = con_text + (i % con_totallines) * con_linewidth;
 		clearnotify = 0;
 
+		D3DDraw_SetSize (&vid.sbarsize);
+
 		for (x = 0; x < con_linewidth; x++)
 			Draw_Character ((x + 1) << 3, v, text[x]);
 
@@ -620,6 +627,7 @@ void Con_DrawNotify (void)
 
 	if (key_dest == key_message)
 	{
+		D3DDraw_SetSize (&vid.sbarsize);
 		clearnotify = 0;
 		x = 0;
 
@@ -639,6 +647,8 @@ void Con_DrawNotify (void)
 	}
 
 	if (v > con_notifylines) con_notifylines = v;
+
+	D3DDraw_SetSize (&vid.consize);
 }
 
 /*
@@ -661,7 +671,7 @@ void Con_DrawConsole (int lines, bool drawinput)
 		return;
 
 	// draw the background
-	Draw_ConsoleBackground (lines);
+	Draw_ConsoleBackground (lines * 100 / vid.currsize->height);
 
 	// draw the text
 	con_vislines = lines;

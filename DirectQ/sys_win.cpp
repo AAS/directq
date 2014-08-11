@@ -54,7 +54,6 @@ static HANDLE	hFile;
 static HANDLE	heventParent;
 static HANDLE	heventChild;
 
-int sys_time_period = 1;
 
 int	Sys_FileExists (char *path)
 {
@@ -121,49 +120,8 @@ Sys_Init
 */
 void Sys_Init (void)
 {
-	TIMECAPS tc;
-
-	if (timeGetDevCaps (&tc, sizeof (TIMECAPS)) != TIMERR_NOERROR)
-	{
-		MessageBox
-		(
-			NULL,
-			"A high resolution multimedia timer was not found on your system",
-			"Error",
-			MB_OK | MB_ICONERROR
-		);
-
-		exit (666);
-	}
-
-	// make sure that what timeGetDevCaps reported back is actually supported!
-	for (sys_time_period = tc.wPeriodMin;; sys_time_period++)
-	{
-		MMRESULT mmr = timeBeginPeriod (sys_time_period);
-
-		// can't support this time period
-		if (mmr == TIMERR_NOCANDO) continue;
-
-		// supported
-		if (mmr == TIMERR_NOERROR) break;
-
-		// as soon as we hit more than 1/10 second accuracy we abort
-		if (sys_time_period > 100)
-		{
-			MessageBox
-			(
-				NULL,
-				"A high resolution multimedia timer was not found on your system",
-				"Error",
-				MB_OK | MB_ICONERROR
-			);
-
-			exit (666);
-		}
-	}
-
 	// run the timer once to get a valid baseline for subsequents
-	Sys_Milliseconds ();
+	Sys_FloatTime ();
 }
 
 
@@ -222,7 +180,6 @@ void Sys_Error (char *error, ...)
 		in_sys_error2 = 1;
 	}
 
-	timeEndPeriod (sys_time_period);
 	exit (666);
 }
 
@@ -230,70 +187,37 @@ void Sys_Error (char *error, ...)
 void Sys_Quit (int ExitCode)
 {
 	Host_Shutdown ();
-	timeEndPeriod (sys_time_period);
 	AllowAccessibilityShortcutKeys (true);
 	exit (ExitCode);
 }
 
 
-DWORD Sys_Milliseconds (void)
+double Sys_FloatTime (void)
 {
-	static bool first = true;
-	static DWORD oldtime = 0, basetime = 0, old = 0;
-	DWORD newtime, now;
+	__int64	freq;
+	static double totaltime = 0;
 
-	now = timeGetTime () + basetime;
+	// get the current frequency as it may change from frame to frame
+	QueryPerformanceFrequency ((LARGE_INTEGER *) &freq);
 
-	if (first)
-	{
-		first = false;
-		basetime = now;
-		now = 0;
-	}
+	__int64 pcount;
+	static __int64 lastpcount;
+	static double frametime;
 
-	if (now < old)
-	{
-		// wrapped
-		basetime += 0xffffffff;
-		now += 0xffffffff;
-	}
+	// now get the current counter
+	QueryPerformanceCounter ((LARGE_INTEGER *) &pcount);
 
-	old = now;
-	newtime = now;
+	// if we wrap we just retain the last valid frametime and it will automatically rectify itself next time
+	if (pcount < lastpcount)
+		; // Con_Printf ("QPC overflow!!!\n");
+	else frametime = (double) (pcount - lastpcount) / (double) freq;
 
-	if (newtime < oldtime)
-		Sys_Error ("Sys_Milliseconds: time running backwards??\n");
+	totaltime += frametime;
 
-	oldtime = newtime;
+	// store back the previous counter
+	lastpcount = pcount;
 
-	return newtime;
-}
-
-
-float Sys_GetNextTime (void)
-{
-	return ((float) Sys_Milliseconds () / 1000.0f);
-}
-
-
-float Sys_GetFirstTime (void)
-{
-	return ((float) Sys_Milliseconds () / 1000.0f);
-}
-
-
-/*
-================
-Sys_FloatTime
-
-================
-*/
-float Sys_FloatTime (void)
-{
-	static DWORD starttime = Sys_Milliseconds ();
-	DWORD now = Sys_Milliseconds ();
-
-	return ((float) (now - starttime) / 1000.0f);
+	return totaltime;
 }
 
 
@@ -303,14 +227,16 @@ void Sys_SendKeyEvents (void)
 
 	while (PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE))
 	{
-		// we always update if there are any event, even if we're paused
+		// we always update if there are any events, even if we're paused
 		scr_skipupdate = 0;
 
-		if (!GetMessage (&msg, NULL, 0, 0))
-			Sys_Quit (msg.wParam);
-
-		TranslateMessage (&msg);
-		DispatchMessage (&msg);
+		// GetMessage returns -1 if there was an error, 0 if WM_QUIT
+		if (GetMessage (&msg, NULL, 0, 0) > 0)
+		{
+			TranslateMessage (&msg);
+			DispatchMessage (&msg);
+		}
+		else Sys_Quit (msg.wParam);
 	}
 }
 
@@ -677,6 +603,12 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	case WM_ERASEBKGND: return 1; // treachery!!! see your MSDN!
 	case WM_SYSCHAR: return 0;
 
+	case WM_PAINT:
+		// minimal WM_PAINT processing
+		// this always generates a valid update rect so just validate it
+		ValidateRect (hWnd, NULL);
+		return 0;
+
 	case WM_INPUT:
 		IN_ReadRawInput ((HRAWINPUT) lParam);
 		return 0;
@@ -728,6 +660,42 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		PostQuitMessage (0);
 		return 0;
 
+	case WM_MOUSEWHEEL:
+		// in the console or the menu we capture the mousewheel and use it for scrolling
+		if (key_dest == key_console)
+		{
+			if ((short) HIWORD (wParam) > 0)
+			{
+				Key_Event (K_PGUP, true);
+				Key_Event (K_PGUP, false);
+			}
+			else
+			{
+				Key_Event (K_PGDN, true);
+				Key_Event (K_PGDN, false);
+			}
+
+			return 0;
+		}
+		else if (key_dest == key_menu)
+		{
+			if ((short) HIWORD (wParam) > 0)
+			{
+				Key_Event (K_UPARROW, true);
+				Key_Event (K_UPARROW, false);
+			}
+			else
+			{
+				Key_Event (K_DOWNARROW, true);
+				Key_Event (K_DOWNARROW, false);
+			}
+
+			return 0;
+		}
+
+		// key_game returns DefWindowProc
+		break;
+
 	case MM_MCINOTIFY:
 		return CDAudio_MessageHandler (hWnd, Msg, wParam, lParam);
 
@@ -740,9 +708,8 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 
 
-void Host_Frame (DWORD time);
+void Host_Frame (double time);
 void VID_DefaultMonitorGamma_f (void);
-void D3DVid_DetectVSync (HWND hWnd);
 
 void GetCrashReason (LPEXCEPTION_POINTERS ep);
 
@@ -751,9 +718,6 @@ LONG WINAPI TildeDirectQ (LPEXCEPTION_POINTERS toast)
 {
 	// restore monitor gamma
 	VID_DefaultMonitorGamma_f ();
-
-	// restore default timer
-	timeEndPeriod (sys_time_period);
 
 	// get and display what caused the crash (debug builds only) or display a generic error (release builds)
 	GetCrashReason (toast);
@@ -776,7 +740,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	WNDCLASS wc;
 
 	// here we use DefWindowProc because we're going to change it a few times and we don't want spurious messages
-	wc.style = CS_CLASSDC | CS_HREDRAW | CS_VREDRAW;
+	wc.style = CS_CLASSDC;//CS_CLASSDC | CS_HREDRAW | CS_VREDRAW;
 	wc.lpfnWndProc = (WNDPROC) DefWindowProc;
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
@@ -940,11 +904,15 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// Disable when full screen
 	AllowAccessibilityShortcutKeys (false);
 
-	Sys_Init ();
-	D3DVid_DetectVSync (d3d_Window);
-	Host_Init (&parms);
+	// force an initial refdef calculation
+	vid.recalc_refdef = 1;
 
-	DWORD oldtime = Sys_Milliseconds ();
+	// bring everything up and run an initial frame to settle things down
+	Sys_Init ();
+	Host_Init (&parms);
+	Host_Frame (0.1);
+
+	double oldtime = Sys_FloatTime ();
 	MSG msg;
 
 	// prime the message
@@ -953,25 +921,31 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// restructured main loop inspired by http://www.mvps.org/directx/articles/writing_the_game_loop.htm
 	while (msg.message != WM_QUIT)
 	{
-		DWORD newtime = Sys_Milliseconds ();
-
-		if (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
+		while (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
 		{
 			TranslateMessage (&msg);
 			DispatchMessage (&msg);
 		}
-		else
-		{
-			// note - a normal frame needs to be run even if paused otherwise we'll never be able to unpause!!!
-			if (cl.paused)
-				Sleep (PAUSE_SLEEP);
-			else if (!ActiveApp || Minimized || block_drawing)
-				Sleep (NOT_FOCUS_SLEEP);
 
+		// note - a normal frame needs to be run even if paused otherwise we'll never be able to unpause!!!
+		if (cl.paused)
+			Sleep (PAUSE_SLEEP);
+		else if (!ActiveApp || Minimized || block_drawing)
+			Sleep (NOT_FOCUS_SLEEP);
+
+		double newtime = Sys_FloatTime ();
+
+		// smooth out timings
+		newtime = ((newtime * 2.0) + oldtime) / 3.0;
+
+		// don't run any 0-length frames and give up remainder of this threads time-slice if we have one
+		if (newtime > oldtime)
+		{
 			// run a normal frame
 			Host_Frame (newtime - oldtime);
 			oldtime = newtime;
 		}
+		else Sleep (0);
 	}
 
 	// run through correct shutdown

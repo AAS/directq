@@ -127,7 +127,7 @@ void LOC_LoadLocations (void)
 	}
 
 	Zone_Free (locdataload);
-	Con_Printf ("Read %i locations\n", numlocations);
+	Con_DPrintf ("Read %i locations\n", numlocations);
 }
 
 

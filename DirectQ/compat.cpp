@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // if a real cvar is registered with the same name as a prior compatibility cvar the real cvar will stomp the compatibility cvar
 void Cvar_MakeCompatLayer (void)
 {
-	cvar_t *r_draworder_compat = new cvar_t ("r_draworder", "0", CVAR_COMPAT);
 	cvar_t *scr_screensize_compat = new cvar_t ("screensize", "0", CVAR_COMPAT);
 	cvar_t *chase_back_compat = new cvar_t ("chase_back", "0", CVAR_COMPAT);
 	cvar_t *chase_up_compat = new cvar_t ("chase_up", "0", CVAR_COMPAT);
@@ -184,7 +183,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *sv_gravity_compat = new cvar_t ("sv_gravity", "0", CVAR_COMPAT);
 	cvar_t *sv_maxvelocity_compat = new cvar_t ("sv_maxvelocity", "0", CVAR_COMPAT);
 	cvar_t *sv_nostep_compat = new cvar_t ("sv_nostep", "0", CVAR_COMPAT);
-	cvar_t *sv_edgefriction_compat = new cvar_t ("edgefriction", "0", CVAR_COMPAT);
 	cvar_t *sv_idealpitchscale_compat = new cvar_t ("sv_idealpitchscale", "0", CVAR_COMPAT);
 	cvar_t *sv_maxspeed_compat = new cvar_t ("sv_maxspeed", "0", CVAR_COMPAT);
 	cvar_t *sv_accelerate_compat = new cvar_t ("sv_accelerate", "0", CVAR_COMPAT);

@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "unzip.h"
+#include "modelgen.h"
 #include <shlwapi.h>
 #pragma comment (lib, "shlwapi.lib")
 
@@ -598,6 +599,25 @@ int COM_FReadChar (void *fh)
 }
 
 
+bool COM_ValidateMDLFile (HANDLE fh)
+{
+	unsigned int mdlid = 0;
+
+	// make sure that we can read it all in
+	if (COM_FReadFile (fh, &mdlid, 4) != 4)
+		return false;
+
+	// check for MD3 masquerading as mdl
+	if (mdlid != IDPOLYHEADER)
+		return false;
+
+	// OK, it's an MDL file now; put the file pointer back
+	SetFilePointer (fh, -4, NULL, FILE_CURRENT);
+	// Con_Printf ("Validated MDL file\n");
+	return true;
+}
+
+
 int COM_FOpenFile (char *filename, void *hf)
 {
 	// don't error out here
@@ -610,6 +630,21 @@ int COM_FOpenFile (char *filename, void *hf)
 
 	// silliness here and above is needed because common.h doesn't know what a HANDLE is
 	HANDLE *hFile = (HANDLE *) hf;
+
+	// darkplaces does something evil; it allows MD3 files to be loaded with a .mdl extension.  Here we need to flag if we're trying to load an MDL
+	// so that we can confirm if it's REALLY an MDL... grrrr...
+	bool checkmdl = false;
+
+	for (int i = strlen (filename); i; i--)
+	{
+		if (!stricmp (&filename[i], ".mdl"))
+		{
+			checkmdl = true;
+			break;
+		}
+
+		if (filename[i] == '.' || filename[i] == '/' || filename[i] == '\\') break;
+	}
 
 	// ensure for the close test below
 	*hFile = INVALID_HANDLE_VALUE;
@@ -653,9 +688,14 @@ int COM_FOpenFile (char *filename, void *hf)
 					}
 
 					SetFilePointer (*hFile, pak->files[i].filepos, NULL, FILE_BEGIN);
-
 					com_filesize = pak->files[i].filelen;
-					return com_filesize;
+
+					if (checkmdl && !COM_ValidateMDLFile (*hFile))
+					{
+						CloseHandle (*hFile);
+						*hFile = INVALID_HANDLE_VALUE;
+					}
+					else return com_filesize;
 				}
 			}
 		}
@@ -670,7 +710,13 @@ int COM_FOpenFile (char *filename, void *hf)
 				// need to reset the file pointer as it will be at eof owing to the file just having been created
 				com_filesize = GetFileSize (*hFile, NULL);
 				SetFilePointer (*hFile, 0, NULL, FILE_BEGIN);
-				return com_filesize;
+
+				if (checkmdl && !COM_ValidateMDLFile (*hFile))
+				{
+					CloseHandle (*hFile);
+					*hFile = INVALID_HANDLE_VALUE;
+				}
+				else return com_filesize;
 			}
 		}
 		else
@@ -696,7 +742,13 @@ int COM_FOpenFile (char *filename, void *hf)
 			if (*hFile == INVALID_HANDLE_VALUE) continue;
 
 			com_filesize = GetFileSize (*hFile, NULL);
-			return com_filesize;
+
+			if (checkmdl && !COM_ValidateMDLFile (*hFile))
+			{
+				CloseHandle (*hFile);
+				*hFile = INVALID_HANDLE_VALUE;
+			}
+			else return com_filesize;
 		}
 	}
 

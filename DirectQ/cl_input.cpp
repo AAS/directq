@@ -427,7 +427,7 @@ cvar_t	v_centerspeed ("v_centerspeed", "500");
 
 void CL_StartPitchDrift (void)
 {
-	if (cl.laststop == cl.time)
+	if (cl.laststop >= cl.time)
 	{
 		// something else is keeping it from drifting
 		return;
@@ -443,7 +443,7 @@ void CL_StartPitchDrift (void)
 
 void CL_StopPitchDrift (void)
 {
-	cl.laststop = cl.time;
+	cl.laststop = cl.time + 1;
 	cl.nodrift = true;
 	cl.pitchvel = 0;
 }
@@ -477,7 +477,7 @@ void CL_DriftPitch (float time)
 	{
 		// it seems more reliable to have this check here rather than having multiple calls to CL_StopPitchDrift scattered all over the engine code
 		// (especially if different subsystems can be running at different framerates nowadays)
-		cl.laststop = cl.time;
+		cl.laststop = cl.time + 1;
 		cl.nodrift = true;
 		cl.pitchvel = 0;
 		return;
@@ -578,7 +578,7 @@ void CL_BaseMove (usercmd_t *cmd)
 
 // JPG - support for synthetic lag
 sizebuf_t lag_buff[32];
-byte lag_data[32][128];
+byte lag_data[32][1024];	// extra space for expanded protocol stuff
 unsigned int lag_head, lag_tail;
 float lag_sendtime[32];
 

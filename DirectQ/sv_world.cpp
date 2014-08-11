@@ -31,6 +31,32 @@ line of sight checks trace->crosscontent, but bullets don't
 */
 
 
+// this is a negative value so that we can reuse the plane dists for server and client
+// each will need to recache during their own slice of the frame anyway so this is safe to do
+float sv_frame = -1;
+
+float SV_PlaneDist (struct mplane_s *plane, float *org)
+{
+	// for axial planes it's quicker to just eval the dist and there's no need to cache;
+	// for non-axial we check the cache and use if it current, otherwise calc it and cache it
+	if (plane->type < 3)
+		return org[plane->type] - plane->dist;
+	else if (plane->cacheframe == sv_frame)
+	{
+		// Con_Printf ("Cached planedist\n");
+		return plane->cachedist;
+	}
+	else plane->cachedist = DotProduct (org, plane->normal) - plane->dist;
+
+	// cache the result for this plane
+	// (this forces a recache on the client but that's OK as it will need to recache anyway)
+	plane->cacheframe = sv_frame;
+
+	// and return what we got
+	return plane->cachedist;
+}
+
+
 // ClearLink is used for new headnodes
 void ClearLink (link_t *l)
 {
@@ -96,19 +122,16 @@ can just be stored out and get a proper hull_t structure.
 */
 void SV_InitBoxHull (void)
 {
-	int		i;
-	int		side;
-
 	box_hull.clipnodes = box_clipnodes;
 	box_hull.planes = box_planes;
 	box_hull.firstclipnode = 0;
 	box_hull.lastclipnode = 5;
 
-	for (i = 0; i < 6; i++)
+	for (int i = 0; i < 6; i++)
 	{
 		box_clipnodes[i].planenum = i;
 
-		side = i & 1;
+		int side = i & 1;
 
 		box_clipnodes[i].children[side] = CONTENTS_EMPTY;
 
@@ -306,48 +329,6 @@ SV_TouchLinks
 */
 void SV_TouchLinks (edict_t *ent, areanode_t *node)
 {
-#if 0
-	link_t		*l, *next;
-	edict_t		*touch;
-	int			old_self, old_other;
-
-// touch linked edicts
-	for (l = node->trigger_edicts.next ; l != &node->trigger_edicts ; l = next)
-	{
-		next = l->next;
-		touch = EDICT_FROM_AREA(l);
-		if (touch == ent)
-			continue;
-		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER)
-			continue;
-		if (ent->v.absmin[0] > touch->v.absmax[0]
-		|| ent->v.absmin[1] > touch->v.absmax[1]
-		|| ent->v.absmin[2] > touch->v.absmax[2]
-		|| ent->v.absmax[0] < touch->v.absmin[0]
-		|| ent->v.absmax[1] < touch->v.absmin[1]
-		|| ent->v.absmax[2] < touch->v.absmin[2] )
-			continue;
-		old_self = SVProgs->GlobalStruct->self;
-		old_other = SVProgs->GlobalStruct->other;
-
-		SVProgs->GlobalStruct->self = EDICT_TO_PROG(touch);
-		SVProgs->GlobalStruct->other = EDICT_TO_PROG(ent);
-		SVProgs->GlobalStruct->time = sv.time;
-		SVProgs->ExecuteProgram (touch->v.touch);
-
-		SVProgs->GlobalStruct->self = old_self;
-		SVProgs->GlobalStruct->other = old_other;
-	}
-	
-// recurse down both sides
-	if (node->axis == -1)
-		return;
-	
-	if ( ent->v.absmax[node->axis] > node->dist )
-		SV_TouchLinks ( ent, node->children[0] );
-	if ( ent->v.absmin[node->axis] < node->dist )
-		SV_TouchLinks ( ent, node->children[1] );
-#else
 	link_t	       *l, *next;
 	edict_t	       *touch;
 	int	       old_self, old_other, touched = 0, i;
@@ -423,7 +404,6 @@ loc0:;
 			goto loc0;
 		}
 	}
-#endif
 }
 
 
@@ -433,7 +413,7 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 	float mins[3];
 	float maxs[3];
 	vec3_t bbox[8];
-	vec3_t fv, rv, uv;
+	avectors_t av;
 	float angles[3];
 
 	// compute a full bounding box
@@ -445,7 +425,7 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 	}
 
 	// derive forward/right/up vectors from the angles
-	AngleVectors (ent->v.angles, fv, rv, uv);
+	AngleVectors (ent->v.angles, &av);
 
 	// compute the rotated bbox corners
 	mins[0] = mins[1] = mins[2] = 9999999;
@@ -458,9 +438,9 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 
 		VectorCopy (bbox[i], tmp);
 
-		bbox[i][0] = DotProduct (fv, tmp);
-		bbox[i][1] = -DotProduct (rv, tmp);
-		bbox[i][2] = DotProduct (uv, tmp);
+		bbox[i][0] = DotProduct (av.forward, tmp);
+		bbox[i][1] = -DotProduct (av.right, tmp);
+		bbox[i][2] = DotProduct (av.up, tmp);
 
 		// and convert them to mins and maxs
 		for (j = 0; j < 3; j++)
@@ -478,6 +458,49 @@ void SV_RotateBBoxToAbsMinMax (edict_t *ent)
 }
 
 
+void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node)
+{
+LOC0:;
+	if (node->contents == CONTENTS_SOLID)
+		return;
+
+	// add an efrag if the node is a leaf
+	if (node->contents < 0)
+	{
+		if (ent->num_leafs == MAX_ENT_LEAFS)
+			return;
+
+		int leafnum = ((mleaf_t *) node) - sv.worldmodel->brushhdr->leafs - 1;
+
+		ent->leafnums[ent->num_leafs] = leafnum;
+		ent->num_leafs++;
+		return;
+	}
+
+	// NODE_MIXED
+	mplane_t *splitplane = node->plane;
+	int sides = BOX_ON_PLANE_SIDE (ent->v.absmin, ent->v.absmax, splitplane);
+
+	// recurse down the contacted sides
+	if (sides & 1)
+	{
+		if (!(sides & 2))
+		{
+			node = node->children[0];
+			goto LOC0;
+		}
+		else SV_FindTouchedLeafs (ent, node->children[0]);
+	}
+
+	if (sides & 2)
+	{
+		// the compiler should just optimize this out but oh well
+		node = node->children[1];
+		goto LOC0;
+	}
+}
+
+
 /*
 ===============
 SV_LinkEdict
@@ -486,6 +509,9 @@ SV_LinkEdict
 */
 void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 {
+	// clear all touched leafs so that if the edict doesn't get linked it won't get added to the client PVS
+	ent->num_leafs = 0;
+
 	if (ent->area.prev) SV_UnlinkEdict (ent);	// unlink from old position
 	if (ent == SVProgs->EdictPointers[0]) return;		// don't add the world
 	if (ent->free) return;
@@ -519,6 +545,10 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 		ent->v.absmax[1] += 1;
 		ent->v.absmax[2] += 1;
 	}
+
+	// link to PVS leafs (this may be inherited across multiple frames...)
+	if (ent->v.modelindex)
+		SV_FindTouchedLeafs (ent, sv.worldmodel->brushhdr->nodes);
 
 	if (ent->v.solid == SOLID_NOT)
 		return;
@@ -565,18 +595,15 @@ SV_HullPointContents
 */
 int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
 {
+	sv_frame--;
+
 	while (num >= 0)
 	{
 		if (num < hull->firstclipnode || num > hull->lastclipnode)
 			Sys_Error ("SV_HullPointContents: bad node number");
 
 		mclipnode_t *node = hull->clipnodes + num;
-		mplane_t *plane = hull->planes + node->planenum;
-		float d = 0;
-
-		if (plane->type < 3)
-			d = p[plane->type] - plane->dist;
-		else d = DotProduct (plane->normal, p) - plane->dist;
+		float d = SV_PlaneDist (hull->planes + node->planenum, p);
 
 		if (d < 0)
 			num = node->children[1];
@@ -697,6 +724,18 @@ loc0:;
 		goto loc0;
 	}
 
+	// restore the original trace
+	if (plane->type < 3)
+	{
+		t1 = p1[plane->type] - plane->dist;
+		t2 = p2[plane->type] - plane->dist;
+	}
+	else
+	{
+		t1 = DotProduct (plane->normal, p1) - plane->dist;
+		t2 = DotProduct (plane->normal, p2) - plane->dist;
+	}
+
 	// put the crosspoint DIST_EPSILON pixels on the near side
 	if (t1 < 0)
 		frac = (t1 + DIST_EPSILON) / (t1 - t2);
@@ -717,8 +756,21 @@ loc0:;
 		return false;
 
 	// go past the node
+#if 0
 	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
 		return SV_RecursiveHullCheck (hull, node->children[side^1], midf, p2f, mid, p2, trace);
+#else
+	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
+	{
+		// Con_Printf ("go past the node\n");
+		num = node->children[side ^ 1];
+		p1f = midf;
+		VectorCopy2 (p1, mid);
+		goto loc0;
+
+		//return SV_RecursiveHullCheck (hull, node->children[side ^ 1], midf, p2f, mid, p2, trace);
+	}
+#endif
 
 	if (trace->allsolid)
 		return false;		// never got out of the solid area

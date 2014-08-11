@@ -132,30 +132,59 @@ void IN_ReadKeyboard (RAWKEYBOARD *ri_Keyboard)
 		Key_Event (key, false);
 }
 
+// decode raw input structs to stuff we can actually use in Quake
+typedef struct mousepos_s
+{
+	float x;
+	float y;
+} mousepos_t;
+
+typedef struct ri_mousebutton_s
+{
+	int downflag;
+	int upflag;
+	int quakekey;
+	bool down;
+} ri_mousebutton_t;
 
 typedef struct in_mousestate_s
 {
-	float mx;
-	float my;
-	float lastmx;
-	float lastmy;
+	mousepos_t currpos;
+	mousepos_t lastpos;
+	ri_mousebutton_t buttons[5];
 } in_mousestate_t;
 
-in_mousestate_t in_mousestate = {0, 0};
+in_mousestate_t in_mousestate =
+{
+	{0, 0},
+	{0, 0},
+	{
+		{RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, K_MOUSE1, false},
+		{RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP, K_MOUSE2, false},
+		{RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, K_MOUSE3, false},
+		{RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, K_MOUSE4, false},
+		{RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, K_MOUSE5, false}
+	}
+};
 
 
-void IN_MouseMove (usercmd_t *cmd, float movetime)
+bool IN_DoMouseMove (usercmd_t *cmd, float movetime)
 {
 	if (ActiveApp && !Minimized)
 	{
 		// if the mouse isn't active or there was no movement accumulated we don't run this
-		if (!in_mouseacquired) return;
+		if (!in_mouseacquired) return false;
 
-		if (in_mousestate.mx || in_mousestate.my)
+		// always eval movement even if it's 0 so that we can set the last factors correctly
+		float mx = in_mousestate.currpos.x * sensitivity.value * 2.0f;
+		float my = in_mousestate.currpos.y * sensitivity.value * 2.0f;
+
+		// smooth out mouse movement
+		in_mousestate.lastpos.x = mx = ((mx * 2.0f) + in_mousestate.lastpos.x) / 3.0f;
+		in_mousestate.lastpos.y = my = ((my * 2.0f) + in_mousestate.lastpos.y) / 3.0f;
+
+		if (in_mousestate.currpos.x || in_mousestate.currpos.y)
 		{
-			float mx = in_mousestate.mx * sensitivity.value * 2.0f;
-			float my = in_mousestate.my * sensitivity.value * 2.0f;
-
 			mouselooking = freelook.integer || (in_mlook.state & 1);
 
 			if ((in_strafe.state & 1) || (lookstrafe.value && mouselooking))
@@ -178,74 +207,62 @@ void IN_MouseMove (usercmd_t *cmd, float movetime)
 		}
 
 		// reset the accumulated positions
-		in_mousestate.mx = 0;
-		in_mousestate.my = 0;
+		in_mousestate.currpos.x = 0;
+		in_mousestate.currpos.y = 0;
+
+		return true;
+	}
+
+	return false;
+}
+
+
+void IN_MouseMove (usercmd_t *cmd, float movetime)
+{
+	if (!IN_DoMouseMove (cmd, movetime))
+	{
+		// if we're not recording mouse moves we reset the accumulated moves
+		in_mousestate.lastpos.x = 0;
+		in_mousestate.lastpos.y = 0;
 	}
 }
 
 
-typedef struct ri_mousebutton_s
-{
-	int ri_downflag;
-	int ri_upflag;
-	int quakekey;
-	bool down;
-} ri_mousebutton_t;
-
-ri_mousebutton_t ri_mousebuttons[5] =
-{
-	{RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, K_MOUSE1, false},
-	{RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP, K_MOUSE2, false},
-	{RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, K_MOUSE3, false},
-	{RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, K_MOUSE4, false},
-	{RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, K_MOUSE5, false}
-};
-
-
-void IN_ClearMouse (void)
+void IN_ClearMouseState (void)
 {
 	for (int i = 0; i < 5; i++)
 	{
-		if (ri_mousebuttons[i].down)
+		if (in_mousestate.buttons[i].down)
 		{
-			Key_Event (ri_mousebuttons[i].quakekey, false);
-			ri_mousebuttons[i].down = false;
+			Key_Event (in_mousestate.buttons[i].quakekey, false);
+			in_mousestate.buttons[i].down = false;
 		}
 	}
+
+	in_mousestate.currpos.x = in_mousestate.lastpos.x = 0;
+	in_mousestate.currpos.y = in_mousestate.lastpos.y = 0;
 }
 
 
 void IN_ReadMouse (RAWMOUSE *ri_Mouse)
 {
-	if (ri_Mouse->usFlags & MOUSE_MOVE_ABSOLUTE)
-	{
-		// read and accumulate the movement
-		in_mousestate.mx += (ri_Mouse->lLastX - in_mousestate.lastmx);
-		in_mousestate.my += (ri_Mouse->lLastY - in_mousestate.lastmy);
-
-		in_mousestate.lastmx = ri_Mouse->lLastX;
-		in_mousestate.lastmy = ri_Mouse->lLastY;
-	}
-	else
-	{
-		// read and accumulate the movement
-		in_mousestate.mx += ri_Mouse->lLastX;
-		in_mousestate.my += ri_Mouse->lLastY;
-	}
+	// read and accumulate the movement
+	in_mousestate.currpos.x += ri_Mouse->lLastX;
+	in_mousestate.currpos.y += ri_Mouse->lLastY;
 
 	// 5 mouse buttons and we check them all
 	for (int i = 0; i < 5; i++)
 	{
-		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_downflag) && !ri_mousebuttons[i].down)
+		if ((ri_Mouse->usButtonFlags & in_mousestate.buttons[i].downflag) && !in_mousestate.buttons[i].down)
 		{
-			Key_Event (ri_mousebuttons[i].quakekey, true);
-			ri_mousebuttons[i].down = true;
+			Key_Event (in_mousestate.buttons[i].quakekey, true);
+			in_mousestate.buttons[i].down = true;
 		}
 
-		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_upflag) && ri_mousebuttons[i].down)
+		if ((ri_Mouse->usButtonFlags & in_mousestate.buttons[i].upflag) && in_mousestate.buttons[i].down)
 		{
-			Key_Event (ri_mousebuttons[i].quakekey, false);
-			ri_mousebuttons[i].down = false;
+			Key_Event (in_mousestate.buttons[i].quakekey, false);
+			in_mousestate.buttons[i].down = false;
 		}
 	}
 
@@ -348,22 +365,6 @@ void IN_Init (void)
 }
 
 
-/*
-===================
-IN_ClearStates
-===================
-*/
-void IN_ClearStates (void)
-{
-	// clear button states
-	IN_ClearMouse ();
-
-	// clear movement states
-	in_mousestate.mx = 0;
-	in_mousestate.my = 0;
-}
-
-
 void IN_RegisterRawInputMouse (void)
 {
 	RAWINPUTDEVICE ri_Mouse;
@@ -404,7 +405,7 @@ void IN_UnacquireMouse (void)
 		ClipCursor (NULL);
 		IN_UnregisterRawInputMouse ();
 
-		IN_ClearStates ();
+		IN_ClearMouseState ();
 		in_mouseacquired = false;
 
 		SystemParametersInfo (SPI_SETMOUSE, 0, originalmouseparms, 0);
@@ -441,7 +442,7 @@ void IN_AcquireMouse (void)
 		ShowCursor (FALSE);
 		IN_RegisterRawInputMouse ();
 
-		IN_ClearStates ();
+		IN_ClearMouseState ();
 		in_mouseacquired = true;
 
 		IN_UpdateClipCursor ();

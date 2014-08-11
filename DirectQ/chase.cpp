@@ -124,22 +124,22 @@ void Chase_Adjust (vec3_t chase_dest)
 {
 	// calculate distance between chasecam and original org to establish number of tests we need.
 	// an int is good enough here.:)  add a cvar multiplier to this...
-	int num_tests = sqrt ((r_refdef.vieworg[0] - chase_dest[0]) * (r_refdef.vieworg[0] - chase_dest[0]) +
-						   (r_refdef.vieworg[1] - chase_dest[1]) * (r_refdef.vieworg[1] - chase_dest[1]) +
-						   (r_refdef.vieworg[2] - chase_dest[2]) * (r_refdef.vieworg[2] - chase_dest[2])) * chase_scale.value;
+	int num_tests = sqrt ((r_refdef.vieworigin[0] - chase_dest[0]) * (r_refdef.vieworigin[0] - chase_dest[0]) +
+		(r_refdef.vieworigin[1] - chase_dest[1]) * (r_refdef.vieworigin[1] - chase_dest[1]) +
+		(r_refdef.vieworigin[2] - chase_dest[2]) * (r_refdef.vieworigin[2] - chase_dest[2])) * chase_scale.value;
 
 	// take the contents of the view leaf
-	int viewcontents = (Mod_PointInLeaf (r_refdef.vieworg, cl.worldmodel))->contents;
+	int viewcontents = (Mod_PointInLeaf (r_refdef.vieworigin, cl.worldmodel))->contents;
 	int best;
 
-	// move along path from r_refdef.vieworg to chase_dest
+	// move along path from r_refdef.vieworigin to chase_dest
 	for (best = 0; best < num_tests; best++)
 	{
 		vec3_t chase_newdest;
 
-		chase_newdest[0] = r_refdef.vieworg[0] + (chase_dest[0] - r_refdef.vieworg[0]) * best / num_tests;
-		chase_newdest[1] = r_refdef.vieworg[1] + (chase_dest[1] - r_refdef.vieworg[1]) * best / num_tests;
-		chase_newdest[2] = r_refdef.vieworg[2] + (chase_dest[2] - r_refdef.vieworg[2]) * best / num_tests;
+		chase_newdest[0] = r_refdef.vieworigin[0] + (chase_dest[0] - r_refdef.vieworigin[0]) * best / num_tests;
+		chase_newdest[1] = r_refdef.vieworigin[1] + (chase_dest[1] - r_refdef.vieworigin[1]) * best / num_tests;
+		chase_newdest[2] = r_refdef.vieworigin[2] + (chase_dest[2] - r_refdef.vieworigin[2]) * best / num_tests;
 
 		// check for a leaf hit with different contents
 		if (!Chase_Check (chase_newdest, viewcontents))
@@ -158,7 +158,7 @@ void Chase_Adjust (vec3_t chase_dest)
 	int chase_vert[] = {0, 0, 1, 1, 2, 2};
 	int dest_offset[] = {CHASE_DEST_OFFSET, -CHASE_DEST_OFFSET};
 
-	// move along path from chase_dest to r_refdef.vieworg
+	// move along path from chase_dest to r_refdef.vieworigin
 	// this one will early-out the vast majority of cases
 	for (; best >= 0; best--)
 	{
@@ -166,9 +166,9 @@ void Chase_Adjust (vec3_t chase_dest)
 		int nummatches = 0;
 
 		// adjust
-		chase_dest[0] = r_refdef.vieworg[0] + (chase_dest[0] - r_refdef.vieworg[0]) * best / num_tests;
-		chase_dest[1] = r_refdef.vieworg[1] + (chase_dest[1] - r_refdef.vieworg[1]) * best / num_tests;
-		chase_dest[2] = r_refdef.vieworg[2] + (chase_dest[2] - r_refdef.vieworg[2]) * best / num_tests;
+		chase_dest[0] = r_refdef.vieworigin[0] + (chase_dest[0] - r_refdef.vieworigin[0]) * best / num_tests;
+		chase_dest[1] = r_refdef.vieworigin[1] + (chase_dest[1] - r_refdef.vieworigin[1]) * best / num_tests;
+		chase_dest[2] = r_refdef.vieworigin[2] + (chase_dest[2] - r_refdef.vieworigin[2]) * best / num_tests;
 
 		// run 6 tests: -x/+x/-y/+y/-z/+z
 		for (int test = 0; test < 6; test++)
@@ -185,9 +185,9 @@ void Chase_Adjust (vec3_t chase_dest)
 		if (nummatches == 6) break;
 	}
 
-	float chase_length = (r_refdef.vieworg[0] - chase_dest[0]) * (r_refdef.vieworg[0] - chase_dest[0]);
-	chase_length += (r_refdef.vieworg[1] - chase_dest[1]) * (r_refdef.vieworg[1] - chase_dest[1]);
-	chase_length += (r_refdef.vieworg[2] - chase_dest[2]) * (r_refdef.vieworg[2] - chase_dest[2]);
+	float chase_length = (r_refdef.vieworigin[0] - chase_dest[0]) * (r_refdef.vieworigin[0] - chase_dest[0]);
+	chase_length += (r_refdef.vieworigin[1] - chase_dest[1]) * (r_refdef.vieworigin[1] - chase_dest[1]);
+	chase_length += (r_refdef.vieworigin[2] - chase_dest[2]) * (r_refdef.vieworigin[2] - chase_dest[2]);
 
 	if (chase_length < 150)
 	{
@@ -216,9 +216,9 @@ void Chase_Update (void)
 	AngleVectors (cl.viewangles, &av);
 
 	// calc exact destination
-	chase_dest[0] = r_refdef.vieworg[0] - av.forward[0] * chase_back.value - av.right[0] * chase_right.value;
-	chase_dest[1] = r_refdef.vieworg[1] - av.forward[1] * chase_back.value - av.right[1] * chase_right.value;
-	chase_dest[2] = r_refdef.vieworg[2] + chase_up.value;
+	chase_dest[0] = r_refdef.vieworigin[0] - av.forward[0] * chase_back.value - av.right[0] * chase_right.value;
+	chase_dest[1] = r_refdef.vieworigin[1] - av.forward[1] * chase_back.value - av.right[1] * chase_right.value;
+	chase_dest[2] = r_refdef.vieworigin[2] + chase_up.value;
 
 	// don't allow really small or negative scaling values
 	if (chase_scale.value < 0.01)
@@ -238,11 +238,11 @@ void Chase_Update (void)
 	cl_entities[cl.viewentity]->alphaval = chase_alpha;
 
 	// find the spot the player is looking at
-	VectorMultiplyAdd (r_refdef.vieworg, 4096, av.forward, dest);
-	TraceLine (r_refdef.vieworg, dest, stop);
+	VectorMultiplyAdd (r_refdef.vieworigin, 4096, av.forward, dest);
+	TraceLine (r_refdef.vieworigin, dest, stop);
 
 	// calculate pitch to look at the same spot from camera
-	VectorSubtract (stop, r_refdef.vieworg, stop);
+	VectorSubtract (stop, r_refdef.vieworigin, stop);
 	dist = DotProduct (stop, av.forward);
 
 	if (dist < 1) dist = 1;
@@ -250,7 +250,7 @@ void Chase_Update (void)
 	r_refdef.viewangles[PITCH] = -atan (stop[2] / dist) / D3DX_PI * 180;
 
 	// move towards destination
-	VectorCopy2 (r_refdef.vieworg, chase_dest);
+	VectorCopy2 (r_refdef.vieworigin, chase_dest);
 }
 
 

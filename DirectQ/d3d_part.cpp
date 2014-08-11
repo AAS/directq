@@ -707,9 +707,9 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 			// hack a scale up to keep particles from disappearing
 			// note - all of this *could* go into a vertex shader, but we'd have a pretty heavyweight vertex submission
 			// and we likely wouldn't gain that much from it.
-			scale = (p->org[0] - r_viewvectors.origin[0]) * r_viewvectors.forward[0] +
-					(p->org[1] - r_viewvectors.origin[1]) * r_viewvectors.forward[1] +
-					(p->org[2] - r_viewvectors.origin[2]) * r_viewvectors.forward[2];
+			scale = (p->org[0] - r_refdef.vieworigin[0]) * r_viewvectors.forward[0] +
+					(p->org[1] - r_refdef.vieworigin[1]) * r_viewvectors.forward[1] +
+					(p->org[2] - r_refdef.vieworigin[2]) * r_viewvectors.forward[2];
 
 			if (scale < 20)
 				scale = 1;
@@ -971,7 +971,7 @@ void D3D_SetupSpriteModel (entity_t *ent)
 		break;
 
 	case SPR_FACING_UPRIGHT:
-		VectorSubtract (ent->origin, r_viewvectors.origin, av.forward);
+		VectorSubtract (ent->origin, r_refdef.vieworigin, av.forward);
 		av.forward[2] = 0;
 		VectorNormalize (av.forward);
 

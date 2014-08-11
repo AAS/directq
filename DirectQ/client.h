@@ -189,7 +189,7 @@ typedef struct client_state_s
 	float		pitchvel;
 	bool		nodrift;
 	float		driftmove;
-	float		laststop;
+	double		laststop;
 
 	float		viewheight;
 	float		crouch;			// local amount for smoothing stepups
@@ -201,14 +201,13 @@ typedef struct client_state_s
 	int			intermission;	// don't change view angle, full screen, etc
 	int			completed_time;	// latched at intermission start
 
-	float		mtime[2];		// keep message times steady
+	double		mtime[2];		// keep message times steady
 
-	float		time;			// clients view of time, should be between
+	double		time;			// clients view of time, should be between
 								// servertime and oldservertime to generate
 								// a lerp point for other data
 
-	DWORD		dwTime;			// used to keep timings steady
-	float		frametime;		// client frametime
+	double		frametime;		// client frametime
 
 	float		lastrecievedmessage;	// (realtime) for net trouble icon
 
@@ -329,11 +328,12 @@ void CL_SendMove (usercmd_t *cmd);
 
 void CL_ParseTEnt (void);
 void CL_UpdateTEnts (void);
+void CL_RelinkEntities (void);
 
 void CL_ClearState (void);
 
 
-int  CL_ReadFromServer (DWORD dwFrameTime);
+int  CL_ReadFromServer (double frametime);
 void CL_WriteToServer (usercmd_t *cmd);
 void CL_BaseMove (usercmd_t *cmd);
 
@@ -368,3 +368,13 @@ void V_SetContentsColor (int contents);
 // cl_tent
 void CL_InitTEnts (void);
 void CL_SignonReply (void);
+
+
+#define CLEAR_POSES		1
+#define CLEAR_ORIGIN	2
+#define CLEAR_ANGLES	4
+#define CLEAR_ORIENT	(CLEAR_ORIGIN | CLEAR_ANGLES)
+#define CLEAR_ALLLERP	(CLEAR_POSES | CLEAR_ORIGIN | CLEAR_ANGLES)
+
+void CL_ClearInterpolation (entity_t *ent, int clearflags);
+

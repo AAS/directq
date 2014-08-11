@@ -190,13 +190,9 @@ byte *Mod_LeafPVS (mleaf_t *leaf, model_t *model)
 }
 
 
+// fixme - is this now the same as the server-side version?
 void Mod_AddToFatPVS (vec3_t org, mnode_t *node)
 {
-	int		i;
-	byte	*pvs;
-	mplane_t	*plane;
-	float	d;
-
 	// optimized recursion without a goto! whee!
 	while (1)
 	{
@@ -205,17 +201,15 @@ void Mod_AddToFatPVS (vec3_t org, mnode_t *node)
 		{
 			if (node->contents != CONTENTS_SOLID)
 			{
-				pvs = Mod_LeafPVS ((mleaf_t *) node, cl.worldmodel);
+				byte *pvs = Mod_LeafPVS ((mleaf_t *) node, cl.worldmodel);
 
-				for (i = 0; i < fatbytes; i++) fatpvs[i] |= pvs[i];
+				for (int i = 0; i < fatbytes; i++) fatpvs[i] |= pvs[i];
 			}
 
 			return;
 		}
 
-		plane = node->plane;
-
-		d = DotProduct (org, plane->normal) - plane->dist;
+		float d = SV_PlaneDist (node->plane, org);
 
 		// add extra fatness here as the server-side fatness is not sufficient
 		if (d > 120 + sv_pvsfat.value)
@@ -235,7 +229,10 @@ void Mod_AddToFatPVS (vec3_t org, mnode_t *node)
 byte *Mod_FatPVS (vec3_t org)
 {
 	// it's expected that cl.worldmodel will be the same as sv.worldmodel. ;)
+	fatbytes = (cl.worldmodel->brushhdr->numleafs + 31) >> 3;
 	memset (fatpvs, 0, fatbytes);
+
+	sv_frame--;
 	Mod_AddToFatPVS (org, cl.worldmodel->brushhdr->nodes);
 
 	return fatpvs;
@@ -362,11 +359,6 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	mod->brushhdr = NULL;
 	mod->spritehdr = NULL;
 
-	char headerver[5];
-
-	memcpy (headerver, (unsigned *) buf, 4);
-	headerver[4] = 0;
-
 	switch (((unsigned *) buf)[0])
 	{
 	case IDPOLYHEADER:
@@ -377,9 +369,18 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 		Mod_LoadSpriteModel (mod, buf);
 		break;
 
-	default:
+	case HL_BSPVERSION:
+	case Q1_BSPVERSION:
+	case PR_BSPVERSION:
 		// bsp files don't have a header ident... sigh...
+		// the version seems good for use though
 		Mod_LoadBrushModel (mod, buf);
+		break;
+
+	default:
+		// we can't host_error here as this will dirty the model cache
+		Sys_Error ("Unknown model type for %s ('%c' '%c' '%c' '%c')\n", mod->name,
+			((char *) buf)[0], ((char *) buf)[1], ((char *) buf)[2], ((char *) buf)[3]);
 		break;
 	}
 
@@ -839,6 +840,17 @@ bool Mod_LoadLITFile (model_t *mod, lump_t *l)
 }
 
 
+void Mod_SwapLighting (byte *src, int len)
+{
+	for (int i = 0; i < len; i += 3, src += 3)
+	{
+		byte tmp = src[0];
+		src[0] = src[2];
+		src[2] = tmp;
+	}
+}
+
+
 void Mod_LoadLighting (model_t *mod, byte *mod_base, lump_t *l)
 {
 	int i;
@@ -856,6 +868,7 @@ void Mod_LoadLighting (model_t *mod, byte *mod_base, lump_t *l)
 		// read direct with no LIT file or no expansion
 		mod->brushhdr->lightdata = (byte *) MainHunk->Alloc (l->filelen, FALSE);
 		memcpy (mod->brushhdr->lightdata, mod_base + l->fileofs, l->filelen);
+		Mod_SwapLighting (mod->brushhdr->lightdata, l->filelen);
 		return;
 	}
 
@@ -863,7 +876,11 @@ void Mod_LoadLighting (model_t *mod, byte *mod_base, lump_t *l)
 	mod->brushhdr->lightdata = (byte *) MainHunk->Alloc (l->filelen * 3, FALSE);
 
 	// check for a lit file
-	if (Mod_LoadLITFile (mod, l)) return;
+	if (Mod_LoadLITFile (mod, l))
+	{
+		Mod_SwapLighting (mod->brushhdr->lightdata, l->filelen * 3);
+		return;
+	}
 
 	// copy to end of the buffer
 	memcpy (&mod->brushhdr->lightdata[l->filelen * 2], mod_base + l->fileofs, l->filelen);
@@ -1085,13 +1102,13 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 		// texcoords
 		if (surf->flags & SURF_DRAWTURB)
 		{
-			verts->st[0] = verts->st2[0] = (st[0] - surf->texinfo->vecs[0][3]) / 64.0f;
-			verts->st[1] = verts->st2[1] = (st[1] - surf->texinfo->vecs[1][3]) / 64.0f;
+			verts->st[0][0] = verts->st[1][0] = (st[0] - surf->texinfo->vecs[0][3]) / 64.0f;
+			verts->st[0][1] = verts->st[1][1] = (st[1] - surf->texinfo->vecs[1][3]) / 64.0f;
 		}
 		else
 		{
-			verts->st[0] = st[0] / surf->texinfo->texture->size[0];
-			verts->st[1] = st[1] / surf->texinfo->texture->size[1];
+			verts->st[0][0] = st[0] / surf->texinfo->texture->size[0];
+			verts->st[0][1] = st[1] / surf->texinfo->texture->size[1];
 		}
 	}
 
@@ -1223,6 +1240,8 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 	brushpolyvert_t *verts = (brushpolyvert_t *) MainHunk->Alloc (totalverts * sizeof (brushpolyvert_t), FALSE);
 	unsigned short *indexes = (unsigned short *) MainHunk->Alloc (totalindexes * sizeof (unsigned short), FALSE);
 
+	// Con_Printf ("%s has %i verts\n", mod->name, totalverts);
+
 	surf = mod->brushhdr->surfaces;
 
 	for (int surfnum = 0; surfnum < count; surfnum++, surf++)
@@ -1303,7 +1322,8 @@ void Mod_LoadVisLeafsNodes (model_t *mod, byte *mod_base, lump_t *v, lump_t *l, 
 
 	for (i = 0; i < leafcount; i++, lin++, lout++)
 	{
-		lout->num = i;
+		// correct number for SV_ processing
+		lout->num = i - 1;
 
 		for (j = 0; j < 3; j++)
 		{
@@ -1364,9 +1384,6 @@ void Mod_LoadVisLeafsNodes (model_t *mod, byte *mod_base, lump_t *v, lump_t *l, 
 
 		// static entities
 		lout->efrags = NULL;
-
-		// not seen yet
-		lout->seen = false;
 	}
 
 	// set up nodes in contiguous memory - see comment in R_LeafVisibility
@@ -1388,19 +1405,15 @@ void Mod_LoadVisLeafsNodes (model_t *mod, byte *mod_base, lump_t *v, lump_t *l, 
 
 		nout->firstsurface = (unsigned short) nin->firstface;
 		nout->numsurfaces = (unsigned short) nin->numfaces;
-
 		nout->visframe = -1;
-		nout->seen = false;
 
 		// set children and parents here too
 		// note - the memory has already been allocated and this field won't be overwritten during node loading
 		// so even if a node hasn't yet been loaded it's safe to do this; leafs of course have all been loaded.
 		for (j = 0; j < 2; j++)
 		{
-			p = nin->children[j];
-
 			// hacky fix
-			if (p < -mod->brushhdr->numleafs) p += 65536;
+			if ((p = nin->children[j]) < -mod->brushhdr->numleafs) p += 65536;
 
 			if (p >= 0)
 			{
@@ -2206,15 +2219,6 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	{
 		pheader->scale[i] = pinmodel->scale[i];
 		pheader->scale_origin[i] = pinmodel->scale_origin[i];
-	}
-
-	if (!stricmp (mod->name, "progs/eyes.mdl"))
-	{
-		// double size of eyes
-		for (int i = 0; i < 3; i++)
-			pheader->scale[i] *= 2.0f;
-
-		pheader->scale_origin[2] -= (22 + 8);
 	}
 
 	// load the skins

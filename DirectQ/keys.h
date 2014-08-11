@@ -112,8 +112,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define K_POV4		245
 
 
-// added automap as a new key_dest
-typedef enum {key_game, key_console, key_message, key_menu, key_automap} keydest_t;
+typedef enum {key_game, key_console, key_message, key_menu} keydest_t;
 
 extern keydest_t	key_dest;
 extern char *keybindings[256];

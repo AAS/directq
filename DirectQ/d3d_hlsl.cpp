@@ -316,6 +316,10 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 	ShaderFlags |= D3DXSHADER_OPTIMIZATION_LEVEL3;
 #endif
 
+#ifdef D3DXSHADER_PACKMATRIX_COLUMNMAJOR
+	ShaderFlags |= D3DXSHADER_PACKMATRIX_COLUMNMAJOR;
+#endif
+
 	hr = D3DXCreateEffect
 	(
 		d3d_Device,

@@ -49,11 +49,15 @@ extern int ed_gravity;
 
 #define GETEDICTFIELDVALUEFAST(ed, fieldoffset) ((fieldoffset) ? (eval_t *) ((byte *) &(ed)->v + (fieldoffset)) : NULL)
 
+// 16 is sufficient with the new bbox code; 32 is just for paranoia
+#define MAX_ENT_LEAFS	32
+
 typedef struct edict_s
 {
 	bool			free;
 	link_t			area;			// linked to a division node or leaf
-	bool			touchleaf;		// true if the ent touches a leaf in the pvs
+	int				num_leafs;
+	unsigned short	leafnums[MAX_ENT_LEAFS];
 	entity_state_t	baseline;
 	float			freetime;		// time when the object was freed
 	float			tracetimer;		// timer for cullentities tracing

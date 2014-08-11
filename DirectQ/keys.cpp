@@ -579,8 +579,8 @@ void Key_Console (int key)
 	{
 		con_backscroll += 2;
 
-		if (con_backscroll > con_totallines - (vid.height >> 3) - 1)
-			con_backscroll = con_totallines - (vid.height >> 3) - 1;
+		if (con_backscroll > con_totallines - (vid.consize.height >> 3) - 1)
+			con_backscroll = con_totallines - (vid.consize.height >> 3) - 1;
 
 		return;
 	}
@@ -600,7 +600,7 @@ void Key_Console (int key)
 		// the home key functions differently depending on whether or not we are in the first position on the line
 		if (key_linepos == 1)
 		{
-			con_backscroll = con_totallines - (vid.height >> 3) - 1;
+			con_backscroll = con_totallines - (vid.consize.height >> 3) - 1;
 			return;
 		}
 		else
@@ -1077,8 +1077,6 @@ Should NOT be called during an interrupt!
 void Menu_ToggleMenu (void);
 void M_Keydown (int key);
 void HUD_ShowDemoScores (void);
-void Cmd_ToggleAutomap_f (void);
-void Key_Automap (int key);
 
 void Key_Event (int key, bool down)
 {
@@ -1139,11 +1137,6 @@ void Key_Event (int key, bool down)
 		case key_game:
 		case key_console:
 			Menu_ToggleMenu ();
-			break;
-
-		case key_automap:
-			// always allow escape from the automap
-			Cmd_ToggleAutomap_f ();
 			break;
 
 		default:
@@ -1237,10 +1230,6 @@ void Key_Event (int key, bool down)
 		Key_Console (key);
 		break;
 
-	case key_automap:
-		Key_Automap (key);
-		break;
-
 	default:
 		Sys_Error ("Bad key_dest");
 	}
@@ -1278,6 +1267,6 @@ void ClearAllStates (void)
 		key_repeats[i] = 0;
 	}
 
-	IN_ClearStates ();
+	IN_ClearMouseState ();
 }
 

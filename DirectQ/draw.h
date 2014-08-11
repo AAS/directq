@@ -32,7 +32,7 @@ void Draw_DebugChar (char num);
 void Draw_Pic (int x, int y, qpic_t *pic);
 void Draw_Pic (int x, int y, qpic_t *pic, float alpha);
 void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt, int pants);
-void Draw_ConsoleBackground (int lines);
+void Draw_ConsoleBackground (int percent);
 void Draw_Fill (int x, int y, int w, int h, int c, int alpha = 255);
 void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alpha = 1.0f);
 void Draw_FadeScreen (int alpha);

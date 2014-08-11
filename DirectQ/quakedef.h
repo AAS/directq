@@ -22,6 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // be a little kinder to the CRT in Quake by telling it to act like it's single-threaded
 // #define _CRT_DISABLE_PERFCRIT_LOCKS
 
+// make qsort calls easier on the eye...
+typedef int (*sortfunc_t) (const void *, const void *);
+
 #include "versions.h"
 
 #define GLQUAKE_GAMMA_SCALE
@@ -298,7 +301,7 @@ extern	bool	host_initialized;		// true if into command execution
 
 extern	int			host_framecount;	// incremented every frame, never reset
 
-extern	float		realtime;			// not bounded in any way, changed at
+extern	double		realtime;			// not bounded in any way, changed at
 										// start of every frame, never reset
 
 void Host_ClearMemory (void);

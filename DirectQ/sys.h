@@ -31,8 +31,7 @@ void Sys_Error (char *error, ...);
 
 void Sys_Quit (int ExitCode);
 
-float Sys_FloatTime (void);
-DWORD Sys_Milliseconds (void);
+double Sys_FloatTime (void);
 
 void Sys_SendKeyEvents (void);
 // Perform Key_Event () callbacks until the input que is empty

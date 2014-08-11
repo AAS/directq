@@ -841,7 +841,6 @@ void Host_Loadgame_f (void)
 	}
 
 	SVProgs->NumEdicts = entnum;
-	sv.dwTime = (DWORD) (time * 1000.0f);
 	sv.time = time;
 
 	fclose (f);
@@ -1183,9 +1182,16 @@ void Host_Kill_f (void)
 		return;
 	}
 
+	// save out the serverflags so that we can restore them properly
+	float fl = SVProgs->GlobalStruct->serverflags;
+
 	SVProgs->GlobalStruct->time = sv.time;
 	SVProgs->GlobalStruct->self = EDICT_TO_PROG (sv_player);
 	SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientKill);
+
+	// and now restore the serverflags
+	SVProgs->GlobalStruct->serverflags = fl;
+	svs.serverflags = fl;
 }
 
 
@@ -1209,13 +1215,8 @@ void Host_Pause_f (void)
 		sv.paused ^= 1;
 
 		if (sv.paused)
-		{
 			SV_BroadcastPrintf ("%s paused the game\n", SVProgs->Strings + sv_player->v.netname);
-		}
-		else
-		{
-			SV_BroadcastPrintf ("%s unpaused the game\n", SVProgs->Strings + sv_player->v.netname);
-		}
+		else SV_BroadcastPrintf ("%s unpaused the game\n", SVProgs->Strings + sv_player->v.netname);
 
 		// send notification to all clients
 		MSG_WriteByte (&sv.reliable_datagram, svc_setpause);
@@ -1297,12 +1298,10 @@ void Host_Spawn_f (void)
 		ent->v.netname = host_client->name - SVProgs->Strings;
 
 		// copy spawn parms out of the client_t
-
 		for (i = 0; i < NUM_SPAWN_PARMS; i++)
 			(&SVProgs->GlobalStruct->parm1)[i] = host_client->spawn_parms[i];
 
 		// call the spawn function
-
 		SVProgs->GlobalStruct->time = sv.time;
 		SVProgs->GlobalStruct->self = EDICT_TO_PROG (sv_player);
 		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientConnect);
@@ -1438,11 +1437,8 @@ void Host_Kick_f (void)
 	{
 		for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 		{
-			if (!host_client->active)
-				continue;
-
-			if (stricmp (host_client->name, Cmd_Argv (1)) == 0)
-				break;
+			if (!host_client->active) continue;
+			if (stricmp (host_client->name, Cmd_Argv (1)) == 0) break;
 		}
 	}
 
@@ -1450,8 +1446,7 @@ void Host_Kick_f (void)
 	{
 		if (cmd_source == src_command)
 			who = cl_name.string;
-		else
-			who = save->name;
+		else who = save->name;
 
 		// can't kick yourself!
 		if (host_client == save)
@@ -1797,14 +1792,10 @@ void PrintFrameName (model_t *m, int frame)
 	if (m->type != mod_alias) return;
 
 	aliashdr_t 			*hdr;
-	maliasframedesc_t	*pframedesc;
 
-	hdr = m->aliashdr;
+	if (!(hdr = m->aliashdr)) return;
 
-	if (!hdr) return;
-
-	pframedesc = &hdr->frames[frame];
-
+	maliasframedesc_t *pframedesc = &hdr->frames[frame];
 	Con_Printf ("frame %i: %s\n", frame, pframedesc->name);
 }
 
@@ -1881,14 +1872,17 @@ void Host_Startdemos_f (void)
 	{
 		// stop the demo loop
 		cls.demonum = -1;
+
+		// clear the demos
+		for (int i = 0; i < MAX_DEMOS; i++)
+			cls.demos[i][0] = 0;
+
 		return;
 	}
 
 	startdemos_firsttime = false;
 
-	int		i, c;
-
-	c = Cmd_Argc () - 1;
+	int c = Cmd_Argc () - 1;
 
 	if (c > MAX_DEMOS)
 	{
@@ -1898,7 +1892,7 @@ void Host_Startdemos_f (void)
 
 	Con_SafePrintf ("%i demo(s) in loop\n", c);
 
-	for (i = 1; i < c + 1; i++)
+	for (int i = 1; i < c + 1; i++)
 		Q_strncpy (cls.demos[i - 1], Cmd_Argv (i), sizeof (cls.demos[0]) - 1);
 
 	if (!sv.active && cls.demonum != -1 && !cls.demoplayback)

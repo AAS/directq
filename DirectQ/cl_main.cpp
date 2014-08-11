@@ -66,8 +66,6 @@ dlight_t		*cl_dlights = NULL;
 void D3D_AddVisEdict (entity_t *ent);
 void D3D_BeginVisedicts (void);
 
-void R_InitEfrags (void);
-
 
 // save and restore anything that needs it while wiping the cl struct
 void CL_ClearCLStruct (void)
@@ -123,8 +121,6 @@ void CL_ClearState (void)
 		}
 		else cl_entities[i] = NULL;
 	}
-
-	R_InitEfrags ();
 }
 
 
@@ -459,16 +455,11 @@ should be put at.
 */
 float CL_LerpPoint (void)
 {
-	float	f, frac;
+	float f = cl.mtime[0] - cl.mtime[1];
 
-	f = cl.mtime[0] - cl.mtime[1];
-
-	// because our server is now running at a different rate to the client the sv.active test is no longer
-	// valid because we can no longer depend on messages arriving in lockstep with when they're sent.
-	if (!f || cl_nolerp.value || cls.timedemo)
+	if (!f || cls.timedemo || sv.active)
 	{
 		cl.time = cl.mtime[0];
-		cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
 		return 1;
 	}
 
@@ -479,7 +470,7 @@ float CL_LerpPoint (void)
 		f = 0.1f;
 	}
 
-	frac = (cl.time - cl.mtime[1]) / f;
+	float frac = (cl.time - cl.mtime[1]) / f;
 
 	if (frac < 0)
 	{
@@ -487,7 +478,6 @@ float CL_LerpPoint (void)
 		{
 			// Con_Printf ("low frac\n");
 			cl.time = cl.mtime[1];
-			cl.dwTime = (DWORD) (cl.mtime[1] * 1000.0f);
 		}
 
 		frac = 0;
@@ -498,13 +488,14 @@ float CL_LerpPoint (void)
 		{
 			// Con_Printf ("high frac\n");
 			cl.time = cl.mtime[0];
-			cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
 		}
 
 		frac = 1;
 	}
 
-	return frac;
+	if (cl_nolerp.value)
+		return 1;
+	else return frac;
 }
 
 
@@ -517,103 +508,96 @@ extern cvar_t r_lerporient;
 
 void CL_EntityInterpolateOrigins (entity_t *ent)
 {
-	if (r_lerporient.integer)
+	float timepassed = cl.time - ent->translatestarttime;
+	float blend = 0;
+	vec3_t delta = {0, 0, 0};
+
+	if (ent->translatestarttime < 0.001 || timepassed > 1)
 	{
-		float timepassed = cl.time - ent->translatestarttime;
-		float blend = 0;
-		vec3_t delta = {0, 0, 0};
+		ent->translatestarttime = cl.time;
 
-		if (ent->translatestarttime < 0.001 || timepassed > 1)
-		{
-			ent->translatestarttime = cl.time;
-
-			VectorCopy2 (ent->lerporigin[LERP_LAST], ent->origin);
-			VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
-		}
-
-		if (!VectorCompare (ent->origin, ent->lerporigin[LERP_CURR]))
-		{
-			ent->translatestarttime = cl.time;
-
-			VectorCopy2 (ent->lerporigin[LERP_LAST], ent->lerporigin[LERP_CURR]);
-			VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
-
-			blend = 0;
-		}
-		else
-		{
-			blend = timepassed / 0.1;
-
-			if (cl.paused || blend > 1) blend = 1;
-		}
-
-		VectorSubtract (ent->lerporigin[LERP_CURR], ent->lerporigin[LERP_LAST], delta);
-
-		// use cubic interpolation
-		float lastlerp = 1.0f - blend;
-		float currlerp = blend;
-
-		ent->origin[0] = ent->lerporigin[LERP_LAST][0] * lastlerp + ent->lerporigin[LERP_CURR][0] * currlerp;
-		ent->origin[1] = ent->lerporigin[LERP_LAST][1] * lastlerp + ent->lerporigin[LERP_CURR][1] * currlerp;
-		ent->origin[2] = ent->lerporigin[LERP_LAST][2] * lastlerp + ent->lerporigin[LERP_CURR][2] * currlerp;
+		VectorCopy2 (ent->lerporigin[LERP_LAST], ent->origin);
+		VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
 	}
+
+	if (!VectorCompare (ent->origin, ent->lerporigin[LERP_CURR]))
+	{
+		ent->translatestarttime = cl.time;
+
+		VectorCopy2 (ent->lerporigin[LERP_LAST], ent->lerporigin[LERP_CURR]);
+		VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
+
+		blend = 0;
+	}
+	else
+	{
+		blend = timepassed / 0.1;
+
+		if (cl.paused || blend > 1) blend = 1;
+	}
+
+	VectorSubtract (ent->lerporigin[LERP_CURR], ent->lerporigin[LERP_LAST], delta);
+
+	// use cubic interpolation
+	float lastlerp = 1.0f - blend;
+	float currlerp = blend;
+
+	ent->origin[0] = ent->lerporigin[LERP_LAST][0] * lastlerp + ent->lerporigin[LERP_CURR][0] * currlerp;
+	ent->origin[1] = ent->lerporigin[LERP_LAST][1] * lastlerp + ent->lerporigin[LERP_CURR][1] * currlerp;
+	ent->origin[2] = ent->lerporigin[LERP_LAST][2] * lastlerp + ent->lerporigin[LERP_CURR][2] * currlerp;
 }
 
 
 void CL_EntityInterpolateAngles (entity_t *ent)
 {
-	if (r_lerporient.integer)
+	float timepassed = cl.time - ent->rotatestarttime;
+	float blend = 0;
+	vec3_t delta = {0, 0, 0};
+
+	if (ent->rotatestarttime < 0.001 || timepassed > 1)
 	{
-		float timepassed = cl.time - ent->rotatestarttime;
-		float blend = 0;
-		vec3_t delta = {0, 0, 0};
+		ent->rotatestarttime = cl.time;
 
-		if (ent->rotatestarttime < 0.001 || timepassed > 1)
-		{
-			ent->rotatestarttime = cl.time;
-
-			VectorCopy2 (ent->lerpangles[LERP_LAST], ent->angles);
-			VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
-		}
-
-		if (!VectorCompare (ent->angles, ent->lerpangles[LERP_CURR]))
-		{
-			ent->rotatestarttime = cl.time;
-
-			VectorCopy2 (ent->lerpangles[LERP_LAST], ent->lerpangles[LERP_CURR]);
-			VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
-
-			blend = 0;
-		}
-		else
-		{
-			blend = timepassed / 0.1;
-
-			if (cl.paused || blend > 1) blend = 1;
-		}
-
-		VectorSubtract (ent->lerpangles[LERP_CURR], ent->lerpangles[LERP_LAST], delta);
-
-		// always interpolate along the shortest path
-		if (delta[0] > 180) delta[0] -= 360; else if (delta[0] < -180) delta[0] += 360;
-		if (delta[1] > 180) delta[1] -= 360; else if (delta[1] < -180) delta[1] += 360;
-		if (delta[2] > 180) delta[2] -= 360; else if (delta[2] < -180) delta[2] += 360;
-
-		// get lerpangles[LERP_CURR] on the shortest path
-		VectorAdd (ent->lerpangles[LERP_LAST], delta, delta);
-
-		// use cubic interpolation
-		float lastlerp = 1.0f - blend;
-		float currlerp = blend;
-
-		ent->angles[0] = ent->lerpangles[LERP_LAST][0] * lastlerp + delta[0] * currlerp;
-		ent->angles[1] = ent->lerpangles[LERP_LAST][1] * lastlerp + delta[1] * currlerp;
-		ent->angles[2] = ent->lerpangles[LERP_LAST][2] * lastlerp + delta[2] * currlerp;
+		VectorCopy2 (ent->lerpangles[LERP_LAST], ent->angles);
+		VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
 	}
+
+	if (!VectorCompare (ent->angles, ent->lerpangles[LERP_CURR]))
+	{
+		ent->rotatestarttime = cl.time;
+
+		VectorCopy2 (ent->lerpangles[LERP_LAST], ent->lerpangles[LERP_CURR]);
+		VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
+
+		blend = 0;
+	}
+	else
+	{
+		blend = timepassed / 0.1;
+
+		if (cl.paused || blend > 1) blend = 1;
+	}
+
+	VectorSubtract (ent->lerpangles[LERP_CURR], ent->lerpangles[LERP_LAST], delta);
+
+	// always interpolate along the shortest path
+	if (delta[0] > 180) delta[0] -= 360; else if (delta[0] < -180) delta[0] += 360;
+	if (delta[1] > 180) delta[1] -= 360; else if (delta[1] < -180) delta[1] += 360;
+	if (delta[2] > 180) delta[2] -= 360; else if (delta[2] < -180) delta[2] += 360;
+
+	// get lerpangles[LERP_CURR] on the shortest path
+	VectorAdd (ent->lerpangles[LERP_LAST], delta, delta);
+
+	// use cubic interpolation
+	float lastlerp = 1.0f - blend;
+	float currlerp = blend;
+
+	ent->angles[0] = ent->lerpangles[LERP_LAST][0] * lastlerp + delta[0] * currlerp;
+	ent->angles[1] = ent->lerpangles[LERP_LAST][1] * lastlerp + delta[1] * currlerp;
+	ent->angles[2] = ent->lerpangles[LERP_LAST][2] * lastlerp + delta[2] * currlerp;
 }
 
 
-void CL_ClearInterpolation (entity_t *ent);
 cvar_t cl_itemrotatespeed ("cl_itemrotatespeed", 100.0f);
 
 void CL_RelinkEntities (void)
@@ -667,8 +651,7 @@ void CL_RelinkEntities (void)
 		if (ent->msgtime != cl.mtime[0])
 		{
 			// clear it's interpolation data too
-			CL_ClearInterpolation (ent);
-			ent->brushstate.bmrelinked = true;
+			CL_ClearInterpolation (ent, CLEAR_ALLLERP);
 			ent->model = NULL;
 			D3DOQ_CleanEntity (ent);
 			continue;
@@ -699,7 +682,7 @@ void CL_RelinkEntities (void)
 				}
 			}
 
-			if (f >= 1) CL_ClearInterpolation (ent);
+			if (f >= 1) CL_ClearInterpolation (ent, CLEAR_ALLLERP);
 
 			// interpolate the origin and angles (does this make the QER interpolation invalid?)
 			// using cubic with this gives a serious case of the herky jerkies when playing demos
@@ -716,9 +699,13 @@ void CL_RelinkEntities (void)
 			}
 		}
 
-		// blend the positions
-		CL_EntityInterpolateOrigins (ent);
-		CL_EntityInterpolateAngles (ent);
+		if (r_lerporient.integer)
+		{
+			// blend the positions
+			CL_EntityInterpolateOrigins (ent);
+			CL_EntityInterpolateAngles (ent);
+		}
+		else CL_ClearInterpolation (ent, CLEAR_ORIENT);
 
 		// rotate binary objects locally
 		if (ent->model->flags & EF_ROTATE)
@@ -921,12 +908,11 @@ Read all incoming data from the server
 */
 CDQEventTimer *cl_UpdateTime = NULL;
 
-int CL_ReadFromServer (DWORD dwFrameTime)
+int CL_ReadFromServer (double frametime)
 {
 	int		ret;
 
-	cl.dwTime += dwFrameTime;
-	cl.time = (float) cl.dwTime / 1000.0f;
+	cl.time += frametime;
 
 	// a client frame only really happens when the client reads from the server
 	// (fixme - certain client events can happen before this - like input.  how to handle correctly?)
@@ -951,7 +937,6 @@ int CL_ReadFromServer (DWORD dwFrameTime)
 	CL_RelinkEntities ();
 	CL_UpdateTEnts ();
 
-	// bring the links up to date
 	return 0;
 }
 

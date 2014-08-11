@@ -218,8 +218,8 @@ so the server doesn't disconnect.
 */
 void CL_KeepaliveMessage (bool showmsg = true)
 {
-	DWORD	Time;
-	static DWORD LastMsg = 0;
+	float	fTime;
+	static float fLastMsg = 0;
 	int		ret;
 	sizebuf_t	old;
 
@@ -258,11 +258,11 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	memcpy (net_message.data, olddata, net_message.cursize);
 
 	// check time
-	Time = Sys_Milliseconds ();
+	fTime = Sys_FloatTime ();
 
-	if (Time - LastMsg < 5000) return;
+	if (fTime - fLastMsg < 5) return;
 
-	LastMsg = Time;
+	fLastMsg = fTime;
 
 	// write out a nop
 	if (showmsg) Con_Printf ("--> client to server keepalive\n");
@@ -272,11 +272,11 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	SZ_Clear (&cls.message);
 }
 
-void Host_Frame (DWORD time);
+void Host_Frame (double time);
 
 static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 {
-	static DWORD time, oldtime, newtime;
+	static double time, oldtime, newtime;
 	static int lastpercent = 666;
 	int thispercent = (PercentDown / 10);
 
@@ -292,7 +292,7 @@ static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 
 	cls.download.percent = PercentDown;
 
-	newtime = Sys_Milliseconds ();
+	newtime = Sys_FloatTime ();
 	time = newtime - oldtime;
 
 	if (lastpercent != thispercent)
@@ -303,7 +303,6 @@ static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
 	}
 
 	Host_Frame (time);
-
 	oldtime = newtime;
 
 	// abort if we disconnect
@@ -634,18 +633,27 @@ If an entities model or origin changes from frame to frame, it must be
 relinked.  Other attributes can change without relinking.
 ==================
 */
-void CL_ClearInterpolation (entity_t *ent)
+void CL_ClearInterpolation (entity_t *ent, int clearflags)
 {
-	ent->framestarttime = 0;
-	ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR];
+	if (clearflags & CLEAR_POSES)
+	{
+		ent->framestarttime = 0;
+		ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR] = -1;
+	}
 
-	ent->translatestarttime = 0;
-	ent->lerporigin[LERP_LAST][0] = ent->lerporigin[LERP_LAST][1] = ent->lerporigin[LERP_LAST][2] = 0;
-	ent->lerporigin[LERP_CURR][0] = ent->lerporigin[LERP_CURR][1] = ent->lerporigin[LERP_CURR][2] = 0;
+	if (clearflags & CLEAR_ORIGIN)
+	{
+		ent->translatestarttime = 0;
+		ent->lerporigin[LERP_LAST][0] = ent->lerporigin[LERP_LAST][1] = ent->lerporigin[LERP_LAST][2] = 0;
+		ent->lerporigin[LERP_CURR][0] = ent->lerporigin[LERP_CURR][1] = ent->lerporigin[LERP_CURR][2] = 0;
+	}
 
-	ent->rotatestarttime = 0;
-	ent->lerpangles[LERP_LAST][0] = ent->lerpangles[LERP_LAST][1] = ent->lerpangles[LERP_LAST][2] = 0;
-	ent->lerpangles[LERP_CURR][0] = ent->lerpangles[LERP_CURR][1] = ent->lerpangles[LERP_CURR][2] = 0;
+	if (clearflags & CLEAR_ANGLES)
+	{
+		ent->rotatestarttime = 0;
+		ent->lerpangles[LERP_LAST][0] = ent->lerpangles[LERP_LAST][1] = ent->lerpangles[LERP_LAST][2] = 0;
+		ent->lerpangles[LERP_CURR][0] = ent->lerpangles[LERP_CURR][1] = ent->lerpangles[LERP_CURR][2] = 0;
+	}
 }
 
 
@@ -697,7 +705,7 @@ void CL_ParseUpdate (int bits)
 	if (ent->msgtime + 0.2 < cl.mtime[0])
 	{
 		// more than 0.2 seconds since the last message (most entities think every 0.1 sec)
-		CL_ClearInterpolation (ent);
+		CL_ClearInterpolation (ent, CLEAR_ALLLERP);
 	}
 
 	ent->msgtime = cl.mtime[0];
@@ -764,7 +772,7 @@ void CL_ParseUpdate (int bits)
 		ent->msg_origins[0][0] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_origins[0][0] = ent->baseline.origin[0];
 
-	if (bits & U_ANGLE1)
+	if (bits & U_ANGLES1)
 		ent->msg_angles[0][0] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_angles[0][0] = ent->baseline.angles[0];
 
@@ -772,7 +780,7 @@ void CL_ParseUpdate (int bits)
 		ent->msg_origins[0][1] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_origins[0][1] = ent->baseline.origin[1];
 
-	if (bits & U_ANGLE2)
+	if (bits & U_ANGLES2)
 		ent->msg_angles[0][1] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_angles[0][1] = ent->baseline.angles[1];
 
@@ -780,7 +788,7 @@ void CL_ParseUpdate (int bits)
 		ent->msg_origins[0][2] = MSG_ReadCoord (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_origins[0][2] = ent->baseline.origin[2];
 
-	if (bits & U_ANGLE3)
+	if (bits & U_ANGLES3)
 		ent->msg_angles[0][2] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 	else ent->msg_angles[0][2] = ent->baseline.angles[2];
 
@@ -853,9 +861,8 @@ void CL_ParseUpdate (int bits)
 
 		// if the model has changed we must also reset the interpolation data
 		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical as they might be pointing to invalid frames in the new model!!!
-		CL_ClearInterpolation (ent);
+		CL_ClearInterpolation (ent, CLEAR_POSES);
 		D3DOQ_CleanEntity (ent);
-		ent->brushstate.bmrelinked = true;
 
 		// reset frame and skin too...!
 		if (!(bits & U_FRAME)) ent->frame = 0;
@@ -874,7 +881,7 @@ void CL_ParseUpdate (int bits)
 
 		// fix "dying throes" interpolation bug - reset interpolation data if the entity wasn't updated
 		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical here; the rest is done for completeness sake.
-		CL_ClearInterpolation (ent);
+		CL_ClearInterpolation (ent, CLEAR_ALLLERP);
 
 		// register a new occlusion query for the entity
 		D3DOQ_RegisterQuery (ent);
@@ -921,16 +928,6 @@ CL_ParseClientdata
 Server information pertaining to this client only
 ==================
 */
-void CL_UpdateClientStat (int stat, int value)
-{
-	if (cl.stats[stat] != value)
-	{
-		cl.stats[stat] = value;
-		HUD_Changed ();
-	}
-}
-
-
 void CL_ParseClientdata (void)
 {
 	int		i, j;
@@ -975,7 +972,6 @@ void CL_ParseClientdata (void)
 			if ((i & (1 << j)) && !(cl.items & (1 << j)))
 				cl.itemgettime[j] = cl.time;
 
-		HUD_Changed ();
 		cl.items = i;
 	}
 
@@ -1026,9 +1022,9 @@ void CL_ParseClientdata (void)
 		Con_DPrintf ("updated death location\n");
 	}
 
-	// now update the stats
+	// now update the stats for real
 	for (i = 0; i < 32; i++)
-		CL_UpdateClientStat (i, clnewstats[i]);
+		cl.stats[i] = clnewstats[i];
 
 	if (bits & SU_WEAPONALPHA)
 		cl.viewent.alphaval = MSG_ReadByte ();
@@ -1268,9 +1264,9 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_setangle:
-			for (i = 0; i < 3; i++)
-				cl.viewangles[i] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
-
+			cl.viewangles[0] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
+			cl.viewangles[1] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
+			cl.viewangles[2] = MSG_ReadAngle (cl.Protocol, cl.PrototcolFlags);
 			break;
 
 		case svc_setview:
@@ -1302,7 +1298,6 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatename:
-			HUD_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1316,7 +1311,6 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatefrags:
-			HUD_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1330,7 +1324,6 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_updatecolors:
-			HUD_Changed ();
 			i = MSG_ReadByte ();
 
 			if (i >= cl.maxclients)
@@ -1628,7 +1621,7 @@ void Q_Version (char *s)
 	{
 		if (!strncmp (t, ": q_version", 9))
 		{
-			Cbuf_AddText (va ("say ProQuake version (DirectQ emulated)\n"));
+			Cbuf_AddText (va ("say DirectQ "DIRECTQ_VERSION")\n"));
 			Cbuf_Execute ();
 			q_version_reply_time = realtime;
 			break; // Baker: only do once per string

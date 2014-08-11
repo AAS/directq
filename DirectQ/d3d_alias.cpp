@@ -63,23 +63,8 @@ typedef struct aliasbuffers_s
 	LPDIRECT3DVERTEXBUFFER9 TexCoordStream;
 	LPDIRECT3DINDEXBUFFER9 Indexes;
 
-	int RegistrationSequence;
 	int BufferSize;
-
-	aliashdr_t *aliashdr;
 } aliasbuffers_t;
-
-
-bool d3d_AliasRegenBuffers = false;
-
-
-void D3DAlias_ClearCache (void)
-{
-	// if the cache needs to be flushed we need special handling of subsequent buffer clearing and creation
-	// this is needed because a buffer struct now holds a reference to the MDL that it was created for, and
-	// that reference will now be an invalid pointer.  yes, this is ugly.
-	d3d_AliasRegenBuffers = true;
-}
 
 
 void D3D_CacheAliasMesh (char *name, byte *hash, aliashdr_t *hdr)
@@ -117,7 +102,7 @@ D3DAlias_MakeAliasMesh
 */
 void D3DAlias_MakeAliasMesh (char *name, byte *hash, aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles)
 {
-	if (r_cachealiasmodels.integer)
+	if (r_cachealiasmodels.integer && d3d_GlobalCaps.supportHardwareTandL)
 	{
 		// look for a cached version
 		HANDLE h = INVALID_HANDLE_VALUE;
@@ -160,14 +145,15 @@ void D3DAlias_MakeAliasMesh (char *name, byte *hash, aliashdr_t *hdr, stvert_t *
 		// we probably need to create buffers for this model
 		hdr->buffernum = -1;
 
-		return;
+		// let's not miss this part
+		goto mesh_set_drawflags;
 
 bad_mesh_2:;
 		// we get here if the mesh file was successfully opened but was not valid for this MDL or had a read error
 		COM_FCloseFile (&h);
 bad_mesh_1:;
 		// we get here if the mesh file could not be opened
-		Con_Printf ("meshing %s...\n", name);
+		// Con_Printf ("meshing %s...\n", name);
 	}
 
 	// also reserve space for the index remap tables
@@ -235,7 +221,8 @@ bad_mesh_1:;
 	if (hdr->nummesh > d3d_DeviceCaps.MaxVertexIndex) Sys_Error ("D3DAlias_MakeAliasMesh: MDL %s too big", name);
 	if (hdr->nummesh > d3d_DeviceCaps.MaxPrimitiveCount) Sys_Error ("D3DAlias_MakeAliasMesh: MDL %s too big", name);
 
-	if (r_optimizealiasmodels.integer)
+	// only optimize with hardware T&L as there have been reports of it being slower with software
+	if (r_optimizealiasmodels.integer && d3d_GlobalCaps.supportHardwareTandL)
 	{
 		// optimize the mesh - we can pull temp storage off the hunk here because we're gonna free it anyway
 		// most of the following code was inspired by the example at http://psp.jim.sh/svn/comp.php?repname=ps3ware&compare[]=/@136&compare[]=/@137
@@ -284,9 +271,10 @@ bad_mesh_1:;
 	MainHunk->FreeToLowMark (hunkmark);
 
 	// (optionally) save the data out to disk
-	if (r_cachealiasmodels.integer)
+	if (r_cachealiasmodels.integer && d3d_GlobalCaps.supportHardwareTandL)
 		D3D_CacheAliasMesh (name, hash, hdr);
 
+mesh_set_drawflags:;
 	// calculate drawflags
 	hdr->drawflags = 0;
 	char *Name = strrchr (name, '/');
@@ -572,18 +560,6 @@ void D3DAlias_ReleaseBuffers (aliasbuffers_t *buf)
 	SAFE_RELEASE (buf->BlendStream);
 	SAFE_RELEASE (buf->TexCoordStream);
 	SAFE_RELEASE (buf->Indexes);
-
-	// explicitly unregistered
-	buf->RegistrationSequence = ~d3d_RenderDef.RegistrationSequence;
-
-	// NULL the header if we're regenerating buffers (the creation code will look after everything else we need here)
-	if (d3d_AliasRegenBuffers) buf->aliashdr = NULL;
-
-	if (buf->aliashdr)
-	{
-		buf->aliashdr->buffernum = -1;
-		buf->aliashdr = NULL;
-	}
 }
 
 
@@ -595,22 +571,6 @@ void D3DAlias_ReleaseBuffers (int buffernum)
 
 void D3DAlias_CreateBuffers (aliashdr_t *hdr)
 {
-	// so that we can check for failure
-	hdr->buffernum = -1;
-
-	// the model needs a new buffer so find a free one
-	for (int j = 0; j < MAX_MOD_KNOWN; j++)
-	{
-		if (!d3d_AliasBuffers[j].Indexes)
-		{
-			hdr->buffernum = j;
-			break;
-		}
-	}
-
-	// this should never happen as MAX_MOD_KNOWN should hopefully crap out first
-	if (hdr->buffernum < 0) Sys_Error ("D3DAlias_CreateBuffers : failed to find free buffers");
-
 	// this one is just to keep the memory weenies from having fits
 	d3d_AliasBuffers[hdr->buffernum].BufferSize = hdr->nummesh * hdr->nummeshframes * sizeof (aliasvertexstream_t) +
 		hdr->nummesh * sizeof (aliastexcoordstream_t) +
@@ -619,10 +579,6 @@ void D3DAlias_CreateBuffers (aliashdr_t *hdr)
 	D3DAlias_CreateIndexBuffer (hdr, &d3d_AliasBuffers[hdr->buffernum]);
 	D3DAlias_CreateVertexStreamBuffer (hdr, &d3d_AliasBuffers[hdr->buffernum]);
 	D3DAlias_CreateTexCoordStreamBuffer (hdr, &d3d_AliasBuffers[hdr->buffernum]);
-
-	// store the alias header that was used with this buffer so that we can clear it properly
-	// (fixme - this needs to be fixed if we;re clearing the cache)
-	d3d_AliasBuffers[hdr->buffernum].aliashdr = hdr;
 }
 
 
@@ -634,53 +590,22 @@ void D3DAlias_CreateBuffers (void)
 	int activebuffers = 0;
 	int BufferSize = 0;
 
-	// nothing allocated yet
-	if (!mod_known) return;
-
 	// go through all the models
 	for (int i = 0; i < MAX_MOD_KNOWN; i++)
 	{
+		// release anything that was using this set of buffers
+		D3DAlias_ReleaseBuffers (&d3d_AliasBuffers[i]);
+
+		// nothing allocated yet
+		if (!mod_known) continue;
 		if (!(mod = mod_known[i])) continue;
 		if (mod->type != mod_alias) continue;
 
-		aliashdr_t *hdr = mod->aliashdr;
-
-		// a cache flush needs to regenerate buffers for all MDLs as the buffer now holds
-		// a reference to the MDL header
-		if (mod->aliashdr->buffernum < 0 || d3d_AliasRegenBuffers)
-		{
-			D3DAlias_CreateBuffers (mod->aliashdr);
-			createbuffers++;
-		}
-
-		// track total allocations
-		BufferSize += d3d_AliasBuffers[hdr->buffernum].BufferSize;
-
-		// mark the buffer as used in this registration sequence
-		d3d_AliasBuffers[hdr->buffernum].RegistrationSequence = d3d_RenderDef.RegistrationSequence;
-		activebuffers++;
+		// and create them again
+		mod->aliashdr->buffernum = i;
+		D3DAlias_CreateBuffers (mod->aliashdr);
+		BufferSize += d3d_AliasBuffers[i].BufferSize;
 	}
-
-	// clear down any buffers which are unused in this registration sequence
-	for (int i = 0; i < MAX_MOD_KNOWN; i++)
-	{
-		// this buffer is used
-		if (d3d_AliasBuffers[i].RegistrationSequence == d3d_RenderDef.RegistrationSequence) continue;
-
-		// all models must have indexes so if it has indexes count it to the cleared total
-		if (d3d_AliasBuffers[i].Indexes)
-		{
-			clearbuffers++;
-			D3DAlias_ReleaseBuffers (&d3d_AliasBuffers[i]);
-		}
-	}
-
-	// no need to force a regeneration any more
-	d3d_AliasRegenBuffers = false;
-
-	// Con_Printf ("Created %i buffers\n", createbuffers);
-	// Con_Printf ("Released %i buffers\n", clearbuffers);
-	// Con_Printf ("Using %i buffers\n", activebuffers);
 
 	// this just exists so that I can track how much memory I'm using for MDLs and keep the memory weenies from panicking
 	// Con_Printf ("%i k in MDL vertex buffers\n", (BufferSize + 1023) / 1024);
@@ -783,9 +708,6 @@ void D3DAlias_CreateBuffers (void)
 
 void D3DAlias_ReleaseBuffers (void)
 {
-	// if we're releasing here on a vid_restart, game change or lost device we must fully regenerate
-	d3d_AliasRegenBuffers = true;
-
 	for (int i = 0; i < MAX_MOD_KNOWN; i++)
 		D3DAlias_ReleaseBuffers (&d3d_AliasBuffers[i]);
 
@@ -847,17 +769,25 @@ void D3DAlias_SetupLighting (entity_t *ent, float *shadevector, float *shadeligh
 
 void D3DAlias_TransformFinal (entity_t *ent, aliashdr_t *hdr)
 {
+#if 0
 	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.integer)
 	{
 		// the scaling needs to be included at this time
-		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0] - (22 + 8), hdr->scale_origin[1] - (22 + 8), hdr->scale_origin[2] - (22 + 8));
+		// (fixme - this is incorrect in everything!!!) (done--ish)
+		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin[0] - 1.41f, hdr->scale_origin[1] - 3.2f, hdr->scale_origin[2] - 24.0f);
 		D3DMatrix_Scale (&ent->matrix, hdr->scale[0] * 2.0f, hdr->scale[1] * 2.0f, hdr->scale[2] * 2.0f);
 	}
 	else
+#endif
 	{
 		// the scaling needs to be included at this time
 		D3DMatrix_Translate (&ent->matrix, hdr->scale_origin);
 		D3DMatrix_Scale (&ent->matrix, hdr->scale);
+	}
+
+	if ((hdr->drawflags & AM_EYES) && gl_doubleeyes.integer)
+	{
+		// double the size of the eyes
 	}
 }
 
@@ -1384,7 +1314,7 @@ void D3DAlias_SetupAliasModel (entity_t *ent)
 	else
 	{
 		// and now check it for culling
-		if (R_CullBox (ent->mins, ent->maxs)) return;
+		if (R_CullBox (ent->mins, ent->maxs, frustum)) return;
 	}
 
 	// the model has not been culled now
@@ -1717,13 +1647,7 @@ void D3DAlias_RenderAliasModels (void)
 
 	// sort the alias edicts by model
 	// (to do - chain these in a list instead to save memory, remove limits and run faster...)
-	qsort
-	(
-		d3d_AliasEdicts,
-		d3d_NumAliasEdicts,
-		sizeof (entity_t *),
-		(int (*) (const void *, const void *)) D3DAlias_ModelSortFunc
-	);
+	qsort (d3d_AliasEdicts, d3d_NumAliasEdicts, sizeof (entity_t *), (sortfunc_t) D3DAlias_ModelSortFunc);
 
 	// draw in two passes to prevent excessive shader switching
 	if (d3d_GlobalCaps.supportInstancing && d3d_usinginstancing.value)
@@ -1746,7 +1670,6 @@ void D3DAlias_DrawViewModel (void)
 	if (cl.stats[STAT_HEALTH] <= 0) return;
 	if (!cl.viewent.model) return;
 	if (!r_drawentities.value) return;
-	if (d3d_RenderDef.automap) return;
 
 	// select view ent
 	entity_t *ent = &cl.viewent;
@@ -1784,13 +1707,13 @@ void D3DAlias_DrawViewModel (void)
 
 	extern cvar_t scr_fov;
 	extern cvar_t scr_fovcompat;
-	float aspect = (float) r_refdef.vrect.width / (float) r_refdef.vrect.height;
+	float aspect = (float) vid.ref3dsize.width / (float) vid.ref3dsize.height;
 
 	if ((scr_fov.value > 90 && !scr_fovcompat.integer) || aspect < (4.0f / 3.0f))
 	{
 		// recalculate the correct fov for displaying the gun model as if fov was 90
 		float fov_y = SCR_CalcFovY (90, 640, 432);
-		float fov_x = SCR_CalcFovX (fov_y, r_refdef.vrect.width, r_refdef.vrect.height);
+		float fov_x = SCR_CalcFovX (fov_y, vid.ref3dsize.width, vid.ref3dsize.height);
 
 		// adjust projection to a constant y fov for wide-angle views
 		// don't need to worry over much about the far clipping plane here

@@ -201,6 +201,7 @@ void ED_Free (edict_t *ed)
 	VectorCopy (vec3_origin, ed->v.angles);
 	ed->v.nextthink = -1;
 	ed->v.solid = 0;
+	ed->num_leafs = 0;
 
 	ed->freetime = sv.time;
 }
@@ -1320,13 +1321,7 @@ void ED_LoadFromFile (char *data)
 		nument++;
 	}
 
-	qsort
-	(
-		sv_levelstats.sorted,
-		sv_levelstats.numenttypes,
-		sizeof (entitystat_t *),
-		(int ( *) (const void *, const void *)) SV_EntityStatSortFunc
-	);
+	qsort (sv_levelstats.sorted, sv_levelstats.numenttypes, sizeof (entitystat_t *), (sortfunc_t) SV_EntityStatSortFunc);
 
 	for (int i = 1; i < sv_levelstats.numenttypes; i++)
 	{

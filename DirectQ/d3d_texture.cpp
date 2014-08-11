@@ -140,119 +140,41 @@ bool d3d_ImagePadded = false;
 
 void D3D_Transfer8BitTexture (byte *src, unsigned *dst, int size, unsigned *palette)
 {
-	while (size > 16)
+	int n = (size + 7) >> 3;
+	size %= 8;
+
+	switch (size)
 	{
-		dst[0] = palette[src[0]];
-		dst[1] = palette[src[1]];
-		dst[2] = palette[src[2]];
-		dst[3] = palette[src[3]];
-		dst[4] = palette[src[4]];
-		dst[5] = palette[src[5]];
-		dst[6] = palette[src[6]];
-		dst[7] = palette[src[7]];
-		dst[8] = palette[src[8]];
-		dst[9] = palette[src[9]];
-		dst[10] = palette[src[10]];
-		dst[11] = palette[src[11]];
-		dst[12] = palette[src[12]];
-		dst[13] = palette[src[13]];
-		dst[14] = palette[src[14]];
-		dst[15] = palette[src[15]];
-
-		size -= 16;
-		dst += 16;
-		src += 16;
+	case 0: do {*dst++ = palette[*src++];
+	case 7: *dst++ = palette[*src++];
+	case 6: *dst++ = palette[*src++];
+	case 5: *dst++ = palette[*src++];
+	case 4: *dst++ = palette[*src++];
+	case 3: *dst++ = palette[*src++];
+	case 2: *dst++ = palette[*src++];
+	case 1: *dst++ = palette[*src++];
+	} while (--n > 0);
 	}
-
-	while (size > 8)
-	{
-		dst[0] = palette[src[0]];
-		dst[1] = palette[src[1]];
-		dst[2] = palette[src[2]];
-		dst[3] = palette[src[3]];
-		dst[4] = palette[src[4]];
-		dst[5] = palette[src[5]];
-		dst[6] = palette[src[6]];
-		dst[7] = palette[src[7]];
-
-		size -= 8;
-		dst += 8;
-		src += 8;
-	}
-
-	while (size > 4)
-	{
-		dst[0] = palette[src[0]];
-		dst[1] = palette[src[1]];
-		dst[2] = palette[src[2]];
-		dst[3] = palette[src[3]];
-
-		size -= 4;
-		dst += 4;
-		src += 4;
-	}
-
-	for (int i = 0; i < size; i++)
-		dst[i] = palette[src[i]];
 }
 
 
 void D3D_Transfer32BitTexture (unsigned *src, unsigned *dst, int size)
 {
-	while (size > 16)
+	int n = (size + 7) >> 3;
+	size %= 8;
+
+	switch (size)
 	{
-		dst[0] = src[0];
-		dst[1] = src[1];
-		dst[2] = src[2];
-		dst[3] = src[3];
-		dst[4] = src[4];
-		dst[5] = src[5];
-		dst[6] = src[6];
-		dst[7] = src[7];
-		dst[8] = src[8];
-		dst[9] = src[9];
-		dst[10] = src[10];
-		dst[11] = src[11];
-		dst[12] = src[12];
-		dst[13] = src[13];
-		dst[14] = src[14];
-		dst[15] = src[15];
-
-		size -= 16;
-		dst += 16;
-		src += 16;
+	case 0: do {*dst++ = *src++;
+	case 7: *dst++ = *src++;
+	case 6: *dst++ = *src++;
+	case 5: *dst++ = *src++;
+	case 4: *dst++ = *src++;
+	case 3: *dst++ = *src++;
+	case 2: *dst++ = *src++;
+	case 1: *dst++ = *src++;
+	} while (--n > 0);
 	}
-
-	while (size > 8)
-	{
-		dst[0] = src[0];
-		dst[1] = src[1];
-		dst[2] = src[2];
-		dst[3] = src[3];
-		dst[4] = src[4];
-		dst[5] = src[5];
-		dst[6] = src[6];
-		dst[7] = src[7];
-
-		size -= 8;
-		dst += 8;
-		src += 8;
-	}
-
-	while (size > 4)
-	{
-		dst[0] = src[0];
-		dst[1] = src[1];
-		dst[2] = src[2];
-		dst[3] = src[3];
-
-		size -= 4;
-		dst += 4;
-		src += 4;
-	}
-
-	for (int i = 0; i < size; i++)
-		dst[i] = src[i];
 }
 
 
@@ -388,8 +310,7 @@ void D3D_Pad8BitTexture (byte *data, int width, int height, unsigned *padded, in
 {
 	for (int y = 0; y < height; y++)
 	{
-		for (int x = 0; x < width; x++)
-			padded[x] = palette[data[x]];
+		D3D_Transfer8BitTexture (data, padded, width, palette);
 
 		data += width;
 		padded += scaled_width;
@@ -401,8 +322,7 @@ void D3D_Pad32BitTexture (unsigned *data, int width, int height, unsigned *padde
 {
 	for (int y = 0; y < height; y++)
 	{
-		for (int x = 0; x < width; x++)
-			padded[x] = data[x];
+		D3D_Transfer32BitTexture (data, padded, width);
 
 		data += width;
 		padded += scaled_width;
@@ -1317,13 +1237,7 @@ void D3D_EnumExternalTextures (void)
 	}
 
 	// sort the list
-	qsort
-	(
-		d3d_ExternalTextures,
-		d3d_NumExternalTextures,
-		sizeof (d3d_externaltexture_t *),
-		D3D_ExternalTextureCompareFunc
-	);
+	qsort (d3d_ExternalTextures, d3d_NumExternalTextures, sizeof (d3d_externaltexture_t *), D3D_ExternalTextureCompareFunc);
 
 	// set up byte pointers and remove dummy sort order extensions
 	for (int i = 0; i < d3d_NumExternalTextures; i++)
@@ -1488,26 +1402,27 @@ cmd_t d3d_TextureList_cmd ("texturelist", D3D_TextureList_f);
 cmd_t d3d_CopyTexture_cmd ("copytexture", D3D_CopyTexture_f);
 
 
-void D3DSurf_BeginBuildingTextureChains (void);
-void D3DSurf_CreateTextureChainObject (image_t *image);
-void D3DSurf_EndBuildingTextureChains (void);
+void D3DSurf_RegisterTextureChain (image_t *image);
+void D3DSurf_FinishTextureChains (void);
+extern int d3d_NumTextureChains;
 
-void D3DTexture_DefineChains (void)
+void D3DTexture_RegisterChains (void)
 {
-	D3DSurf_BeginBuildingTextureChains ();
+	d3d_NumTextureChains = 0;
 
 	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
 	{
-		// only BSP textures go into chains
-		if (!(tex->texture->flags & IMAGE_BSP)) continue;
+		if (!tex) continue;
+		if (!tex->texture) continue;
+		if (!tex->texture->d3d_Texture) continue;
 		if (tex->texture->flags & IMAGE_LUMA) continue;
+		if (!(tex->texture->flags & IMAGE_BSP)) continue;
 		if (tex->texture->RegistrationSequence != d3d_RenderDef.RegistrationSequence) continue;
 
-		// add a texture chain object for this texture
-		D3DSurf_CreateTextureChainObject (tex->texture);
+		D3DSurf_RegisterTextureChain (tex->texture);
 	}
 
-	D3DSurf_EndBuildingTextureChains ();
+	D3DSurf_FinishTextureChains ();
 }
 
 

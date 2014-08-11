@@ -59,8 +59,8 @@ typedef struct d3d_modelsurf_s
 	LPDIRECT3DTEXTURE9 textures[3];
 	int surfalpha;
 	int shaderpass;
-	int addorder;	// so that we can maintain stability in qsort
 	struct d3d_modelsurf_s *next;
+	struct d3d_modelsurf_s *chain;
 } d3d_modelsurf_t;
 
 
@@ -87,7 +87,10 @@ typedef struct mplane_s
 	float	dist;
 	byte	type;			// for texture axis selection and fast side tests
 	byte	signbits;		// signx + signy<<1 + signz<<1
-	byte	pad[2];
+	byte	pad[2];			// wtf???
+	int		cacheframe;
+	float	cachedist;
+	entity_t *cacheent;
 } mplane_t;
 
 typedef struct texture_s
@@ -195,19 +198,13 @@ typedef struct aliaspolyvert_s
 typedef struct brushpolyvert_s
 {
 	float xyz[3];
-	float st[2];
-
-	union
-	{
-		// warp verts need to cache the original s/t for non-hlsl updates
-		float lm[2];
-		float st2[2];
-	};
+	float st[2][2];
 } brushpolyvert_t;
 
 
 typedef struct msurface_s
 {
+	int			clipflags;
 	int			surfnum;
 	int			visframe;		// should be drawn when node is crossed
 
@@ -250,13 +247,11 @@ typedef struct msurface_s
 	int			overbright;
 	int			fullbright;
 	int			ambient;
+	float		lm_gamma;
 
 	// extents of the surf in world space
 	float		mins[3];
 	float		maxs[3];
-
-	// true if the surf intersected the frustum
-	bool		intersect;
 
 	byte		styles[MAXLIGHTMAPS];
 	int			cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
@@ -268,33 +263,16 @@ typedef struct msurface_s
 } msurface_t;
 
 
-// corrected these flags
-#define INSIDE_FRUSTUM		0x01
-#define OUTSIDE_FRUSTUM		0x10
-#define INTERSECT_FRUSTUM	0x11
-
-#define FRUSTUM_UNDEFINED			0x0
-#define FULLY_INSIDE_FRUSTUM		0x01010101
-#define FULLY_OUTSIDE_FRUSTUM		0x10101010
-#define FULLY_INTERSECT_FRUSTUM		0x11111111
-
 typedef struct mnode_s
 {
 	// common with leaf
 	int			contents;		// 0, to differentiate from leafs
 	int			visframe;		// node needs to be traversed if current
-	bool		seen;
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
-
-	union
-	{
-		int			bops;
-		byte		sides[4];
-	};
 
 	// node specific
 	float		dot;
@@ -313,24 +291,18 @@ typedef struct mleaf_s
 	// common with node
 	int			contents;		// wil be a negative contents number
 	int			visframe;		// node needs to be traversed if current
-	bool		seen;
 	float		mins[3];		// for bounding box culling
 	float		maxs[3];		// for bounding box culling
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
 
-	union
-	{
-		int			bops;
-		byte		sides[4];
-	};
-
 	// leaf specific
 	byte		*compressed_vis;
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
-	struct efrag_s	*efrags;
+	struct efrag_s	*efrags;	// client-side for static entities
+	int			sv_visframe;
 	int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
 
@@ -590,15 +562,8 @@ typedef struct model_s
 	aliashdr_t	*aliashdr;
 	msprite_t	*spritehdr;
 
-	// the entity that used this model (inline bmodels only)
-	// kept here so that we can explicitly NULL it for other model types and write more general code as a result
-	struct entity_s *cacheent;
-
 	// will be == d3d_RenderDef.RegistrationSequence is this model was touched on this map load
 	int RegistrationSequence;
-
-	// true if the model was ever seen
-	bool wasseen;
 } model_t;
 
 //============================================================================

@@ -133,27 +133,18 @@ bool IsFileNameChar (char c)
 	// true if the char is valid for a file name (excluding alpha numeric)
 	// standard windows disallowed characters
 	if (c == '\\') return false;
-
 	if (c == '/') return false;
-
 	if (c == ':') return false;
-
 	if (c == '*') return false;
-
 	if (c == '?') return false;
-
 	if (c == '"') return false;
-
 	if (c == '<') return false;
-
 	if (c == '>') return false;
-
 	if (c == '|') return false;
 
 	// these are ones we want to disallow in the engine for various reasons
 	// (keeping code simpler, prevention of relative paths, etc etc etc)
 	if (c == ' ') return false;
-
 	if (c == '.') return false;
 
 	return true;
@@ -173,13 +164,13 @@ bool IsFileNameChar (char c)
 
 void Menu_DrawCharacter (int cx, int line, int num)
 {
-	Draw_Character (cx + ((vid.width - 320) >> 1), line, num);
+	Draw_Character (cx + ((vid.currsize->width - 320) >> 1), line, num);
 }
 
 
 void Menu_DrawBackwardsCharacter (int cx, int line, int num)
 {
-	Draw_BackwardsCharacter (cx + ((vid.width - 320) >> 1), line, num);
+	Draw_BackwardsCharacter (cx + ((vid.currsize->width - 320) >> 1), line, num);
 }
 
 
@@ -205,8 +196,46 @@ void Menu_PrintWhite (int cx, int cy, char *str)
 }
 
 
+char *Menu_TrimString (char *str)
+{
+	// con_printf can have appended spaces - ugh
+	static char menu_static[1024];
+
+	Q_strncpy (menu_static, str, 1023);
+
+	for (int i = strlen (menu_static); i; i--)
+	{
+		if (menu_static[i] < 32) continue;
+
+		if (menu_static[i] != ' ')
+		{
+			menu_static[i + 1] = 0;
+			break;
+		}
+	}
+
+	for (int i = 0; ; i++)
+	{
+		if (!menu_static[i])
+		{
+			str = menu_static;
+			break;
+		}
+
+		if (menu_static[i] != ' ')
+		{
+			str = &menu_static[i];
+			break;
+		}
+	}
+
+	return str;
+}
+
+
 void Menu_PrintCenter (int cx, int cy, char *str)
 {
+	str = Menu_TrimString (str);
 	cx -= strlen (str) * 4;
 
 	while (*str)
@@ -226,6 +255,7 @@ void Menu_PrintCenter (int cy, char *str)
 
 void Menu_PrintCenterWhite (int cx, int cy, char *str)
 {
+	str = Menu_TrimString (str);
 	cx -= strlen (str) * 4;
 
 	while (*str)
@@ -254,21 +284,26 @@ void Menu_PrintCenterWhite (int cy, char *str)
 */
 
 char menu_ConBuffer[1024];
-float menu_ConBufferTime = 0;
-float old_ConBufferTime = 0;
+float ConBufferEndTime = 0;
+float ConBufferStartTime = 0;
 
 void Menu_PutConsolePrintInbuffer (char *text)
 {
 	extern cvar_t scr_centertime;
 
-	// copy to console buffer
-	Q_strncpy (menu_ConBuffer, text, 1023);
+	if (realtime > ConBufferStartTime)
+	{
+		// clear the buffer if we're going to a new print
+		menu_ConBuffer[0] = 0;
+		ConBufferStartTime = realtime;
+	}
+
+	// append to console buffer
+	strncat (menu_ConBuffer, text, 1023);
 
 	// display time
-	old_ConBufferTime = realtime;
-
 	// give it an extra few seconds so the user has a chance to read it
-	menu_ConBufferTime = realtime + 3 + scr_centertime.value;
+	ConBufferEndTime = realtime + 3 + scr_centertime.value;
 }
 
 
@@ -385,13 +420,11 @@ void CQMenuSpinControl::DrawCurrentOptionHighlight (int y)
 	if (this->MenuCvar)
 	{
 		if (this->MenuCvar->value > this->MinVal) drawleft = true;
-
 		if (this->MenuCvar->value < this->MaxVal) drawright = true;
 	}
 	else if (this->StringBuf)
 	{
-		if (* (this->MenuVal) > 0) drawleft = true;
-
+		if (*(this->MenuVal) > 0) drawleft = true;
 		if (this->StringBuf[* (this->MenuVal) + 1]) drawright = true;
 	}
 
@@ -406,7 +439,6 @@ void CQMenuSpinControl::DrawCurrentOptionHighlight (int y)
 	int rpos = lpos + 16 + strlen (this->OutputText) * 8;
 
 	if (drawleft) Menu_DrawBackwardsCharacter (lpos, y, 12 + ((int) (realtime * 2) & 1));
-
 	if (drawright) Menu_DrawCharacter (rpos, y, 12 + ((int) (realtime * 2) & 1));
 }
 
@@ -493,11 +525,11 @@ void CQMenuSpinControl::Key (int k)
 		case K_LEFTARROW:
 			menu_soundlevel = m_sound_option;
 
-			(* (this->MenuVal))--;
+			(*(this->MenuVal))--;
 
-			if (* (this->MenuVal) < 0)
+			if (*(this->MenuVal) < 0)
 			{
-				* (this->MenuVal) = 0;
+				*(this->MenuVal) = 0;
 				menu_soundlevel = m_sound_deny;
 			}
 
@@ -506,11 +538,11 @@ void CQMenuSpinControl::Key (int k)
 		case K_RIGHTARROW:
 			menu_soundlevel = m_sound_option;
 
-			(* (this->MenuVal)) ++;
+			(*(this->MenuVal)) ++;
 
 			if (!this->StringBuf[* (this->MenuVal)])
 			{
-				(* (this->MenuVal))--;
+				(*(this->MenuVal))--;
 				menu_soundlevel = m_sound_deny;
 			}
 
@@ -529,7 +561,7 @@ void CQMenuSpinControl::Key (int k)
 					if ((this->StringBuf[i][0] == k) || (this->StringBuf[i][0] == (k - 32)))
 					{
 						menu_soundlevel = m_sound_option;
-						* (this->MenuVal) = i;
+						*(this->MenuVal) = i;
 						break;
 					}
 				}
@@ -584,14 +616,14 @@ void CQMenuColourBar::Draw (int y)
 		int c = i * 16 + (i < 8 ? 8 : 7);
 
 		// braw baseline colour (offset downwards a little so that it fits correctly
-		Draw_Fill (vid.width / 2 + 12 + i * 8, y + 1, 8, 8, c, 255);
+		Draw_Fill (vid.currsize->width / 2 + 12 + i * 8, y + 1, 8, 8, c, 255);
 	}
 
 	// draw the highlight rectangle
-	Draw_Fill (vid.width / 2 + 11 + colour * 8, y, 10, 10, 15, 255);
+	Draw_Fill (vid.currsize->width / 2 + 11 + colour * 8, y, 10, 10, 15, 255);
 
 	// redraw the highlighted color at brighter intensity (handle backward ranges)
-	Draw_Fill (vid.width / 2 + 12 + colour * 8, y + 1, 8, 8, intense, 255);
+	Draw_Fill (vid.currsize->width / 2 + 12 + colour * 8, y + 1, 8, 8, intense, 255);
 }
 
 
@@ -602,11 +634,11 @@ void CQMenuColourBar::Key (int k)
 	case K_LEFTARROW:
 		menu_soundlevel = m_sound_option;
 
-		(* (this->Colour))--;
+		(*(this->Colour))--;
 
-		if (* (this->Colour) < 0)
+		if (*(this->Colour) < 0)
 		{
-			* (this->Colour) = 0;
+			*(this->Colour) = 0;
 			menu_soundlevel = m_sound_deny;
 		}
 
@@ -615,11 +647,11 @@ void CQMenuColourBar::Key (int k)
 	case K_RIGHTARROW:
 		menu_soundlevel = m_sound_option;
 
-		(* (this->Colour)) ++;
+		(*(this->Colour)) ++;
 
-		if (* (this->Colour) > 13)
+		if (*(this->Colour) > 13)
 		{
-			* (this->Colour) = 13;
+			*(this->Colour) = 13;
 			menu_soundlevel = m_sound_deny;
 		}
 
@@ -681,8 +713,8 @@ void CQMenuCvarTextbox::Draw (int y)
 	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
 
 	// textbox
-	Draw_Fill (vid.width / 2 - 160 + 168, y - 1, MAX_TBLENGTH * 8 + 4, 10, 20, 255);
-	Draw_Fill (vid.width / 2 - 160 + 169, y, MAX_TBLENGTH * 8 + 2, 8, 0, 192);
+	Draw_Fill (vid.currsize->width / 2 - 160 + 168, y - 1, MAX_TBLENGTH * 8 + 4, 10, 20, 255);
+	Draw_Fill (vid.currsize->width / 2 - 160 + 169, y, MAX_TBLENGTH * 8 + 2, 8, 0, 192);
 
 	// current text
 	for (int i = 0; i < MAX_TBLENGTH; i++)
@@ -855,13 +887,9 @@ void CQMenuCvarTextbox::Key (int k)
 		{
 			// check individual flags
 			if ((this->Flags & TBFLAG_ALLOWNUMBERS) && (k >= '0' && k <= '9')) validinput = true;
-
 			if ((this->Flags & TBFLAG_ALLOWLETTERS) && ((k >= 'a' && k <= 'z') || (k >= 'A' && k <= 'Z'))) validinput = true;
-
 			if ((this->Flags & TBFLAG_FILENAMECHARS) && IsFileNameChar (k)) validinput = true;
-
 			if ((this->Flags & TBFLAG_ALLOWSPACE) && k == 32) validinput = true;
-
 			if ((this->Flags & TBFLAG_FOLDERPATH) && (k == '/' || k == '\\') && RealTextPos > 0) validinput = true;
 		}
 
@@ -996,7 +1024,6 @@ void CQMenuCursorSubMenu::Key (int k)
 	if (k == K_ENTER)
 	{
 		if (this->SubMenu) Menu_StackPush (this->SubMenu);
-
 		if (this->Command) this->Command ();
 	}
 }
@@ -1004,7 +1031,7 @@ void CQMenuCursorSubMenu::Key (int k)
 
 void CQMenuCursorSubMenu::DrawCurrentOptionHighlight (int y)
 {
-	Draw_Pic (((vid.width - 240) >> 1) + 5, y, menu_dot_lmp[(int) (realtime * 10) % 6]);
+	Draw_Pic (((vid.currsize->width - 240) >> 1) + 5, y, menu_dot_lmp[(int) (realtime * 10) % 6]);
 }
 
 
@@ -1262,7 +1289,7 @@ CQMenuBanner::CQMenuBanner (qpic_t **pic)
 void CQMenuBanner::Draw (int y)
 {
 	// draw centered on screen and offset down
-	Draw_Pic ((vid.width - this->Pic[0]->width) >> 1, y, this->Pic[0]);
+	Draw_Pic ((vid.currsize->width - this->Pic[0]->width) >> 1, y, this->Pic[0]);
 	this->Y = this->Pic[0]->height + 10;
 }
 
@@ -1294,10 +1321,12 @@ void CQMenuChunkyPic::Draw (int y)
 	y -= this->Parent->NumCursorOptions * 20;
 
 	// quake plaque
-	Draw_Pic (((vid.width - 240) >> 1) - 35, y - 15, gfx_qplaque_lmp);
+	Draw_Pic (((vid.currsize->width - 240) >> 1) - 35, y - 15, gfx_qplaque_lmp);
 
 	// draw centered on screen and offset down
-	Draw_Pic (((vid.width - 240) >> 1) + 25, y, this->Pic[0]);
+	// avoid bilerp seam
+	Draw_SubPic (((vid.currsize->width - 240) >> 1) + 26, y + 1, this->Pic[0], 1, 1, this->Pic[0]->width - 2, this->Pic[0]->height - 2);
+
 	this->Y = this->Pic[0]->height + 10;
 }
 
@@ -1353,7 +1382,6 @@ void CQMenuCvarSlider::Draw (int y)
 
 	// don't go beyond the bounds
 	if (point < 0) point = 0;
-
 	if (point > 1) point = 1;
 
 	// draw indicator
@@ -1680,7 +1708,6 @@ bool CQMenuOption::CanAcceptInput (void)
 {
 	// never accepts input
 	if (!this->Enabled) return false;
-
 	if (!this->Visible) return false;
 
 	// depends on the option type
@@ -1891,14 +1918,47 @@ void CQMenu::Draw (void)
 		y += opt->GetYAdvance ();
 	}
 
-	// draw the console buffer
-	if (menu_ConBufferTime > realtime)
+	// draw the console buffer (multiline)
+	if (ConBufferEndTime > realtime && menu_ConBuffer[0])
 	{
-		menu_ConBufferTime -= (realtime - old_ConBufferTime);
-		old_ConBufferTime = realtime;
+		int lines = 0;
+		char **buflines = (char **) scratchbuf;
+		int *restorelines = ((int *) (buflines)) + 65536;
+		char *first = menu_ConBuffer;
 
-		Menu_PrintCenter (vid.height - 32, menu_ConBuffer);
+		for (int i = 0; ; i++)
+		{
+			if (!menu_ConBuffer[i]) break;
+
+			if (menu_ConBuffer[i] == '\n')
+			{
+				buflines[lines] = first;
+				first = &menu_ConBuffer[i + 1];
+				menu_ConBuffer[i] = 0;
+				restorelines[lines] = i;
+				lines++;
+			}
+		}
+
+		if (!lines)
+		{
+			// !lines should never happen
+			y = vid.currsize->height - ((vid.currsize->height - 480) / 2) - 25;
+			Menu_PrintCenter (y, menu_ConBuffer);
+		}
+		else
+		{
+			y = vid.currsize->height - ((vid.currsize->height - 480) / 2) - 20 - (lines * 5);
+
+			for (int i = 0; i < lines; i++)
+			{
+				Menu_PrintCenter (y, buflines[i]);
+				menu_ConBuffer[restorelines[i]] = '\n';
+				y += 10;
+			}
+		}
 	}
+	else menu_ConBuffer[0] = 0;
 }
 
 
@@ -1941,7 +2001,6 @@ void CQMenu::Key (int k)
 		break;
 
 	case K_UPARROW:
-
 		while (1)
 		{
 			// go to the previous option
@@ -1958,7 +2017,6 @@ void CQMenu::Key (int k)
 		break;
 
 	case K_DOWNARROW:
-
 		while (1)
 		{
 			// go to the next option
@@ -1978,7 +2036,6 @@ void CQMenu::Key (int k)
 		break;
 
 	default:
-
 		// send it through the option key handler
 		if (this->CurrentOption->CanAcceptInput ())
 			this->CurrentOption->Key (k);
@@ -2056,7 +2113,6 @@ void CScrollBoxProvider::SetDeleteItemCallback (menucommandi_t deleteitemcallbac
 int CScrollBoxProvider::DrawItems (int x, int starty)
 {
 	if (!this->DrawItemCallback) return starty;
-
 	if (!this->NumItems) return starty;
 
 	int initialy = starty;
@@ -2088,10 +2144,10 @@ int CScrollBoxProvider::DrawItems (int x, int starty)
 
 	// testing...
 	/*
-	Menu_Print (-50, vid.height - 60, va ("ScrollBoxStartItem:   %i\n", this->ScrollBoxStartItem));
-	Menu_Print (-50, vid.height - 50, va ("ScrollBoxCurrentItem: %i\n", this->ScrollBoxCurrentItem));
-	Menu_Print (-50, vid.height - 40, va ("MaxVisibleItems:      %i\n", this->MaxVisibleItems));
-	Menu_Print (-50, vid.height - 30, va ("NumItems:             %i\n", this->NumItems));
+	Menu_Print (-50, vid.currsize->height - 60, va ("ScrollBoxStartItem:   %i\n", this->ScrollBoxStartItem));
+	Menu_Print (-50, vid.currsize->height - 50, va ("ScrollBoxCurrentItem: %i\n", this->ScrollBoxCurrentItem));
+	Menu_Print (-50, vid.currsize->height - 40, va ("MaxVisibleItems:      %i\n", this->MaxVisibleItems));
+	Menu_Print (-50, vid.currsize->height - 30, va ("NumItems:             %i\n", this->NumItems));
 	*/
 
 	return starty;
@@ -2122,14 +2178,12 @@ void CScrollBoxProvider::KeyFunc (int key)
 	switch (key)
 	{
 	case K_DEL:
-
 		if (this->DeleteItemCallback)
 			this->DeleteItemCallback (this->ScrollBoxCurrentItem);
 
 		break;
 
 	case K_ENTER:
-
 		if (this->EnterItemCallback)
 			this->EnterItemCallback (this->ScrollBoxCurrentItem);
 
@@ -2211,7 +2265,6 @@ void Menu_DrawOption (int x, int y, char *option, bool leftflash, bool rightflas
 	Menu_PrintWhite (x, y, option);
 
 	if (leftflash) Menu_DrawBackwardsCharacter (x - 12, y, 12 + ((int) (realtime * 2) & 1));
-
 	if (rightflash) Menu_DrawCharacter (x + 4 + strlen (option) * 8, y, 12 + ((int) (realtime * 2) & 1));
 }
 
@@ -2239,7 +2292,6 @@ void Menu_HighlightGeneric (int x, int y, int width, int height)
 	else c += 6;
 
 	int colorramp[] = {c, c + dir, c + (2 * dir), c + (3 * dir), c + (4 * dir), c + (3 * dir), c + (2 * dir), c + dir};
-
 	int color = colorramp[(int) (realtime * 10) % 8];
 
 	Draw_Fill (x, y, width, height, color, 192);
@@ -2248,7 +2300,7 @@ void Menu_HighlightGeneric (int x, int y, int width, int height)
 
 void Menu_HighlightBar (int xofs, int y, int width, int height)
 {
-	Menu_HighlightGeneric ((vid.width / 2) + xofs, y - 1, width, height);
+	Menu_HighlightGeneric ((vid.currsize->width / 2) + xofs, y - 1, width, height);
 }
 
 
@@ -2311,6 +2363,8 @@ void Menu_ToggleMenu (void)
 		return;
 	}
 
+	S_ClearBuffer ();
+
 	if (key_dest == key_console)
 		Con_ToggleConsole_f ();
 	else Menu_StackPush (&menu_Main);
@@ -2348,13 +2402,17 @@ void M_Draw (void)
 		// we can't reset key_dest here as doing so breaks the console entirely
 		m_state = m_none;
 		menu_StackDepth = 0;
+		menu_ConBuffer[0] = 0;
 		return;
 	}
+
+	D3DDraw_SetSize (&vid.menusize);
 
 	// draw the appropriate background
 	if (scr_con_current)
 	{
-		Draw_ConsoleBackground (vid.height);
+		// draw console fullscreen (this is crap, it should take a percentage rather than lines)
+		Draw_ConsoleBackground (100);
 
 		// partial alpha
 		Draw_FadeScreen (128);
@@ -2365,8 +2423,14 @@ void M_Draw (void)
 		Draw_FadeScreen (200);
 	}
 
+	// offset the menu to a 640x480 rect centered in the screen
+	D3DDraw_SetOfs (0, (vid.menusize.height - 480) / 2);
+
 	// run the draw func
 	menu_Current->Draw ();
+
+	// restore original draw offsets
+	D3DDraw_SetOfs (0, 0);
 
 	// run the appropriate sound
 	switch (menu_soundlevel)

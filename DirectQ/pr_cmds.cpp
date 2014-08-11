@@ -1969,7 +1969,7 @@ void PF_sqrt (void)
 void PF_Fixme (void)
 {
 	// don't crash
-	Con_SafePrintf ("PF_Fixme: unimplemented bulitin\n");
+	// Con_SafePrintf ("PF_Fixme: unimplemented bulitin\n");
 }
 
 

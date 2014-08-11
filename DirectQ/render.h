@@ -38,23 +38,6 @@ typedef struct aliascache_s
 } aliasstate_t;
 
 
-typedef struct brushstate_s
-{
-	vec3_t bmoldorigin;
-	vec3_t bmoldangles;
-	bool bmrelinked;
-} brushstate_t;
-
-
-typedef struct efrag_s
-{
-	struct mleaf_s		*leaf;
-	struct entity_s		*entity;
-	struct efrag_s		*entnext;
-	struct efrag_s		*leafnext;
-} efrag_t;
-
-
 // just for consistency although it's not protocol-dependent
 #define LERP_FINISH (1 << 4)
 
@@ -88,9 +71,8 @@ typedef struct entity_s
 	int						effects;		// light, particals, etc
 	int						skinnum;		// for Alias models
 	int						visframe;		// last frame this entity was found in an active leaf
+	int						relinkframe;	// static entities only; frame when added to the visedicts list
 	vec3_t					modelorg;		// relative to r_origin
-
-	int						relinkfame;
 
 	// occlusion queries
 	bool					Occluded;
@@ -152,16 +134,14 @@ typedef struct entity_s
 	// cached info about models
 	// these can't be in a union as the entity slot could be reused for a different model type
 	aliasstate_t		aliasstate;
-	brushstate_t		brushstate;
 } entity_t;
 
 
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
 typedef struct
 {
-	vrect_t		vrect;				// subwindow in video for refresh
-	// FIXME: not need vrect next field here?
-	vrect_t		aliasvrect;			// scaled Alias version
+	// so much of this is just crap that's no longer needed
+	/*
 	int			vrectright, vrectbottom;	// right & bottom screen coords
 	int			aliasvrectright, aliasvrectbottom;	// scaled Alias versions
 	float		vrectrightedge;			// rightmost right edge we care about,
@@ -178,8 +158,9 @@ typedef struct
 	// 2.0 = 90 degrees
 	float		xOrigin;			// should probably allways be 0.5
 	float		yOrigin;			// between be around 0.3 to 0.5
+	*/
 
-	vec3_t		vieworg;
+	vec3_t		vieworigin;
 	vec3_t		viewangles;
 
 	float		fov_x, fov_y;
@@ -197,7 +178,6 @@ typedef struct r_viewvecs_s
 	vec3_t forward;
 	vec3_t up;
 	vec3_t right;
-	vec3_t origin;
 } r_viewvecs_t;
 
 extern	r_viewvecs_t	r_viewvectors;
@@ -208,10 +188,6 @@ extern	struct texture_s	*r_notexture_mip;
 
 void R_Init (void);
 void R_InitTextures (void);
-void R_RenderView (void);		// must set r_refdef first
-void R_ViewChanged (vrect_t *pvrect, int lineadj, float aspect);
-// called whenever r_refdef or vid change
-
 void R_NewMap (void);
 
 void R_ParseParticleEffect (void);
@@ -235,5 +211,4 @@ extern	int		reinit_surfcache;	// if 1, surface cache is currently empty and
 int	D_SurfaceCacheForRes (int width, int height);
 void D_DeleteSurfaceCache (void);
 void D_InitCaches (void *buffer, int size);
-void R_SetVrect (vrect_t *pvrect, vrect_t *pvrectin, int lineadj);
 

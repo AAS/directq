@@ -23,11 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-
-bool D3D_DrawAutomap (void);
-cvar_t scr_automapinfo ("scr_automapinfo", "3", CVAR_ARCHIVE);
-cvar_t scr_automapposition ("scr_automapposition", "1", CVAR_ARCHIVE);
-
+void R_RenderView (void);
 void Menu_PrintCenterWhite (int cy, char *str);
 void Menu_PrintWhite (int cx, int cy, char *str);
 void D3D_GenerateTextureList (void);
@@ -79,8 +75,13 @@ console is:
 */
 
 
+void SCR_RefdefCvarChange (cvar_t *blah)
+{
+	vid.recalc_refdef = true;
+}
+
+
 float		scr_con_current;
-float		scr_conlines;		// lines of console to display
 
 cvar_t		scr_showcoords ("scr_showcoords", "0");
 
@@ -89,10 +90,14 @@ cvar_t		scr_showcoords ("scr_showcoords", "0");
 float		scr_timeout;
 
 float		oldscreensize, oldfov, oldconscale, oldhudbgfill, oldsbaralpha;
-bool		oldautomap = false;
-extern cvar_t		gl_conscale;
-cvar_t		scr_viewsize ("viewsize", 100, CVAR_ARCHIVE);
-cvar_t		scr_fov ("fov", 90);	// 10 - 170
+
+extern cvar_t gl_conscale;
+extern cvar_t scr_sbarscale;
+extern cvar_t scr_menuscale;
+extern cvar_t scr_conscale;
+
+cvar_t		scr_viewsize ("viewsize", 100, CVAR_ARCHIVE, SCR_RefdefCvarChange);
+cvar_t		scr_fov ("fov", 90, 0, SCR_RefdefCvarChange);	// 10 - 170
 cvar_t		scr_fovcompat ("fov_compatible", 0.0f, CVAR_ARCHIVE);
 cvar_t		scr_conspeed ("scr_conspeed", 3000);
 cvar_t		scr_centertime ("scr_centertime", 2);
@@ -118,8 +123,6 @@ qpic_t		*scr_turtle;
 
 int			clearconsole;
 int			clearnotify;
-
-vrect_t		scr_vrect;
 
 bool	scr_disabled_for_loading;
 bool	scr_drawmapshot;
@@ -213,6 +216,10 @@ void SCR_CenterPrint (char *str)
 
 int finaley = 0;
 
+// some of sandy's e4 messages are offset strangely so we use this to center them properly
+// (fixme - will this break qc menu hacks?)
+void Menu_PrintCenterWhite (int cy, char *str);
+
 void SCR_DrawCenterString (void)
 {
 	char	*start;
@@ -230,8 +237,29 @@ void SCR_DrawCenterString (void)
 	scr_erase_center = 0;
 	start = scr_centerstring;
 
-	finaley = y = (vid.height - (scr_center_lines * 10)) / 3;
+	finaley = y = (vid.currsize->height - (scr_center_lines * 10)) / 3;
 
+#if 0
+	// some of sandy's e4 messages are offset strangely so we use this to center them properly
+	// (fixme - will this break qc menu hacks?)
+	for (int i = 0; ; i++)
+	{
+		if (!scr_centerstring[i])
+		{
+			Menu_PrintCenterWhite (y, start);
+			break;
+		}
+
+		if (scr_centerstring[i] == '\n')
+		{
+			scr_centerstring[i] = 0;
+			Menu_PrintCenterWhite (y, start);
+			scr_centerstring[i] = '\n';
+			start = &scr_centerstring[i + 1];
+			y += 10;
+		}
+	}
+#else
 	do
 	{
 		// scan the width of the line
@@ -239,7 +267,7 @@ void SCR_DrawCenterString (void)
 			if (start[l] == '\n' || !start[l])
 				break;
 
-		x = (vid.width - l * 8) / 2;
+		x = (vid.currsize->width - l * 8) / 2;
 
 		for (j = 0; j < l; j++, x += 8)
 		{
@@ -260,6 +288,7 @@ void SCR_DrawCenterString (void)
 		// skip the \n
 		start++;
 	} while (1);
+#endif
 }
 
 void SCR_CheckDrawCenterString (void)
@@ -290,6 +319,7 @@ void SCR_CheckDrawCenterString (void)
 		return;
 	}
 
+	D3DDraw_SetSize (&vid.sbarsize);
 	SCR_DrawCenterString ();
 }
 
@@ -344,24 +374,40 @@ Internal use only
 */
 extern cvar_t scr_sbaralpha;
 
+void SCR_CalcGUIScaleFactor (cvar_t *var, sizedef_t *sizedef, sizedef_t *basesize, sizedef_t *sizeclamp)
+{
+	sizedef->width = (float) basesize->width / var->value;
+	sizedef->height = (float) basesize->height / var->value;
+
+	if (sizedef->width < sizeclamp->width || sizedef->height < sizeclamp->height)
+	{
+		sizedef->width = sizeclamp->width;
+		sizedef->height = sizeclamp->height;
+	}
+
+	if (sizedef->width > d3d_CurrentMode.Width || sizedef->height > d3d_CurrentMode.Height)
+	{
+		sizedef->width = d3d_CurrentMode.Width;
+		sizedef->height = d3d_CurrentMode.Height;
+	}
+}
+
+
 static void SCR_CalcRefdef (void)
 {
-	Cvar_Get (conscale, "gl_conscale");
-
+	// don't need a recalc
 	vid.recalc_refdef = 0;
 
 	// bound viewsize
 	if (scr_viewsize.value < 100) Cvar_Set ("viewsize", "100");
-
 	if (scr_viewsize.value > 120) Cvar_Set ("viewsize", "120");
 
 	// bound field of view
 	if (scr_fov.value < 10) Cvar_Set ("fov", "10");
-
 	if (scr_fov.value > 170) Cvar_Set ("fov", "170");
 
 	// conditions for switching off the HUD - viewsize 120 always switches it off, period
-	if (cl.intermission || d3d_RenderDef.automap || scr_viewsize.value > 110)
+	if (cl.intermission || scr_viewsize.value > 110)
 		sb_lines = 0;
 	else if (scr_viewsize.value > 100)
 		sb_lines = 24;
@@ -373,48 +419,58 @@ static void SCR_CalcRefdef (void)
 	if (hudstyle->integer) sb_lines = 0;
 
 	// bound console scale
-	if (conscale->value < 0) Cvar_Set ("r_conscale", "0");
+	if (gl_conscale.value < 0) Cvar_Set (&gl_conscale, "0");
+	if (gl_conscale.value > 1) Cvar_Set (&gl_conscale, "1");
+	if (scr_sbarscale.value < 1) Cvar_Set (&scr_sbarscale, "1");
+	if (scr_menuscale.value < 1) Cvar_Set (&scr_menuscale, "1");
+	if (scr_conscale.value < 1) Cvar_Set (&scr_conscale, "1");
 
-	if (conscale->value > 1) Cvar_Set ("r_conscale", "1");
-
-	// adjust a conwidth and conheight to match the mode aspect
+	// adjust a basesize.width and basesize.height to match the mode aspect
 	// they should be the same aspect as the mode, with width never less than 640 and height never less than 480
-	int conheight = 480;
-	int conwidth = 480 * d3d_CurrentMode.Width / d3d_CurrentMode.Height;
+	sizedef_t basesize = {480 * d3d_CurrentMode.Width / d3d_CurrentMode.Height, 480};
 
 	// bring it up to 640
-	if (conwidth < 640)
+	if (basesize.width < 640)
 	{
-		conwidth = 640;
-		conheight = conwidth * d3d_CurrentMode.Height / d3d_CurrentMode.Width;
+		basesize.width = 640;
+		basesize.height = basesize.width * d3d_CurrentMode.Height / d3d_CurrentMode.Width;
 	}
 
 	// round
-	conwidth = (conwidth + 7) & ~7;
-	conheight = (conheight + 7) & ~7;
+	basesize.width = (basesize.width + 7) & ~7;
+	basesize.height = (basesize.height + 7) & ~7;
 
 	// clamp
-	if (conwidth > d3d_CurrentMode.Width) conwidth = d3d_CurrentMode.Width;
+	if (basesize.width > d3d_CurrentMode.Width) basesize.width = d3d_CurrentMode.Width;
+	if (basesize.height > d3d_CurrentMode.Height) basesize.height = d3d_CurrentMode.Height;
 
-	if (conheight > d3d_CurrentMode.Height) conheight = d3d_CurrentMode.Height;
+	// set width and height from our gl_conscale cvar
+	sizedef_t fullsize =
+	{
+		(d3d_CurrentMode.Width - basesize.width) * gl_conscale.value + basesize.width,
+		(d3d_CurrentMode.Height - basesize.height) * gl_conscale.value + basesize.height
+	};
 
-	// set width and height
-	r_refdef.vrect.width = vid.width = (d3d_CurrentMode.Width - conwidth) * conscale->value + conwidth;
-	r_refdef.vrect.height = vid.height = (d3d_CurrentMode.Height - conheight) * conscale->value + conheight;
+	// eval our GUI scale factors
+	SCR_CalcGUIScaleFactor (&scr_sbarscale, &vid.sbarsize, &fullsize, &basesize);
+	SCR_CalcGUIScaleFactor (&scr_menuscale, &vid.menusize, &fullsize, &basesize);
+	SCR_CalcGUIScaleFactor (&scr_conscale, &vid.consize, &fullsize, &basesize);
 
-	if (r_refdef.vrect.height > vid.height - sb_lines) r_refdef.vrect.height = vid.height - sb_lines;
+	// calc our sbar lines portion
+	vid.sbar_lines = sb_lines;
+	vid.sbar_lines *= d3d_CurrentMode.Height;
+	vid.sbar_lines /= vid.sbarsize.height;
 
-	if (r_refdef.vrect.height > vid.height) r_refdef.vrect.height = vid.height;
-
-	// always
-	r_refdef.vrect.x = r_refdef.vrect.y = 0;
+	// and finally calc our 3D refresh size
+	vid.ref3dsize.width = d3d_CurrentMode.Width;
+	vid.ref3dsize.height = d3d_CurrentMode.Height - vid.sbar_lines;
 
 	// x fov is initially the selected value
 	r_refdef.fov_x = scr_fov.value;
 
 	if (scr_fov.integer == 90 || !scr_fovcompat.integer)
 	{
-		float aspect = (float) r_refdef.vrect.width / (float) r_refdef.vrect.height;
+		float aspect = (float) vid.ref3dsize.width / (float) vid.ref3dsize.height;
 
 		if (aspect > (4.0f / 3.0f))
 		{
@@ -423,7 +479,7 @@ static void SCR_CalcRefdef (void)
 			r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, 640, 432);
 
 			// now recalculate fov_x so that it's correctly proportioned for fov_y
-			r_refdef.fov_x = SCR_CalcFovX (r_refdef.fov_y, r_refdef.vrect.width, r_refdef.vrect.height);
+			r_refdef.fov_x = SCR_CalcFovX (r_refdef.fov_y, vid.ref3dsize.width, vid.ref3dsize.height);
 
 			// Con_Printf ("widescreen\n");
 		}
@@ -442,13 +498,8 @@ static void SCR_CalcRefdef (void)
 	{
 		// the user wants their own FOV.  this may not be correct in terms of yfov, but it's at least
 		// consistent with GLQuake and other engines
-		r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
+		r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, vid.ref3dsize.width, vid.ref3dsize.height);
 	}
-
-	scr_vrect = r_refdef.vrect;
-
-	// !!!!!!!!!!!!!!!!!
-	HUD_Changed ();
 }
 
 
@@ -541,7 +592,8 @@ void SCR_DrawTurtle (void)
 	if (count < 3)
 		return;
 
-	Draw_Pic (vid.width - 132, 4, scr_turtle);
+	D3DDraw_SetSize (&vid.sbarsize);
+	Draw_Pic (vid.currsize->width - 132, 4, scr_turtle);
 }
 
 /*
@@ -555,7 +607,8 @@ void SCR_DrawNet (void)
 	if (cls.demoplayback) return;
 	if (sv.active) return;
 
-	Draw_Pic (vid.width - 168, 4, scr_net);
+	D3DDraw_SetSize (&vid.sbarsize);
+	Draw_Pic (vid.currsize->width - 168, 4, scr_net);
 }
 
 /*
@@ -571,7 +624,8 @@ void SCR_DrawPause (void)
 
 	if (!cl.paused) return;
 
-	Draw_Pic ((vid.width - gfx_pause_lmp->width) / 2, (vid.height - 48 - gfx_pause_lmp->height) / 2, gfx_pause_lmp);
+	D3DDraw_SetSize (&vid.sbarsize);
+	Draw_Pic ((vid.currsize->width - gfx_pause_lmp->width) / 2, (vid.currsize->height - 48 - gfx_pause_lmp->height) / 2, gfx_pause_lmp);
 }
 
 
@@ -584,6 +638,8 @@ CDQEventTimer *scr_ConsoleTimer = NULL;
 
 void SCR_SetUpToDrawConsole (void)
 {
+	float scr_conlines = 0;
+
 	Con_CheckResize ();
 
 	if (!scr_ConsoleTimer)
@@ -596,16 +652,16 @@ void SCR_SetUpToDrawConsole (void)
 
 	if (con_forcedup)
 	{
-		scr_conlines = vid.height;		// full screen
+		scr_conlines = 100;		// full screen
 		scr_con_current = scr_conlines;
 	}
 	else if (key_dest == key_console)
-		scr_conlines = vid.height / 2;	// half screen
+		scr_conlines = 50;	// half screen
 	else scr_conlines = 0;				// none visible
 
 	if (scr_conlines < scr_con_current)
 	{
-		scr_con_current -= scr_conspeed.value * frametime;
+		scr_con_current -= scr_conspeed.value * frametime * 0.1f;
 
 		if (scr_conlines > scr_con_current)
 			scr_con_current = scr_conlines;
@@ -613,7 +669,7 @@ void SCR_SetUpToDrawConsole (void)
 	}
 	else if (scr_conlines > scr_con_current)
 	{
-		scr_con_current += scr_conspeed.value * frametime;
+		scr_con_current += scr_conspeed.value * frametime * 0.1f;
 
 		if (scr_conlines < scr_con_current)
 			scr_con_current = scr_conlines;
@@ -630,9 +686,11 @@ SCR_DrawConsole
 */
 void SCR_DrawConsole (void)
 {
+	D3DDraw_SetSize (&vid.consize);
+
 	if (scr_con_current)
 	{
-		Con_DrawConsole (scr_con_current, true);
+		Con_DrawConsole ((vid.consize.height * scr_con_current) / 100, true);
 		clearconsole = 0;
 	}
 	else
@@ -1094,8 +1152,6 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	// invalidate the cached mapshot
 	Draw_InvalidateMapshot ();
 
-	HUD_Changed ();
-
 	// done
 	if (report) Con_Printf ("Wrote mapshot \"%s\"\n", workingname);
 }
@@ -1140,7 +1196,9 @@ void SCR_DrawLoading (void)
 	if (!scr_drawloading) return;
 
 	extern qpic_t *gfx_loading_lmp;
-	Draw_Pic ((vid.width - gfx_loading_lmp->width) / 2, (vid.height - 48 - gfx_loading_lmp->height) / 2, gfx_loading_lmp);
+
+	D3DDraw_SetSize (&vid.sbarsize);
+	Draw_Pic ((vid.currsize->width - gfx_loading_lmp->width) / 2, (vid.currsize->height - 48 - gfx_loading_lmp->height) / 2, gfx_loading_lmp);
 }
 
 
@@ -1240,14 +1298,14 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 	if (strlen (caption) > maxline) maxline = strlen (caption);
 
 	// adjust positioning
-	y = (vid.height - ((scr_modallines + 5) * 10)) / 3;
+	y = (vid.currsize->height - ((scr_modallines + 5) * 10)) / 3;
 
 	// background
-	Draw_TextBox ((vid.width - (maxline * 8)) / 2 - 16, y - 12, maxline * 8 + 16, (scr_modallines + 5) * 10 - 5);
-	Draw_TextBox ((vid.width - (maxline * 8)) / 2 - 16, y - 12, maxline * 8 + 16, 15);
+	Draw_TextBox ((vid.currsize->width - (maxline * 8)) / 2 - 16, y - 12, maxline * 8 + 16, (scr_modallines + 5) * 10 - 5);
+	Draw_TextBox ((vid.currsize->width - (maxline * 8)) / 2 - 16, y - 12, maxline * 8 + 16, 15);
 
 	// draw caption
-	Draw_String ((vid.width - (strlen (caption) * 8)) / 2, y, caption);
+	Draw_String ((vid.currsize->width - (strlen (caption) * 8)) / 2, y, caption);
 
 	y += 20;
 
@@ -1258,7 +1316,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 		for (int s = 0; s < strlen (lines[i]); s++)
 			lines[i][s] += 128;
 
-		Draw_String ((vid.width - strlen (lines[i]) * 8) / 2, y, lines[i]);
+		Draw_String ((vid.currsize->width - strlen (lines[i]) * 8) / 2, y, lines[i]);
 		y += 10;
 	}
 
@@ -1275,7 +1333,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 		prompt = mbpromts[3];
 	else prompt = mbpromts[1];
 
-	if (prompt) Draw_String ((vid.width - strlen (prompt) * 8) / 2, y + 5, prompt);
+	if (prompt) Draw_String ((vid.currsize->width - strlen (prompt) * 8) / 2, y + 5, prompt);
 
 	Zone_Free (textbuf);
 }
@@ -1358,80 +1416,6 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 
 //=============================================================================
 
-void SCR_DrawAutomapStats (void)
-{
-	extern int automap_key;
-	extern float r_automap_x;
-	extern float r_automap_y;
-	extern float r_automap_z;
-	extern float r_automap_scale;
-	extern int automap_culls;
-	extern int screenshot_key;
-
-	if (scr_automapposition.integer)
-	{
-		extern LPDIRECT3DTEXTURE9 yahtexture;
-
-		// translate from automap space to screen space
-		int yahx = (((r_automap_x - r_refdef.vieworg[0]) * -1) / r_automap_scale) + (vid.width / 2);
-		int yahy = (((r_automap_y - r_refdef.vieworg[1]) * 1) / r_automap_scale) + (vid.height / 2);
-
-		// draw it
-		Draw_Pic (yahx - 5, yahy - 10, 64, 64, yahtexture);
-	}
-
-	if (scr_automapinfo.integer & 1)
-	{
-		Draw_Fill (0, vid.height - 24, vid.width, 24, 0.0625, 0.0625, 0.0625, 0.5);
-
-		if (automap_key == -1)
-		{
-			Draw_String
-			(
-				16,
-				vid.height - 16,
-				"Arrow Keys: Move  Home/End: Zoom In/Out  PGUP/PGDN: Up/Down  ESC: Automap Off"
-			);
-		}
-		else
-		{
-			char *automap_bind = Key_KeynumToString (automap_key);
-
-			Draw_String
-			(
-				16,
-				vid.height - 16,
-				va ("Arrow Keys: Move  Home/End: Zoom In/Out  PGUP/PGDN: Up/Down  ESC/%s: Automap Off", automap_bind)
-			);
-		}
-	}
-
-	if (scr_automapinfo.integer & 2)
-	{
-		Draw_Fill (0, 0, vid.width, 24, 0.0625, 0.0625, 0.0625, 0.5);
-
-		Draw_String
-		(
-			16,
-			8,
-			va
-			(
-				"x offset: %i  y offset: %i  z offset: %i  scale: %0.1fx",
-				(int) (r_automap_x - r_refdef.vieworg[0]),
-				(int) (r_automap_y - r_refdef.vieworg[1]),
-				(int) r_automap_z,
-				r_automap_scale
-			)
-		);
-
-		if (screenshot_key != -1)
-		{
-			char *screenshot_bind = Key_KeynumToString (screenshot_key);
-			Draw_String (500, 8, va ("%s: Screenshot", screenshot_bind));
-		}
-	}
-}
-
 
 /*
 ==================
@@ -1490,37 +1474,10 @@ void SCR_UpdateScreen (void)
 	// if we needed to restart video skip updating this frame
 	if (vid_restarted) return;
 
-	// determine size of refresh window
-	if (oldfov != scr_fov.value)
-	{
-		oldfov = scr_fov.value;
-		vid.recalc_refdef = true;
-	}
-
-	if (oldconscale != gl_conscale.value)
-	{
-		oldconscale = gl_conscale.value;
-		vid.recalc_refdef = true;
-	}
-
-	if (oldscreensize != scr_viewsize.value)
-	{
-		oldscreensize = scr_viewsize.value;
-		vid.recalc_refdef = true;
-	}
-
-	// check for automap
-	d3d_RenderDef.automap = D3D_DrawAutomap ();
-
-	if (oldautomap != d3d_RenderDef.automap)
-	{
-		oldautomap = d3d_RenderDef.automap;
-		vid.recalc_refdef = true;
-	}
-
 	// check for status bar modifications
 	SCR_CheckSBarRefdef ();
 
+	// determine size of refresh window
 	if (vid.recalc_refdef) SCR_CalcRefdef ();
 
 	D3DHLSL_BeginFrame ();
@@ -1545,44 +1502,48 @@ void SCR_UpdateScreen (void)
 	}
 	else if (!scr_drawmapshot)
 	{
-		if (!d3d_RenderDef.automap)
+		if (!scr_drawloading)
 		{
-			if (!scr_drawloading)
-			{
-				SCR_DrawNet ();
-				SCR_DrawTurtle ();
-				SCR_DrawPause ();
-				SCR_CheckDrawCenterString ();
-			}
-
-			HUD_DrawHUD ();
-			SCR_DrawConsole ();
-
-			if (!scr_drawloading)
-				SHOWLMP_drawall ();
-
-			extern int r_speedstime;
-
-			if (r_speeds.value && r_speedstime >= 0 && !con_forcedup)
-			{
-				Draw_String (vid.width - 100, 20, va ("%5i ms   ", r_speedstime));
-				Draw_String (vid.width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
-				Draw_String (vid.width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
-				Draw_String (vid.width - 100, 50, va ("%5i stream", d3d_RenderDef.numsss));
-				Draw_String (vid.width - 100, 60, va ("%5i lock", d3d_RenderDef.numlock));
-				Draw_String (vid.width - 100, 70, va ("%5i draw", d3d_RenderDef.numdrawprim));
-			}
-
-			if (scr_showcoords.integer && !con_forcedup)
-				Draw_String (10, 10, va ("%0.3f %0.3f %0.3f", r_viewvectors.origin[0], r_viewvectors.origin[1], r_viewvectors.origin[2]));
-
-			if (!scr_drawloading) M_Draw ();
+			SCR_DrawNet ();
+			SCR_DrawTurtle ();
+			SCR_DrawPause ();
+			SCR_CheckDrawCenterString ();
 		}
-		else SCR_DrawAutomapStats ();
+
+		HUD_DrawHUD ();
+		SCR_DrawConsole ();
+
+		if (!scr_drawloading)
+			SHOWLMP_drawall ();
+
+		extern int r_speedstime;
+
+		if (r_speeds.value && r_speedstime >= 0 && !con_forcedup)
+		{
+			D3DDraw_SetSize (&vid.sbarsize);
+			Draw_String (vid.currsize->width - 100, 20, va ("%5i ms   ", r_speedstime));
+			Draw_String (vid.currsize->width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
+			Draw_String (vid.currsize->width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
+			Draw_String (vid.currsize->width - 100, 50, va ("%5i stream", d3d_RenderDef.numsss));
+			Draw_String (vid.currsize->width - 100, 60, va ("%5i lock", d3d_RenderDef.numlock));
+			Draw_String (vid.currsize->width - 100, 70, va ("%5i draw", d3d_RenderDef.numdrawprim));
+		}
+
+		if (scr_showcoords.integer && !con_forcedup)
+		{
+			D3DDraw_SetSize (&vid.sbarsize);
+			Draw_String (10, 10, va ("%0.3f %0.3f %0.3f", r_refdef.vieworigin[0], r_refdef.vieworigin[1], r_refdef.vieworigin[2]));
+		}
+
+		if (!scr_drawloading) M_Draw ();
 	}
 
 	if (scr_modalmessage)
+	{
+		// ensure that we have a valid size selected
+		if (!vid.currsize) D3DDraw_SetSize (&vid.sbarsize);
 		SCR_DrawNotifyString (scr_notifytext, scr_notifycaption, scr_notifyflags);
+	}
 
 	d3d_RenderDef.numdrawprim = 0;
 	d3d_RenderDef.numsss = 0;
@@ -1644,13 +1605,14 @@ void SCR_QuakeIsLoading (int stage, int maxstage)
 
 	D3DHLSL_BeginFrame ();
 	D3DDraw_Begin2D ();
+	D3DDraw_SetSize (&vid.consize);
 
-	Draw_ConsoleBackground (vid.height);
+	Draw_ConsoleBackground (100);
 
 	extern qpic_t *gfx_loading_lmp;
 
-	int x = (vid.width - gfx_loading_lmp->width) / 2;
-	int y = (vid.height - 48 - gfx_loading_lmp->height) / 2;
+	int x = (vid.currsize->width - gfx_loading_lmp->width) / 2;
+	int y = (vid.currsize->height - 48 - gfx_loading_lmp->height) / 2;
 
 	Draw_Pic (x, y, gfx_loading_lmp);
 

@@ -235,18 +235,8 @@ void *CQuakeCache::Check (char *name)
 }
 
 
-// if the cache needs to be flushed we need special handling of subsequent buffer clearing and creation
-// this is needed because a buffer struct now holds a reference to the MDL that it was created for, and
-// that reference will now be an invalid pointer.  yes, this is ugly.
-void D3DAlias_ClearCache (void);
-
 void CQuakeCache::Flush (void)
 {
-	// if the cache needs to be flushed we need special handling of subsequent buffer clearing and creation
-	// this is needed because a buffer struct now holds a reference to the MDL that it was created for, and
-	// that reference will now be an invalid pointer.  yes, this is ugly.
-	D3DAlias_ClearCache ();
-
 	// reinitialize the cache
 	SAFE_DELETE (this->Heap);
 	this->Init ();

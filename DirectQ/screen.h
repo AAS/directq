@@ -33,7 +33,6 @@ void SCR_EndLoadingPlaque (void);
 int SCR_ModalMessage (char *text, char *caption, int flags);
 
 extern	float		scr_con_current;
-extern	float		scr_conlines;		// lines of console to display
 
 extern	int			sb_lines;
 

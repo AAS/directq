@@ -76,9 +76,9 @@ float D3DAlpha_GetDist (float *origin)
 	// our qsort for dist is always going to return ints so we just store dist as an int
 	return (int)
 	(
-		(origin[0] - r_viewvectors.origin[0]) * (origin[0] - r_viewvectors.origin[0]) +
-		(origin[1] - r_viewvectors.origin[1]) * (origin[1] - r_viewvectors.origin[1]) +
-		(origin[2] - r_viewvectors.origin[2]) * (origin[2] - r_viewvectors.origin[2])
+		(origin[0] - r_refdef.vieworigin[0]) * (origin[0] - r_refdef.vieworigin[0]) +
+		(origin[1] - r_refdef.vieworigin[1]) * (origin[1] - r_refdef.vieworigin[1]) +
+		(origin[2] - r_refdef.vieworigin[2]) * (origin[2] - r_refdef.vieworigin[2])
 	);
 }
 
@@ -302,13 +302,7 @@ void D3DAlpha_RenderList (void)
 	else
 	{
 		// sort fully
-		qsort
-		(
-			d3d_AlphaList,
-			d3d_NumAlphaList,
-			sizeof (d3d_alphalist_t *),
-			D3DAlpha_SortFunc
-		);
+		qsort (d3d_AlphaList, d3d_NumAlphaList, sizeof (d3d_alphalist_t *), D3DAlpha_SortFunc);
 	}
 
 	d3d_alphalist_t *previous = NULL;

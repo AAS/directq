@@ -127,6 +127,25 @@ void D3D_SetIndices (LPDIRECT3DINDEXBUFFER9 ib)
 }
 
 
+void D3D_UnbindStreams (void)
+{
+	for (int i = 0; i < 16; i++)
+	{
+		if (d3d_VertexStreams[i].vb)
+		{
+			d3d_VertexStreams[i].vb = NULL;
+			d3d_VertexStreams[i].freq = 0;
+			d3d_VertexStreams[i].offset = 0;
+			d3d_VertexStreams[i].stride = 0;
+
+			d3d_Device->SetStreamSource (i, NULL, 0, 0);
+		}
+	}
+
+	D3D_SetIndices (NULL);
+}
+
+
 LPDIRECT3DVERTEXDECLARATION9 d3d_VD = NULL;
 
 void D3D_SetVertexDeclaration (LPDIRECT3DVERTEXDECLARATION9 vd)

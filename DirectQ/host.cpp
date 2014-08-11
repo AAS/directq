@@ -29,48 +29,36 @@ class CDQHostTimer
 public:
 	CDQHostTimer (void)
 	{
-		this->dwFrameTime = 0;
-		this->fFrameTime = 0;
-		this->dwOldTime = 0;
+		this->frametime = 0;
+		this->oldtime = 0;
 		this->frame = false;
 	}
 
 	bool RunFrame (void) {return this->frame;}
-	DWORD FrameTime (void) {return this->dwFrameTime;}
-	float FloatTime (void) {return this->fFrameTime;}
+	double FrameTime (void) {return this->frametime;}
 
-	void UpdateFrame (DWORD dwTime)
+	void Advance (double time, float FPS, bool timedemo = false)
 	{
-		this->dwFrameTime = dwTime - this->dwOldTime;
-		this->fFrameTime = (float) (dwTime - this->dwOldTime) * 0.001f;
-		this->dwOldTime = dwTime;
-		this->frame = true;
-
-		// don't run too slowly (this is primarily needed for demos and loading where there will
-		// be a time discrepency due to time spent loading the map)
-		if (this->dwFrameTime > 100)
+		if (timedemo || ((time - this->oldtime) >= (1.0 / FPS)))
 		{
-			this->dwFrameTime = 100;
-			this->fFrameTime = 0.1f;
-		}
-	}
+			this->frametime = time - this->oldtime;
+			this->oldtime = time;
+			this->frame = true;
 
-	void Advance (DWORD dwTime, float FPS, bool timedemo = false)
-	{
-		if (timedemo || ((dwTime - this->dwOldTime) >= (DWORD) ((1000.0f / FPS) + 0.5f)))
-			this->UpdateFrame (dwTime);
+			// don't run too slowly (this is primarily needed for demos and loading where there will
+			// be a time discrepency due to time spent loading the map)
+			if (this->frametime > 0.1) this->frametime = 0.1;
+		}
 		else
 		{
-			this->dwFrameTime = 0;
-			this->fFrameTime = 0;
+			this->frametime = 0;
 			this->frame = false;
 		}
 	}
 
 private:
-	DWORD dwOldTime;
-	DWORD dwFrameTime;
-	float fFrameTime;
+	double oldtime;
+	double frametime;
 	bool frame;
 };
 
@@ -88,7 +76,7 @@ quakeparms_t host_parms;
 
 bool	host_initialized;		// true if into command execution
 
-float		realtime;				// without any filtering or bounding
+double realtime;				// without any filtering or bounding
 
 int			host_framecount;
 
@@ -539,7 +527,7 @@ void Host_ShutdownServer (bool crash)
 		CL_Disconnect ();
 
 	// flush any pending messages - like the score!!!
-	DWORD dwStart = Sys_Milliseconds ();
+	double dStart = Sys_FloatTime ();
 
 	do
 	{
@@ -562,7 +550,7 @@ void Host_ShutdownServer (bool crash)
 			}
 		}
 
-		if ((Sys_Milliseconds () - dwStart) > 3000) break;
+		if ((Sys_FloatTime () - dStart) > 3) break;
 	} while (count);
 
 	// make sure all the clients know we're disconnecting
@@ -660,13 +648,15 @@ void CL_SendLagMove (void);
 void SCR_SetTimeout (float timeout);
 void R_UpdateParticles (void);
 void SCR_SetUpToDrawConsole (void);
+void PR_FixupFish (void);
+
 
 void Host_SendClientInput (CDQHostTimer *Timer)
 {
 	if (Timer->RunFrame ())
 	{
 		// the functions called by this are misnamed as all that they do is send previously buffered commands
-		CL_SendCmd (Timer->FloatTime ());
+		CL_SendCmd (Timer->FrameTime ());
 	}
 }
 
@@ -678,8 +668,10 @@ void Host_RunServer (CDQHostTimer *Timer)
 
 	if (Timer->RunFrame ())
 	{
+		PR_FixupFish ();
+
 		// run the world state
-		SVProgs->GlobalStruct->frametime = Timer->FloatTime ();
+		SVProgs->GlobalStruct->frametime = Timer->FrameTime ();
 
 		// set the time and clear the general datagram
 		SV_ClearDatagram ();
@@ -688,7 +680,7 @@ void Host_RunServer (CDQHostTimer *Timer)
 		SV_CheckForNewClients ();
 
 		// read client messages
-		SV_RunClients (Timer->FloatTime ());
+		SV_RunClients (Timer->FrameTime ());
 
 		// move things around and think
 		// always pause in single player if in console or menus
@@ -737,6 +729,9 @@ void Host_FinishFrame (CDQHostTimer *Timer)
 {
 	if (Timer->RunFrame ())
 	{
+		// set this to something invalid to force a clear first time through
+		static keydest_t old_keydest = key_message;
+
 		// particle updates are FPS dependent so run them at a fixed rate too
 		R_UpdateParticles ();
 
@@ -745,7 +740,7 @@ void Host_FinishFrame (CDQHostTimer *Timer)
 		if (cls.signon == SIGNONS)
 		{
 			CL_DecayLights ();
-			S_Update (r_viewvectors.origin, r_viewvectors.forward, r_viewvectors.right, r_viewvectors.up);
+			S_Update (r_refdef.vieworigin, r_viewvectors.forward, r_viewvectors.right, r_viewvectors.up);
 		}
 		else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 
@@ -775,19 +770,20 @@ Runs all active servers
 ==================
 */
 
-// 4 timers need to run here; one for the server, one for the client and one for
+// 3 timers need to run here; one for the server, one for the client and one for
 // anything else which needs to advance at a fixed rate but isn't influenced by the server being active
 CDQHostTimer *ClientTime = NULL;
 CDQHostTimer *ServerTime = NULL;
-//CDQHostTimer *StableTime = NULL;
-//CDQHostTimer *SteadyTime = NULL;
+CDQHostTimer *SteadyTime = NULL;
 
+cvar_t host_framerate ("host_framerate", "0");
+cvar_t host_simrate ("host_simrate", "1");
 
 // regular non-decoupled version
-void Host_Frame (DWORD time)
+void Host_Frame (double time)
 {
-	// millisecond version to keep timings steady
-	static DWORD dwRealTime = 0;
+	// simulation time for host_framerate
+	static double simtime = 0;
 
 	// this is the steady ticrate for the server and anything else that needs to be run at a stable rate
 	float host_serverframerate = 72.0f;
@@ -795,6 +791,7 @@ void Host_Frame (DWORD time)
 	// create our timers the first time they're seen
 	if (!ClientTime) ClientTime = new CDQHostTimer ();
 	if (!ServerTime) ServerTime = new CDQHostTimer ();
+	if (!SteadyTime) SteadyTime = new CDQHostTimer ();
 
 	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver)) return;
@@ -803,8 +800,14 @@ void Host_Frame (DWORD time)
 	rand ();
 
 	// advance realtime keep timings steady
-	dwRealTime += time;
-	realtime = (float) dwRealTime * 0.001f;
+	realtime += time;
+
+	// allow the use of host_framerate to affect demos but only demos
+	if (cls.demoplayback && !cls.timedemo && host_framerate.value > 0)
+		simtime += host_framerate.value;
+	else if (cls.demoplayback && !cls.timedemo && host_simrate.value > 0)
+		simtime = realtime * host_simrate.value;
+	else simtime = realtime;
 
 	// prevent division by zero (and stalling the host)
 	if (host_maxfps.value < 1) Cvar_Set (&host_maxfps, 1);
@@ -815,17 +818,18 @@ void Host_Frame (DWORD time)
 	// client has been artificially slowed (by host_maxfps) that we need to artificially throttle them too
 	if (host_maxfps.value < host_serverframerate) host_serverframerate = host_maxfps.value;
 
-	// advance our timers
-	if (host_decoupletimers.value)
+	// advance our timers - only allow decoupled timers if a local server is active
+	// i suspect that some people are misunderstanding the purpose of this and trying to use it in multiplayer...
+	if (host_decoupletimers.value && sv.active)
 	{
 		// advance the timers independently
 		if (cls.state == ca_connected || cls.demoplayback || cls.timedemo)
-			ClientTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
-		else ClientTime->Advance (dwRealTime, host_serverframerate);
+			ClientTime->Advance (simtime, host_maxfps.value, cls.timedemo);
+		else ClientTime->Advance (simtime, host_serverframerate);
 
 		if (cls.timedemo)
-			ServerTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
-		else ServerTime->Advance (dwRealTime, host_serverframerate);
+			ServerTime->Advance (simtime, host_maxfps.value, cls.timedemo);
+		else ServerTime->Advance (simtime, host_serverframerate);
 	}
 	else
 	{
@@ -833,16 +837,19 @@ void Host_Frame (DWORD time)
 		if (cls.state == ca_connected || cls.demoplayback || cls.timedemo)
 		{
 			// if we're connected to a server (which may be a local server for SP games) run at full speed
-			ClientTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
-			ServerTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
+			ClientTime->Advance (simtime, host_maxfps.value, cls.timedemo);
+			ServerTime->Advance (simtime, host_maxfps.value, cls.timedemo);
 		}
 		else
 		{
 			// if we're not connected run at throttled back speed
-			ClientTime->Advance (dwRealTime, host_serverframerate);
-			ServerTime->Advance (dwRealTime, host_serverframerate);
+			ClientTime->Advance (simtime, host_serverframerate);
+			ServerTime->Advance (simtime, host_serverframerate);
 		}
 	}
+
+	// this always advances at the same rate irrespective of the mode
+	SteadyTime->Advance (simtime, host_serverframerate);
 
 	// allow framerate simulation and PQ synthetic lag
 	Host_PrepFrame (ClientTime);
@@ -861,18 +868,14 @@ void Host_Frame (DWORD time)
 
 	// basic client input is always allowed to happen even if we're not running a frame
 	// so that input events can be recorded as they actually happen rather than going out
-	// of sync with hardware polling rates
+	// of sync with hardware polling rates (this only applies to the joystick; mouse and
+	// keyboard input is in response to WM_INPUT events in Sys_SendKeyEvents).
 	IN_Commands ();		// all this does is add joystick movement to the accumulated input commands
 
 	// send accumulated client input to the server
-	if (cls.state == ca_connected)
-	{
-		// run the send at the same rate as the read if we're connected
-		if (cls.demoplayback || sv.active)
-			Host_SendClientInput (ServerTime);
-		else Host_SendClientInput (ClientTime);
-	}
-	else Host_SendClientInput (ServerTime);
+	if (cls.demoplayback || cls.demorecording || cls.timedemo)
+		Host_SendClientInput (ServerTime);
+	else Host_SendClientInput (SteadyTime);
 
 	// run a server frame
 	Host_RunServer (ServerTime);
@@ -880,11 +883,11 @@ void Host_Frame (DWORD time)
 	// fetch results from server
 	if (cls.state == ca_connected)
 	{
-		// run the send at the same rate as the send
-		// if a local active server is running then both this and the send must run at the same
-		// speed as the server does in order to keep buffers happy and everything synchronized
-		if (cls.demoplayback || sv.active)
+		// run the read at the same rate as the send unless the server is non-local
+		if (cls.demoplayback || cls.demorecording || cls.timedemo)
 			Host_ReadServer (ServerTime);
+		else if (sv.active)
+			Host_ReadServer (SteadyTime);
 		else Host_ReadServer (ClientTime);
 	}
 
@@ -903,7 +906,7 @@ void Host_Frame (DWORD time)
 	// and finally run anything else that's needed to finish the frame
 	// this also runs at the slower rate (one reason being that particles are FPS dependent (gravity),
 	// another being that everything else is sound updates which don't need to flood out)
-	Host_FinishFrame (ServerTime);
+	Host_FinishFrame (SteadyTime);
 
 	// this is only used for counting timedemo frames
 	if (ClientTime->RunFrame ()) host_framecount++;
@@ -911,11 +914,6 @@ void Host_Frame (DWORD time)
 
 
 //============================================================================
-
-
-void Host_InitVCR (quakeparms_t *parms)
-{
-}
 
 /*
 ====================
