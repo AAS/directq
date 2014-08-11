@@ -407,6 +407,16 @@ typedef struct aliasskin_s
 	byte				*texels;
 } aliasskin_t;
 
+typedef struct aliaspart_s
+{
+	aliasmesh_t			*meshverts;
+	int					nummesh;
+
+	unsigned short		*indexes;
+	int					numindexes;
+
+	struct aliaspart_s	*next;
+} aliaspart_t;
 
 typedef struct aliashdr_s
 {
@@ -422,14 +432,12 @@ typedef struct aliashdr_s
 
 	int			nummeshframes;
 	int			numtris;
-	int			nummesh;
 
 	int			vertsperframe;
 	int			numframes;
 
-	aliasmesh_t			*meshverts;
-	unsigned short		*indexes;
-	int					numindexes;
+	aliaspart_t *parts;
+
 	struct drawvertx_s	**vertexes;
 	maliasframedesc_t	*frames;
 

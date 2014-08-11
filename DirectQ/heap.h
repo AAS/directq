@@ -30,11 +30,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define POOL_TEMP			32
 
 
+extern byte *scratchbuf;
+#define SCRATCHBUF_SIZE 262144
+
 // interface
 void Pool_Init (void);
 void *Cache_Check (char *name);
 void Cache_Invalidate (char *name);
 void *Cache_Alloc (char *name, void *data, int size);
+void *Cache_Alloc (int size);
+void *Cache_Alloc (void *data, int size);
 void *Zone_Alloc (int size);
 void Zone_Free (void *ptr);
 void Zone_Compact (void);

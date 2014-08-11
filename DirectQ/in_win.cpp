@@ -174,6 +174,7 @@ void IN_JoyMove (usercmd_t *cmd);
 
 void CL_BoundViewPitch (void);
 
+
 /*
 ===========
 Force_CenterView_f
@@ -541,6 +542,9 @@ void IN_MouseMove (usercmd_t *cmd)
 
 	if (!mouseactive && !keybind_grab) return;
 
+	// ack, it's horrible but we don't want to change the code too much for this version.  we'll do it right in 1.8.4
+	if (key_dest == key_game) IN_ShowMouse (FALSE);
+
 	// ensure that we have a device and it's actually acquired!!!
 	if (m_directinput.integer && di_Mouse && dinput_acquired)
 	{
@@ -656,8 +660,11 @@ void IN_MouseMove (usercmd_t *cmd)
 		}
 
 		GetCursorPos (&current_pos);
-		mx = current_pos.x - ((cliprect.right - cliprect.left) / 2) + mx_accum;
-		my = current_pos.y - ((cliprect.bottom - cliprect.top) / 2) + my_accum;
+
+		// these were right - left and bottom - top causing all sort of havoc when di was disabled or failed to start!!!
+		mx = current_pos.x - (cliprect.left + (cliprect.right - cliprect.left) / 2) + mx_accum;
+		my = current_pos.y - (cliprect.top + (cliprect.bottom - cliprect.top) / 2) + my_accum;
+
 		mx_accum = 0;
 		my_accum = 0;
 	}
@@ -727,9 +734,7 @@ void IN_MouseMove (usercmd_t *cmd)
 	}
 
 	// if the mouse has moved, force it to the center, so there's room to move
-	// note - don't need this with directinput
-	if ((mx || my) && !m_directinput.integer)
-		SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
+	if (mx || my) SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 }
 
 
@@ -814,8 +819,8 @@ void IN_Accumulate (void)
 			GetCursorPos (&current_pos);
 			GetWindowRect (d3d_Window, &cliprect);
 
-			mx_accum += current_pos.x - ((cliprect.right - cliprect.left) / 2);
-			my_accum += current_pos.y - ((cliprect.bottom - cliprect.top) / 2);
+			mx_accum += current_pos.x - (cliprect.left + (cliprect.right - cliprect.left) / 2);
+			my_accum += current_pos.y - (cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 
 			// force the mouse to the center, so there's room to move
 			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);

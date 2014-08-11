@@ -2442,7 +2442,10 @@ ebfs_builtin_t pr_ebfs_builtins[] =
 	{  61, "cos", PF_cos },
 	{  62, "sqrt", PF_sqrt },
 	{  63, "changepitch", PF_changepitch },
+#endif
+	// nehahra needs this
 	{  64, "TraceToss", PF_TraceToss },
+#ifdef QUAKE2
 	{  65, "etos", PF_etos },
 	{  66, "WaterMove", PF_WaterMove },
 #endif

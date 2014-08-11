@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // directq memory functions.  funny how things come full-circle, isn't it?
 #include "quakedef.h"
 
+byte *scratchbuf = NULL;
 
 /*
 ========================================================================================================================
@@ -129,6 +130,22 @@ void *Cache_Alloc (char *name, void *data, int size)
 }
 
 
+void *Cache_Alloc (void *data, int size)
+{
+	void *buf = Pool_Cache->Alloc (size);
+
+	memcpy (buf, data, size);
+
+	return buf;
+}
+
+
+void *Cache_Alloc (int size)
+{
+	return Pool_Cache->Alloc (size);
+}
+
+
 void Cache_Init (void)
 {
 	cachehead = NULL;
@@ -175,6 +192,8 @@ void Pool_Init (void)
 
 	// init the cache
 	Cache_Init ();
+
+	scratchbuf = (byte *) Pool_Permanent->Alloc (SCRATCHBUF_SIZE);
 
 	// memory is up now
 	vpinit = true;
@@ -271,7 +290,7 @@ void Zone_Compact (void)
 {
 	// create an initial heap for use with the zone
 	// this heap has 128K initially allocated and 32 MB reserved from the virtual address space
-	if (!zoneheap) zoneheap = HeapCreate (0, 0x20000, 0x2000000);
+	if (!zoneheap) zoneheap = HeapCreate (0, 0x20000, 0);
 
 	if (!zoneheap)
 	{

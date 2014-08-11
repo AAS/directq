@@ -610,7 +610,7 @@ int	bitcounts[16];
 void CL_ClearInterpolation (entity_t *ent)
 {
 	ent->frame_start_time = 0;
-	ent->lastpose = ent->currpose = -1;
+	ent->lastpose = ent->currpose;
 
 	ent->translate_start_time = 0;
 	ent->lastorigin[0] = ent->lastorigin[1] = ent->lastorigin[2] = 0;

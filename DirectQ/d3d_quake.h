@@ -47,8 +47,8 @@ void D3D_VBOAddShader (d3d_shader_t *Shader, LPDIRECT3DTEXTURE9 Stage0Tex, LPDIR
 void D3D_VBOAddSurfaceVerts (msurface_t *surf);
 void D3D_VBORender (void);
 void D3D_VBOCheckOverflow (int numverts, int numindexes);
-void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasstate);
-void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasstate, DWORD shadecolor);
+void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, aliasstate_t *aliasstate);
+void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, aliasstate_t *aliasstate, DWORD shadecolor);
 void D3D_VBOSetVBOStream (LPDIRECT3DVERTEXBUFFER9 vbo, LPDIRECT3DINDEXBUFFER9 ibo = NULL, int stride = 0);
 void D3D_DrawUserPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride);
 void D3D_DrawUserPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT NumVertices, UINT PrimitiveCount, CONST void *pIndexData, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride);
@@ -75,6 +75,8 @@ typedef HRESULT (WINAPI *D3DXSAVESURFACETOFILEPROC) (LPCSTR, D3DXIMAGE_FILEFORMA
 typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) (LPDIRECT3DDEVICE9, LPCVOID, UINT, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
 typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMRESOURCEEXAPROC) (LPDIRECT3DDEVICE9, HMODULE, LPCSTR, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
 typedef HRESULT (WINAPI *D3DXCREATERENDERTOSURFACEPROC) (LPDIRECT3DDEVICE9, UINT, UINT, D3DFORMAT, BOOL, D3DFORMAT, LPD3DXRENDERTOSURFACE *);
+typedef HRESULT (WINAPI *D3DXOPTIMIZEFACEVERTPROC) (LPCVOID, UINT, UINT, BOOL, DWORD *);
+typedef HRESULT (WINAPI *D3DXCREATEMESHFVFPROC) (DWORD, DWORD, DWORD, DWORD, LPDIRECT3DDEVICE9, LPD3DXMESH *);
 
 extern HINSTANCE hInstD3D9;
 extern HINSTANCE hInstD3DX;
@@ -99,6 +101,9 @@ extern D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA;
 extern D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx;
 extern D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA;
 extern D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface;
+extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeFaces;
+extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeVertices;
+extern D3DXCREATEMESHFVFPROC QD3DXCreateMeshFVF;
 
 // for render to texture
 extern bool d3d_SceneBegun;
@@ -107,8 +112,8 @@ extern bool d3d_SceneBegun;
 void D3D_VBOReleaseBuffers (void);
 void D3D_SubmitVertexes (int numverts, int numindexes, int polysize);
 
-void D3D_GetIndexBufferSpace (void **data);
-void D3D_GetVertexBufferSpace (void **data);
+void D3D_GetIndexBufferSpace (void **data, int locksize = 0);
+void D3D_GetVertexBufferSpace (void **data, int locksize = 0);
 
 BOOL D3D_AreBuffersFull (int numverts, int numindexes);
 

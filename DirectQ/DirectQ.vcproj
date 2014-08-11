@@ -221,6 +221,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\cl_efrag.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\cl_input.cpp"
 				>
 			</File>
@@ -353,6 +357,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\imageloaders.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\in_win.cpp"
 				>
 			</File>
@@ -426,10 +434,6 @@
 			</File>
 			<File
 				RelativePath=".\qunicode.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\r_efrag.cpp"
 				>
 			</File>
 			<File

@@ -21,14 +21,28 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 
-CSpaceBuffer *Pool_TempEntities = NULL;
-CSpaceBuffer *Pool_Beams = NULL;
+typedef struct tempent_s
+{
+	entity_t ent;
+	struct tempent_s *next;
+} tempent_t;
 
-int			num_temp_entities;
-entity_t	*cl_temp_entities;
+tempent_t	*cl_temp_entities = NULL;
+tempent_t	*cl_free_tempents = NULL;
+
+typedef struct beam_s
+{
+	int		entity;
+	struct model_s	*model;
+	float	endtime;
+	vec3_t	start, end;
+	struct beam_s *next;
+} beam_t;
+
+#define EXTRA_TEMPENTS 64
 
 beam_t		*cl_beams;
-int			num_beams;
+beam_t		*cl_free_beams;
 
 sfx_t			*cl_sfx_wizhit;
 sfx_t			*cl_sfx_knighthit;
@@ -44,7 +58,7 @@ void D3D_AddVisEdict (entity_t *ent);
 
 /*
 =================
-CL_ParseTEnt
+CL_InitTEnts
 =================
 */
 model_t	*cl_bolt1_mod = NULL;
@@ -56,10 +70,6 @@ void CL_InitTEnts (void)
 {
 	beam_t	*b;
 	int		i;
-
-	// reset temp entitiy counts; the pools will be created on-demand
-	num_temp_entities = 0;
-	num_beams = 0;
 
 	// we need to load these too as models are being cleared between maps
 	cl_bolt1_mod = Mod_ForName ("progs/bolt.mdl", true);
@@ -77,7 +87,14 @@ void CL_InitTEnts (void)
 	cl_sfx_ric2 = S_PrecacheSound ("weapons/ric2.wav");
 	cl_sfx_ric3 = S_PrecacheSound ("weapons/ric3.wav");
 	cl_sfx_r_exp3 = S_PrecacheSound ("weapons/r_exp3.wav");
+
+	// ensure on each map load
+	cl_beams = NULL;
+	cl_free_beams = NULL;
+	cl_temp_entities = NULL;
+	cl_free_tempents = NULL;
 }
+
 
 /*
 =================
@@ -89,22 +106,10 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 	// if the model didn't load just ignore it
 	if (!m) return;
 
-	if (!Pool_Beams)
-	{
-		Pool_Beams = new CSpaceBuffer ("Beams", 1, POOL_MAP);
-		cl_beams = (beam_t *) Pool_Beams->Alloc (1);
-		Pool_Beams->Rewind ();
-	}
-
-	// reset the beams pool to the beginning if there are no active beams
-	if (!num_beams) Pool_Beams->Rewind ();
-
-	beam_t	*b;
-	int		i;
+	beam_t *b;
 
 	// override any beam with the same entity
-	// fixme - reuse first???
-	for (i = 0, b = cl_beams; i < num_beams; i++, b++)
+	for (b = cl_beams; b; b = b->next)
 	{
 		if (b->entity == ent)
 		{
@@ -118,28 +123,31 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 	}
 
 	// find a free beam
-	for (i = 0, b = cl_beams; i < num_beams; i++, b++)
+	if (!cl_free_beams)
 	{
-		if (!b->model || b->endtime < cl.time)
+		cl_free_beams = (beam_t *) Pool_Map->Alloc (EXTRA_TEMPENTS * sizeof (beam_t));
+
+		for (int i = 1; i < EXTRA_TEMPENTS; i++)
 		{
-			b->entity = ent;
-			b->model = m;
-			b->endtime = cl.time + 0.2;
-			VectorCopy (start, b->start);
-			VectorCopy (end, b->end);
-			return;
+			cl_free_beams[i - 1].next = &cl_free_beams[i];
+			cl_free_beams[i].next = NULL;
 		}
 	}
 
-	// create a new beam
-	b = (beam_t *) Pool_Beams->Alloc (sizeof (beam_t));
+	// take the first free beam
+	b = cl_free_beams;
+	cl_free_beams = b->next;
 
+	// link it in
+	b->next = cl_beams;
+	cl_beams = b;
+
+	// set it's properties
 	b->entity = ent;
 	b->model = m;
 	b->endtime = cl.time + 0.2;
 	VectorCopy (start, b->start);
 	VectorCopy (end, b->end);
-	num_beams++;
 }
 
 
@@ -546,28 +554,33 @@ CL_NewTempEntity
 */
 entity_t *CL_NewTempEntity (void)
 {
-	entity_t	*ent;
+	tempent_t *ent;
 
-	if (!Pool_TempEntities)
+	if (!cl_free_tempents)
 	{
-		Pool_TempEntities = new CSpaceBuffer ("Temp Entities", 8, POOL_MAP);
-		cl_temp_entities = (entity_t *) Pool_TempEntities->Alloc (1);
-		Pool_TempEntities->Rewind ();
+		// alloc a new batch of free temp entities if required
+		cl_free_tempents = (tempent_t *) Pool_Map->Alloc (sizeof (tempent_t) * EXTRA_TEMPENTS);
+
+		for (int i = 2; i < EXTRA_TEMPENTS - 1; i++)
+			cl_free_tempents[i - 2].next = &cl_free_tempents[i - 1];
+
+		cl_free_tempents[EXTRA_TEMPENTS - 1].next = NULL;
 	}
 
-	// begin a new sequence
-	if (!num_temp_entities) Pool_TempEntities->Rewind ();
+	// unlink from free
+	ent = cl_free_tempents;
+	cl_free_tempents = ent->next;
 
-	// ensure space in the buffer
-	Pool_TempEntities->Alloc (sizeof (entity_t));
+	// link to active
+	ent->next = cl_temp_entities;
+	cl_temp_entities = ent;
 
-	// alloc this temp entity
-	ent = &cl_temp_entities[num_temp_entities];
-	memset (ent, 0, sizeof (*ent));
+	// init the new entity
+	memset (&ent->ent, 0, sizeof (entity_t));
+	ent->ent.colormap = vid.colormap;
 
-	num_temp_entities++;
-	ent->colormap = vid.colormap;
-	return ent;
+	// done
+	return &ent->ent;
 }
 
 
@@ -578,26 +591,73 @@ CL_UpdateTEnts
 */
 void CL_UpdateTEnts (void)
 {
-	int			i;
-	beam_t		*b;
-	vec3_t		dist, org;
-	float		d;
-	entity_t	*ent;
-	float		yaw, pitch;
-	float		forward;
+	vec3_t	    dist, org;
+	entity_t    *ent;
+	float	    yaw, pitch;
+	float	    forward;
 
 	// hack - cl.time goes to 0 before some maps are fully flushed which can cause invalid
 	// beam entities to be added to the list, so need to test for that (this can cause
 	// crashes on maps where you give yourself the lightning gun and then issue a changelevel)
 	if (cl.time < 0.1) return;
 
-	num_temp_entities = 0;
+	// no beams while a server is paused (if running locally)
+	if (sv.active && sv.paused) return;
+
+	// move all tempents back to the free list
+	for (;;)
+	{
+		tempent_t *kill = cl_temp_entities;
+
+		if (kill)
+		{
+			cl_temp_entities = kill->next;
+
+			kill->next = cl_free_tempents;
+			cl_free_tempents = kill;
+			continue;
+		}
+
+		// no temp entities to begin with
+		cl_temp_entities = NULL;
+		break;
+	}
+
+	for (;;)
+	{
+		beam_t *kill = cl_beams;
+
+		if (kill && (!kill->model || kill->endtime < cl.time))
+		{
+			cl_beams = kill->next;
+			kill->next = cl_free_beams;
+			cl_free_beams = kill;
+			continue;
+		}
+
+		break;
+	}
 
 	// update lightning
-	for (i = 0, b = cl_beams; i < num_beams; i++, b++)
+	for (beam_t *b = cl_beams; b; b = b->next)
 	{
-		if (!b->model || b->endtime < cl.time)
-			continue;
+		for (;;)
+		{
+			beam_t *kill = b->next;
+
+			if (kill && (!kill->model || kill->endtime < cl.time))
+			{
+				b->next = kill->next;
+				kill->next = cl_free_beams;
+				cl_free_beams = kill;
+				continue;
+			}
+
+			break;
+		}
+
+		// is this needed any more???
+		if (!b->model || b->endtime < cl.time) continue;
 
 		// if coming from the player, update the start position
 		if (b->entity == cl.viewentity)
@@ -608,6 +668,7 @@ void CL_UpdateTEnts (void)
 
 		if (dist[1] == 0 && dist[0] == 0)
 		{
+			// linear so pythagoras can have his coffee break
 			yaw = 0;
 
 			if (dist[2] > 0)
@@ -616,7 +677,7 @@ void CL_UpdateTEnts (void)
 		}
 		else
 		{
-			yaw = (int) (atan2(dist[1], dist[0]) * 180 / M_PI);
+			yaw = (int) (atan2 (dist[1], dist[0]) * 180 / M_PI);
 
 			if (yaw < 0) yaw += 360;
 	
@@ -628,7 +689,7 @@ void CL_UpdateTEnts (void)
 
 		// add new entities for the lightning
 		VectorCopy (b->start, org);
-		d = VectorNormalize (dist);
+		float d = VectorNormalize (dist);
 
 		while (d > 0)
 		{
@@ -642,11 +703,10 @@ void CL_UpdateTEnts (void)
 			ent->angles[1] = yaw;
 			ent->angles[2] = rand () % 360;
 
-			// spotted by metlslime - inner loop used i as well!
-			for (int j = 0; j < 3; j++)
+			for (int i = 0; i < 3; i++)
 			{
-				org[j] += dist[j] * 30;
-				ent->origin[j] = org[j];
+				org[i] += dist[i] * 30;
+				ent->origin[i] = org[i];
 			}
 
 			// never occlude these wee buggers
@@ -658,8 +718,6 @@ void CL_UpdateTEnts (void)
 			d -= 30;
 		}
 	}
-
-	// if (num_beams) Con_Printf ("%i beams\n", num_beams);
 }
 
 

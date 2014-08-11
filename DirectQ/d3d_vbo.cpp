@@ -23,7 +23,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-#define D3D_MAX_VBO_SIZE	65535
+#define D3D_MAX_VBO_SIZE 65535
+
+
 #define D3D_VBO_VERT_SIZE	32
 #define D3D_MAX_VBO_SHADERS	128
 
@@ -61,6 +63,9 @@ typedef struct d3d_vbo_state_s
 
 	bool VBOLocked;
 	bool IBOLocked;
+
+	int VBOLockSize;
+	int IBOLockSize;
 
 	int NumVerts;
 	int NumIndexes;
@@ -104,7 +109,10 @@ void D3D_VBOSetVBOStream (LPDIRECT3DVERTEXBUFFER9 vbo, LPDIRECT3DINDEXBUFFER9 ib
 
 	if ((int) ibo != oldibo)
 	{
-		if (ibo) d3d_Device->SetIndices (ibo);
+		if (ibo)
+			d3d_Device->SetIndices (ibo);
+		else d3d_Device->SetIndices (NULL);
+
 		oldibo = (int) ibo;
 	}
 }
@@ -127,7 +135,7 @@ void D3D_DrawUserPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT NumVertices, UI
 void D3D_VBOBegin (D3DPRIMITIVETYPE PrimitiveType, int Stride)
 {
 	if (!d3d_VBOState.Shaders)
-		d3d_VBOState.Shaders = (d3d_vbo_shader_t *) Pool_Permanent->Alloc (D3D_MAX_VBO_SHADERS * sizeof (d3d_vbo_shader_t));
+		d3d_VBOState.Shaders = (d3d_vbo_shader_t *) Zone_Alloc (D3D_MAX_VBO_SHADERS * sizeof (d3d_vbo_shader_t));
 
 	do
 	{
@@ -151,6 +159,7 @@ void D3D_VBOBegin (D3DPRIMITIVETYPE PrimitiveType, int Stride)
 		}
 
 		hr = d3d_VBOState.VBO->Lock (0, 0, (void **) &d3d_VBOState.VBOData, D3DLOCK_DISCARD);
+		d3d_VBOState.VBOLockSize = 0;
 
 		if (FAILED (hr))
 		{
@@ -181,6 +190,7 @@ void D3D_VBOBegin (D3DPRIMITIVETYPE PrimitiveType, int Stride)
 		}
 
 		hr = d3d_VBOState.IBO->Lock (0, 0, (void **) &d3d_VBOState.IBOData, D3DLOCK_DISCARD);
+		d3d_VBOState.IBOLockSize = 0;
 
 		if (FAILED (hr))
 		{
@@ -231,7 +241,7 @@ static void D3D_VBOUnlockBuffers (void)
 }
 
 
-void D3D_GetVertexBufferSpace (void **data)
+void D3D_GetVertexBufferSpace (void **data, int locksize)
 {
 	// create on demand
 	do
@@ -255,7 +265,8 @@ void D3D_GetVertexBufferSpace (void **data)
 			}
 		}
 
-		hr = d3d_VBOState.VBO->Lock (0, 0, data, D3DLOCK_DISCARD);
+		hr = d3d_VBOState.VBO->Lock (0, locksize, data, D3DLOCK_DISCARD);
+		d3d_VBOState.VBOLockSize = locksize;
 
 		if (FAILED (hr))
 		{
@@ -268,7 +279,7 @@ void D3D_GetVertexBufferSpace (void **data)
 }
 
 
-void D3D_GetIndexBufferSpace (void **data)
+void D3D_GetIndexBufferSpace (void **data, int locksize)
 {
 	// create on demand
 	do
@@ -292,7 +303,8 @@ void D3D_GetIndexBufferSpace (void **data)
 			}
 		}
 
-		hr = d3d_VBOState.IBO->Lock (0, 0, data, D3DLOCK_DISCARD);
+		hr = d3d_VBOState.IBO->Lock (0, locksize, data, D3DLOCK_DISCARD);
+		d3d_VBOState.IBOLockSize = locksize;
 
 		if (FAILED (hr))
 		{
@@ -310,10 +322,15 @@ void D3D_SubmitVertexes (int numverts, int numindexes, int polysize)
 	// always unlock!
 	D3D_VBOUnlockBuffers ();
 
-	if (numverts || numindexes)
+	if (numverts && numindexes)
 	{
 		D3D_VBOSetVBOStream (d3d_VBOState.VBO, d3d_VBOState.IBO, polysize);
 		d3d_Device->DrawIndexedPrimitive (D3DPT_TRIANGLELIST, 0, 0, numverts, 0, (numindexes / 3));
+	}
+	else if (numverts)
+	{
+		D3D_VBOSetVBOStream (d3d_VBOState.VBO, NULL, polysize);
+		d3d_Device->DrawPrimitive (D3DPT_TRIANGLELIST, 0, numverts / 3);
 	}
 
 	d3d_VBOState.NumVerts = 0;
@@ -591,17 +608,17 @@ __inline void D3D_LerpLight (aliaspolyvert_t *dest, entity_t *e, aliasmesh_t *av
 	{D3D_LerpLight (vd, ent, vs, aliasstate, hdr->vertexes[ent->lastpose], hdr->vertexes[ent->currpose]); \
 	D3D_LerpVert (vd, vs, aliasstate, hdr->vertexes[ent->lastpose], hdr->vertexes[ent->currpose], &ent->matrix);}
 
-void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasstate)
+void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, aliasstate_t *aliasstate)
 {
 	if (!d3d_VBOState.CurrShader) return;
 
-	aliasmesh_t *src = hdr->meshverts;
+	aliasmesh_t *src = part->meshverts;
 	aliaspolyvert_t *dst = (aliaspolyvert_t *) (d3d_VBOState.VBOData + d3d_VBOState.NumVerts * sizeof (aliaspolyvert_t));
 
 	// submit this entity to the renderer
-	if (!(hdr->nummesh & 7))
+	if (!(part->nummesh & 7))
 	{
-		for (int i = 0; i < hdr->nummesh; i += 8, src += 8, dst += 8)
+		for (int i = 0; i < part->nummesh; i += 8, src += 8, dst += 8)
 		{
 			EMIT_ALIAS_VERT (&dst[0], &src[0]);
 			EMIT_ALIAS_VERT (&dst[1], &src[1]);
@@ -613,9 +630,9 @@ void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasst
 			EMIT_ALIAS_VERT (&dst[7], &src[7]);
 		}
 	}
-	else if (!(hdr->nummesh & 3))
+	else if (!(part->nummesh & 3))
 	{
-		for (int i = 0; i < hdr->nummesh; i += 4, src += 4, dst += 4)
+		for (int i = 0; i < part->nummesh; i += 4, src += 4, dst += 4)
 		{
 			EMIT_ALIAS_VERT (&dst[0], &src[0]);
 			EMIT_ALIAS_VERT (&dst[1], &src[1]);
@@ -625,16 +642,16 @@ void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasst
 	}
 	else
 	{
-		for (int i = 0; i < hdr->nummesh; i++, src++, dst++)
+		for (int i = 0; i < part->nummesh; i++, src++, dst++)
 			EMIT_ALIAS_VERT (dst, src);
 	}
 
-	unsigned short *ind = hdr->indexes;
+	unsigned short *ind = part->indexes;
 	unsigned short *ndx = &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes];
 
-	if (!(hdr->numindexes & 7))
+	if (!(part->numindexes & 7))
 	{
-		for (int i = 0; i < hdr->numindexes; i += 8, ind += 8, ndx += 8)
+		for (int i = 0; i < part->numindexes; i += 8, ind += 8, ndx += 8)
 		{
 			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
 			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
@@ -647,9 +664,9 @@ void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasst
 			ndx[7] = ind[7] + d3d_VBOState.NumVerts;
 		}
 	}
-	else if (!(hdr->numindexes & 3))
+	else if (!(part->numindexes & 3))
 	{
-		for (int i = 0; i < hdr->numindexes; i += 4, ind += 4, ndx += 4)
+		for (int i = 0; i < part->numindexes; i += 4, ind += 4, ndx += 4)
 		{
 			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
 			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
@@ -659,14 +676,14 @@ void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasst
 	}
 	else
 	{
-		for (int i = 0; i < hdr->numindexes; i++)
-			ndx[i] = hdr->indexes[i] + d3d_VBOState.NumVerts;
+		for (int i = 0; i < part->numindexes; i++)
+			ndx[i] = part->indexes[i] + d3d_VBOState.NumVerts;
 	}
 
-	d3d_VBOState.NumVerts += hdr->nummesh;
-	d3d_VBOState.NumIndexes += hdr->numindexes;
-	d3d_VBOState.CurrShader->NumVerts += hdr->nummesh;
-	d3d_VBOState.CurrShader->NumIndexes += hdr->numindexes;
+	d3d_VBOState.NumVerts += part->nummesh;
+	d3d_VBOState.NumIndexes += part->numindexes;
+	d3d_VBOState.CurrShader->NumVerts += part->nummesh;
+	d3d_VBOState.CurrShader->NumIndexes += part->numindexes;
 }
 
 
@@ -675,18 +692,18 @@ void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasst
 	(vd)->xyz[2] = aliasstate->lightspot[2] + 0.1f; \
 	(vd)->color = shadecolor;}
 
-void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasstate, DWORD shadecolor)
+void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, aliasstate_t *aliasstate, DWORD shadecolor)
 {
 	if (!d3d_VBOState.CurrShader) return;
 
-	aliasmesh_t *src = hdr->meshverts;
+	aliasmesh_t *src = part->meshverts;
 	aliaspolyvert_t *dst = (aliaspolyvert_t *) (d3d_VBOState.VBOData + d3d_VBOState.NumVerts * sizeof (aliaspolyvert_t));
 
 	// submit this entity to the renderer
 	// submit this entity to the renderer
-	if (!(hdr->nummesh & 7))
+	if (!(part->nummesh & 7))
 	{
-		for (int i = 0; i < hdr->nummesh; i += 8, src += 8, dst += 8)
+		for (int i = 0; i < part->nummesh; i += 8, src += 8, dst += 8)
 		{
 			EMIT_SHADOW_VERT (&dst[0], &src[0]);
 			EMIT_SHADOW_VERT (&dst[1], &src[1]);
@@ -698,9 +715,9 @@ void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliass
 			EMIT_SHADOW_VERT (&dst[7], &src[7]);
 		}
 	}
-	else if (!(hdr->nummesh & 3))
+	else if (!(part->nummesh & 3))
 	{
-		for (int i = 0; i < hdr->nummesh; i += 4, src += 4, dst += 4)
+		for (int i = 0; i < part->nummesh; i += 4, src += 4, dst += 4)
 		{
 			EMIT_SHADOW_VERT (&dst[0], &src[0]);
 			EMIT_SHADOW_VERT (&dst[1], &src[1]);
@@ -710,16 +727,16 @@ void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliass
 	}
 	else
 	{
-		for (int i = 0; i < hdr->nummesh; i++, src++, dst++)
+		for (int i = 0; i < part->nummesh; i++, src++, dst++)
 			EMIT_SHADOW_VERT (dst, src);
 	}
 
-	unsigned short *ind = hdr->indexes;
+	unsigned short *ind = part->indexes;
 	unsigned short *ndx = &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes];
 
-	if (!(hdr->numindexes & 7))
+	if (!(part->numindexes & 7))
 	{
-		for (int i = 0; i < hdr->numindexes; i += 8, ind += 8, ndx += 8)
+		for (int i = 0; i < part->numindexes; i += 8, ind += 8, ndx += 8)
 		{
 			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
 			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
@@ -732,9 +749,9 @@ void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliass
 			ndx[7] = ind[7] + d3d_VBOState.NumVerts;
 		}
 	}
-	else if (!(hdr->numindexes & 3))
+	else if (!(part->numindexes & 3))
 	{
-		for (int i = 0; i < hdr->numindexes; i += 4, ind += 4, ndx += 4)
+		for (int i = 0; i < part->numindexes; i += 4, ind += 4, ndx += 4)
 		{
 			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
 			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
@@ -744,14 +761,14 @@ void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliass
 	}
 	else
 	{
-		for (int i = 0; i < hdr->numindexes; i++)
-			ndx[i] = hdr->indexes[i] + d3d_VBOState.NumVerts;
+		for (int i = 0; i < part->numindexes; i++)
+			ndx[i] = part->indexes[i] + d3d_VBOState.NumVerts;
 	}
 
-	d3d_VBOState.NumVerts += hdr->nummesh;
-	d3d_VBOState.NumIndexes += hdr->numindexes;
-	d3d_VBOState.CurrShader->NumVerts += hdr->nummesh;
-	d3d_VBOState.CurrShader->NumIndexes += hdr->numindexes;
+	d3d_VBOState.NumVerts += part->nummesh;
+	d3d_VBOState.NumIndexes += part->numindexes;
+	d3d_VBOState.CurrShader->NumVerts += part->nummesh;
+	d3d_VBOState.CurrShader->NumIndexes += part->numindexes;
 }
 
 

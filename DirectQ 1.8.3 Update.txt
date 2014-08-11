@@ -1,3 +1,10 @@
+DIRECTQ 1.8.3a UPDATE
+---------------------
+
+- Fixed bug in cvar and cmd compatibility layer where the original cvar or cmd could sometimes be accidentally stomped.
+- Fixed bug where crosshair colour wasn't working.
+
+
 DIRECTQ 1.8.3 UPDATE
 --------------------
 

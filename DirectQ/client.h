@@ -96,15 +96,6 @@ typedef struct
 void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b);
 
 
-typedef struct
-{
-	int		entity;
-	struct model_s	*model;
-	float	endtime;
-	vec3_t	start, end;
-} beam_t;
-
-
 #define	MAX_MAPSTRING	2048
 #define	MAX_DEMOS		64
 #define	MAX_DEMONAME	64

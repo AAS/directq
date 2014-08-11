@@ -74,6 +74,9 @@ D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA = NULL;
 D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx = NULL;
 D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA = NULL;
 D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface = NULL;
+D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeFaces = NULL;
+D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeVertices = NULL;
+D3DXCREATEMESHFVFPROC QD3DXCreateMeshFVF = NULL;
 
 // this needs to default to 42 and be capped at that level as using d3dx versions later than the SDK we compile with it problematical
 cvar_t d3dx_version ("d3dx_version", 42, CVAR_ARCHIVE);
@@ -116,6 +119,9 @@ void D3D_LoadD3DXVersion (int ver)
 			if (!(QD3DXCreateTextureFromFileInMemoryEx = (D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromFileInMemoryEx"))) continue;
 			if (!(QD3DXCreateTextureFromResourceExA = (D3DXCREATETEXTUREFROMRESOURCEEXAPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromResourceExA"))) continue;
 			if (!(QD3DXCreateRenderToSurface = (D3DXCREATERENDERTOSURFACEPROC) D3DX_GetProcAddress ("D3DXCreateRenderToSurface"))) continue;
+			if (!(QD3DXOptimizeFaces = (D3DXOPTIMIZEFACEVERTPROC) D3DX_GetProcAddress ("D3DXOptimizeFaces"))) continue;
+			if (!(QD3DXOptimizeVertices = (D3DXOPTIMIZEFACEVERTPROC) D3DX_GetProcAddress ("D3DXOptimizeVertices"))) continue;
+			if (!(QD3DXCreateMeshFVF = (D3DXCREATEMESHFVFPROC) D3DX_GetProcAddress ("D3DXCreateMeshFVF"))) continue;
 
 			// done
 			Con_SafePrintf ("Loaded D3DX version %i (d3dx9_%i.dll)\n", i, i);

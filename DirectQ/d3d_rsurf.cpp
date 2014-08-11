@@ -249,7 +249,7 @@ void D3D_DrawModelSurfs (bool fbon, bool pass2 = false)
 		if (pass2)
 		{
 			// disable blend mode
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 			D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
 			D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 			D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);

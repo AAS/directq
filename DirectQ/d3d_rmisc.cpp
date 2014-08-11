@@ -908,7 +908,7 @@ void D3D_TranslatePlayerSkin (int playernum)
 		translated,
 		paliashdr->skinwidth,
 		paliashdr->skinheight,
-		IMAGE_MIPMAP | IMAGE_NOCOMPRESS | IMAGE_NOEXTERN
+		IMAGE_MIPMAP | IMAGE_NOCOMPRESS | IMAGE_NOEXTERN | IMAGE_PADDABLE
 	);
 }
 
@@ -1129,6 +1129,10 @@ void R_NewMap (void)
 
 	// normal light value
 	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 256;
+
+	// clear out efrags (one short???)
+	for (int i = 0; i < cl.worldmodel->brushhdr->numleafs; i++)
+		cl.worldmodel->brushhdr->leafs[i].efrags = NULL;
 
 	// world entity baseline
 	memset (&d3d_RenderDef.worldentity, 0, sizeof (entity_t));

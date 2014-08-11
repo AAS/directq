@@ -872,8 +872,11 @@ void CL_RelinkEntities (void)
 
 		ent->forcelink = false;
 
+		extern bool chase_nodraw;
+
 		// chasecam test
 		if (i == cl.viewentity && !chase_active.value) continue;
+		if (i == cl.viewentity && chase_nodraw) continue;
 
 		D3D_AddVisEdict (ent);
 	}

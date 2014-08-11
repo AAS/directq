@@ -1770,6 +1770,13 @@ ALIAS MODELS
 
 ==============================================================================
 */
+/*
+==============================================================================
+
+ALIAS MODELS
+
+==============================================================================
+*/
 
 
 // FIXME - store per frame rather than for the entire model???
@@ -1778,7 +1785,8 @@ float aliasbboxmins[3], aliasbboxmaxs[3];
 
 void Mod_LoadFrameVerts (aliashdr_t *pheader, trivertx_t *verts)
 {
-	drawvertx_t *vertexes = (drawvertx_t *) Pool_Cache->Alloc (pheader->vertsperframe * sizeof (drawvertx_t));
+	drawvertx_t *vertexes = (drawvertx_t *) Cache_Alloc (pheader->vertsperframe * sizeof (drawvertx_t));
+	pheader->vertexes[pheader->nummeshframes] = vertexes;
 
 	for (int i = 0; i < pheader->vertsperframe; i++, vertexes++, verts++)
 	{
@@ -1971,7 +1979,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 
 	if (pheader->numskins < 1) Host_Error ("Mod_LoadAliasModel: Invalid # of skins: %d\n", pheader->numskins);
 
-	pheader->skins = (aliasskin_t *) Pool_Cache->Alloc (pheader->numskins * sizeof (aliasskin_t));
+	pheader->skins = (aliasskin_t *) Cache_Alloc (pheader->numskins * sizeof (aliasskin_t));
 	s = pheader->skinwidth * pheader->skinheight;
 
 	// don't remove the extension here as Q1 has s_light.mdl and s_light.spr, so we need to differentiate them
@@ -1988,7 +1996,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 			// progs/player.mdl is already hardcoded in sv_main so it's ok here too
 			if (!stricmp (loadmodel->name, "progs/player.mdl"))
 			{
-				pheader->skins[i].texels = (byte *) Pool_Cache->Alloc (s);
+				pheader->skins[i].texels = (byte *) Cache_Alloc (s);
 				memcpy (pheader->skins[i].texels, (byte *) (pskintype + 1), s);
 				loadmodel->flags |= EF_PLAYER;
 			}
@@ -2040,7 +2048,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 				{
 					// saving this out doesn't really work as each skin in the group will
 					// overwrite the last.
-					pheader->skins[i].texels = (byte *) Pool_Cache->Alloc (s);
+					pheader->skins[i].texels = (byte *) Cache_Alloc (s);
 					memcpy (pheader->skins[i].texels, (byte *) (pskintype), s);
 					loadmodel->flags |= EF_PLAYER;
 				}
@@ -2099,7 +2107,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 		Host_Error ("%s has wrong version number (%i should be %i)", mod->name, LittleLong (pinmodel->version), ALIAS_VERSION);
 
 	// alloc the header in the cache
-	aliashdr_t *pheader = (aliashdr_t *) Pool_Cache->Alloc (sizeof (aliashdr_t));
+	aliashdr_t *pheader = (aliashdr_t *) Cache_Alloc (sizeof (aliashdr_t));
 
 	mod->flags = LittleLong (pinmodel->flags);
 	mod->type = mod_alias;
@@ -2113,7 +2121,6 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	pheader->vertsperframe = LittleLong (pinmodel->numverts);
 	pheader->numtris = LittleLong (pinmodel->numtris);
 	pheader->numframes = LittleLong (pinmodel->numframes);
-	pheader->nummesh = pheader->numtris * 3;
 
 	// validate the setup
 	// Sys_Error seems a little harsh here...
@@ -2159,12 +2166,16 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 
 	// load the frames
 	daliasframetype_t *pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
-	pheader->frames = (maliasframedesc_t *) Pool_Cache->Alloc (pheader->numframes * sizeof (maliasframedesc_t));
+	pheader->frames = (maliasframedesc_t *) Cache_Alloc (pheader->numframes * sizeof (maliasframedesc_t));
 
 	// initial bbox
 	aliasbboxmins[0] = aliasbboxmins[1] = aliasbboxmins[2] = 9999999;
 	aliasbboxmaxs[0] = aliasbboxmaxs[1] = aliasbboxmaxs[2] = -9999999;
 	pheader->nummeshframes = 0;
+
+	// because we don't know how many frames we need in advance we take a copy to the scratch buffer initially
+	// the size of the scratch buffer is compatible with the max number of frames allowed by protocol 666
+	pheader->vertexes = (drawvertx_t **) scratchbuf;
 
 	for (int i = 0; i < pheader->numframes; i++)
 	{
@@ -2175,18 +2186,10 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 		else pframetype = (daliasframetype_t *) Mod_LoadAliasGroup (pheader, pframetype + 1, &pheader->frames[i]);
 	}
 
-	// link in the frame vert pointers
-	pheader->vertexes = (drawvertx_t **) Pool_Cache->Alloc (pheader->nummeshframes * sizeof (drawvertx_t *));
+	// copy framepointers from the scratch buffer to the final cached copy
+	pheader->vertexes = (drawvertx_t **) Cache_Alloc (pheader->vertexes, pheader->nummeshframes * sizeof (drawvertx_t *));
 
-	for (int i = 0; i < pheader->nummeshframes; i++)
-	{
-		// the mesh verts immediately follow the frames in memory
-		drawvertx_t *vertexes = (drawvertx_t *) (((byte *) pheader->frames) + pheader->numframes * sizeof (maliasframedesc_t));
-		vertexes += i * pheader->vertsperframe;
-
-		pheader->vertexes[i] = vertexes;
-	}
-
+	// set correct bbox
 	for (int i = 0; i < 3; i++)
 	{
 		mod->mins[i] = aliasbboxmins[i] * pheader->scale[i] + pheader->scale_origin[i];
@@ -2207,28 +2210,11 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	// build the draw lists
 	GL_MakeAliasModelDisplayLists (pheader, pinstverts, pintriangles);
 
-	// all skins must be the same size
-	if (pheader->skins[0].texture[0]->flags & IMAGE_PADDED)
-	{
-		// unpad texcoords for the model
-		int scaled_width = D3D_PowerOf2Size (pheader->skins[0].texture[0]->width);
-		int scaled_height = D3D_PowerOf2Size (pheader->skins[0].texture[0]->height);
-
-		for (int i = 0; i < pheader->nummesh; i++)
-		{
-			pheader->meshverts[i].s = (pheader->meshverts[i].s * pheader->skins[0].texture[0]->width) / scaled_width;
-			pheader->meshverts[i].t = (pheader->meshverts[i].t * pheader->skins[0].texture[0]->height) / scaled_height;
-		}
-	}
-
 	// set the final header
 	mod->aliashdr = pheader;
 
 	// copy it out to the cache
 	Cache_Alloc (mod->name, mod, sizeof (model_t));
-
-	// just reset the pool for now so that we can reuse memory that has already been committed but isn't needed anymore
-	Pool_Temp->Rewind ();
 }
 
 

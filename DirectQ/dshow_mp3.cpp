@@ -53,6 +53,23 @@ Note: DS_FindTrack is a bit messy right now; I should go back and clean it up.
 #pragma comment (lib, "Strmiids.lib")
 
 
+char *IsURLContainer (char *filename)
+{
+	static char urlname[1024];
+	FILE *f = fopen (filename, "r");
+
+	if (!f) return NULL;
+
+	fscanf (f, "%1023s", urlname);
+	fclose (f);
+
+	if (!strnicmp (urlname, "http://", 7)) return urlname;
+	if (!strnicmp (urlname, "https://", 8)) return urlname;
+
+	return NULL;
+}
+
+
 // a class!!!  it does help to keep the code a lot tidier in here; DirectShow is MESSY!
 class CDSClass
 {
@@ -67,6 +84,8 @@ private:
 	IBasicAudio *ds_Audio;
 	IMediaEventEx *ds_Event;
 	IMediaPosition *ds_Position;
+
+	REFTIME Duration;
 
 public:
 	void PauseTrack (void)
@@ -108,14 +127,13 @@ public:
 			db = -10000;
 		else if (bgmvolume.value >= 1)
 			db = 0;
-		else
-			db = log10 (bgmvolume.value) * 2000;
+		else db = log10 (bgmvolume.value) * 2000;
 
 		// set the volume
 		this->ds_Audio->put_Volume (db);
 	}
 
-	CDSClass (wchar_t *FileName, bool looping)
+	CDSClass (char *FileName, bool looping)
 	{
 		this->Initialized = false;
 		this->Playing = false;
@@ -136,19 +154,35 @@ public:
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaEvent, (void **) &this->ds_Event))) return;
 		if (FAILED (hr = this->ds_Graph->QueryInterface (IID_IMediaPosition, (void **) &this->ds_Position))) return;
 
-		// set up notification on the event window - see WM_GRAPHEVENT in MainWndProc
-		this->ds_Event->SetNotifyWindow ((OAHWND) d3d_Window, WM_GRAPHEVENT, 0);
-		this->ds_Event->SetNotifyFlags (0);
-
 		// it's initialized now
 		this->Initialized = true;
 
 		// flag if we're looping
 		this->Looping = looping;
 
+		wchar_t WCFileName[1024];
+		char *urlname = IsURLContainer (FileName);
+
+		if (urlname)
+		{
+			// convert to wide char cos DirectShow requires Wide Chars (bastards!)
+			mbstowcs (WCFileName, urlname, 1023);
+			if (FAILED (hr = this->ds_Graph->RenderFile (WCFileName, NULL))) return;
+		}
+		else
+		{
+			// convert to wide char cos DirectShow requires Wide Chars (bastards!)
+			mbstowcs (WCFileName, FileName, 256);
+			if (FAILED (hr = this->ds_Graph->RenderFile (WCFileName, NULL))) return;
+		}
+
 		// attempt to play it
-		if (FAILED (hr = this->ds_Graph->RenderFile (FileName, NULL))) return;
 		if (FAILED (hr = this->ds_Control->Run ())) return;
+
+		// we can't get the duration until it's actually running
+		// the event notification sends spurious EC_COMPLETE messages on some machines
+		// (possibly because the k-lite codec pack hijacks directshow) so we poll for stopping each frame instead
+		this->ds_Position->get_Duration (&this->Duration);
 
 		// finish up by adjusting volume
 		this->AdjustVolume ();
@@ -158,33 +192,33 @@ public:
 		this->Paused = false;
 	}
 
-	void DoEvents (void)
+	void CheckStopTime (void)
 	{
+		static int checkframe = 0;
+
 		// ensure that we can process events
 		if (!this->Initialized) return;
+		if (!this->Playing) return;
+		if ((++checkframe) & 7) return;
 
-		long EventCode, Param1, Param2;
+		// we could be streaming over the web or paused so we need to check position
+		REFTIME currpos;
+		ds_Position->get_CurrentPosition (&currpos);
 
-		// read all events
-		while (this->ds_Event->GetEvent (&EventCode, &Param1, &Param2, 0) != E_ABORT)
+		// currpos will be == when stopped so we need a little fuzziness and >=
+		if ((currpos + 0.001) >= this->Duration)
 		{
-			switch (EventCode)
+			if (!this->Looping)
 			{
-			case EC_COMPLETE:
 				// if we're not looping we stop it
-				if (!this->Looping) this->ds_Control->Stop ();
+				this->ds_Control->Stop ();
 
-				// reset to start either way
-				this->ds_Position->put_CurrentPosition (0);
-				break;
-
-			default:
-				// we're not interested in these events
-				break;
+				// not playing now
+				this->Playing = false;
 			}
 
-			// DirectShow stores some data for events internally so we must be sure to free it
-			this->ds_Event->FreeEventParams (EventCode, Param1, Param2);
+			// reset to start either way
+			this->ds_Position->put_CurrentPosition (0);
 		}
 	}
 
@@ -216,7 +250,7 @@ void DS_Event (void)
 	if (!DSManager) return;
 
 	// run all events
-	DSManager->DoEvents ();
+	DSManager->CheckStopTime ();
 }
 
 
@@ -284,13 +318,8 @@ bool DS_FindTrack (const char *trackdir, const char *musicdir, int track, bool l
 
 		if (track == seektrack)
 		{
-			wchar_t WCFileName[256];
-
-			// convert to wide char cos DirectShow requires Wide Chars (bastards!)
-			mbstowcs (WCFileName, va ("%s\\%s", MusicPath, FindFileData.cFileName), 256);
-
 			// attempt to play it
-			DSManager = new CDSClass (WCFileName, looping);
+			DSManager = new CDSClass (va ("%s\\%s", MusicPath, FindFileData.cFileName), looping);
 
 			// no need to find any more
 			FindClose (hFind);

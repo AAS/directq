@@ -38,6 +38,33 @@ ALIAS MODEL DISPLAY LIST GENERATION
 
 =================================================================
 */
+DWORD *d3d_RemapTable = NULL;
+unsigned short *d3d_CopyIndexes = NULL;
+
+void D3D_FinalizeAliasMeshPart (aliashdr_t *hdr, aliaspart_t *part)
+{
+	// optimize indexes for vertex cache hits.
+	// a full optimization (including D3DXOptimizeVertices) actually comes out as slower
+	// with *most* Q1 mdls (all that I've tested anyway - ID1 and Quoth) so we don't bother
+	// doing it.  This code would actually work with OpenGL as the D3DX functions used
+	// don't require a d3d device; they're purely algorithmic.
+	QD3DXOptimizeFaces (part->indexes, part->numindexes / 3, part->nummesh, FALSE, d3d_RemapTable);
+
+	// memcpy on MS CRT is just a straight byte copy
+	for (int i = 0; i < part->numindexes; i++)
+		d3d_CopyIndexes[i] = part->indexes[i];
+
+	// reverse the order because the remap table is reversed
+	for (int i = 0, j = (part->numindexes / 3) - 1; i < part->numindexes; i += 3, j--)
+	{
+		part->indexes[i + 0] = d3d_CopyIndexes[d3d_RemapTable[j] * 3 + 0];
+		part->indexes[i + 1] = d3d_CopyIndexes[d3d_RemapTable[j] * 3 + 1];
+		part->indexes[i + 2] = d3d_CopyIndexes[d3d_RemapTable[j] * 3 + 2];
+	}
+
+	// copy out the verts
+	part->meshverts = (aliasmesh_t *) Cache_Alloc (part->meshverts, part->nummesh * sizeof (aliasmesh_t));
+}
 
 
 /*
@@ -50,22 +77,47 @@ for the model, which holds for all frames
 */
 void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles)
 {
-	// no verts to begin with
-	hdr->meshverts = NULL;
-	hdr->nummesh = 0;
+	// nothing to begin with
+	hdr->parts = NULL;
+	aliaspart_t *part = NULL;
 
-	// initialize indexes; these will be filled in as the model is loaded
-	hdr->indexes = (unsigned short *) Pool_Cache->Alloc (sizeof (unsigned short) * hdr->numtris * 3);
-	hdr->numindexes = 0;
+	// also reserve space for the index remap tables
+	int max_mesh = (SCRATCHBUF_SIZE / (sizeof (aliasmesh_t) + sizeof (DWORD) + sizeof (unsigned short) * 3));
 
-	for (int i = 0; i < hdr->numtris; i++)
+	// set up holding areas for the remapping
+	d3d_RemapTable = (DWORD *) (scratchbuf + sizeof (aliasmesh_t) * max_mesh);
+	d3d_CopyIndexes = (unsigned short *) (d3d_RemapTable + max_mesh);
+
+	// create a pool of indexes for use by the model
+	unsigned short *indexes = (unsigned short *) Cache_Alloc (3 * sizeof (unsigned short) * hdr->numtris);
+
+	for (int i = 0, v = 0; i < hdr->numtris; i++)
 	{
-		for (int j = 0; j < 3; j++)
+		if (!hdr->parts || (part && (part->nummesh >= max_mesh || part->numindexes >= 65534)))
 		{
-			int v;
+			// copy to the cache
+			if (part) D3D_FinalizeAliasMeshPart (hdr, part);
 
-			// index into hdr->vertexes
-			unsigned short vertindex = triangles[i].vertindex[j];
+			// go to a new part
+			part = (aliaspart_t *) Cache_Alloc (sizeof (aliaspart_t));
+
+			// link it in
+			part->next = hdr->parts;
+			hdr->parts = part;
+
+			// take a chunk of indexes for it
+			part->indexes = indexes;
+
+			// take a chunk of the scratch buffer for it
+			part->meshverts = (aliasmesh_t *) scratchbuf;
+			part->nummesh = 0;
+			part->numindexes = 0;
+		}
+
+		for (int j = 0; j < 3; j++, indexes++, part->numindexes++)
+		{
+			// this is nothing to do with an index buffer, it's an index into hdr->vertexes
+			int vertindex = triangles[i].vertindex[j];
 
 			// basic s/t coords
 			int s = stverts[vertindex].s;
@@ -75,39 +127,58 @@ void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangl
 			if (!triangles[i].facesfront && stverts[vertindex].onseam) s += hdr->skinwidth / 2;
 
 			// see does this vert already exist
-			for (v = 0; v < hdr->nummesh; v++)
+			for (v = 0; v < part->nummesh; v++)
 			{
 				// it could use the same xyz but have different s and t
-				if (hdr->meshverts[v].vertindex == vertindex && (int) hdr->meshverts[v].s == s && (int) hdr->meshverts[v].t == t)
+				if (part->meshverts[v].vertindex == vertindex && (int) part->meshverts[v].s == s && (int) part->meshverts[v].t == t)
 				{
 					// exists; emit an index for it
-					hdr->indexes[hdr->numindexes++] = v;
+					part->indexes[part->numindexes] = v;
 					break;
 				}
 			}
 
-			if (v == hdr->nummesh)
+			if (v == part->nummesh)
 			{
 				// doesn't exist; emit a new vert and index
-				// consecutive memory trick here...
-				if (!hdr->meshverts)
-					hdr->meshverts = (aliasmesh_t *) Pool_Cache->Alloc (sizeof (aliasmesh_t));
-				else Pool_Cache->Alloc (sizeof (aliasmesh_t));
+				part->indexes[part->numindexes] = part->nummesh;
 
-				hdr->indexes[hdr->numindexes++] = hdr->nummesh;
-
-				hdr->meshverts[hdr->nummesh].vertindex = vertindex;
-				hdr->meshverts[hdr->nummesh].s = s;
-				hdr->meshverts[hdr->nummesh++].t = t;
+				part->meshverts[part->nummesh].vertindex = vertindex;
+				part->meshverts[part->nummesh].s = s;
+				part->meshverts[part->nummesh++].t = t;
 			}
 		}
 	}
 
+	// finish the last one
+	if (part) D3D_FinalizeAliasMeshPart (hdr, part);
+
 	// tidy up the verts by calculating final s and t
-	for (int i = 0; i < hdr->nummesh; i++)
+	for (part = hdr->parts; part; part = part->next)
 	{
-		hdr->meshverts[i].s = ((float) hdr->meshverts[i].s + 0.5f) / (float) hdr->skinwidth;
-		hdr->meshverts[i].t = ((float) hdr->meshverts[i].t + 0.5f) / (float) hdr->skinheight;
+		// now do s/t
+		for (int i = 0; i < part->nummesh; i++)
+		{
+			part->meshverts[i].s = ((float) part->meshverts[i].s + 0.5f) / (float) hdr->skinwidth;
+			part->meshverts[i].t = ((float) part->meshverts[i].t + 0.5f) / (float) hdr->skinheight;
+		}
+	}
+
+	// all skins must be the same size
+	if (hdr->skins[0].texture[0]->flags & IMAGE_PADDED)
+	{
+		// unpad texcoords for the model
+		int scaled_width = D3D_PowerOf2Size (hdr->skins[0].texture[0]->width);
+		int scaled_height = D3D_PowerOf2Size (hdr->skins[0].texture[0]->height);
+
+		for (part = hdr->parts; part; part = part->next)
+		{
+			for (int i = 0; i < part->nummesh; i++)
+			{
+				part->meshverts[i].s = (part->meshverts[i].s * hdr->skins[0].texture[0]->width) / scaled_width;
+				part->meshverts[i].t = (part->meshverts[i].t * hdr->skins[0].texture[0]->height) / scaled_height;
+			}
+		}
 	}
 
 	// not delerped yet (view models only)
@@ -276,10 +347,6 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 			stateset = true;
 		}
 
-		// note the hack here - just sending NULL into the shader won't add it!!!
-		D3D_VBOCheckOverflow (hdr->nummesh, hdr->numindexes);
-		D3D_VBOAddShader (&d3d_ShadowShader, NULL, d3d_PlayerSkins[0].d3d_Texture);
-
 		// build the transformation for this entity.
 		// we need to run this in software as we are now potentially submitting multiple alias models in a single batch
 		D3D_LoadIdentity (&ent->matrix);
@@ -290,9 +357,18 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 		D3D_TranslateMatrix (&ent->matrix, hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2]);
 		D3D_ScaleMatrix (&ent->matrix, hdr->scale[0], hdr->scale[1], hdr->scale[2]);
 
-		// accumulate vert counts
-		D3D_VBOAddShadowVerts (ent, hdr, aliasstate, shadecolor);
-		d3d_RenderDef.alias_polys += hdr->numtris;
+		for (aliaspart_t *part = hdr->parts; part; part = part->next)
+		{
+			// check for overflow
+			D3D_VBOCheckOverflow (part->nummesh, part->numindexes);
+
+			// note the hack here - just sending NULL into the shader won't add it!!! (really should fix this)
+			D3D_VBOAddShader (&d3d_ShadowShader, NULL, d3d_PlayerSkins[0].d3d_Texture);
+
+			// accumulate vert counts
+			D3D_VBOAddShadowVerts (ent, hdr, part, aliasstate, shadecolor);
+			d3d_RenderDef.alias_polys += hdr->numtris;
+		}
 	}
 
 	// required even if there is nothing so that the buffers will unlock
@@ -430,13 +506,8 @@ void D3D_SetupAliasModel (entity_t *ent)
 	ent->visframe = d3d_RenderDef.framecount;
 	aliasstate->lightplane = NULL;
 
-	extern bool chase_nodraw;
-
 	if (ent == cl_entities[cl.viewentity] && chase_active.value)
 	{
-		// don't draw if too close
-		if (chase_nodraw) return;
-
 		// adjust angles (done here instead of chase_update as we only want the angle for rendering to be adjusted)
 		ent->angles[0] *= 0.3;
 	}
@@ -598,9 +669,6 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 	// begin a new render batch
 	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (aliaspolyvert_t));
 
-	// need to track when skins change so that we can emit a new shader
-	int lastskin = 0;
-
 	for (int i = 0; i < numents; i++)
 	{
 		entity_t *ent = ents[i];
@@ -617,26 +685,29 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 		if (!aliasstate->teximage) continue;
 		if (!aliasstate->teximage->d3d_Texture) continue;
 
-		D3D_VBOCheckOverflow (hdr->nummesh, hdr->numindexes);
-
-		if ((int) aliasstate->teximage != lastskin)
-		{
-			// add a new shader if the skin changes
-			if (aliasstate->lumaimage)
-				D3D_VBOAddShader (&d3d_AliasShaderLuma, aliasstate->lumaimage->d3d_Texture, aliasstate->teximage->d3d_Texture);
-			else D3D_VBOAddShader (&d3d_AliasShaderNoLuma, aliasstate->teximage->d3d_Texture);
-
-			lastskin = (int) aliasstate->teximage;
-		}
-
 		// build the transformation for this entity.
 		// we need to run this in software as we are now potentially submitting multiple alias models in a single batch
 		D3D_LoadIdentity (&ent->matrix);
 		D3D_RotateForEntity (ent, &ent->matrix);
 
-		// submit it
-		D3D_VBOAddAliasVerts (ent, hdr, aliasstate);
-		d3d_RenderDef.alias_polys += hdr->numtris;
+		// interpolation clearing gets this
+		if (ent->currpose < 0) ent->currpose = 0;
+		if (ent->lastpose < 0) ent->lastpose = 0;
+
+		for (aliaspart_t *part = hdr->parts; part; part = part->next)
+		{
+			// check for overflow
+			D3D_VBOCheckOverflow (part->nummesh, part->numindexes);
+
+			// add a new shader (note: these self-filter so no worry about doing it each time)
+			if (aliasstate->lumaimage && d3d_GlobalCaps.NumTMUs > 1)
+				D3D_VBOAddShader (&d3d_AliasShaderLuma, aliasstate->lumaimage->d3d_Texture, aliasstate->teximage->d3d_Texture);
+			else D3D_VBOAddShader (&d3d_AliasShaderNoLuma, aliasstate->teximage->d3d_Texture);
+
+			// submit it
+			D3D_VBOAddAliasVerts (ent, hdr, part, aliasstate);
+			d3d_RenderDef.alias_polys += hdr->numtris;
+		}
 	}
 
 	// render the alias verts

@@ -513,6 +513,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 		IN_ShowMouse (FALSE);
 		VID_SetAppGamma ();
 		CDAudio_Resume ();
+		block_drawing = false;
 
 		if (modestate == MS_FULLDIB)
 		{
@@ -537,6 +538,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 		VID_SetOSGamma ();
 		CDAudio_Pause ();
 		S_ClearBuffer ();
+		block_drawing = true;
 
 		if (modestate == MS_FULLDIB)
 		{
@@ -687,8 +689,8 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		if (wParam & MK_RBUTTON) temp |= 2;
 		if (wParam & MK_MBUTTON) temp |= 4;
 
-		// 3 buttons
-		if (temp) IN_MouseEvent (temp, 3, false);
+		// 3 buttons and we always send the event (event if temp is 0) so that we'll get up events too
+		IN_MouseEvent (temp, 3, false);
 		break;
 
 	// JACK: This is the mouse wheel with the Intellimouse
