@@ -599,9 +599,10 @@ void CL_UpdateTEnts (void)
 	float	    yaw, pitch;
 	float	    forward;
 
-	// hack - cl.dwTime goes to 0 before some maps are fully flushed which can cause invalid
+	// hack - cl.time goes to 0 before some maps are fully flushed which can cause invalid
 	// beam entities to be added to the list, so need to test for that (this can cause
 	// crashes on maps where you give yourself the lightning gun and then issue a changelevel)
+	// hmmm - i think this one was more like i being used in both the inner and outer loops.
 	if (cl.time < 0.1f) return;
 
 	// no beams while a server is paused (if running locally)

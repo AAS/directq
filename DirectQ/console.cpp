@@ -45,12 +45,13 @@ char		*con_text = 0;
 
 cvar_t		con_notifytime ("con_notifytime", "3");		//seconds
 cvar_t		con_lineheight ("con_lineheight", "8", CVAR_ARCHIVE);
+cvar_t		con_notify_lines ("con_notifylines", 5, CVAR_ARCHIVE);
 
 // this define was a bit misnamed
-#define	CON_NOTIFYLINES 5
+#define	CON_MAXNOTIFYLINES 256
 
-float		con_times[CON_NOTIFYLINES];	// realtime time the line was generated
-// for transparent notify lines
+float		con_times[CON_MAXNOTIFYLINES];	// realtime time the line was generated
+											// for transparent notify lines
 
 int			con_vislines;
 
@@ -126,7 +127,7 @@ void Con_ClearNotify (void)
 {
 	int		i;
 
-	for (i = 0; i < CON_NOTIFYLINES; i++)
+	for (i = 0; i < CON_MAXNOTIFYLINES; i++)
 		con_times[i] = 0;
 }
 
@@ -229,6 +230,7 @@ cmd_t Con_ToggleConsole_f_Cmd ("toggleconsole", Con_ToggleConsole_f);
 cmd_t Con_MessageMode_f_Cmd ("messagemode", Con_MessageMode_f);
 cmd_t Con_MessageMode2_f_Cmd ("messagemode2", Con_MessageMode2_f);
 cmd_t Con_Clear_f_Cmd ("clear", Con_Clear_f);
+cmd_t Con_Cls_f_Cmd ("cls", Con_Clear_f);
 cvar_t condebug ("condebug", 0.0f);
 
 void Con_Init (void)
@@ -269,7 +271,7 @@ void Con_Linefeed (void)
 	con_x = 0;
 	if (con_backscroll) con_backscroll++;
 	con_current++;
-	memset (&con_text[(con_current%con_totallines) *con_linewidth], ' ', con_linewidth);
+	memset (&con_text[(con_current % con_totallines) * con_linewidth], ' ', con_linewidth);
 }
 
 /*
@@ -285,7 +287,7 @@ static void Con_Print (char *txt, bool silent)
 {
 	int		y;
 	int		c, l;
-	static int	cr;
+	static int	cr = 0;
 	int		mask;
 
 	// con_backscroll = 0;
@@ -302,8 +304,7 @@ static void Con_Print (char *txt, bool silent)
 		mask = 128;		// go to colored text
 		txt++;
 	}
-	else
-		mask = 0;
+	else mask = 0;
 
 	while ((c = *txt))
 	{
@@ -331,7 +332,7 @@ static void Con_Print (char *txt, bool silent)
 
 			// mark time for transparent overlay
 			if (con_current >= 0 && !silent)
-				con_times[con_current % CON_NOTIFYLINES] = realtime;
+				con_times[con_current % CON_MAXNOTIFYLINES] = realtime;
 		}
 
 		switch (c)
@@ -355,7 +356,6 @@ static void Con_Print (char *txt, bool silent)
 
 			break;
 		}
-
 	}
 }
 
@@ -595,13 +595,15 @@ void Con_DrawNotify (void)
 	// let's not scrunch everything into one corner
 	v = 2;
 
-	if (con_lineheight.value < 1) con_lineheight.value = 1;
+	if (con_lineheight.value < 1) Cvar_Set (&con_lineheight, 1);
+	if (con_notify_lines.integer < 1) Cvar_Set (&con_notify_lines, 1);
+	if (con_notify_lines.integer >= CON_MAXNOTIFYLINES) Cvar_Set (&con_notify_lines, CON_MAXNOTIFYLINES);
 
-	for (i = con_current - CON_NOTIFYLINES + 1; i <= con_current; i++)
+	for (i = con_current - con_notify_lines.integer + 1; i <= con_current; i++)
 	{
 		if (i < 0) continue;
 
-		if ((time = con_times[i % CON_NOTIFYLINES]) < 0.001f) continue;
+		if ((time = con_times[i % CON_MAXNOTIFYLINES]) < 0.001f) continue;
 		if ((time = realtime - time) > con_notifytime.value) continue;
 		if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (con_notifytime.value - time);
 

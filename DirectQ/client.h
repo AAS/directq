@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // client.h
 
+// if this is changed then CL_ClearCmd in cl_main.cpp must be updated to reflect it!!!!
 typedef struct
 {
 	vec3_t	viewangles;
@@ -27,9 +28,6 @@ typedef struct
 	float	forwardmove;
 	float	sidemove;
 	float	upmove;
-#ifdef QUAKE2
-	byte	lightlevel;
-#endif
 } usercmd_t;
 
 typedef struct
@@ -206,11 +204,9 @@ typedef struct client_state_s
 								// servertime and oldservertime to generate
 								// a lerp point for other data
 
-	float frametime;
-
 	DWORD		dwTime;			// used to keep timings steady
+	float		frametime;		// client frametime
 
-	float		oldtime;
 	float		lastrecievedmessage;	// (realtime) for net trouble icon
 
 	// information that is static for the entire time connected to a server
@@ -325,7 +321,7 @@ extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
 
 void CL_InitInput (void);
-void CL_SendCmd (void);
+void CL_SendCmd (float frametime);
 void CL_SendMove (usercmd_t *cmd);
 
 void CL_ParseTEnt (void);
@@ -355,11 +351,12 @@ void CL_TimeDemo_f (void);
 void CL_ParseServerMessage (void);
 
 // view
-void V_StartPitchDrift (void);
-void V_StopPitchDrift (void);
+void CL_StartPitchDrift (void);
+void CL_StopPitchDrift (void);
+void CL_DriftPitch (float time);
 
-void V_RenderView (float time, float frametime);
-void V_UpdatePalette (float frametime);
+void V_RenderView (void);
+void V_UpdateCShifts (void);
 void V_Register (void);
 void V_ParseDamage (float time);
 void V_SetContentsColor (int contents);

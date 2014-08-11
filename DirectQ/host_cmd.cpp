@@ -76,6 +76,7 @@ void Host_Status_f (void)
 	{
 		if (!sv.active)
 		{
+			cl.console_status = true;
 			Cmd_ForwardToServer ();
 			return;
 		}
@@ -232,6 +233,9 @@ void Host_Ping_f (void)
 
 	if (cmd_source == src_command)
 	{
+		// bugfix: CL_ParseProQuakeString will hose the returned string unless this is set
+		// to true before forwarding the command to the server.
+		cl.console_ping = true;
 		Cmd_ForwardToServer ();
 		return;
 	}
@@ -459,6 +463,9 @@ LOAD / SAVE GAME
 ===============================================================================
 */
 
+cvar_t	host_savedir ("host_savedir", "save/", CVAR_ARCHIVE, COM_ValidateUserSettableDir);
+
+
 /*
 ===============
 Host_SavegameComment
@@ -533,7 +540,7 @@ void Host_DoSavegame (char *savename)
 		}
 	}
 
-	_snprintf (name, 256, "%s/save/%s", com_gamedir, savename);
+	_snprintf (name, 256, "%s/%s%s", com_gamedir, host_savedir.string, savename);
 	COM_DefaultExtension (name, ".sav");
 
 	f = fopen (name, "w");
@@ -690,7 +697,7 @@ void Host_Loadgame_f (void)
 
 	cls.demonum = -1;		// stop demo loop in case this fails
 
-	_snprintf (name, 128, "%s/save/%s", com_gamedir, loadname);
+	_snprintf (name, 128, "%s/%s%s", com_gamedir, host_savedir.string, loadname);
 	COM_DefaultExtension (name, ".sav");
 
 	// we can't call SCR_BeginLoadingPlaque, because too much stack space has
@@ -1502,7 +1509,10 @@ void Host_Give_f (void)
 	}
 
 	if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
+	{
+		SV_BroadcastPrintf ("\"%s\" tried to \"give %s %s\"\n", host_client->name, Cmd_Argv (1), Cmd_Argv (2));
 		return;
+	}
 
 	t = Cmd_Argv (1);
 	v = atoi (Cmd_Argv (2));
@@ -1519,7 +1529,6 @@ void Host_Give_f (void)
 	case '7':
 	case '8':
 	case '9':
-
 		// MED 01/04/97 added hipnotic give stuff
 		if (hipnotic)
 		{
@@ -1546,7 +1555,6 @@ void Host_Give_f (void)
 		break;
 
 	case 's':
-
 		if (rogue)
 		{
 			val = GETEDICTFIELDVALUEFAST (sv_player, ed_ammo_shells1);
@@ -1556,8 +1564,8 @@ void Host_Give_f (void)
 
 		sv_player->v.ammo_shells = v;
 		break;
-	case 'n':
 
+	case 'n':
 		if (rogue)
 		{
 			val = GETEDICTFIELDVALUEFAST (sv_player, ed_ammo_nails1);
@@ -1576,8 +1584,8 @@ void Host_Give_f (void)
 		}
 
 		break;
-	case 'l':
 
+	case 'l':
 		if (rogue)
 		{
 			val = GETEDICTFIELDVALUEFAST (sv_player, ed_ammo_lava_nails);
@@ -1592,8 +1600,8 @@ void Host_Give_f (void)
 		}
 
 		break;
-	case 'r':
 
+	case 'r':
 		if (rogue)
 		{
 			val = GETEDICTFIELDVALUEFAST (sv_player, ed_ammo_rockets1);
@@ -1612,8 +1620,8 @@ void Host_Give_f (void)
 		}
 
 		break;
-	case 'm':
 
+	case 'm':
 		if (rogue)
 		{
 			val = GETEDICTFIELDVALUEFAST (sv_player, ed_ammo_multi_rockets);
@@ -1630,7 +1638,6 @@ void Host_Give_f (void)
 		break;
 
 	case 'a':
-
 		// remove all current armor
 		if (rogue)
 			sv_player->v.items = ((int) sv_player->v.items) & ~ (RIT_ARMOR1 | RIT_ARMOR2 | RIT_ARMOR3);
@@ -1667,15 +1674,13 @@ void Host_Give_f (void)
 		break;
 
 	case 'h':
-
 		// don't die!
-		if (v < 25) v = 25;
+		if (v < 1) v = 1;
 
 		sv_player->v.health = v;
 		break;
 
 	case 'c':
-
 		if (rogue)
 		{
 			val = GETEDICTFIELDVALUEFAST (sv_player, ed_ammo_cells1);
@@ -1696,7 +1701,6 @@ void Host_Give_f (void)
 		break;
 
 	case 'p':
-
 		if (rogue)
 		{
 			val = GETEDICTFIELDVALUEFAST (sv_player, ed_ammo_plasma);
@@ -1949,9 +1953,9 @@ int unfun_match (char *s1, char *s2)
 {
 	int i;
 
-	for (; *s2 ; s2++)
+	for (; *s2; s2++)
 	{
-		for (i = 0 ; s1[i] ; i++)
+		for (i = 0; s1[i]; i++)
 		{
 			if (unfun[s1[i] & 127] != unfun[s2[i] & 127])
 				break;
@@ -2002,7 +2006,7 @@ void Host_Identify_f (void)
 	{
 		if (sv.active)
 		{
-			for (i = 0 ; i < svs.maxclients ; i++)
+			for (i = 0; i < svs.maxclients; i++)
 			{
 				if (svs.clients[i].active && unfun_match (Cmd_Argv (1), svs.clients[i].name))
 					break;
@@ -2010,7 +2014,7 @@ void Host_Identify_f (void)
 		}
 		else
 		{
-			for (i = 0 ; i < cl.maxclients ; i++)
+			for (i = 0; i < cl.maxclients; i++)
 			{
 				if (unfun_match (Cmd_Argv (1), cl.scores[i].name))
 					break;

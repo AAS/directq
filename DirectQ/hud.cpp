@@ -589,6 +589,9 @@ void HUD_CenterMessage (int x, int y, char *str)
 }
 
 
+void CL_QueuePingCommand (void);
+void CL_QueueStatusCommand (void);
+
 void HUD_DeathmatchOverlay (void)
 {
 	extern cvar_t pq_scoreboard_pings;
@@ -596,17 +599,14 @@ void HUD_DeathmatchOverlay (void)
 	// update scoreboard pings every 5 seconds; force immediate update if we haven't had one at all yet
 	if (((cl.lastpingtime < cl.time - 5) || (cl.lastpingtime < 0.1)) && pq_scoreboard_pings.value && cl.Protocol == PROTOCOL_VERSION_NQ)
 	{
-		// send a ping command to the server
-		MSG_WriteByte (&cls.message, clc_stringcmd);
-		SZ_Print (&cls.message, "ping\n");
+		CL_QueuePingCommand ();
 		cl.lastpingtime = cl.time;
 	}
 
 	// JPG 1.05 - check to see if we should update IP status
-	if (iplog_size && (cl.laststatustime < cl.time - 5))
+	if (iplog_size && ((cl.laststatustime < cl.time - 5) || (cl.laststatustime < 0.1)))
 	{
-		MSG_WriteByte (&cls.message, clc_stringcmd);
-		SZ_Print (&cls.message, "status\n");
+		CL_QueueStatusCommand ();
 		cl.laststatustime = cl.time;
 	}
 
@@ -1574,11 +1574,15 @@ void HUD_DrawHUD (void)
 	static int old_hud = -1;
 
 	// no HUD conditions
-	if (scr_con_current == vid.height) return;
+	if (scr_con_current == vid.height) return;	// fixme - this is a pretty crap way of deciding if we're in a map
 	if (scr_viewsize.value > 111) return;
 	if (cl.intermission) return;
+	if (cls.state != ca_connected) return;
 
-	// hack
+	// don't draw with a NULL worldmodel primarily so that the HUD doesn't appear during a game change
+	if (!cl.worldmodel) return;
+
+	// hack (why?)
 	if (!cl.levelname) return;
 
 	// bound sbar
@@ -1657,7 +1661,7 @@ void HUD_DrawStuffGotten (int x, int y, int numstuff, int totalstuff)
 		sprintf (stuffstr, "%4i/%i", numstuff, totalstuff);
 	else sprintf (stuffstr, "%4i", numstuff);
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!stuffstr[i]) break;
 

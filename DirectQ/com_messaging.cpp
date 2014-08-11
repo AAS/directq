@@ -333,12 +333,25 @@ float MSG_ReadProQuakeAngle (void)
 
 void SZ_Alloc (sizebuf_t *buf, int startsize)
 {
+	// ensure room
 	if (startsize < 256)
 		startsize = 256;
 
 	buf->data = (byte *) Zone_Alloc (startsize);
 	buf->maxsize = startsize;
 	buf->cursize = 0;
+}
+
+
+void SZ_Init (sizebuf_t *buf, void *data, int len)
+{
+	buf->allowoverflow = false;
+	buf->cursize = 0;
+	buf->data = (byte *) data;
+	buf->maxsize = len;
+	buf->overflowed = false;
+
+	memset (data, 0, len);
 }
 
 

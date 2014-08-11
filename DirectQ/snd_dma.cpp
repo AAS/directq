@@ -227,7 +227,7 @@ sfx_t *S_FindName (char *name)
 		Sys_Error ("Sound name too long: %s", name);
 
 	// see if already loaded
-	for (i=0 ; i < num_sfx ; i++)
+	for (i=0; i < num_sfx; i++)
 	{
 		if (!strcmp (known_sfx[i].name, name))
 		{
@@ -323,10 +323,11 @@ channel_t *SND_PickChannel(int entnum, int entchannel)
     int first_to_die;
     int life_left;
 
-// Check for replacement sound, or find the best one to replace
+	// Check for replacement sound, or find the best one to replace
     first_to_die = -1;
     life_left = 0x7fffffff;
-    for (ch_idx=NUM_AMBIENTS ; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS ; ch_idx++)
+
+    for (ch_idx = NUM_AMBIENTS; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS; ch_idx++)
     {
 		if (entchannel != 0		// channel 0 never overrides
 		&& channels[ch_idx].entnum == entnum
@@ -465,7 +466,7 @@ void S_StartSound(int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float f
 // if an identical sound has also been started this frame, offset the pos
 // a bit to keep it from just making the first one louder
 	check = &channels[NUM_AMBIENTS];
-    for (ch_idx=NUM_AMBIENTS ; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS ; ch_idx++, check++)
+    for (ch_idx=NUM_AMBIENTS; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS; ch_idx++, check++)
     {
 		if (check == target_chan)
 			continue;
@@ -486,7 +487,7 @@ void S_StopSound(int entnum, int entchannel)
 {
 	int i;
 
-	for (i=0 ; i<MAX_DYNAMIC_CHANNELS ; i++)
+	for (i=0; i<MAX_DYNAMIC_CHANNELS; i++)
 	{
 		if (channels[i].entnum == entnum
 			&& channels[i].entchannel == entchannel)
@@ -600,30 +601,32 @@ void S_StaticSound (sfx_t *sfx, vec3_t origin, float vol, float attenuation)
 S_UpdateAmbientSounds
 ===================
 */
-void S_UpdateAmbientSounds (float sound_frametime)
+CDQEventTimer *s_AmbientTimer = NULL;
+
+void S_UpdateAmbientSounds (void)
 {
-	mleaf_t		*l;
 	float		vol;
 	int			ambient_channel;
 	channel_t	*chan;
 
-	if (!snd_ambient)
-		return;
-
 	// calc ambient sound levels
-	if (!cl.worldmodel)
-		return;
+	if (!snd_ambient) return;
+	if (!cl.worldmodel) return;
 
-	l = Mod_PointInLeaf (listener_origin, cl.worldmodel);
+	if (!s_AmbientTimer)
+		s_AmbientTimer = new CDQEventTimer (cl.time);
+
+	float sound_frametime = s_AmbientTimer->GetElapsedTime (cl.time);
+	mleaf_t *l = Mod_PointInLeaf (listener_origin, cl.worldmodel);
 
 	if (!l || !ambient_level.value)
 	{
-		for (ambient_channel = 0 ; ambient_channel< NUM_AMBIENTS ; ambient_channel++)
+		for (ambient_channel = 0; ambient_channel < NUM_AMBIENTS; ambient_channel++)
 			channels[ambient_channel].sfx = NULL;
 		return;
 	}
 
-	for (ambient_channel = 0 ; ambient_channel< NUM_AMBIENTS ; ambient_channel++)
+	for (ambient_channel = 0; ambient_channel < NUM_AMBIENTS; ambient_channel++)
 	{
 		chan = &channels[ambient_channel];	
 		chan->sfx = ambient_sfx[ambient_channel];
@@ -657,7 +660,7 @@ S_Update
 Called once each time through the main loop
 ============
 */
-void S_Update (float sound_frametime, vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
+void S_Update (vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 {
 	int			i, j;
 	int			total;
@@ -666,13 +669,17 @@ void S_Update (float sound_frametime, vec3_t origin, vec3_t forward, vec3_t righ
 
 	if (!sound_started || (snd_blocked > 0)) return;
 
+	extern int snd_NumSounds;
+
+	// Con_Printf ("Loaded %i sounds\n", snd_NumSounds);
+
 	VectorCopy2 (listener_origin, origin);
 	VectorCopy2 (listener_forward, forward);
 	VectorCopy2 (listener_right, right);
 	VectorCopy2 (listener_up, up);
 
 	// update general area ambient sound sources
-	S_UpdateAmbientSounds (sound_frametime);
+	S_UpdateAmbientSounds ();
 
 	combine = NULL;
 
@@ -748,7 +755,7 @@ void S_Update (float sound_frametime, vec3_t origin, vec3_t forward, vec3_t righ
 	S_Update_ ();
 }
 
-void GetSoundtime(void)
+void GetSoundtime (void)
 {
 	int		samplepos;
 	static	int		buffers;
@@ -783,7 +790,7 @@ void S_ExtraUpdate (void)
 }
 
 
-void S_Update_(void)
+void S_Update_ (void)
 {
 	unsigned        endtime;
 	int				samps;
@@ -899,7 +906,7 @@ void S_SoundList(void)
 	int		size, total;
 
 	total = 0;
-	for (sfx=known_sfx, i=0 ; i<num_sfx ; i++, sfx++)
+	for (sfx=known_sfx, i=0; i<num_sfx; i++, sfx++)
 	{
 		sc = sfx->sndcache;
 

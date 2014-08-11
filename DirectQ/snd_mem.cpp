@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // this is our new cache object for sounds
 CQuakeCache *SoundCache = NULL;
 CQuakeZone *SoundHeap = NULL;
+int snd_NumSounds = 0;
 
 /*
 ================
@@ -67,7 +68,7 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 	if (stepscale == 1 && inwidth == 1 && sc->width == 1)
 	{
 		// fast special case
-		for (i=0 ; i<outcount ; i++)
+		for (i=0; i<outcount; i++)
 			((signed char *)sc->data)[i]
 			= (int)( (unsigned char)(data[i]) - 128);
 	}
@@ -76,7 +77,7 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 		// general case
 		samplefrac = 0;
 		fracstep = stepscale*256;
-		for (i=0 ; i<outcount ; i++)
+		for (i=0; i<outcount; i++)
 		{
 			srcsample = samplefrac >> 8;
 			samplefrac += fracstep;
@@ -169,6 +170,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	ResampleSfx (s, sc->speed, sc->width, data + info.dataofs);
 
 	Zone_Free (data);
+	snd_NumSounds++;
 	return sc;
 }
 

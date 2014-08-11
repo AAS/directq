@@ -434,3 +434,23 @@ bool COM_StringContains (char *str1, char *str2)
 }
 
 
+CDQEventTimer::CDQEventTimer (float BaseTime)
+{
+	this->OldTime = BaseTime;
+}
+
+
+float CDQEventTimer::GetElapsedTime (float NewTime)
+{
+	// this happens on every frame and if OldTime exceeds NewTime it means we've had a map transition;
+	// because that can only happen on the first frame of the map, we just run an update of time 0 in
+	// that frame and subsequent frames will get the correct timing.
+	if (this->OldTime > NewTime) this->OldTime = NewTime;
+
+	float ElapsedTime = NewTime - this->OldTime;
+	this->OldTime = NewTime;
+
+	return ElapsedTime;
+}
+
+

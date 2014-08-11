@@ -76,6 +76,7 @@ bool Chase_CheckBrushEdict (entity_t *e, vec3_t checkpoint, int viewcontents)
 	if (e->angles[0] || e->angles[1] || e->angles[2])
 	{
 		// copied from R_CullBox rotation code for inline bmodels, loop just unrolled
+		// (this is no longer really valid - oh well; the quake chasecam is a hack anyway)
 		mins[0] = e->origin[0] - e->model->radius;
 		maxs[0] = e->origin[0] + e->model->radius;
 		mins[1] = e->origin[1] - e->model->radius;
@@ -91,15 +92,10 @@ bool Chase_CheckBrushEdict (entity_t *e, vec3_t checkpoint, int viewcontents)
 
 	// check against bbox
 	if (checkpoint[0] < mins[0]) return true;
-
 	if (checkpoint[1] < mins[1]) return true;
-
 	if (checkpoint[2] < mins[2]) return true;
-
 	if (checkpoint[0] > maxs[0]) return true;
-
 	if (checkpoint[1] > maxs[1]) return true;
-
 	if (checkpoint[2] > maxs[2]) return true;
 
 	// blocked
@@ -212,16 +208,16 @@ void Chase_Update (void)
 {
 	int		i;
 	float	dist;
-	vec3_t	forward, up, right;
+	avectors_t av;
 	vec3_t	dest, stop;
 	vec3_t	chase_dest;
 
 	// if can't see player, reset
-	AngleVectors (cl.viewangles, forward, right, up);
+	AngleVectors (cl.viewangles, &av);
 
 	// calc exact destination
-	chase_dest[0] = r_refdef.vieworg[0] - forward[0] * chase_back.value - right[0] * chase_right.value;
-	chase_dest[1] = r_refdef.vieworg[1] - forward[1] * chase_back.value - right[1] * chase_right.value;
+	chase_dest[0] = r_refdef.vieworg[0] - av.forward[0] * chase_back.value - av.right[0] * chase_right.value;
+	chase_dest[1] = r_refdef.vieworg[1] - av.forward[1] * chase_back.value - av.right[1] * chase_right.value;
 	chase_dest[2] = r_refdef.vieworg[2] + chase_up.value;
 
 	// don't allow really small or negative scaling values
@@ -242,12 +238,12 @@ void Chase_Update (void)
 	cl_entities[cl.viewentity]->alphaval = chase_alpha;
 
 	// find the spot the player is looking at
-	VectorMA (r_refdef.vieworg, 4096, forward, dest);
+	VectorMultiplyAdd (r_refdef.vieworg, 4096, av.forward, dest);
 	TraceLine (r_refdef.vieworg, dest, stop);
 
 	// calculate pitch to look at the same spot from camera
 	VectorSubtract (stop, r_refdef.vieworg, stop);
-	dist = DotProduct (stop, forward);
+	dist = DotProduct (stop, av.forward);
 
 	if (dist < 1) dist = 1;
 

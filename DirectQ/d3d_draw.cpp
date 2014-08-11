@@ -132,9 +132,8 @@ void D3DDraw_SetBuffers (void)
 
 __inline void D3DDraw_Vertex (d3d_drawvertex_t *vert, float x, float y, D3DCOLOR c, float s, float t)
 {
-	// correct the half pixel offset
-	vert->x = x - 0.5f;
-	vert->y = y - 0.5f;
+	vert->x = x;
+	vert->y = y;
 	vert->z = 0;
 
 	vert->c = c;
@@ -392,7 +391,7 @@ void Scrap_Upload (void)
 	{
 		SAFE_RELEASE (scrap_textures.d3d_Texture);
 		D3D_UploadTexture (&scrap_textures.d3d_Texture, scrap_texels,
-			SCRAP_WIDTH, SCRAP_HEIGHT, IMAGE_ALPHA | IMAGE_NOCOMPRESS);
+			SCRAP_WIDTH, SCRAP_HEIGHT, IMAGE_ALPHA);
 
 		// SCR_WriteDataToTGA ("scrap.tga", scrap_texels, SCRAP_WIDTH, SCRAP_HEIGHT, 8, 32);
 		scrap_dirty = false;
@@ -401,6 +400,11 @@ void Scrap_Upload (void)
 
 
 cvar_t gl_conscale ("gl_conscale", "1", CVAR_ARCHIVE);
+
+// fitz compatibility
+cvar_alias_t scr_menuscale ("scr_menuscale", &gl_conscale);
+cvar_alias_t scr_sbarscale ("scr_sbarscale", &gl_conscale);
+cvar_alias_t scr_conscale ("scr_conscale", &gl_conscale);
 
 char *gfxlmps[] =
 {
@@ -423,7 +427,6 @@ void Draw_DumpLumps (void)
 		qpic_t *dat = (qpic_t *) COM_LoadFile (va ("gfx/%s", gfxlmps[i]));
 
 		if (dat->width > 1024) continue;
-
 		if (dat->height > 1024) continue;
 
 		SCR_WriteDataToTGA (va ("%s.tga", gfxlmps[i]), dat->data, dat->width, dat->height, 8, 24);
@@ -716,7 +719,7 @@ void Draw_LoadCrosshairs (void)
 	d3d_NumCrosshairs = 0;
 
 	// now attempt to load replacements
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		// attempt to load one
 		LPDIRECT3DTEXTURE9 newcrosshair = NULL;
@@ -834,7 +837,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 			newchars[i] = 255;
 
 	// now turn them into textures
-	D3D_UploadTexture (&char_textures[0], newchars, 256, 256, IMAGE_ALPHA | IMAGE_NOCOMPRESS);
+	D3D_UploadTexture (&char_textures[0], newchars, 256, 256, IMAGE_ALPHA);
 
 #if 0
 	// brighten the default chars a little as they can be hard to see
@@ -1389,8 +1392,9 @@ void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt,
 	// replace the texture fully
 	glpic_t *gl = (glpic_t *) pic->data;
 	SAFE_RELEASE (gl->tex->d3d_Texture);
+
 	D3D_UploadTexture (&gl->tex->d3d_Texture, menuplyr_pixels_translated,
-		pic->width, pic->height, (gl->tex->flags & ~IMAGE_32BIT) | IMAGE_NOCOMPRESS | IMAGE_ALPHA);
+		pic->width, pic->height, (gl->tex->flags & ~IMAGE_32BIT) | IMAGE_ALPHA);
 
 	// and draw it normally
 	Draw_Pic (x, y, pic);
@@ -1524,7 +1528,13 @@ void Draw_PolyBlend (void)
 {
 	if (d3d_RenderDef.automap) return;
 	if (!gl_polyblend.value) return;
-	if (!v_blend[3]) return;
+	if (v_blend[3] < 1) return;
+
+	// who knows if this helps?  Not I.
+	D3DMATRIX m;
+	D3DMatrix_Identity (&m);
+	D3DMatrix_OrthoOffCenterRH (&m, 0, vid.width >> 3, vid.height >> 3, 0, 0, 1);
+	D3DHLSL_SetWorldMatrix (&m);
 
 	DWORD blendcolor = D3DCOLOR_ARGB
 	(
@@ -1535,7 +1545,10 @@ void Draw_PolyBlend (void)
 	);
 
 	// don't go down into sbar territory
-	D3DDraw_SubmitQuad (0, 0, vid.width, vid.height - sb_lines, blendcolor);
+	D3DDraw_SubmitQuad (0, 0, vid.width >> 3, (vid.height - sb_lines) >> 3, blendcolor);
+
+	// this needs to flush immediately as state is changing immediately after it
+	D3DDraw_Flush ();
 
 	// ensure
 	v_blend[3] = 0;
@@ -1571,16 +1584,10 @@ void D3DDraw_Begin2D (void)
 	// enforce upload of any textures that went into the scrap
 	Scrap_Upload ();
 
-	// alwats switch to a full-sized viewport even if we're drawing nothing so that
-	// IDirect3DDevice9::Clear can do a fast clear in the next frame
-	D3D_SetViewport (0, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 1);
-
-	// end our RTT scene here first
-	D3DRTT_EndScene ();
-
+	// this is a gross hack for bboxes
 	D3DMATRIX m;
 	D3DMatrix_Identity (&m);
-	D3DMatrix_OrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
+	D3DHLSL_SetEntMatrix (&m);
 
 	// disable depth testing and writing
 	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
@@ -1589,8 +1596,15 @@ void D3DDraw_Begin2D (void)
 	// no backface culling
 	D3D_BackfaceCull (D3DCULL_NONE);
 
+	// alwats switch to a full-sized viewport even if we're drawing nothing so that
+	// IDirect3DDevice9::Clear can do a fast clear in the next frame
+	D3D_SetViewport (0, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 1);
+
+	// end our RTT scene here first
+	D3DRTT_EndScene ();
+
 	// backtile needs wrap mode explicitly
-	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
+	D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
 
 	// enable alpha blending (always)
 	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
@@ -1599,7 +1613,6 @@ void D3DDraw_Begin2D (void)
 	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
 	// set up shader for drawing; always force a pass switch first time
-	D3DHLSL_SetWorldMatrix (&m);
 	d3d_DrawState.ShaderPass = FX_PASS_NOTBEGUN;
 	d3d_DrawState.color2D = 0xffffffff;
 
@@ -1615,6 +1628,10 @@ void D3DDraw_Begin2D (void)
 	// note - this is a good bit faster with this code than doing them in r_main
 	// note 2 - the gun model code assumes that it's the last thing drawn in the 3D view
 	Draw_PolyBlend ();
+
+	// now set the real ortho matrix we;ll use for everything else
+	D3DMatrix_OrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
+	D3DHLSL_SetWorldMatrix (&m);
 }
 
 

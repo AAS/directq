@@ -345,7 +345,6 @@ bool ValidateQuakeDirectory (char *quakedir)
 	// some gamedirs are just used for keeping stuff separate
 	if (CheckKnownContent (va ("%s/ID1/*.sav", quakedir))) return true;
 	if (CheckKnownContent (va ("%s/ID1/*.dem", quakedir))) return true;
-	if (CheckKnownContent (va ("%s/ID1/save/*.sav", quakedir))) return true;
 
 	// not quake
 	return false;
@@ -521,70 +520,6 @@ void SetQuakeDirectory (void)
 }
 
 
-int MapKey (int key);
-void ClearAllStates (void);
-LONG CDAudio_MessageHandler (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-
-void VID_SetOSGamma (void);
-void VID_SetAppGamma (void);
-void CDAudio_Pause (void);
-void CDAudio_Resume (void);
-
-void AppActivate (BOOL fActive, BOOL minimize)
-{
-	static bool vid_wassuspended = false;
-	extern bool vid_canalttab;
-
-	ActiveApp = fActive;
-	Minimized = minimize;
-
-	if (fActive)
-	{
-		bWindowActive = true;
-		block_drawing = false;
-
-		// do this first as the api calls might affect the other stuff
-		if (modestate == MS_FULLDIB)
-		{
-			if (vid_canalttab && vid_wassuspended)
-			{
-				vid_wassuspended = false;
-
-				// ensure that the window is shown at at the top of the z order
-				ShowWindow (d3d_Window, SW_SHOWNORMAL);
-				SetForegroundWindow (d3d_Window);
-			}
-		}
-
-		IN_SetMouseState (modestate == MS_FULLDIB);
-
-		// restore everything else
-		VID_SetAppGamma ();
-		CDAudio_Resume ();
-
-		// needed to reestablish the correct viewports
-		vid.recalc_refdef = 1;
-	}
-	else
-	{
-		bWindowActive = false;
-		IN_SetMouseState (modestate == MS_FULLDIB);
-		VID_SetOSGamma ();
-		CDAudio_Pause ();
-		S_ClearBuffer ();
-		block_drawing = true;
-
-		if (modestate == MS_FULLDIB)
-		{
-			if (vid_canalttab)
-			{
-				vid_wassuspended = true;
-			}
-		}
-	}
-}
-
-
 STICKYKEYS StartupStickyKeys = {sizeof (STICKYKEYS), 0};
 TOGGLEKEYS StartupToggleKeys = {sizeof (TOGGLEKEYS), 0};
 FILTERKEYS StartupFilterKeys = {sizeof (FILTERKEYS), 0};
@@ -594,11 +529,9 @@ void AllowAccessibilityShortcutKeys (bool bAllowKeys)
 {
 	if (bAllowKeys)
 	{
-		// Restore StickyKeys/etc to original state and enable Windows key
-		STICKYKEYS sk = StartupStickyKeys;
-		TOGGLEKEYS tk = StartupToggleKeys;
-		FILTERKEYS fk = StartupFilterKeys;
-
+		// Restore StickyKeys/etc to original state
+		// (note that this function is called "allow", not "enable"; if they were previously
+		// disabled it will put them back that way too, it doesn't force them to be enabled.)
 		SystemParametersInfo (SPI_SETSTICKYKEYS, sizeof (STICKYKEYS), &StartupStickyKeys, 0);
 		SystemParametersInfo (SPI_SETTOGGLEKEYS, sizeof (TOGGLEKEYS), &StartupToggleKeys, 0);
 		SystemParametersInfo (SPI_SETFILTERKEYS, sizeof (FILTERKEYS), &StartupFilterKeys, 0);
@@ -638,6 +571,74 @@ void AllowAccessibilityShortcutKeys (bool bAllowKeys)
 			fkOff.dwFlags &= ~FKF_CONFIRMHOTKEY;
 
 			SystemParametersInfo (SPI_SETFILTERKEYS, sizeof (FILTERKEYS), &fkOff, 0);
+		}
+	}
+}
+
+
+int MapKey (int key);
+void ClearAllStates (void);
+LONG CDAudio_MessageHandler (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+void VID_SetOSGamma (void);
+void VID_SetAppGamma (void);
+void CDAudio_Pause (void);
+void CDAudio_Resume (void);
+
+void AppActivate (BOOL fActive, BOOL minimize)
+{
+	static bool vid_wassuspended = false;
+	extern bool vid_canalttab;
+
+	ActiveApp = fActive;
+	Minimized = minimize;
+
+	if (fActive)
+	{
+		bWindowActive = true;
+		block_drawing = false;
+
+		// do this first as the api calls might affect the other stuff
+		if (modestate == MS_FULLDIB)
+		{
+			if (vid_canalttab && vid_wassuspended)
+			{
+				vid_wassuspended = false;
+
+				// ensure that the window is shown at at the top of the z order
+				ShowWindow (d3d_Window, SW_SHOWNORMAL);
+				SetForegroundWindow (d3d_Window);
+			}
+		}
+
+		ClearAllStates ();
+		IN_SetMouseState (modestate == MS_FULLDIB);
+
+		// restore everything else
+		VID_SetAppGamma ();
+		CDAudio_Resume ();
+		AllowAccessibilityShortcutKeys (false);
+
+		// needed to reestablish the correct viewports
+		vid.recalc_refdef = 1;
+	}
+	else
+	{
+		bWindowActive = false;
+		ClearAllStates ();
+		IN_SetMouseState (modestate == MS_FULLDIB);
+		VID_SetOSGamma ();
+		CDAudio_Pause ();
+		S_ClearBuffer ();
+		block_drawing = true;
+		AllowAccessibilityShortcutKeys (true);
+
+		if (modestate == MS_FULLDIB)
+		{
+			if (vid_canalttab)
+			{
+				vid_wassuspended = true;
+			}
 		}
 	}
 }
@@ -959,12 +960,14 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 			TranslateMessage (&msg);
 			DispatchMessage (&msg);
 		}
-		else if (cl.paused)
-			Sleep (PAUSE_SLEEP);
-		else if (!ActiveApp || Minimized || block_drawing)
-			Sleep (NOT_FOCUS_SLEEP);
 		else
 		{
+			// note - a normal frame needs to be run even if paused otherwise we'll never be able to unpause!!!
+			if (cl.paused)
+				Sleep (PAUSE_SLEEP);
+			else if (!ActiveApp || Minimized || block_drawing)
+				Sleep (NOT_FOCUS_SLEEP);
+
 			// run a normal frame
 			Host_Frame (newtime - oldtime);
 			oldtime = newtime;

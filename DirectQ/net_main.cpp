@@ -83,7 +83,7 @@ float			net_time;
 
 float SetNetTime (void)
 {
-	net_time = Sys_FloatTime();
+	net_time = Sys_FloatTime ();
 	return net_time;
 }
 
@@ -883,12 +883,14 @@ void NET_Poll (void)
 	if (!configRestored)
 		configRestored = true;
 
-	SetNetTime();
+	SetNetTime ();
 
 	for (pp = pollProcedureList; pp; pp = pp->next)
 	{
 		if (pp->nextTime > net_time)
 			break;
+
+		// Con_Printf ("NET_Poll\n");
 
 		pollProcedureList = pp->next;
 		pp->procedure (pp->arg);

@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "menu_common.h"
 #include "winquake.h"
+#include "d3d_model.h"
+#include "d3d_quake.h"
 
 extern qpic_t *gfx_p_option_lmp;
 
@@ -29,6 +31,8 @@ extern cvar_t scr_screenshotformat;
 extern cvar_t r_lerporient;
 extern cvar_t r_lerpframe;
 extern cvar_t r_lerplightstyle;
+extern cvar_t r_coronas;
+extern cvar_t gl_flashblend;
 extern cvar_t freelook;
 extern cvar_t chase_back;
 extern cvar_t chase_up;
@@ -59,6 +63,7 @@ extern cvar_t r_waterwarptime;
 extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
 extern cvar_t v_gamma;
+extern cvar_t vid_contrast;
 extern cvar_t r_waterwarp;
 extern cvar_t r_wateralpha;
 extern cvar_t loadas8bit;
@@ -69,6 +74,7 @@ extern cvar_t r_aliaslightscale;
 extern cvar_t r_particlesize;
 extern cvar_t r_particlestyle;
 extern cvar_t gl_fullbrights;
+extern cvar_t r_truecontentscolour;
 
 CQMenu menu_Main (m_main);
 CQMenu menu_Singleplayer (m_other);
@@ -87,6 +93,7 @@ CQMenu menu_Input (m_other);
 CQMenu menu_Keybindings (m_keys);
 CQMenu menu_Effects (m_other);
 CQMenu menu_EffectsSimple (m_other);
+CQMenu menu_UI (m_other);
 CQMenu menu_WarpSurf (m_other);
 CQMenu menu_Fog (m_other);
 CQMenu menu_ContentDir (m_other);
@@ -490,7 +497,6 @@ bool IsGameDir (char *path)
 	// some gamedirs are just used for keeping stuff separate
 	if (CheckKnownContent (va ("%s/%s/*.sav", basedir, path))) return true;
 	if (CheckKnownContent (va ("%s/%s/*.dem", basedir, path))) return true;
-	if (CheckKnownContent (va ("%s/%s/save/*.sav", basedir, path))) return true;
 
 	// nope
 	return false;
@@ -811,8 +817,13 @@ void Menu_LoadAvailableSkyboxes (void)
 char *hudstylelist[] = {"Classic Status Bar", "Overlay Status Bar", "QuakeWorld HUD", "Quake 64 HUD", NULL};
 int hudstyleselection = 0;
 
-#define TAG_HUDALIGN 8192
-#define TAG_HUDALPHA 16384
+#define TAG_CONSCALE		64
+#define TAG_SMOOTHCHAR		128
+#define TAG_HUDALIGN		8192
+#define TAG_HUDALPHA		16384
+
+extern cvar_t r_smoothcharacters;
+extern cvar_t gl_conscale;
 
 char *hud_invshow[] = {"On", "Off", NULL};
 int hud_invshownum = 0;
@@ -826,6 +837,11 @@ int waterwarp_num = 1;
 
 char *particle_options[] = {"Dots", "Squares", NULL};
 int particle_num = 0;
+
+// the wording has been chosen to hint at the player that there is something more here...
+char *flashblend_options[] = {"Lightmaps Only", "Coronas Only", "Lightmaps/Coronas", NULL};
+int flashblend_num = 0;
+
 
 int Menu_WarpCustomDraw (int y)
 {
@@ -853,6 +869,25 @@ int Menu_WarpCustomDraw (int y)
 	Cvar_Set (&r_waterwarp, waterwarp_num);
 	Cvar_Set (&r_particlestyle, particle_num);
 
+	if (flashblend_num == 0)
+	{
+		// lightmaps only
+		Cvar_Set (&r_coronas, 0.0f);
+		Cvar_Set (&gl_flashblend, 0.0f);
+	}
+	else if (flashblend_num == 1)
+	{
+		// coronas only
+		Cvar_Set (&r_coronas, 0.0f);
+		Cvar_Set (&gl_flashblend, 1.0f);
+	}
+	else
+	{
+		// lightmaps + coronas
+		Cvar_Set (&r_coronas, 1.0f);
+		Cvar_Set (&gl_flashblend, 0.0f);
+	}
+
 	// hud style
 	Cvar_Get (hudstyle, "cl_sbar");
 	Cvar_Set (hudstyle, hudstyleselection);
@@ -860,18 +895,18 @@ int Menu_WarpCustomDraw (int y)
 	switch (hudstyle->integer)
 	{
 	case 0:
-		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALPHA);
-		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALIGN);
+		menu_UI.DisableMenuOptions (TAG_HUDALPHA);
+		menu_UI.EnableMenuOptions (TAG_HUDALIGN);
 		break;
 
 	case 1:
-		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALPHA);
-		menu_EffectsSimple.EnableMenuOptions (TAG_HUDALIGN);
+		menu_UI.EnableMenuOptions (TAG_HUDALPHA);
+		menu_UI.EnableMenuOptions (TAG_HUDALIGN);
 		break;
 
 	default:
-		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALPHA);
-		menu_EffectsSimple.DisableMenuOptions (TAG_HUDALIGN);
+		menu_UI.DisableMenuOptions (TAG_HUDALPHA);
+		menu_UI.DisableMenuOptions (TAG_HUDALIGN);
 		break;
 	}
 
@@ -879,10 +914,29 @@ int Menu_WarpCustomDraw (int y)
 		Cvar_Set (&scr_viewsize, 110.0f);
 	else Cvar_Set (&scr_viewsize, 100.0f);
 
+	if (d3d_CurrentMode.Width > 640 && d3d_CurrentMode.Height > 480)
+	{
+		menu_UI.EnableMenuOptions (TAG_CONSCALE);
+
+		if (gl_conscale.value < 1)
+			menu_UI.EnableMenuOptions (TAG_SMOOTHCHAR);
+		else menu_UI.DisableMenuOptions (TAG_SMOOTHCHAR);
+	}
+	else
+	{
+		menu_UI.DisableMenuOptions (TAG_SMOOTHCHAR);
+		menu_UI.DisableMenuOptions (TAG_CONSCALE);
+	}
+
 	// keep y
 	return y;
 }
 
+
+#define GETCVAROPTION(var, num, minnum, maxnum) \
+	(num) = (var); \
+	if ((num) < (minnum)) (num) = (minnum); \
+	if ((num) > (maxnum)) (num) = (maxnum); \
 
 void Menu_WarpCustomEnter (void)
 {
@@ -892,28 +946,20 @@ void Menu_WarpCustomEnter (void)
 
 	Cvar_Get (hudstyle, "cl_sbar");
 
-	hudstyleselection = hudstyle->integer;
-
-	if (hudstyleselection < 0) hudstyleselection = 0;
-	if (hudstyleselection > 3) hudstyleselection = 3;
-
 	skybox_menunumber = 0;
 	old_skybox_menunumber = 0;
 
-	overbright_num = r_overbright.integer;
+	GETCVAROPTION (hudstyle->integer, hudstyleselection, 0, 3);
+	GETCVAROPTION (r_overbright.integer, overbright_num, 0, 2);
+	GETCVAROPTION (r_waterwarp.integer, waterwarp_num, 0, 2);
+	GETCVAROPTION (r_particlestyle.integer, particle_num, 0, 2);
 
-	if (overbright_num < 0) overbright_num = 0;
-	if (overbright_num > 2) overbright_num = 2;
-
-	waterwarp_num = r_waterwarp.integer;
-
-	if (waterwarp_num < 0) waterwarp_num = 0;
-	if (waterwarp_num > 2) waterwarp_num = 2;
-
-	particle_num = r_particlestyle.integer;
-
-	if (particle_num < 0) particle_num = 0;
-	if (particle_num > 2) particle_num = 2;
+	// set correct flashblend mode
+	if (gl_flashblend.integer)
+		flashblend_num = 1;
+	else if (r_coronas.value)
+		flashblend_num = 2;
+	else flashblend_num = 0;
 
 	extern char CachedSkyBoxName[];
 
@@ -1089,6 +1135,10 @@ int Menu_SpeedDrawCheck (int y)
 }
 
 
+extern cvar_t host_maxfps;
+extern cvar_t scr_fov;
+extern cvar_t scr_fovcompat;
+
 void Menu_InitOptionsMenu (void)
 {
 	extern qpic_t *gfx_ttl_cstm_lmp;
@@ -1112,17 +1162,38 @@ void Menu_InitOptionsMenu (void)
 	menu_Options.AddOption (new CQMenuSubMenu ("Run or Record a Demo", &menu_Demo));
 	menu_Options.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Options.AddOption (new CQMenuCvarSlider ("Brightness", &v_gamma, 1.75, 0.25, 0.05));
-	menu_Options.AddOption (new CQMenuCvarSlider ("Mouse Speed", &sensitivity, 1, 21, 1));
+	menu_Options.AddOption (new CQMenuCvarSlider ("Contrast", &vid_contrast, 0.25f, 1.75f, 0.05f));
 	menu_Options.AddOption (new CQMenuCvarSlider ("Music Volume", &bgmvolume, 0, 1, 0.05));
 	menu_Options.AddOption (new CQMenuCvarSlider ("Sound Volume", &volume, 0, 1, 0.05));
 	menu_Options.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Options.AddOption (new CQMenuCvarToggle ("Always Run", &dummy_speed, 0, 1));
+	menu_Options.AddOption (new CQMenuCvarSlider ("Mouse Speed", &sensitivity, 1, 21, 1));
 	menu_Options.AddOption (new CQMenuCvarToggle ("Mouse Look", &freelook, 0, 1));
 	menu_Options.AddOption (new CQMenuCvarToggle ("Invert Mouse", &m_pitch, 0.022, -0.022));
+	menu_Options.AddOption (new CQMenuCvarToggle ("Always Run", &dummy_speed, 0, 1));
 	menu_Options.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Options.AddOption (new CQMenuSubMenu ("User Interface Options", &menu_UI));
 	menu_Options.AddOption (new CQMenuSubMenu ("Video Options", &menu_Video));
-	// menu_Options.AddOption (new CQMenuSubMenu ("Sound Options", &menu_Sound));
+#ifdef _DEBUG
+	menu_Options.AddOption (new CQMenuSubMenu ("Sound Options", &menu_Sound));
+#endif
 	menu_Options.AddOption (new CQMenuSubMenu ("Effects and Other Options", &menu_EffectsSimple));
+
+	menu_UI.AddOption (new CQMenuCustomDraw (Menu_OptionsCustomDraw));
+	menu_UI.AddOption (new CQMenuCustomEnter (Menu_WarpCustomEnter));
+	menu_UI.AddOption (new CQMenuCustomDraw (Menu_WarpCustomDraw));
+	menu_UI.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
+	menu_UI.AddOption (new CQMenuTitle ("User Interface Options"));
+	menu_UI.AddOption (new CQMenuColourBar ("Menu Highlight", &menu_fillcolor.integer));
+	menu_UI.AddOption (TAG_CONSCALE, new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
+	menu_UI.AddOption (TAG_SMOOTHCHAR, new CQMenuCvarToggle ("Smooth Characters", &r_smoothcharacters, 0, 1));
+	menu_UI.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_UI.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
+	menu_UI.AddOption (new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
+	menu_UI.AddOption (new CQMenuTitle ("Heads-Up Display"));
+	menu_UI.AddOption (new CQMenuSpinControl ("HUD Style", &hudstyleselection, hudstylelist));
+	menu_UI.AddOption (new CQMenuSpinControl ("Show Inventory", &hud_invshownum, hud_invshow));
+	menu_UI.AddOption (TAG_HUDALIGN, new CQMenuCvarToggle ("Center-align HUD", &scr_centersbar));
+	menu_UI.AddOption (TAG_HUDALPHA, new CQMenuCvarSlider ("HUD Alpha", &scr_sbaralpha, 0, 1, 0.1));
 
 	// sound
 	menu_Sound.AddOption (new CQMenuCustomEnter (Menu_SoundCustomEnter));
@@ -1135,10 +1206,10 @@ void Menu_InitOptionsMenu (void)
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Clip Distance", &sound_nominal_clip_dist, 500, 2000, 100));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Ambient Level", &ambient_level, 0, 1, 0.05));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Ambient Fade", &ambient_fade, 50, 200, 10));
-	menu_Sound.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Sound.AddOption (new CQMenuSpacer ("(Disabled Options)"));
-	menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuSpinControl ("Sound Speed", &soundspeednum, soundspeedlist));
-	menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuCvarToggle ("8-Bit Sounds", &loadas8bit));
+	//menu_Sound.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	//menu_Sound.AddOption (new CQMenuSpacer ("(Disabled Options)"));
+	//menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuSpinControl ("Sound Speed", &soundspeednum, soundspeedlist));
+	//menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuCvarToggle ("8-Bit Sounds", &loadas8bit));
 
 	Cvar_Get (hudstyle, "cl_sbar");
 
@@ -1153,6 +1224,7 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Overbright Light", &overbright_num, overbright_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Fullbrights", &gl_fullbrights, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Dynamic Light Style", &flashblend_num, flashblend_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("MDL Light Scale", &r_aliaslightscale, 0, 5, 0.1));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Particles"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Particle Style", &particle_num, particle_options));
@@ -1160,11 +1232,7 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Water and Liquids"));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Water Alpha", &r_wateralpha, 0, 1, 0.1));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Underwater Warp", &waterwarp_num, waterwarp_options));
-	menu_EffectsSimple.AddOption (new CQMenuTitle ("Heads-Up Display"));
-	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("HUD Style", &hudstyleselection, hudstylelist));
-	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Show Inventory", &hud_invshownum, hud_invshow));
-	menu_EffectsSimple.AddOption (TAG_HUDALIGN, new CQMenuCvarToggle ("Center-align HUD", &scr_centersbar));
-	menu_EffectsSimple.AddOption (TAG_HUDALPHA, new CQMenuCvarSlider ("HUD Alpha", &scr_sbaralpha, 0, 1, 0.1));
+	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Correct Color Shift", &r_truecontentscolour, 0, 1));
 
 	// keybindings
 	menu_Keybindings.AddOption (new CQMenuBanner (&gfx_ttl_cstm_lmp));
@@ -1235,11 +1303,6 @@ void Menu_HelpCustomEnter (void)
 			return;
 		}
 	}
-
-	// switch the help page depending on whether we're playing the registered version or not
-	if (registered.value)
-		menu_HelpPage = 1;
-	else menu_HelpPage = 0;
 }
 
 
@@ -1274,33 +1337,15 @@ void Menu_HelpCustomKey (int key)
 	{
 	case K_UPARROW:
 	case K_RIGHTARROW:
-
-		if (registered.value)
-		{
-			if (++menu_HelpPage >= NUM_HELP_PAGES)
-				menu_HelpPage = 1;
-		}
-		else
-		{
-			if (++menu_HelpPage >= NUM_HELP_PAGES)
-				menu_HelpPage = 0;
-		}
+		if (++menu_HelpPage >= NUM_HELP_PAGES)
+			menu_HelpPage = 0;
 
 		break;
 
 	case K_DOWNARROW:
 	case K_LEFTARROW:
-
-		if (registered.value)
-		{
-			if (--menu_HelpPage < 1)
-				menu_HelpPage = NUM_HELP_PAGES - 1;
-		}
-		else
-		{
-			if (--menu_HelpPage < 0)
-				menu_HelpPage = NUM_HELP_PAGES - 1;
-		}
+		if (--menu_HelpPage < 0)
+			menu_HelpPage = NUM_HELP_PAGES - 1;
 
 		break;
 	}
@@ -1335,6 +1380,7 @@ void Menu_InitControllerMenu (void)
 
 typedef struct mapinfo_s
 {
+	bool loaded;
 	char *bspname;
 	char *mapname;
 	char *skybox;
@@ -1492,11 +1538,8 @@ void Menu_MapsOnHover (int initialy, int y, int itemnum)
 	else Menu_PrintCenterWhite (272, initialy, "(unknown)");
 
 	Menu_PrintCenter (272, initialy + 35, DIVIDER_LINE);
-
 	Draw_Mapshot (va ("maps/%s", menu_mapslist[itemnum].bspname), (vid.width - 320) / 2 + 208, initialy + 55);
-
 	Menu_PrintCenter (272, initialy + 195, DIVIDER_LINE);
-
 	Menu_DoMapInfo (272, initialy + 200, itemnum);
 }
 
@@ -1606,7 +1649,11 @@ void Menu_MapsPopulate (void)
 	for (int i = 0; i < listlen; i++)
 	{
 		// if the map doesn't have an info_player entity in it, don't add it to the list
-		if (ValidateMap (MapList[i], maplistlen)) maplistlen++;
+		if (ValidateMap (MapList[i], maplistlen))
+		{
+			menu_mapslist[maplistlen].loaded = false;
+			maplistlen++;
+		}
 
 		// clear down the source item as we don't need it any more
 		Zone_Free (MapList[i]);
@@ -2168,4 +2215,5 @@ void Menu_InitContentMenu (void)
 	menu_Demo.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Demo.AddOption (new CQMenuCvarToggle ("Enable Mapshots", &r_automapshot, 0, 1));
 }
+
 

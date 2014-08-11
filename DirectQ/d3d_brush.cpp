@@ -35,12 +35,15 @@ void D3DBrush_SetShader (int ShaderNum)
 	{
 	case FX_PASS_WORLD_NOLUMA:
 	case FX_PASS_WORLD_NOLUMA_ALPHA:
-		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP);
+		D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
+		D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 		break;
 
 	default:
 		// some kind of luma style
-		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+		D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
+		D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
+		D3D_SetTextureAddress (2, D3DTADDRESS_WRAP);
 		D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
 		break;
 	}
@@ -143,7 +146,6 @@ void D3DBrush_SetBuffers (void)
 	// and set up for drawing
 	D3D_SetVertexDeclaration (d3d_SurfDecl);
 
-	// VBOs are only used with hardware T&L
 	D3D_SetStreamSource (0, d3d_SurfVBO, 0, sizeof (brushpolyvert_t));
 	D3D_SetStreamSource (1, NULL, 0, 0);
 	D3D_SetStreamSource (2, NULL, 0, 0);
@@ -151,37 +153,17 @@ void D3DBrush_SetBuffers (void)
 }
 
 
-brushpolyvert_t *D3DBrush_TransformSurface (brushpolyvert_t *src, brushpolyvert_t *dst, int numverts, D3DMATRIX *m, bool rotated)
+brushpolyvert_t *D3DBrush_TransformSurface (brushpolyvert_t *src, brushpolyvert_t *dst, int numverts, D3DMATRIX *m)
 {
-	if (rotated)
+	for (int i = 0; i < numverts; i++, src++, dst++)
 	{
-		for (int i = 0; i < numverts; i++, src++, dst++)
-		{
-			dst->xyz[0] = src->xyz[0] * m->_11 + src->xyz[1] * m->_21 + src->xyz[2] * m->_31 + m->_41;
-			dst->xyz[1] = src->xyz[0] * m->_12 + src->xyz[1] * m->_22 + src->xyz[2] * m->_32 + m->_42;
-			dst->xyz[2] = src->xyz[0] * m->_13 + src->xyz[1] * m->_23 + src->xyz[2] * m->_33 + m->_43;
+		D3DMatrix_TransformPoint (m, src->xyz, dst->xyz);
 
-			dst->st[0] = src->st[0];
-			dst->st[1] = src->st[1];
+		dst->st[0] = src->st[0];
+		dst->st[1] = src->st[1];
 
-			dst->lm[0] = src->lm[0];
-			dst->lm[1] = src->lm[1];
-		}
-	}
-	else
-	{
-		for (int i = 0; i < numverts; i++, src++, dst++)
-		{
-			dst->xyz[0] = src->xyz[0] + m->_41;
-			dst->xyz[1] = src->xyz[1] + m->_42;
-			dst->xyz[2] = src->xyz[2] + m->_43;
-
-			dst->st[0] = src->st[0];
-			dst->st[1] = src->st[1];
-
-			dst->lm[0] = src->lm[0];
-			dst->lm[1] = src->lm[1];
-		}
+		dst->lm[0] = src->lm[0];
+		dst->lm[1] = src->lm[1];
 	}
 
 	return dst;
@@ -274,7 +256,7 @@ void D3DBrush_FlushSurfaces (void)
 
 			// an entity always needs to be transformed now as we're not updating the source verts any more
 			if (ent)
-				verts = D3DBrush_TransformSurface (surf->verts, verts, surf->numverts, &ent->matrix, ent->rotated);
+				verts = D3DBrush_TransformSurface (surf->verts, verts, surf->numverts, &ent->matrix);
 			else
 			{
 				memcpy (verts, surf->verts, surf->numverts * sizeof (brushpolyvert_t));

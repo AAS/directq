@@ -2335,6 +2335,12 @@ cmd_t Menu_MainExitQuake_Cmd ("menu_quit", Menu_MainExitQuake);
 
 void M_Draw (void)
 {
+	// sync up the fill colour in case it was changed to an invalid range outside the menu
+	if (menu_fillcolor.integer < 0) Cvar_Set (&menu_fillcolor, 0.0f);
+	if (menu_fillcolor.integer > 13) Cvar_Set (&menu_fillcolor, 13.0f);
+
+	Cvar_Set (&menu_fillcolor, menu_fillcolor.integer);
+
 	// don't run a draw func if not in the menus or if we don't have a current menu set
 	if (m_state == m_none || key_dest != key_menu || !menu_Current || menu_StackDepth <= 0)
 	{

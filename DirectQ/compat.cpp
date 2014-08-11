@@ -76,7 +76,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *gl_smoothmodels_compat = new cvar_t ("gl_smoothmodels", "0", CVAR_COMPAT);
 	cvar_t *gl_affinemodels_compat = new cvar_t ("gl_affinemodels", "0", CVAR_COMPAT);
 	cvar_t *gl_polyblend_compat = new cvar_t ("gl_polyblend", "0", CVAR_COMPAT);
-	cvar_t *gl_flashblend_compat = new cvar_t ("gl_flashblend", "0", CVAR_COMPAT);
 	cvar_t *gl_playermip_compat = new cvar_t ("gl_playermip", "0", CVAR_COMPAT);
 	cvar_t *gl_nocolors_compat = new cvar_t ("gl_nocolors", "0", CVAR_COMPAT);
 	cvar_t *gl_keeptjunctions_compat = new cvar_t ("gl_keeptjunctions", "0", CVAR_COMPAT);
@@ -99,7 +98,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *vid_config_x_compat = new cvar_t ("vid_config_x", "0", CVAR_COMPAT);
 	cvar_t *vid_config_y_compat = new cvar_t ("vid_config_y", "0", CVAR_COMPAT);
 	cvar_t *_windowed_mouse_compat = new cvar_t ("_windowed_mouse", "0", CVAR_COMPAT);
-	cvar_t *host_framerate_compat = new cvar_t ("host_framerate", "0", CVAR_COMPAT);
 	cvar_t *host_speeds_compat = new cvar_t ("host_speeds", "0", CVAR_COMPAT);
 	cvar_t *sys_ticrate_compat = new cvar_t ("sys_ticrate", "0", CVAR_COMPAT);
 	cvar_t *serverprofile_compat = new cvar_t ("serverprofile", "0", CVAR_COMPAT);
@@ -380,5 +378,4 @@ void Cmd_MakeCompatLayer (void)
 	cmd_t *compatcmd_153 = new cmd_t ("bf", NULL);
 	cmd_t *compatcmd_154 = new cmd_t ("centerview", NULL);
 	cmd_t *compatcmd_155 = new cmd_t ("hunk_report", NULL);
-	cmd_t *compatcmd_156 = new cmd_t ("cache_flush", NULL);
 }

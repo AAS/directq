@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // mouse variables
 cvar_t freelook ("freelook", "1", CVAR_ARCHIVE);
-extern cvar_t cl_fullpitch;
 
 bool mouselooking;
 
@@ -34,6 +33,7 @@ extern bool keybind_grab;
 
 void IN_StartupJoystick (void);
 void Joy_AdvancedUpdate_f (void);
+void CL_BoundViewPitch (float *viewangles);
 
 cmd_t joyadvancedupdate ("joyadvancedupdate", Joy_AdvancedUpdate_f);
 
@@ -49,41 +49,6 @@ static int newmouseparms[3] = {0, 0, 0};
 
 ========================================================================================================================
 */
-
-
-// typically there will only be one or two of these per frame
-#define MAX_INPUT_QUEUE	64
-
-typedef struct inputqueue_s
-{
-	int key;
-	bool down;
-} inputqueue_t;
-
-
-inputqueue_t inputqueue[MAX_INPUT_QUEUE];
-int numinputqueue = 0;
-
-
-void IN_QueueEvent (int key, bool down)
-{
-	if (numinputqueue >= MAX_INPUT_QUEUE) return;
-
-	inputqueue[numinputqueue].key = key;
-	inputqueue[numinputqueue].down = down;
-
-	numinputqueue++;
-}
-
-
-void IN_ProcessQueue (void)
-{
-	for (int i = 0; i < numinputqueue; i++)
-		Key_Event (inputqueue[i].key, inputqueue[i].down);
-
-	// if (numinputqueue) Con_Printf ("processed %i\n", numinputqueue);
-	numinputqueue = 0;
-}
 
 
 /*
@@ -162,18 +127,18 @@ void IN_ReadKeyboard (RAWKEYBOARD *ri_Keyboard)
 	int key = IN_MapKey (ri_Keyboard->MakeCode > 127 ? 0 : ri_Keyboard->MakeCode);
 
 	if (!ri_Keyboard->Flags)
-		IN_QueueEvent (key, true);
+		Key_Event (key, true);
 	else if (ri_Keyboard->Flags & RI_KEY_BREAK)
-		IN_QueueEvent (key, false);
+		Key_Event (key, false);
 }
 
 
 typedef struct in_mousestate_s
 {
-	long mx;
-	long my;
-	long lastmx;
-	long lastmy;
+	float mx;
+	float my;
+	float lastmx;
+	float lastmy;
 } in_mousestate_t;
 
 in_mousestate_t in_mousestate = {0, 0};
@@ -188,8 +153,8 @@ void IN_MouseMove (usercmd_t *cmd, float movetime)
 
 		if (in_mousestate.mx || in_mousestate.my)
 		{
-			float mx = (float) in_mousestate.mx * sensitivity.value * 2.0f;
-			float my = (float) in_mousestate.my * sensitivity.value * 2.0f;
+			float mx = in_mousestate.mx * sensitivity.value * 2.0f;
+			float my = in_mousestate.my * sensitivity.value * 2.0f;
 
 			mouselooking = freelook.integer || (in_mlook.state & 1);
 
@@ -197,22 +162,12 @@ void IN_MouseMove (usercmd_t *cmd, float movetime)
 				cmd->sidemove += m_side.value * mx;
 			else cl.viewangles[YAW] -= m_yaw.value * mx;
 
-			if (mouselooking) V_StopPitchDrift ();
+			if (mouselooking) CL_StopPitchDrift ();
 
 			if (mouselooking && !(in_strafe.state & 1))
 			{
 				cl.viewangles[PITCH] += m_pitch.value * my;
-
-				if (cl_fullpitch.integer)
-				{
-					if (cl.viewangles[PITCH] > 90) cl.viewangles[PITCH] = 90;
-					if (cl.viewangles[PITCH] < -90) cl.viewangles[PITCH] = -90;
-				}
-				else
-				{
-					if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
-					if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
-				}
+				CL_BoundViewPitch (cl.viewangles);
 			}
 			else
 			{
@@ -243,7 +198,7 @@ ri_mousebutton_t ri_mousebuttons[5] =
 	{RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP, K_MOUSE2, false},
 	{RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, K_MOUSE3, false},
 	{RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, K_MOUSE4, false},
-	{RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, K_MOUSE5, false},
+	{RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, K_MOUSE5, false}
 };
 
 
@@ -253,7 +208,7 @@ void IN_ClearMouse (void)
 	{
 		if (ri_mousebuttons[i].down)
 		{
-			IN_QueueEvent (ri_mousebuttons[i].quakekey, false);
+			Key_Event (ri_mousebuttons[i].quakekey, false);
 			ri_mousebuttons[i].down = false;
 		}
 	}
@@ -283,13 +238,13 @@ void IN_ReadMouse (RAWMOUSE *ri_Mouse)
 	{
 		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_downflag) && !ri_mousebuttons[i].down)
 		{
-			IN_QueueEvent (ri_mousebuttons[i].quakekey, true);
+			Key_Event (ri_mousebuttons[i].quakekey, true);
 			ri_mousebuttons[i].down = true;
 		}
 
 		if ((ri_Mouse->usButtonFlags & ri_mousebuttons[i].ri_upflag) && ri_mousebuttons[i].down)
 		{
-			IN_QueueEvent (ri_mousebuttons[i].quakekey, false);
+			Key_Event (ri_mousebuttons[i].quakekey, false);
 			ri_mousebuttons[i].down = false;
 		}
 	}
@@ -300,13 +255,13 @@ void IN_ReadMouse (RAWMOUSE *ri_Mouse)
 		// this needs to cast to a short so that we can catch the proper delta
 		if ((short) ri_Mouse->usButtonData > 0)
 		{
-			IN_QueueEvent (K_MWHEELUP, true);
-			IN_QueueEvent (K_MWHEELUP, false);
+			Key_Event (K_MWHEELUP, true);
+			Key_Event (K_MWHEELUP, false);
 		}
 		else
 		{
-			IN_QueueEvent (K_MWHEELDOWN, true);
-			IN_QueueEvent (K_MWHEELDOWN, false);
+			Key_Event (K_MWHEELDOWN, true);
+			Key_Event (K_MWHEELDOWN, false);
 		}
 	}
 }
@@ -809,8 +764,8 @@ void IN_Commands (void)
 
 	for (int i = 0; i < joy_numbuttons; i++)
 	{
-		if ((buttonstate & (1 << i)) && !(joy_oldbuttonstate & (1 << i))) IN_QueueEvent (K_JOY1 + i, true);
-		if (!(buttonstate & (1 << i)) && (joy_oldbuttonstate & (1 << i))) IN_QueueEvent (K_JOY1 + i, false);
+		if ((buttonstate & (1 << i)) && !(joy_oldbuttonstate & (1 << i))) Key_Event (K_JOY1 + i, true);
+		if (!(buttonstate & (1 << i)) && (joy_oldbuttonstate & (1 << i))) Key_Event (K_JOY1 + i, false);
 	}
 
 	joy_oldbuttonstate = buttonstate;
@@ -833,8 +788,8 @@ void IN_Commands (void)
 		// determine which bits have changed and key an auxillary event for each change
 		for (int i = 0; i < 4; i++)
 		{
-			if ((povstate & (1 << i)) && !(joy_oldpovstate & (1 << i))) IN_QueueEvent (K_POV1 + i, true);
-			if (!(povstate & (1 << i)) && (joy_oldpovstate & (1 << i))) IN_QueueEvent (K_POV1 + i, false);
+			if ((povstate & (1 << i)) && !(joy_oldpovstate & (1 << i))) Key_Event (K_POV1 + i, true);
+			if (!(povstate & (1 << i)) && (joy_oldpovstate & (1 << i))) Key_Event (K_POV1 + i, false);
 		}
 
 		joy_oldpovstate = povstate;
@@ -954,7 +909,7 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 						cl.viewangles[PITCH] -= (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
 					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
 
-					V_StopPitchDrift ();
+					CL_StopPitchDrift ();
 				}
 				else
 				{
@@ -962,7 +917,7 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 					// disable pitch return-to-center unless requested by user
 					// *** this code can be removed when the lookspring bug is fixed
 					// *** the bug always has the lookspring feature on
-					if (!lookspring.value == 0.0) V_StopPitchDrift ();
+					if (!lookspring.value == 0.0) CL_StopPitchDrift ();
 				}
 			}
 			else
@@ -1010,7 +965,7 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 						cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * aspeed * cl_pitchspeed.value;
 					else cl.viewangles[PITCH] += (fAxisValue * joy_pitchsensitivity.value) * speed * 180.0;
 
-					V_StopPitchDrift ();
+					CL_StopPitchDrift ();
 				}
 				else
 				{
@@ -1018,7 +973,7 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 					// disable pitch return-to-center unless requested by user
 					// *** this code can be removed when the lookspring bug is fixed
 					// *** the bug always has the lookspring feature on
-					if (!lookspring.value) V_StopPitchDrift ();
+					if (!lookspring.value) CL_StopPitchDrift ();
 				}
 			}
 
@@ -1030,14 +985,5 @@ void IN_JoyMove (usercmd_t *cmd, float movetime)
 	}
 
 	// bounds check pitch
-	if (cl_fullpitch.integer)
-	{
-		if (cl.viewangles[PITCH] > 90) cl.viewangles[PITCH] = 90;
-		if (cl.viewangles[PITCH] < -90) cl.viewangles[PITCH] = -90;
-	}
-	else
-	{
-		if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
-		if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
-	}
+	CL_BoundViewPitch (cl.viewangles);
 }

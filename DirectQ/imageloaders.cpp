@@ -95,8 +95,6 @@ byte *D3D_LoadWAL (byte *f, int *loadsize)
 }
 
 
-D3DFORMAT D3D_GetTextureFormat (int flags);
-
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
 {
 	SAFE_RELEASE (tex[0]);
@@ -111,7 +109,7 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		D3DX_DEFAULT,
 		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
 		0,
-		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+		D3DFMT_A8R8G8B8,
 		D3DPOOL_MANAGED,
 		D3DX_FILTER_LINEAR,
 		D3DX_FILTER_BOX,
@@ -120,6 +118,8 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		NULL,
 		tex
 	);
+
+	// fixme - load into system ram instead, lock, then load through our normal loader
 
 	// now bring it into video RAM
 	if (SUCCEEDED (hr))
@@ -774,7 +774,7 @@ void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceI
 		D3DX_DEFAULT,
 		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
 		0,
-		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+		D3DFMT_A8R8G8B8,
 		D3DPOOL_MANAGED,
 		D3DX_FILTER_LINEAR,
 		D3DX_FILTER_BOX,
@@ -799,7 +799,7 @@ void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceI
 			D3DX_DEFAULT,
 			(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
 			0,
-			D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+			D3DFMT_A8R8G8B8,
 			D3DPOOL_MANAGED,
 			D3DX_FILTER_LINEAR,
 			D3DX_FILTER_BOX,

@@ -51,7 +51,7 @@ Cvars are restricted from having the same names as commands to keep this
 interface from being ambiguous.
 */
 
-typedef void (*cvarcallback_t) (void);
+typedef void (*cvarcallback_t) (class cvar_t *var);
 
 // changes are broadcast to all clients
 #define CVAR_SERVER			1

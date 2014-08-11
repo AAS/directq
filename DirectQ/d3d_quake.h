@@ -59,6 +59,9 @@ extern D3DMATRIX d3d_ProjMatrix;
 
 void D3DMatrix_Translate (D3DMATRIX *matrix, float x, float y, float z);
 void D3DMatrix_Scale (D3DMATRIX *matrix, float x, float y, float z);
+void D3DMatrix_Translate (D3DMATRIX *matrix, float *xyz);
+void D3DMatrix_Scale (D3DMATRIX *matrix, float *xyz);
+void D3DMatrix_TransformPoint (D3DMATRIX *matrix, float *in, float *out);
 void D3DMatrix_Rotate (D3DMATRIX *matrix, float x, float y, float z, float angle);
 D3DMATRIX *D3DMatrix_Identity (D3DMATRIX *matrix);
 D3DXMATRIX *D3DMatrix_Identity (D3DXMATRIX *matrix);
@@ -75,13 +78,7 @@ extern cvar_t r_overbright;
 // hlsl
 void D3DHLSL_SetPass (int passnum);
 void D3DHLSL_SetAlpha (float alphaval);
-void D3DHLSL_SetDepthBias (float depthbias);
 void D3DHLSL_SetTexture (UINT stage, LPDIRECT3DBASETEXTURE9 tex);
-void D3DHLSL_SetCubemap (LPDIRECT3DBASETEXTURE9 tex);
-void D3DHLSL_SetAddressMode (UINT stage, DWORD mode);
-void D3DHLSL_SetMagFilter (UINT stage, DWORD mode);
-void D3DHLSL_SetMinFilter (UINT stage, DWORD mode);
-void D3DHLSL_SetMipFilter (UINT stage, DWORD mode);
 void D3DHLSL_CheckCommit (void);
 void D3DHLSL_SetMatrix (D3DXHANDLE h, D3DMATRIX *matrix);
 void D3DHLSL_SetWorldMatrix (D3DMATRIX *worldmatrix);
@@ -112,9 +109,16 @@ void D3DHLSL_SetLastLerp (float val);
 #define FX_PASS_WORLD_LUMA_ALPHA			12
 #define FX_PASS_PARTICLES_INSTANCED			13
 #define FX_PASS_UNDERWATER					14
-#define FX_PASS_ALIAS_LUMA_NO_LUMA			15
-#define FX_PASS_WORLD_LUMA_NO_LUMA			16
-#define FX_PASS_WORLD_LUMA_NO_LUMA_ALPHA	17
+#define FX_PASS_ALIAS_LUMA_NOLUMA			15
+#define FX_PASS_WORLD_LUMA_NOLUMA			16
+#define FX_PASS_WORLD_LUMA_NOLUMA_ALPHA		17
+#define FX_PASS_ALIAS_INSTANCED_NOLUMA		18
+#define FX_PASS_ALIAS_INSTANCED_LUMA		19
+#define FX_PASS_ALIAS_INSTANCED_LUMA_NOLUMA	20
+#define FX_PASS_ALIAS_VIEWMODEL_NOLUMA		21
+#define FX_PASS_ALIAS_VIEWMODEL_LUMA		22
+#define FX_PASS_ALIAS_VIEWMODEL_LUMA_NOLUMA	23
+
 
 void D3DHLSL_Init (void);
 void D3DHLSL_Shutdown (void);
@@ -132,12 +136,6 @@ void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex,
 
 texture_t *R_TextureAnimation (entity_t *ent, texture_t *base);
 void R_ReadPointFile_f (void);
-
-// view origin
-extern	vec3_t	vup;
-extern	vec3_t	vpn;
-extern	vec3_t	vright;
-extern	vec3_t	r_origin;
 
 // screen size info
 extern	refdef_t	r_refdef;
@@ -162,36 +160,6 @@ extern	cvar_t	gl_affinemodels;
 extern	cvar_t	gl_polyblend;
 extern	cvar_t	gl_nocolors;
 extern	cvar_t	gl_doubleeyes;
-
-
-/*
-==============================================================================================================================
-
-				LIGHTMAP CLASS
-
-	This is a linked list that is only accessible through it's head pointer; all list walking is done internally.
-
-==============================================================================================================================
-*/
-
-class CD3DLightmap
-{
-public:
-	CD3DLightmap (msurface_t *surf);
-	~CD3DLightmap (void);
-	void CalcLightmapTexCoords (msurface_t *surf);
-	void CheckSurfaceForModification (msurface_t *surf);
-	bool AllocBlock (msurface_t *surf);
-
-	int LightmapNum;
-private:
-
-	// next lightmap in the chain
-	CD3DLightmap *next;
-};
-
-
-extern CD3DLightmap *d3d_Lightmaps;
 
 
 // generic world surface with verts and two sets of texcoords
@@ -233,10 +201,9 @@ void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf);
 #define IMAGE_KEEPPATH		(1 << 13)
 #define IMAGE_PADDABLE		(1 << 14)
 #define IMAGE_PADDED		(1 << 15)
-#define IMAGE_NOCOMPRESS	(1 << 16)
-#define IMAGE_SYSMEM		(1 << 17)
-#define IMAGE_SCRAP			(1 << 18)
-#define IMAGE_FENCE			(1 << 19)
+#define IMAGE_SYSMEM		(1 << 16)
+#define IMAGE_SCRAP			(1 << 17)
+#define IMAGE_FENCE			(1 << 18)
 
 int D3D_PowerOf2Size (int size);
 
@@ -250,6 +217,8 @@ typedef struct image_s
 	byte hash[16];
 	int flags;
 	int LastUsage;
+	int RegistrationSequence;
+	int ChainNumber;
 	LPDIRECT3DTEXTURE9 d3d_Texture;
 } image_t;
 
@@ -279,17 +248,11 @@ void D3DDraw_Begin2D (void);
 typedef struct d3d_global_caps_s
 {
 	D3DFORMAT DepthStencilFormat;
-	bool supportXRGB;
-	bool supportARGB;
-	bool supportL8;
-	bool supportA8L8;
-	bool supportDXT1;
-	bool supportDXT3;
-	bool supportDXT5;
-	bool supportDynTex;
 	bool supportHardwareTandL;
 	bool supportNonPow2;
 	bool supportInstancing;
+	bool supportStreamOffset;
+	bool supportOcclusion;
 	DWORD deviceCreateFlags;
 	int NumTMUs;
 } d3d_global_caps_t;
@@ -298,7 +261,6 @@ extern d3d_global_caps_t d3d_GlobalCaps;
 
 typedef struct d3d_renderdef_s
 {
-	int skyframe;
 	int framecount;
 	int visframecount;
 
@@ -311,18 +273,20 @@ typedef struct d3d_renderdef_s
 
 	mleaf_t *viewleaf;
 	mleaf_t *oldviewleaf;
+	int *lastgoodcontents;
 	bool automap;
 
 	// normal opaque entities
 	entity_t **visedicts;
 	int numvisedicts;
+	int relinkframe;
+
+	bool RTT;
 
 	entity_t worldentity;
 
-	float time;
-	float oldtime;
-	float frametime;
-	DWORD dwTime;
+	// models who's RegistrationSequence is == this have been touched on this map load
+	int RegistrationSequence;
 
 	// actual fov used for rendering
 	float fov_x;
@@ -345,15 +309,13 @@ extern D3DTEXTUREFILTERTYPE d3d_MipFilter;
 // these are wrappers around the real call that check the previous value for a change before issuing the API call
 void D3D_SetRenderState (D3DRENDERSTATETYPE State, DWORD Value);
 void D3D_SetRenderStatef (D3DRENDERSTATETYPE State, float Value);
+void D3D_SetSamplerState (UINT sampler, D3DSAMPLERSTATETYPE type, DWORD state);
 void D3D_SetVertexDeclaration (LPDIRECT3DVERTEXDECLARATION9 vd);
-void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset, DWORD stride);
+void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset, DWORD stride, UINT freq = 1);
 void D3D_SetIndices (LPDIRECT3DINDEXBUFFER9 ib);
 
-// batched up states
-void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor);
-void D3D_DisableAlphaBlend (void);
-void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode = D3DTADDRESS_WRAP, DWORD tmu2mode = D3DTADDRESS_WRAP);
 void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE texfilter, D3DTEXTUREFILTERTYPE mipfilter = D3DTEXF_NONE);
+void D3D_SetTextureAddress (DWORD stage, DWORD mode);
 
 void D3D_AlignCubeMapFaceTexels (LPDIRECT3DSURFACE9 surf, D3DCUBEMAP_FACES face);
 
@@ -429,3 +391,6 @@ public:
 	xcommand_t OnLoseDevice;
 	xcommand_t OnRecoverDevice;
 };
+
+
+extern cvar_t d3d_usinginstancing;

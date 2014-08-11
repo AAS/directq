@@ -19,6 +19,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "unzip.h"
+#include <shlwapi.h>
+#pragma comment (lib, "shlwapi.lib")
 
 int COM_ListSortFunc (const void *a, const void *b);
 
@@ -852,6 +854,138 @@ void COM_InitFilesystem (void)
 	if (i && i < com_argc - 1)
 		COM_LoadGame (com_argv[i + 1]);
 	else COM_LoadGame (NULL);
+}
+
+
+// if we're going to allow players to set content locations we really should also validate them
+bool COM_ValidateContentFolderCvar (cvar_t *var)
+{
+	if (!var->string)
+	{
+		Con_Printf ("%s is invalid : name does not exist\n", var->name);
+		return false;
+	}
+
+	// this is a valid path as it means we're in the root of our game folder
+	if (!var->string[0]) return true;
+
+	if ((var->string[0] == '/' || var->string[0] == '\\') && !var->string[1])
+	{
+		// this is a valid path and is replaced by ''
+		Cvar_Set (var, "");
+		return true;
+	}
+
+	if (strlen (var->string) > 64)
+	{
+		Con_Printf ("%s is invalid : name is too long\n", var->name);
+		return false;
+	}
+
+	if (var->string[0] == '/' || var->string[0] == '\\')
+	{
+		Con_Printf ("%s is invalid : cannot back up beyond %s\n", var->name, com_gamedir);
+		return false;
+	}
+
+	// copy it off so that we can safely modify it if need be
+	char tempname[256];
+
+	strcpy (tempname, var->string);
+
+	// remove trailing /
+	for (int i = 0;; i++)
+	{
+		// end of path
+		if (!tempname[i]) break;
+
+		if ((tempname[i] == '/' || tempname[i] == '\\') && !tempname[i + 1])
+		{
+			tempname[i] = 0;
+			break;
+		}
+	}
+
+	// \ / : * ? " < > | are all invalid in a name
+	for (int i = 0;; i++)
+	{
+		// end of path
+		if (!tempname[i]) break;
+
+		// a folder separator is allowed at the end of the path
+		if ((tempname[i] == '/' || tempname[i] == '\\') && !tempname[i + 1]) break;
+
+		if (tempname[i] == '.' && tempname[i + 1] == '.')
+		{
+			Con_Printf ("%s is invalid : relative paths are not allowed\n", var->name);
+			return false;
+		}
+
+		switch (tempname[i])
+		{
+		case ' ':
+			Con_Printf ("%s is invalid : paths with spaces are not allowed\n", var->name);
+			return false;
+
+		case '\\':
+		case '/':
+		case ':':
+		case '*':
+		case '?':
+		case '"':
+		case '<':
+		case '>':
+		case '|':
+			Con_Printf ("%s is invalid : contains \\ / : * ? \" < > or | \n", var->name);
+			return false;
+
+		default: break;
+		}
+	}
+
+	// attempt to create the directory - CreateDirectory will fail if the directory already exists
+	if (!PathIsDirectory (va ("%s/%s", com_gamedir, tempname)))
+	{
+		if (!CreateDirectory (va ("%s/%s", com_gamedir, tempname), NULL))
+		{
+			Con_Printf ("%s is invalid : failed to create directory\n", var->name);
+			return false;
+		}
+	}
+
+	// attempt to create a file in it; the user must have rw access to the directory
+	HANDLE hf = CreateFile
+	(
+		va ("%s/%s/tempfile.tmp", com_gamedir, tempname),
+		FILE_WRITE_DATA | FILE_READ_DATA,
+		0,
+		NULL,
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+		NULL
+	);
+
+	if (hf == INVALID_HANDLE_VALUE)
+	{
+		Con_Printf ("%s is invalid : failed to create file\n", var->name);
+		return false;
+	}
+
+	CloseHandle (hf);
+
+	// path is valid now; we need a trailing / so add one
+	Cvar_Set (var, va ("%s/", tempname));
+	return true;
+}
+
+
+void COM_ValidateUserSettableDir (cvar_t *var)
+{
+	if (!COM_ValidateContentFolderCvar (var))
+	{
+		Con_Printf ("Resetting to default \"%s\"\n", var->defaultvalue);
+		Cvar_Set (var, var->defaultvalue);
+	}
 }
 
 

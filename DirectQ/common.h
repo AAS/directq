@@ -38,6 +38,7 @@ typedef struct sizebuf_s
 	int		cursize;
 } sizebuf_t;
 
+void SZ_Init (sizebuf_t *buf, void *data, int len);
 void SZ_Alloc (sizebuf_t *buf, int startsize);
 void SZ_Clear (sizebuf_t *buf);
 void *SZ_GetSpace (sizebuf_t *buf, int length);
@@ -231,3 +232,19 @@ typedef struct searchpath_s
 } searchpath_t;
 
 extern searchpath_t    *com_searchpaths;
+
+bool COM_ValidateContentFolderCvar (class cvar_t *var);
+void COM_ValidateUserSettableDir (class cvar_t *var);
+
+
+class CDQEventTimer
+{
+public:
+	CDQEventTimer (float BaseTime);
+	float GetElapsedTime (float NewTime);
+
+private:
+	float OldTime;
+};
+
+

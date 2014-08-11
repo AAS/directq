@@ -406,9 +406,11 @@ void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 	angle = angles[YAW] * (D3DX_PI * 2 / 360);
 	sy = sin (angle);
 	cy = cos (angle);
+
 	angle = angles[PITCH] * (D3DX_PI * 2 / 360);
 	sp = sin (angle);
 	cp = cos (angle);
+
 	angle = angles[ROLL] * (D3DX_PI * 2 / 360);
 	sr = sin (angle);
 	cr = cos (angle);
@@ -416,13 +418,46 @@ void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 	forward[0] = cp * cy;
 	forward[1] = cp * sy;
 	forward[2] = -sp;
+
 	right[0] = (-1 * sr * sp * cy + -1 * cr * -sy);
 	right[1] = (-1 * sr * sp * sy + -1 * cr * cy);
 	right[2] = -1 * sr * cp;
+
 	up[0] = (cr * sp * cy + -sr * -sy);
 	up[1] = (cr * sp * sy + -sr * cy);
 	up[2] = cr * cp;
 }
+
+void AngleVectors (vec3_t angles, avectors_t *av)
+{
+	float		angle;
+	float		sr, sp, sy, cr, cp, cy;
+
+	angle = angles[YAW] * (D3DX_PI * 2 / 360);
+	sy = sin (angle);
+	cy = cos (angle);
+
+	angle = angles[PITCH] * (D3DX_PI * 2 / 360);
+	sp = sin (angle);
+	cp = cos (angle);
+
+	angle = angles[ROLL] * (D3DX_PI * 2 / 360);
+	sr = sin (angle);
+	cr = cos (angle);
+
+	av->forward[0] = cp * cy;
+	av->forward[1] = cp * sy;
+	av->forward[2] = -sp;
+
+	av->right[0] = (-1 * sr * sp * cy + -1 * cr * -sy);
+	av->right[1] = (-1 * sr * sp * sy + -1 * cr * cy);
+	av->right[2] = -1 * sr * cp;
+
+	av->up[0] = (cr * sp * cy + -sr * -sy);
+	av->up[1] = (cr * sp * sy + -sr * cy);
+	av->up[2] = cr * cp;
+}
+
 
 int VectorCompare (vec3_t v1, vec3_t v2)
 {
@@ -435,7 +470,7 @@ int VectorCompare (vec3_t v1, vec3_t v2)
 	return 1;
 }
 
-void VectorMA (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc)
+void VectorMultiplyAdd (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc)
 {
 	vecc[0] = veca[0] + scale * vecb[0];
 	vecc[1] = veca[1] + scale * vecb[1];

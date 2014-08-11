@@ -26,7 +26,7 @@ extern	cvar_t	sv_friction;
 cvar_t	sv_edgefriction ("edgefriction", "2");
 extern	cvar_t	sv_stopspeed;
 
-static	vec3_t		forward, right, up;
+static avectors_t userav;
 
 vec3_t	wishdir;
 float	wishspeed;
@@ -269,10 +269,10 @@ void SV_WaterMove (void)
 	float	speed, newspeed, wishspeed, addspeed, accelspeed;
 
 	// user intentions
-	AngleVectors (sv_player->v.v_angle, forward, right, up);
+	AngleVectors (sv_player->v.v_angle, &userav);
 
 	for (i = 0; i < 3; i++)
-		wishvel[i] = forward[i] * cmd.forwardmove + right[i] * cmd.sidemove;
+		wishvel[i] = userav.forward[i] * cmd.forwardmove + userav.right[i] * cmd.sidemove;
 
 	if (!cmd.forwardmove && !cmd.sidemove && !cmd.upmove)
 		wishvel[2] -= 60;		// drift towards bottom
@@ -348,7 +348,7 @@ void SV_AirMove (void)
 	vec3_t		wishvel;
 	float		fmove, smove;
 
-	AngleVectors (sv_player->v.angles, forward, right, up);
+	AngleVectors (sv_player->v.angles, &userav);
 
 	fmove = cmd.forwardmove;
 	smove = cmd.sidemove;
@@ -358,7 +358,7 @@ void SV_AirMove (void)
 		fmove = 0;
 
 	for (i = 0; i < 3; i++)
-		wishvel[i] = forward[i] * fmove + right[i] * smove;
+		wishvel[i] = userav.forward[i] * fmove + userav.right[i] * smove;
 
 	if ((int) sv_player->v.movetype != MOVETYPE_WALK)
 		wishvel[2] = cmd.upmove;
@@ -401,11 +401,11 @@ new, alternate noclip. old noclip is still handled in SV_AirMove
 */
 void SV_NoClipMove (void)
 {
-	AngleVectors (sv_player->v.v_angle, forward, right, up);
+	AngleVectors (sv_player->v.v_angle, &userav);
 
-	velocity[0] = forward[0] * cmd.forwardmove + right[0] * cmd.sidemove;
-	velocity[1] = forward[1] * cmd.forwardmove + right[1] * cmd.sidemove;
-	velocity[2] = forward[2] * cmd.forwardmove + right[2] * cmd.sidemove;
+	velocity[0] = userav.forward[0] * cmd.forwardmove + userav.right[0] * cmd.sidemove;
+	velocity[1] = userav.forward[1] * cmd.forwardmove + userav.right[1] * cmd.sidemove;
+	velocity[2] = userav.forward[2] * cmd.forwardmove + userav.right[2] * cmd.sidemove;
 
 	// doubled to match running speed
 	velocity[2] += cmd.upmove * 2;

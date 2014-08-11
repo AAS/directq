@@ -44,6 +44,7 @@ typedef struct d3d_alphalist_s
 
 	union
 	{
+		dlight_t *DLight;
 		entity_t *Entity;
 		particle_type_t *Particle;
 		struct d3d_modelsurf_s *ModelSurf;
@@ -57,10 +58,10 @@ typedef struct d3d_alphalist_s
 #define D3D_ALPHATYPE_WATERWARP		3
 #define D3D_ALPHATYPE_SURFACE		4
 #define D3D_ALPHATYPE_FENCE			5
+#define D3D_ALPHATYPE_CORONA		6
 
 d3d_alphalist_t **d3d_AlphaList = NULL;
 int d3d_NumAlphaList = 0;
-
 
 void D3DAlpha_NewMap (void)
 {
@@ -75,9 +76,9 @@ float D3DAlpha_GetDist (float *origin)
 	// our qsort for dist is always going to return ints so we just store dist as an int
 	return (int)
 	(
-		(origin[0] - r_origin[0]) * (origin[0] - r_origin[0]) +
-		(origin[1] - r_origin[1]) * (origin[1] - r_origin[1]) +
-		(origin[2] - r_origin[2]) * (origin[2] - r_origin[2])
+		(origin[0] - r_viewvectors.origin[0]) * (origin[0] - r_viewvectors.origin[0]) +
+		(origin[1] - r_viewvectors.origin[1]) * (origin[1] - r_viewvectors.origin[1]) +
+		(origin[2] - r_viewvectors.origin[2]) * (origin[2] - r_viewvectors.origin[2])
 	);
 }
 
@@ -118,6 +119,12 @@ void D3DAlpha_AddToList (particle_type_t *particle)
 }
 
 
+void D3DAlpha_AddToList (dlight_t *dl)
+{
+	D3DAlpha_AddToList (D3D_ALPHATYPE_CORONA, dl, D3DAlpha_GetDist (dl->origin));
+}
+
+
 int D3DAlpha_SortFunc (const void *a, const void *b)
 {
 	d3d_alphalist_t *al1 = * (d3d_alphalist_t **) a;
@@ -146,6 +153,10 @@ void D3DSprite_End (void);
 void D3DBrush_Begin (void);
 void D3DBrush_End (void);
 void D3DBrush_EmitSurface (d3d_modelsurf_t *ms);
+
+void D3DLight_BeginCoronas (void);
+void D3DLight_EndCoronas (void);
+void D3DLight_DrawCorona (dlight_t *dl);
 
 
 void D3DAlpha_Cull (void)
@@ -191,7 +202,10 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 			D3DWarp_TakeDownTurbState ();
 			D3DAlpha_Cull ();
 			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+			break;
 
+		case D3D_ALPHATYPE_CORONA:
+			D3DLight_EndCoronas ();
 			break;
 
 		default:
@@ -203,6 +217,10 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 	{
 		switch (newone->Type)
 		{
+		case D3D_ALPHATYPE_CORONA:
+			D3DLight_BeginCoronas ();
+			break;
+
 		case D3D_ALPHATYPE_ENTITY:
 			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 			D3DSprite_Begin ();
@@ -309,7 +327,7 @@ void D3DAlpha_RenderList (void)
 			if (d3d_AlphaList[i]->Type != previous->Type)
 				D3DAlpha_StageChange (previous, d3d_AlphaList[i]);
 		}
-		else D3DAlpha_StageChange (previous, d3d_AlphaList[i]);
+		else D3DAlpha_StageChange (NULL, d3d_AlphaList[i]);
 
 		previous = d3d_AlphaList[i];
 
@@ -336,6 +354,10 @@ void D3DAlpha_RenderList (void)
 			D3DBrush_EmitSurface (d3d_AlphaList[i]->ModelSurf);
 			break;
 
+		case D3D_ALPHATYPE_CORONA:
+			D3DLight_DrawCorona (d3d_AlphaList[i]->DLight);
+			break;
+
 		default:
 			// nothing to add
 			break;
@@ -343,8 +365,7 @@ void D3DAlpha_RenderList (void)
 	}
 
 	// take down the final state used (in case it was a HLSL state)
-	// (should this be previous???)
-	D3DAlpha_StageChange (d3d_AlphaList[d3d_NumAlphaList - 1], NULL);
+	D3DAlpha_StageChange (previous, NULL);
 
 	D3DAlpha_Takedown ();
 

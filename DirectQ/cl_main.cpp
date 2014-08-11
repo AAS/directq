@@ -21,6 +21,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 
+void D3DOQ_CleanEntity (entity_t *ent);
+void D3DOQ_RegisterQuery (entity_t *ent);
+
 cvar_t	cl_web_download	("cl_web_download", "1");
 cvar_t	cl_web_download_url	("cl_web_download_url", "http://bigfoot.quake1.net/"); // the quakeone.com link is dead //"http://downloads.quakeone.com/");
 
@@ -201,6 +204,8 @@ CL_EstablishConnection
 Host should be either "local" or a net address to be passed on
 =====================
 */
+void CL_KeepaliveMessage (bool showmsg = true);
+
 void CL_EstablishConnection (char *host)
 {
 	if (cls.demoplayback) return;
@@ -417,17 +422,18 @@ CL_DecayLights
 
 ===============
 */
+CDQEventTimer *cl_LightDecayTimer = NULL;
+
+
 void CL_DecayLights (void)
 {
-	int			i;
-	dlight_t	*dl;
-	float		time;
-	static float olddecaytime = 0;
+	if (!cl_LightDecayTimer)
+		cl_LightDecayTimer = new CDQEventTimer (cl.time);
 
-	time = cl.time - olddecaytime;
-	dl = cl_dlights;
+	float time = cl_LightDecayTimer->GetElapsedTime (cl.time);
+	dlight_t *dl = cl_dlights;
 
-	for (i = 0; i < MAX_DLIGHTS; i++, dl++)
+	for (int i = 0; i < MAX_DLIGHTS; i++, dl++)
 	{
 		if (dl->die < cl.time || !dl->radius)
 			continue;
@@ -440,8 +446,6 @@ void CL_DecayLights (void)
 			dl->die = 0;
 		}
 	}
-
-	olddecaytime = cl.time;
 }
 
 
@@ -459,7 +463,9 @@ float CL_LerpPoint (void)
 
 	f = cl.mtime[0] - cl.mtime[1];
 
-	if (!f || cl_nolerp.value || cls.timedemo || sv.active)
+	// because our server is now running at a different rate to the client the sv.active test is no longer
+	// valid because we can no longer depend on messages arriving in lockstep with when they're sent.
+	if (!f || cl_nolerp.value || cls.timedemo)
 	{
 		cl.time = cl.mtime[0];
 		cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
@@ -479,8 +485,9 @@ float CL_LerpPoint (void)
 	{
 		if (frac < -0.01)
 		{
-			cl.dwTime = (DWORD) (cl.mtime[1] * 1000.0f);
+			// Con_Printf ("low frac\n");
 			cl.time = cl.mtime[1];
+			cl.dwTime = (DWORD) (cl.mtime[1] * 1000.0f);
 		}
 
 		frac = 0;
@@ -489,8 +496,9 @@ float CL_LerpPoint (void)
 	{
 		if (frac > 1.01)
 		{
-			cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
+			// Con_Printf ("high frac\n");
 			cl.time = cl.mtime[0];
+			cl.dwTime = (DWORD) (cl.mtime[0] * 1000.0f);
 		}
 
 		frac = 1;
@@ -519,16 +527,16 @@ void CL_EntityInterpolateOrigins (entity_t *ent)
 		{
 			ent->translatestarttime = cl.time;
 
-			VectorCopy2 (ent->lastorigin, ent->origin);
-			VectorCopy2 (ent->currorigin, ent->origin);
+			VectorCopy2 (ent->lerporigin[LERP_LAST], ent->origin);
+			VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
 		}
 
-		if (!VectorCompare (ent->origin, ent->currorigin))
+		if (!VectorCompare (ent->origin, ent->lerporigin[LERP_CURR]))
 		{
 			ent->translatestarttime = cl.time;
 
-			VectorCopy2 (ent->lastorigin, ent->currorigin);
-			VectorCopy2 (ent->currorigin, ent->origin);
+			VectorCopy2 (ent->lerporigin[LERP_LAST], ent->lerporigin[LERP_CURR]);
+			VectorCopy2 (ent->lerporigin[LERP_CURR], ent->origin);
 
 			blend = 0;
 		}
@@ -539,15 +547,15 @@ void CL_EntityInterpolateOrigins (entity_t *ent)
 			if (cl.paused || blend > 1) blend = 1;
 		}
 
-		VectorSubtract (ent->currorigin, ent->lastorigin, delta);
+		VectorSubtract (ent->lerporigin[LERP_CURR], ent->lerporigin[LERP_LAST], delta);
 
 		// use cubic interpolation
 		float lastlerp = 1.0f - blend;
 		float currlerp = blend;
 
-		ent->origin[0] = ent->lastorigin[0] * lastlerp + ent->currorigin[0] * currlerp;
-		ent->origin[1] = ent->lastorigin[1] * lastlerp + ent->currorigin[1] * currlerp;
-		ent->origin[2] = ent->lastorigin[2] * lastlerp + ent->currorigin[2] * currlerp;
+		ent->origin[0] = ent->lerporigin[LERP_LAST][0] * lastlerp + ent->lerporigin[LERP_CURR][0] * currlerp;
+		ent->origin[1] = ent->lerporigin[LERP_LAST][1] * lastlerp + ent->lerporigin[LERP_CURR][1] * currlerp;
+		ent->origin[2] = ent->lerporigin[LERP_LAST][2] * lastlerp + ent->lerporigin[LERP_CURR][2] * currlerp;
 	}
 }
 
@@ -564,16 +572,16 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 		{
 			ent->rotatestarttime = cl.time;
 
-			VectorCopy2 (ent->lastangles, ent->angles);
-			VectorCopy2 (ent->currangles, ent->angles);
+			VectorCopy2 (ent->lerpangles[LERP_LAST], ent->angles);
+			VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
 		}
 
-		if (!VectorCompare (ent->angles, ent->currangles))
+		if (!VectorCompare (ent->angles, ent->lerpangles[LERP_CURR]))
 		{
 			ent->rotatestarttime = cl.time;
 
-			VectorCopy2 (ent->lastangles, ent->currangles);
-			VectorCopy2 (ent->currangles, ent->angles);
+			VectorCopy2 (ent->lerpangles[LERP_LAST], ent->lerpangles[LERP_CURR]);
+			VectorCopy2 (ent->lerpangles[LERP_CURR], ent->angles);
 
 			blend = 0;
 		}
@@ -584,23 +592,23 @@ void CL_EntityInterpolateAngles (entity_t *ent)
 			if (cl.paused || blend > 1) blend = 1;
 		}
 
-		VectorSubtract (ent->currangles, ent->lastangles, delta);
+		VectorSubtract (ent->lerpangles[LERP_CURR], ent->lerpangles[LERP_LAST], delta);
 
 		// always interpolate along the shortest path
 		if (delta[0] > 180) delta[0] -= 360; else if (delta[0] < -180) delta[0] += 360;
 		if (delta[1] > 180) delta[1] -= 360; else if (delta[1] < -180) delta[1] += 360;
 		if (delta[2] > 180) delta[2] -= 360; else if (delta[2] < -180) delta[2] += 360;
 
-		// get currangles on the shortest path
-		VectorAdd (ent->lastangles, delta, delta);
+		// get lerpangles[LERP_CURR] on the shortest path
+		VectorAdd (ent->lerpangles[LERP_LAST], delta, delta);
 
 		// use cubic interpolation
 		float lastlerp = 1.0f - blend;
 		float currlerp = blend;
 
-		ent->angles[0] = ent->lastangles[0] * lastlerp + delta[0] * currlerp;
-		ent->angles[1] = ent->lastangles[1] * lastlerp + delta[1] * currlerp;
-		ent->angles[2] = ent->lastangles[2] * lastlerp + delta[2] * currlerp;
+		ent->angles[0] = ent->lerpangles[LERP_LAST][0] * lastlerp + delta[0] * currlerp;
+		ent->angles[1] = ent->lerpangles[LERP_LAST][1] * lastlerp + delta[1] * currlerp;
+		ent->angles[2] = ent->lerpangles[LERP_LAST][2] * lastlerp + delta[2] * currlerp;
 	}
 }
 
@@ -649,7 +657,11 @@ void CL_RelinkEntities (void)
 		ent = cl_entities[i];
 
 		// doesn't have a model
-		if (!ent->model) continue;
+		if (!ent->model)
+		{
+			D3DOQ_CleanEntity (ent);
+			continue;
+		}
 
 		// if the object wasn't included in the last packet, remove it
 		if (ent->msgtime != cl.mtime[0])
@@ -658,6 +670,7 @@ void CL_RelinkEntities (void)
 			CL_ClearInterpolation (ent);
 			ent->brushstate.bmrelinked = true;
 			ent->model = NULL;
+			D3DOQ_CleanEntity (ent);
 			continue;
 		}
 
@@ -723,7 +736,7 @@ void CL_RelinkEntities (void)
 
 		if (ent->effects & EF_MUZZLEFLASH)
 		{
-			vec3_t		fv, rv, uv;
+			avectors_t av;
 
 			dl = CL_AllocDlight (i);
 			dl->die = cl.time + 0.1f;
@@ -769,9 +782,9 @@ void CL_RelinkEntities (void)
 
 			VectorCopy2 (dl->origin, ent->origin);
 			dl->origin[2] += 16;
-			AngleVectors (ent->angles, fv, rv, uv);
+			AngleVectors (ent->angles, &av);
 
-			VectorMA (dl->origin, 18, fv, dl->origin);
+			VectorMultiplyAdd (dl->origin, 18, av.forward, dl->origin);
 			dl->radius = 200 + (rand() & 31);
 			dl->minlight = 32;
 		}
@@ -906,14 +919,21 @@ CL_ReadFromServer
 Read all incoming data from the server
 ===============
 */
+CDQEventTimer *cl_UpdateTime = NULL;
+
 int CL_ReadFromServer (DWORD dwFrameTime)
 {
 	int		ret;
 
 	cl.dwTime += dwFrameTime;
 	cl.time = (float) cl.dwTime / 1000.0f;
-	cl.frametime = cl.time - cl.oldtime;	// get a correct client frame duration
-	cl.oldtime = cl.time;
+
+	// a client frame only really happens when the client reads from the server
+	// (fixme - certain client events can happen before this - like input.  how to handle correctly?)
+	if (!cl_UpdateTime)
+		cl_UpdateTime = new CDQEventTimer (cl.time);
+
+	cl.frametime = cl_UpdateTime->GetElapsedTime (cl.time);
 
 	do
 	{
@@ -935,29 +955,73 @@ int CL_ReadFromServer (DWORD dwFrameTime)
 	return 0;
 }
 
+
+void CL_ClearCmd (usercmd_t *cl_usercommand)
+{
+	cl_usercommand->forwardmove = 0;
+	cl_usercommand->sidemove = 0;
+	cl_usercommand->upmove = 0;
+
+	cl_usercommand->viewangles[0] = 0;
+	cl_usercommand->viewangles[1] = 0;
+	cl_usercommand->viewangles[2] = 0;
+}
+
+
+bool cl_pingqueued = false;
+bool cl_statusqueued = false;
+
+void CL_QueuePingCommand (void) {cl_pingqueued = true;}
+void CL_QueueStatusCommand (void) {cl_statusqueued = true;}
+
+void CL_CheckQueuedCommands (void)
+{
+	if (cl_statusqueued)
+	{
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		SZ_Print (&cls.message, "status\n");
+		cl_statusqueued = false;
+	}
+
+	if (cl_pingqueued)
+	{
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		SZ_Print (&cls.message, "ping\n");
+		cl_pingqueued = false;
+	}
+}
+
+
 /*
 =================
 CL_SendCmd
+
+the functions called by this are misnamed as all that they do is send previously buffered commands
 =================
 */
-void CL_SendCmd (void)
+void CL_SendCmd (float frametime)
 {
-	usercmd_t		cmd;
+	usercmd_t cl_usercommand;
 
 	if (cls.state != ca_connected)
 		return;
 
+	CL_ClearCmd (&cl_usercommand);
+
 	if (cls.signon == SIGNONS)
 	{
+		// drift pitch here
+		CL_DriftPitch (frametime);
+
 		// get basic movement from keyboard
-		CL_BaseMove (&cmd);
+		CL_BaseMove (&cl_usercommand);
 
 		// allow mice or other external controllers to add to the move
-		IN_MouseMove (&cmd, cl.frametime);
-		IN_JoyMove (&cmd, cl.frametime);
+		IN_MouseMove (&cl_usercommand, frametime);
+		IN_JoyMove (&cl_usercommand, frametime);
 
 		// send the unreliable message
-		CL_SendMove (&cmd);
+		CL_SendMove (&cl_usercommand);
 	}
 
 	if (cls.demoplayback)
@@ -965,6 +1029,10 @@ void CL_SendCmd (void)
 		SZ_Clear (&cls.message);
 		return;
 	}
+
+	// check any commands which were queued by the client
+	// done before the message size check so that it won't prevent it from happening
+	CL_CheckQueuedCommands ();
 
 	// send the reliable message
 	if (!cls.message.cursize)

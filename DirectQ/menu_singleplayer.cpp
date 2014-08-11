@@ -93,6 +93,8 @@ void Menu_InitSPMenu (void)
 ========================================================================================================================
 */
 
+extern cvar_t host_savedir;
+
 #define MAX_SAVE_DISPLAY	20
 int NumSaves = 0;
 
@@ -303,7 +305,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	SYSTEMTIME st;
 
 	// set up the file name for opening
-	_snprintf (name2, 256, "%s/save/%s", com_gamedir, filename);
+	_snprintf (name2, 256, "%s/%s%s", com_gamedir, host_savedir.string, filename);
 
 	// open it again (isn't the Windows API beautiful?)
 	HANDLE hFile = CreateFile (name2, FILE_READ_DATA | FILE_READ_ATTRIBUTES, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -625,7 +627,7 @@ void Menu_SaveLoadOnHover (int initialy, int y, int itemnum)
 	else
 	{
 		// existing save game
-		Draw_Mapshot (va ("save/%s", ActiveSaveInfoArray[itemnum]->SaveInfo.filename), (vid.width - 320) / 2 + 208, initialy + 8);
+		Draw_Mapshot (va ("%s%s", host_savedir.string, ActiveSaveInfoArray[itemnum]->SaveInfo.filename), (vid.width - 320) / 2 + 208, initialy + 8);
 		Menu_PrintWhite (220, initialy + 145, "Savegame Info");
 		Menu_Print (218, initialy + 160, DIVIDER_LINE);
 		Menu_Print (220, initialy + 175, va ("Kills:   %s", ActiveSaveInfoArray[itemnum]->SaveInfo.kills));
@@ -685,7 +687,7 @@ void Menu_SaveLoadOnDelete (int itemnum)
 
 		if (!DeleteFile (delfile))
 		{
-			SCR_UpdateScreen (0);
+			SCR_UpdateScreen ();
 			SCR_ModalMessage ("Delete file failed\n", "Error", MB_OK);
 			return;
 		}
@@ -713,7 +715,7 @@ void Menu_SaveLoadOnEnter (int itemnum)
 			// generate a new save name
 			for (i = 0; i < 99999; i++)
 			{
-				FILE *f = fopen (va ("%s/save/%s%05i.sav", com_gamedir, host_savenamebase.string, i), "r");
+				FILE *f = fopen (va ("%s/%s%05i.sav", com_gamedir, host_savedir.string, host_savenamebase.string, i), "r");
 
 				if (!f)
 				{

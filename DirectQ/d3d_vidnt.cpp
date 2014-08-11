@@ -90,6 +90,12 @@ cvar_t		r_gamma ("r_gamma", "1", CVAR_ARCHIVE);
 cvar_t		g_gamma ("g_gamma", "1", CVAR_ARCHIVE);
 cvar_t		b_gamma ("b_gamma", "1", CVAR_ARCHIVE);
 cvar_t		vid_vsync ("vid_vsync", "0", CVAR_ARCHIVE);
+cvar_t		vid_contrast ("contrast", "1", CVAR_ARCHIVE);
+cvar_t		r_contrast ("r_contrast", "1", CVAR_ARCHIVE);
+cvar_t		g_contrast ("g_contrast", "1", CVAR_ARCHIVE);
+cvar_t		b_contrast ("b_contrast", "1", CVAR_ARCHIVE);
+
+cvar_t d3d_usinginstancing ("r_instancing", "1", CVAR_ARCHIVE);
 
 typedef struct vid_gammaramp_s
 {
@@ -151,6 +157,17 @@ void AppActivate (BOOL fActive, BOOL minimize);
 
 
 void D3DVid_Restart_f (void);
+
+
+void D3DVid_ClearScreen (void)
+{
+	if (d3d_Device)
+	{
+		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
+		d3d_Device->Present (NULL, NULL, NULL, NULL);
+		HUD_Changed ();
+	}
+}
 
 
 void D3DVid_ResizeWindow (HWND hWnd)
@@ -552,13 +569,8 @@ void D3DVid_Restart_f (void)
 		if (hr == D3D_OK) break;
 	}
 
-	if (key_dest == key_menu)
-	{
-		// wipe the screen before resetting the device
-		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-		d3d_Device->Present (NULL, NULL, NULL, NULL);
-		HUD_Changed ();
-	}
+	// wipe the screen before resetting the device
+	if (key_dest == key_menu) D3DVid_ClearScreen ();
 
 	// release anything that needs to be released
 	D3DVid_LoseDeviceResources ();
@@ -586,13 +598,8 @@ void D3DVid_Restart_f (void)
 		if (hr == D3D_OK) break;
 	}
 
-	if (key_dest == key_menu)
-	{
-		// wipe the screen again post-reset
-		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-		d3d_Device->Present (NULL, NULL, NULL, NULL);
-		HUD_Changed ();
-	}
+	// wipe the screen again post-reset
+	if (key_dest == key_menu) D3DVid_ClearScreen ();
 
 	// bring back anything that needs to be brought back
 	D3DVid_RecoverDeviceResources ();
@@ -1125,19 +1132,6 @@ void D3DVid_ValidateTextureSizes (void)
 		SAFE_RELEASE (tex);
 		break;
 	}
-
-	d3d_GlobalCaps.supportDynTex = false;
-
-	if (d3d_DeviceCaps.Caps2 & D3DCAPS2_DYNAMICTEXTURES)
-	{
-		hr = d3d_Device->CreateTexture (256, 256, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
-
-		if (SUCCEEDED (hr))
-		{
-			d3d_GlobalCaps.supportDynTex = true;
-			SAFE_RELEASE (tex);
-		}
-	}
 }
 
 
@@ -1169,7 +1163,7 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	// check for TMU support - Anything less than 3 TMUs is not d3d9 hardware
 	if (d3d_DeviceCaps.MaxTextureBlendStages < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
 	if (d3d_DeviceCaps.MaxSimultaneousTextures < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
-	if (d3d_DeviceCaps.MaxStreams < 3) Sys_Error ("You need a device with at least 3 Vertex Streams to run DirectQ");
+	if (d3d_DeviceCaps.MaxStreams < 4) Sys_Error ("You need a device with at least 4 Vertex Streams to run DirectQ");
 
 	// check for z buffer support
 	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_ALWAYS)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
@@ -1226,9 +1220,7 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	Con_Printf ("\n");
 
 	// clear to black immediately
-	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-	d3d_Device->Present (NULL, NULL, NULL, NULL);
-	HUD_Changed ();
+	D3DVid_ClearScreen ();
 
 	// get capabilities on the actual device
 	hr = d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
@@ -1258,6 +1250,7 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	int vsvermaj = D3DSHADER_VERSION_MAJOR (d3d_DeviceCaps.VertexShaderVersion);
 	int psvermaj = D3DSHADER_VERSION_MAJOR (d3d_DeviceCaps.PixelShaderVersion);
 
+	// we only support np2 with ps3 or higher hardware as it's known-bad on certain ps2 hardware
 	if (!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_POW2) && 
 		!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) && 
 		(vsvermaj >= 3 && psvermaj >= 3))
@@ -1294,19 +1287,6 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	if (d3d_DeviceCaps.MaxTextureBlendStages < d3d_GlobalCaps.NumTMUs) d3d_GlobalCaps.NumTMUs = d3d_DeviceCaps.MaxTextureBlendStages;
 	if (d3d_DeviceCaps.MaxSimultaneousTextures < d3d_GlobalCaps.NumTMUs) d3d_GlobalCaps.NumTMUs = d3d_DeviceCaps.MaxSimultaneousTextures;
 
-	// check for availability of rgb texture formats (ARGB is non-negotiable required by Quake)
-	d3d_GlobalCaps.supportARGB = D3D_CheckTextureFormat (D3DFMT_A8R8G8B8, TRUE);
-	d3d_GlobalCaps.supportXRGB = D3D_CheckTextureFormat (D3DFMT_X8R8G8B8, FALSE);
-
-	// check for availability of alpha/luminance formats
-	d3d_GlobalCaps.supportL8 = D3D_CheckTextureFormat (D3DFMT_L8, TRUE);
-	d3d_GlobalCaps.supportA8L8 = D3D_CheckTextureFormat (D3DFMT_A8L8, FALSE);
-
-	// check for availability of compressed texture formats
-	d3d_GlobalCaps.supportDXT1 = D3D_CheckTextureFormat (D3DFMT_DXT1, FALSE);
-	d3d_GlobalCaps.supportDXT3 = D3D_CheckTextureFormat (D3DFMT_DXT3, FALSE);
-	d3d_GlobalCaps.supportDXT5 = D3D_CheckTextureFormat (D3DFMT_DXT5, FALSE);
-
 	d3d_GlobalCaps.supportInstancing = false;
 
 	// basic requirements for instancing
@@ -1330,6 +1310,100 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 		d3d_Device->SetStreamSourceFreq (1, 1);
 	}
 
+	// check for ATI instancing hack
+	if (!d3d_GlobalCaps.supportInstancing)
+	{
+		hr = d3d_Object->CheckDeviceFormat
+		(
+			D3DADAPTER_DEFAULT,
+			D3DDEVTYPE_HAL,
+			D3DFMT_X8R8G8B8,
+			0,
+			D3DRTYPE_SURFACE,
+			(D3DFORMAT) MAKEFOURCC ('I','N','S','T')
+		);
+
+		if (SUCCEEDED (hr))
+		{
+			// enable instancing
+			hr = d3d_Device->SetRenderState (D3DRS_POINTSIZE, MAKEFOURCC ('I','N','S','T'));
+
+			if (SUCCEEDED (hr))
+			{
+				hr = d3d_Device->SetStreamSourceFreq (0, D3DSTREAMSOURCE_INDEXEDDATA | 25);
+
+				if (SUCCEEDED (hr))
+				{
+					hr = d3d_Device->SetStreamSourceFreq (1, D3DSTREAMSOURCE_INSTANCEDATA | 1);
+
+					if (SUCCEEDED (hr))
+					{
+						Con_Printf ("Allowing geometry instancing\n");
+						d3d_GlobalCaps.supportInstancing = true;
+					}
+				}
+
+				// revert back to non-instanced geometry
+				d3d_Device->SetStreamSourceFreq (0, 1);
+				d3d_Device->SetStreamSourceFreq (1, 1);
+			}
+		}
+	}
+
+	// (d3d_DeviceCaps.Caps2 & D3DDEVCAPS2_STREAMOFFSET) is unreliable; some devices don't set it but *do*
+	// support offset; and based on that i don't feel comfortable assuming that a device which sets it
+	// actually does support offset.  so instead let's test it for real...
+	// this also tests that we can create a vertex buffer OK which is a prime requisite.
+	// (i guess that these devices don't do hardware t&l, and therefore don't report any hardware t&l type caps,
+	// but are perfectly capable of doing it all in software)
+	LPDIRECT3DVERTEXBUFFER9 sotest = NULL;
+	int sotestsize = 4096 * 1024;
+
+	hr = d3d_Device->CreateVertexBuffer (sotestsize, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &sotest, NULL);
+	if (FAILED (hr)) Sys_Error ("D3DVid_InitDirect3D : Failed to create a vertex buffer");
+
+	// assume that it's supported and let's try to prove otherwise
+	d3d_GlobalCaps.supportStreamOffset = true;
+
+	// set up for drawing at multiple offsets to establish whether or not this will work
+	for (int i = 0; i < 1024; i++)
+	{
+		hr = d3d_Device->SetStreamSource (0, sotest, i * 96, 32);
+
+		if (FAILED (hr))
+		{
+			d3d_GlobalCaps.supportStreamOffset = false;
+			break;
+		}
+	}
+
+	if (d3d_GlobalCaps.supportStreamOffset)
+		Con_Printf ("Allowing Stream Offset\n");
+	else Con_Printf ("Stream Offset NOT Supported\n");
+
+	// don't leak memory
+	sotest->Release ();
+
+#if 0
+	LPDIRECT3DQUERY9 qTest = NULL;
+	hr = d3d_Device->CreateQuery (D3DQUERYTYPE_OCCLUSION, &qTest);
+
+	if (FAILED (hr))
+	{
+		Con_Printf ("Occlusion Queries NOT Supported\n");
+		d3d_GlobalCaps.supportOcclusion = false;
+	}
+	else
+	{
+		Con_Printf ("Allowing Occlusion Queries\n");
+		d3d_GlobalCaps.supportOcclusion = true;
+		qTest->Release ();
+	}
+#endif
+
+	// OK, now we disable them because they're still WIP and not 100% right yet
+	d3d_GlobalCaps.supportOcclusion = false;
+
 	// set up everything else
 	// (fixme - run through the on-recover code for the loss handlers here instead)
 	D3DHLSL_Init ();
@@ -1345,6 +1419,10 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 
 	// set initial state caches
 	D3D_SetAllStates ();
+
+	// begin at 1 so that any newly allocated model_t will be 0 and therefore must
+	// be explicitly set to be valid
+	d3d_RenderDef.RegistrationSequence = 1;
 }
 
 
@@ -1603,12 +1681,7 @@ void Menu_PrintCenterWhite (int cy, char *str);
 void D3DVid_ShutdownDirect3D (void)
 {
 	// clear the screen to black so that shutdown doesn't leave artefacts from the last SCR_UpdateScreen
-	if (d3d_Device)
-	{
-		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
-		d3d_Device->Present (NULL, NULL, NULL, NULL);
-		HUD_Changed ();
-	}
+	D3DVid_ClearScreen ();
 
 	// also need these... ;)
 	D3DVid_LoseDeviceResources ();
@@ -1829,15 +1902,34 @@ int D3DVid_AdjustGamma (float gammaval, int baseval)
 }
 
 
+int D3DVid_AdjustContrast (float contrastval, int baseval)
+{
+	int i = ((float) (baseval - 32767) * contrastval) + 32767;
+
+	if (i < 0)
+		return 0;
+	else if (i > 65535)
+		return 65535;
+	else return i;
+}
+
+
 void D3DVid_SetActiveGamma (void)
 {
+	// create a valid baseline for everything to work from
+	for (int i = 0; i < 256; i++)
+	{
+		d3d_CurrentGamma.r[i] = d3d_DefaultGamma.r[i];
+		d3d_CurrentGamma.g[i] = d3d_DefaultGamma.g[i];
+		d3d_CurrentGamma.b[i] = d3d_DefaultGamma.b[i];
+	}
+
 	// apply v_gamma to all components
 	for (int i = 0; i < 256; i++)
 	{
-		// adjust v_gamma to the same scale as glquake uses
-		d3d_CurrentGamma.r[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_DefaultGamma.r[i]);
-		d3d_CurrentGamma.g[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_DefaultGamma.g[i]);
-		d3d_CurrentGamma.b[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_DefaultGamma.b[i]);
+		d3d_CurrentGamma.r[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_CurrentGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_CurrentGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3DVid_AdjustGamma (v_gamma.value, d3d_CurrentGamma.b[i]);
 	}
 
 	// now apply r/g/b to the derived values
@@ -1846,6 +1938,22 @@ void D3DVid_SetActiveGamma (void)
 		d3d_CurrentGamma.r[i] = D3DVid_AdjustGamma (r_gamma.value, d3d_CurrentGamma.r[i]);
 		d3d_CurrentGamma.g[i] = D3DVid_AdjustGamma (g_gamma.value, d3d_CurrentGamma.g[i]);
 		d3d_CurrentGamma.b[i] = D3DVid_AdjustGamma (b_gamma.value, d3d_CurrentGamma.b[i]);
+	}
+
+	// apply global contrast
+	for (int i = 0; i < 256; i++)
+	{
+		d3d_CurrentGamma.r[i] = D3DVid_AdjustContrast (vid_contrast.value, d3d_CurrentGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3DVid_AdjustContrast (vid_contrast.value, d3d_CurrentGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3DVid_AdjustContrast (vid_contrast.value, d3d_CurrentGamma.b[i]);
+	}
+
+	// and again with the r/g/b
+	for (int i = 0; i < 256; i++)
+	{
+		d3d_CurrentGamma.r[i] = D3DVid_AdjustContrast (r_contrast.value, d3d_CurrentGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3DVid_AdjustContrast (g_contrast.value, d3d_CurrentGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3DVid_AdjustContrast (b_contrast.value, d3d_CurrentGamma.b[i]);
 	}
 
 	VID_SetAppGamma ();
@@ -1859,12 +1967,20 @@ void D3DVid_CheckGamma (void)
 	static int oldrgamma = -1;
 	static int oldggamma = -1;
 	static int oldbgamma = -1;
+	static int oldcontrast = -1;
+	static int oldrcontrast = -1;
+	static int oldgcontrast = -1;
+	static int oldbcontrast = -1;
 
 	// didn't change - call me paranoid about floats!!!
 	if ((int) (v_gamma.value * 100) == oldvgamma &&
-			(int) (r_gamma.value * 100) == oldrgamma &&
-			(int) (g_gamma.value * 100) == oldggamma &&
-			(int) (b_gamma.value * 100) == oldbgamma)
+		(int) (r_gamma.value * 100) == oldrgamma &&
+		(int) (g_gamma.value * 100) == oldggamma &&
+		(int) (b_gamma.value * 100) == oldbgamma &&
+		(int) (vid_contrast.value * 100) == oldcontrast &&
+		(int) (r_contrast.value * 100) == oldrcontrast &&
+		(int) (g_contrast.value * 100) == oldgcontrast &&
+		(int) (b_contrast.value * 100) == oldbcontrast)
 	{
 		// didn't change
 		return;
@@ -1875,6 +1991,10 @@ void D3DVid_CheckGamma (void)
 	oldrgamma = (int) (r_gamma.value * 100);
 	oldggamma = (int) (g_gamma.value * 100);
 	oldbgamma = (int) (b_gamma.value * 100);
+	oldcontrast = (int) (vid_contrast.value * 100);
+	oldrcontrast = (int) (r_contrast.value * 100);
+	oldgcontrast = (int) (g_contrast.value * 100);
+	oldbcontrast = (int) (b_contrast.value * 100);
 
 	D3DVid_SetActiveGamma ();
 }
@@ -1975,6 +2095,7 @@ void D3DVid_BeginRendering (void)
 
 	// force lighting calcs off; this is done every frame and it will be filtered if necessary
 	D3D_SetRenderState (D3DRS_LIGHTING, FALSE);
+	D3D_SetRenderState (D3DRS_CLIPPING, TRUE);
 
 	// this is called before d3d_Device->BeginScene so that the d3d_Device->BeginScene is called on the correct rendertarget
 	D3DRTT_BeginScene ();

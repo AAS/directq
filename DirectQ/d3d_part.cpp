@@ -291,15 +291,10 @@ void D3DPart_SetBuffers (void)
 	{
 		D3DPart_SubmitParticle = D3DPart_SubmitParticleInstanced;
 
+		// streams 0 and 1 are set later as they depend on the number of particles to draw
 		D3D_SetVertexDeclaration (d3d_PartDecl);
-		D3D_SetStreamSource (0, d3d_PartVBOStream0, 0, sizeof (partvertinstanced0_t));
-		D3D_SetStreamSource (1, d3d_PartVBOStream1, 0, sizeof (partvertinstanced1_t));
 		D3D_SetStreamSource (2, NULL, 0, 0);
 		D3D_SetIndices (d3d_MainIBO);
-
-		// stream zero is the model and it's frequency is the number of particles to draw (filled in later)
-		// stream one is the per-instance data and advances to the next value after each instance is drawn
-		d3d_Device->SetStreamSourceFreq (1, D3DSTREAMSOURCE_INSTANCEDATA | 1);
 
 		// keep sizes consistent
 		d3d_PartScale = 0.3f * r_particlesize.value;
@@ -339,7 +334,9 @@ void D3DPart_Flush (void)
 			}
 
 			// stream zero is the model and it's frequency is the number of particles to draw
-			d3d_Device->SetStreamSourceFreq (0, D3DSTREAMSOURCE_INDEXEDDATA | d3d_PartState.NumVertexes);
+			// stream one is the per-instance data
+			D3D_SetStreamSource (0, d3d_PartVBOStream0, 0, sizeof (partvertinstanced0_t), D3DSTREAMSOURCE_INDEXEDDATA | d3d_PartState.NumVertexes);
+			D3D_SetStreamSource (1, d3d_PartVBOStream1, 0, sizeof (partvertinstanced1_t), D3DSTREAMSOURCE_INSTANCEDATA | 1);
 
 			// ... and we draw them ... (different params for instancing, we pretend we only have one particle)
 			D3D_DrawIndexedPrimitive (0, 4, 0, 2);
@@ -459,7 +456,7 @@ void D3DPart_SubmitParticleNonInstanced (particle_type_t *pt, particle_t *p, flo
 	// take a copy out so that we can avoid having to read back from the buffer
 	// index these as strips to help out certain hardware
 	vec3_t origin2;
-	VectorMA (p->org, scale, up, origin2);
+	VectorMultiplyAdd (p->org, scale, up, origin2);
 
 	VectorCopy (p->org, d3d_PartState.VertsNonInstanced[0].xyz);
 	d3d_PartState.VertsNonInstanced[0].color = color;
@@ -467,10 +464,10 @@ void D3DPart_SubmitParticleNonInstanced (particle_type_t *pt, particle_t *p, flo
 	VectorCopy (origin2, d3d_PartState.VertsNonInstanced[1].xyz);
 	d3d_PartState.VertsNonInstanced[1].color = color;
 
-	VectorMA (p->org, scale, right, d3d_PartState.VertsNonInstanced[2].xyz);
+	VectorMultiplyAdd (p->org, scale, right, d3d_PartState.VertsNonInstanced[2].xyz);
 	d3d_PartState.VertsNonInstanced[2].color = color;
 
-	VectorMA (origin2, scale, right, d3d_PartState.VertsNonInstanced[3].xyz);
+	VectorMultiplyAdd (origin2, scale, right, d3d_PartState.VertsNonInstanced[3].xyz);
 	d3d_PartState.VertsNonInstanced[3].color = color;
 
 	/*
@@ -658,7 +655,7 @@ void D3D_AddParticesToAlphaList (void)
 
 void D3DPart_BeginParticles (void)
 {
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
 
 	// switch to point sampling for particle mips as they don't need full trilinear
 	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter == D3DTEXF_NONE ? D3DTEXF_NONE : D3DTEXF_POINT);
@@ -671,13 +668,6 @@ void D3DPart_BeginParticles (void)
 void D3DPart_EndParticles (void)
 {
 	D3DPart_Flush ();
-
-	if (d3d_GlobalCaps.supportInstancing)
-	{
-		// go back to non-instanced drawing
-		d3d_Device->SetStreamSourceFreq (0, 1);
-		d3d_Device->SetStreamSourceFreq (1, 1);
-	}
 }
 
 
@@ -694,8 +684,8 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 
 	if (d3d_GlobalCaps.supportInstancing)
 	{
-		D3DHLSL_SetFloatArray ("upvec", vup, 3);
-		D3DHLSL_SetFloatArray ("rightvec", vright, 3);
+		D3DHLSL_SetFloatArray ("upvec", r_viewvectors.up, 3);
+		D3DHLSL_SetFloatArray ("rightvec", r_viewvectors.right, 3);
 	}
 
 	// walk the list starting at the first active particle
@@ -717,7 +707,9 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 			// hack a scale up to keep particles from disappearing
 			// note - all of this *could* go into a vertex shader, but we'd have a pretty heavyweight vertex submission
 			// and we likely wouldn't gain that much from it.
-			scale = (p->org[0] - r_origin[0]) * vpn[0] + (p->org[1] - r_origin[1]) * vpn[1] + (p->org[2] - r_origin[2]) * vpn[2];
+			scale = (p->org[0] - r_viewvectors.origin[0]) * r_viewvectors.forward[0] +
+					(p->org[1] - r_viewvectors.origin[1]) * r_viewvectors.forward[1] +
+					(p->org[2] - r_viewvectors.origin[2]) * r_viewvectors.forward[2];
 
 			if (scale < 20)
 				scale = 1;
@@ -728,8 +720,8 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		if (!d3d_GlobalCaps.supportInstancing)
 		{
 			// note - scale each particle individually
-			VectorScale (vup, p->scale, up);
-			VectorScale (vright, p->scale, right);
+			VectorScale (r_viewvectors.up, p->scale, up);
+			VectorScale (r_viewvectors.right, p->scale, right);
 		}
 
 		if (p->tex != cachedparticletexture)
@@ -815,29 +807,29 @@ void D3DSprite_SubmitSprite (mspriteframe_t *frame, float *origin, float *up, fl
 	}
 
 	// index these as strips to help out certain hardware
-	VectorMA (origin, frame->up, up, point);
-	VectorMA (point, frame->left, right, point);
+	VectorMultiplyAdd (origin, frame->up, up, point);
+	VectorMultiplyAdd (point, frame->left, right, point);
 	VectorCopy (point, verts[0].xyz);
 
 	verts[0].color = color;
 	D3DPart_SetTexCoord (verts[0].st, 0, 0);
 
-	VectorMA (origin, frame->up, up, point);
-	VectorMA (point, frame->right, right, point);
+	VectorMultiplyAdd (origin, frame->up, up, point);
+	VectorMultiplyAdd (point, frame->right, right, point);
 	VectorCopy (point, verts[1].xyz);
 
 	verts[1].color = color;
 	D3DPart_SetTexCoord (verts[1].st, frame->s, 0);
 
-	VectorMA (origin, frame->down, up, point);
-	VectorMA (point, frame->left, right, point);
+	VectorMultiplyAdd (origin, frame->down, up, point);
+	VectorMultiplyAdd (point, frame->left, right, point);
 	VectorCopy (point, verts[2].xyz);
 
 	verts[2].color = color;
 	D3DPart_SetTexCoord (verts[2].st, 0, frame->t);
 
-	VectorMA (origin, frame->down, up, point);
-	VectorMA (point, frame->right, right, point);
+	VectorMultiplyAdd (origin, frame->down, up, point);
+	VectorMultiplyAdd (point, frame->right, right, point);
 	VectorCopy (point, verts[3].xyz);
 
 	verts[3].color = color;
@@ -887,7 +879,7 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *ent)
 		numframes = pspritegroup->numframes;
 		fullinterval = pintervals[numframes - 1];
 
-		time = d3d_RenderDef.time + ent->syncbase;
+		time = cl.time + ent->syncbase;
 
 		// when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
 		// are positive, so we don't have to worry about division by 0
@@ -928,7 +920,7 @@ void D3DSprite_End (void)
 
 void D3DSprite_SetState (image_t *img)
 {
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
 
 	D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
 	D3DHLSL_SetTexture (0, img->d3d_Texture);
@@ -942,7 +934,7 @@ void D3D_SetupSpriteModel (entity_t *ent)
 	vec3_t	point;
 	mspriteframe_t	*frame;
 	float		*up, *right;
-	vec3_t		v_forward, v_right, v_up;
+	avectors_t	av;
 	msprite_t	*psprite;
 	vec3_t		fixed_origin;
 	vec3_t		temp;
@@ -960,45 +952,45 @@ void D3D_SetupSpriteModel (entity_t *ent)
 	{
 	case SPR_ORIENTED:
 		// bullet marks on walls
-		AngleVectors (ent->angles, v_forward, v_right, v_up);
+		AngleVectors (ent->angles, &av);
 
-		VectorScale (v_forward, -2, temp);
+		VectorScale (av.forward, -2, temp);
 		VectorAdd (temp, fixed_origin, fixed_origin);
 
-		up = v_up;
-		right = v_right;
+		up = av.up;
+		right = av.right;
 		break;
 
 	case SPR_VP_PARALLEL_UPRIGHT:
-		v_up[0] = 0;
-		v_up[1] = 0;
-		v_up[2] = 1;
+		av.up[0] = 0;
+		av.up[1] = 0;
+		av.up[2] = 1;
 
-		up = v_up;
-		right = vright;
+		up = av.up;
+		right = r_viewvectors.right;
 		break;
 
 	case SPR_FACING_UPRIGHT:
-		VectorSubtract (ent->origin, r_origin, v_forward);
-		v_forward[2] = 0;
-		VectorNormalize (v_forward);
+		VectorSubtract (ent->origin, r_viewvectors.origin, av.forward);
+		av.forward[2] = 0;
+		VectorNormalize (av.forward);
 
-		v_right[0] = v_forward[1];
-		v_right[1] = -v_forward[0];
-		v_right[2] = 0;
+		av.right[0] = av.forward[1];
+		av.right[1] = -av.forward[0];
+		av.right[2] = 0;
 
-		v_up[0] = 0;
-		v_up[1] = 0;
-		v_up[2] = 1;
+		av.up[0] = 0;
+		av.up[1] = 0;
+		av.up[2] = 1;
 
-		up = v_up;
-		right = v_right;
+		up = av.up;
+		right = av.right;
 		break;
 
 	case SPR_VP_PARALLEL:
 		// normal sprite
-		up = vup;
-		right = vright;
+		up = r_viewvectors.up;
+		right = r_viewvectors.right;
 		break;
 
 	case SPR_VP_PARALLEL_ORIENTED:
@@ -1006,22 +998,22 @@ void D3D_SetupSpriteModel (entity_t *ent)
 		sr = sin (angle);
 		cr = cos (angle);
 
-		v_right[0] = vright[0] * cr + vup[0] * sr;
-		v_right[1] = vright[1] * cr + vup[1] * sr;
-		v_right[2] = vright[2] * cr + vup[2] * sr;
+		av.right[0] = r_viewvectors.right[0] * cr + r_viewvectors.up[0] * sr;
+		av.right[1] = r_viewvectors.right[1] * cr + r_viewvectors.up[1] * sr;
+		av.right[2] = r_viewvectors.right[2] * cr + r_viewvectors.up[2] * sr;
 
-		v_up[0] = vright[0] * -sr + vup[0] * cr;
-		v_up[1] = vright[1] * -sr + vup[1] * cr;
-		v_up[2] = vright[2] * -sr + vup[2] * cr;
+		av.up[0] = r_viewvectors.right[0] * -sr + r_viewvectors.up[0] * cr;
+		av.up[1] = r_viewvectors.right[1] * -sr + r_viewvectors.up[1] * cr;
+		av.up[2] = r_viewvectors.right[2] * -sr + r_viewvectors.up[2] * cr;
 
-		up = v_up;
-		right = v_right;
+		up = av.up;
+		right = av.right;
 		break;
 
 	default:
 		// unknown type - just assume it's normal and Con_DPrintf it
-		up = vup;
-		right = vright;
+		up = r_viewvectors.up;
+		right = r_viewvectors.right;
 		Con_DPrintf ("D3D_SetupSpriteModel - Unknown Sprite Type %i\n", psprite->type);
 		break;
 	}

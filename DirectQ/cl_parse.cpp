@@ -22,6 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "webdownload.h"
 
+void D3DOQ_CleanEntity (entity_t *ent);
+void D3DOQ_RegisterQuery (entity_t *ent);
+
 char *svc_strings[] =
 {
 	"svc_bad",
@@ -87,6 +90,7 @@ char *svc_strings[] =
 
 //=============================================================================
 
+void CL_WipeParticles (void);
 
 /*
 ==================
@@ -142,6 +146,7 @@ entity_t *CL_EntityNum (int num)
 				cl_entities[cl.num_entities] = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
 				cl_entities[cl.num_entities]->alphaval = 255;
+				D3DOQ_CleanEntity (cl_entities[cl.num_entities]);
 			}
 
 			// force cl.numentities up until it exceeds the number we're looking for
@@ -217,9 +222,11 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	static DWORD LastMsg = 0;
 	int		ret;
 	sizebuf_t	old;
-	byte		olddata[8192];
 
-	if (sv.active) return;		// no need if server is local
+	// yikes!  this buffer was never increased!
+	byte *olddata = (byte *) scratchbuf;
+
+	if (sv.active) return;
 	if (cls.demoplayback) return;
 
 	// read messages from server, should just be nops
@@ -346,7 +353,7 @@ void CL_DoWebDownload (char *filename)
 	Con_Printf ("Downloading from %s%s\n\n", cl_web_download_url.string, filename);
 
 	// this needs a screen update
-	SCR_UpdateScreen (0);
+	SCR_UpdateScreen ();
 
 	// default download params
 	cls.download.web = true;
@@ -403,6 +410,10 @@ void CL_ParseServerInfo (void)
 	char	*str;
 	int		i;
 	int		nummodels, numsounds;
+
+	// this function can call Con_Printf so explicitly wipe the particles in case Con_Printf
+	// needs to call SCR_UpdateScreen.
+	CL_WipeParticles ();
 
 	// we can't rely on the map heap being good here as it may not exist on the first demo run
 	// so we create a new heap for storing anything used in it.  is this correct?  surely it calls mod_forname?
@@ -607,6 +618,10 @@ void CL_ParseServerInfo (void)
 
 	// noclip is turned off at start
 	noclip_anglehack = false;
+
+	// refresh ping and status for proquake
+	cl.lastpingtime = -1;
+	cl.laststatustime = -1;
 }
 
 
@@ -624,15 +639,15 @@ int	bitcounts[16];
 void CL_ClearInterpolation (entity_t *ent)
 {
 	ent->framestarttime = 0;
-	ent->lastpose = ent->currpose;
+	ent->lerppose[LERP_LAST] = ent->lerppose[LERP_CURR];
 
 	ent->translatestarttime = 0;
-	ent->lastorigin[0] = ent->lastorigin[1] = ent->lastorigin[2] = 0;
-	ent->currorigin[0] = ent->currorigin[1] = ent->currorigin[2] = 0;
+	ent->lerporigin[LERP_LAST][0] = ent->lerporigin[LERP_LAST][1] = ent->lerporigin[LERP_LAST][2] = 0;
+	ent->lerporigin[LERP_CURR][0] = ent->lerporigin[LERP_CURR][1] = ent->lerporigin[LERP_CURR][2] = 0;
 
 	ent->rotatestarttime = 0;
-	ent->lastangles[0] = ent->lastangles[1] = ent->lastangles[2] = 0;
-	ent->currangles[0] = ent->currangles[1] = ent->currangles[2] = 0;
+	ent->lerpangles[LERP_LAST][0] = ent->lerpangles[LERP_LAST][1] = ent->lerpangles[LERP_LAST][2] = 0;
+	ent->lerpangles[LERP_CURR][0] = ent->lerpangles[LERP_CURR][1] = ent->lerpangles[LERP_CURR][2] = 0;
 }
 
 
@@ -669,6 +684,8 @@ void CL_ParseUpdate (int bits)
 		num = MSG_ReadShort ();
 	else num = MSG_ReadByte ();
 
+	// this is used for both getting an existing entity and creating a new one
+	// eeewww.
 	ent = CL_EntityNum (num);
 
 	for (i = 0; i < 16; i++)
@@ -678,6 +695,7 @@ void CL_ParseUpdate (int bits)
 	if (ent->msgtime != cl.mtime[1])
 	{
 		// entity was not present on the previous frame
+		D3DOQ_CleanEntity (ent);
 		forcelink = true;
 	}
 	else forcelink = false;
@@ -827,9 +845,6 @@ void CL_ParseUpdate (int bits)
 				ent->syncbase = (float) (rand () & 0x7fff) / 0x7fff;
 			else ent->syncbase = 0.0;
 
-			// recache
-			if (model->type == mod_alias) model->aliashdr->cacheposes = 0xffffffff;
-
 			// ST_RAND is not always set on animations that should be out of lockstep
 			ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
 			ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
@@ -837,8 +852,9 @@ void CL_ParseUpdate (int bits)
 		else forcelink = true;	// hack to make null model players work
 
 		// if the model has changed we must also reset the interpolation data
-		// lastpose and currpose are critical as they might be pointing to invalid frames in the new model!!!
+		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical as they might be pointing to invalid frames in the new model!!!
 		CL_ClearInterpolation (ent);
+		D3DOQ_CleanEntity (ent);
 		ent->brushstate.bmrelinked = true;
 
 		// reset frame and skin too...!
@@ -848,9 +864,6 @@ void CL_ParseUpdate (int bits)
 
 	if (forcelink)
 	{
-		if (ent->model && ent->model->type == mod_alias)
-			ent->model->aliashdr->cacheposes = 0xffffffff;
-
 		// didn't have an update last message
 		VectorCopy2 (ent->msg_origins[1], ent->msg_origins[0]);
 		VectorCopy2 (ent->origin, ent->msg_origins[0]);
@@ -860,8 +873,11 @@ void CL_ParseUpdate (int bits)
 		ent->forcelink = true;
 
 		// fix "dying throes" interpolation bug - reset interpolation data if the entity wasn't updated
-		// lastpose and currpose are critical here; the rest is done for completeness sake.
+		// lerppose[LERP_LAST] and lerppose[LERP_CURR] are critical here; the rest is done for completeness sake.
 		CL_ClearInterpolation (ent);
+
+		// register a new occlusion query for the entity
+		D3DOQ_RegisterQuery (ent);
 	}
 }
 
@@ -928,7 +944,6 @@ void CL_ParseClientdata (void)
 	bits = (unsigned short) MSG_ReadShort ();
 
 	if (bits & SU_EXTEND1) bits |= (MSG_ReadByte () << 16);
-
 	if (bits & SU_EXTEND2) bits |= (MSG_ReadByte () << 24);
 
 	if (bits & SU_VIEWHEIGHT)
@@ -1027,6 +1042,7 @@ CL_ParseStatic
 =====================
 */
 void R_AddEfrags (entity_t *ent);
+void D3DMain_BBoxForEnt (entity_t *ent);
 
 void CL_ParseStatic (int version)
 {
@@ -1038,7 +1054,6 @@ void CL_ParseStatic (int version)
 
 	// just alloc in the map pool
 	entity_t *ent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
-	memset (ent, 0, sizeof (entity_t));
 
 	// read in baseline state
 	CL_ParseBaseline (ent, version);
@@ -1059,7 +1074,12 @@ void CL_ParseStatic (int version)
 	ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
 
 	// some static ents don't have models; that's OK as we only use this for rendering them!
-	if (ent->model) R_AddEfrags (ent);
+	if (ent->model)
+	{
+		R_AddEfrags (ent);
+		D3DMain_BBoxForEnt (ent);
+		// D3DOQ_RegisterQuery (ent);
+	}
 }
 
 
@@ -1202,13 +1222,12 @@ void CL_ParseServerMessage (void)
 				// proquake messaging only exists with protocol 15
 				if (cl.Protocol == PROTOCOL_VERSION_NQ)
 				{
-					// the Con_Printf needs to come first as CL_ParseProQuakeString is going to fuck
-					// with the contents of str.  to be honest i think this whole thing is one great big
-					// dirty hack and should be taken outside and shot.
-					Con_Printf ("%s", str);
+					// CL_ParseProQuakeString will hose the value of str unless cl.console_ping is set to
+					// true before forwarding the command to the server; see Host_Ping_f for an example.
 					CL_ParseProQuakeString (str);
 				}
-				else Con_Printf ("%s", str);
+
+				Con_Printf ("%s", str);
 			}
 
 			break;
@@ -1577,7 +1596,10 @@ void CL_ParseProQuakeMessage (void)
 		while (ping = MSG_ReadShortPQ ())
 		{
 			if ((ping / 4096) >= cl.maxclients)
-				Host_Error ("CL_ParseProQuakeMessage: pqc_ping_times > MAX_SCOREBOARD");
+			{
+				Con_Printf ("CL_ParseProQuakeMessage: pqc_ping_times > MAX_SCOREBOARD\n");
+				continue;
+			}
 
 			cl.scores[ping / 4096].ping = ping & 4095;
 		}
@@ -1624,6 +1646,8 @@ CL_ParseProQuakeString
 */
 cvar_t pq_scoreboard_pings ("pq_scoreboard_pings", "1", CVAR_ARCHIVE);
 
+// set cl.console_ping = true before sending a ping to the server if you don't want this to swallow the result
+// set cl.console_status = true before sending a status to the server if you don't want this to swallow the result
 void CL_ParseProQuakeString (char *string)
 {
 	static int checkping = -1;

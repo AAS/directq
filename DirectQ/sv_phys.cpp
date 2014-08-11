@@ -483,6 +483,34 @@ void SV_PushMove (edict_t *pusher, float movetime)
 
 	SV_MakePushBuffers ();
 
+	/*
+	veeeerrryyy iffy.  do we *really* want to to run for *all* SOLID_NOT entities???
+	if (pusher->v.solid == SOLID_NOT)
+	{
+		if (pusher->v.avelocity[0] || pusher->v.avelocity[1] || pusher->v.avelocity[2])
+		{
+			for (i = 0; i < 3; i++)
+			{
+				pusher->v.angles[0] = pusher->v.angles[0] + movetime * pusher->v.avelocity[0];
+				pusher->v.angles[1] = pusher->v.angles[1] + movetime * pusher->v.avelocity[1];
+				pusher->v.angles[2] = pusher->v.angles[2] + movetime * pusher->v.avelocity[2];
+			}
+		}
+
+		for (i = 0; i < 3; i++)
+		{
+			move[i] = pusher->v.velocity[i] * movetime;
+			mins[i] = pusher->v.absmin[i] + move[i];
+			maxs[i] = pusher->v.absmax[i] + move[i];
+		}
+
+		VectorAdd (pusher->v.origin, move, pusher->v.origin);
+		pusher->v.ltime += movetime;
+		SV_LinkEdict (pusher, false);
+		return;
+	}
+	*/
+
 	if (!pusher->v.velocity[0] && !pusher->v.velocity[1] && !pusher->v.velocity[2])
 	{
 		pusher->v.ltime += movetime;
@@ -616,7 +644,7 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 	vec3_t		entorig, pushorig;
 	int			num_moved;
 	vec3_t		org, org2;
-	vec3_t		forward, right, up;
+	avectors_t	av;
 
 	SV_MakePushBuffers ();
 
@@ -630,7 +658,7 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 		amove[i] = pusher->v.avelocity[i] * movetime;
 
 	VectorSubtract (vec3_origin, amove, a);
-	AngleVectors (a, forward, right, up);
+	AngleVectors (a, &av);
 
 	VectorCopy (pusher->v.angles, pushorig);
 
@@ -681,9 +709,9 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 
 		// calculate destination position
 		VectorSubtract (check->v.origin, pusher->v.origin, org);
-		org2[0] = DotProduct (org, forward);
-		org2[1] = -DotProduct (org, right);
-		org2[2] = DotProduct (org, up);
+		org2[0] = DotProduct (org, av.forward);
+		org2[1] = -DotProduct (org, av.right);
+		org2[2] = DotProduct (org, av.up);
 		VectorSubtract (org2, org, move);
 
 		// try moving the contacted entity
@@ -756,7 +784,6 @@ void SV_Physics_Pusher (edict_t *ent)
 	float	movetime;
 
 	oldltime = ent->v.ltime;
-
 	thinktime = ent->v.nextthink;
 
 	if (thinktime < ent->v.ltime + sv.frametime)
@@ -901,12 +928,12 @@ SV_WallFriction
 */
 void SV_WallFriction (edict_t *ent, trace_t *trace)
 {
-	vec3_t		forward, right, up;
+	avectors_t	av;
 	float		d, i;
 	vec3_t		into, side;
 
-	AngleVectors (ent->v.v_angle, forward, right, up);
-	d = DotProduct (trace->plane.normal, forward);
+	AngleVectors (ent->v.v_angle, &av);
+	d = DotProduct (trace->plane.normal, av.forward);
 
 	d += 0.5;
 
@@ -1139,7 +1166,7 @@ void SV_Physics_Client (edict_t	*ent, int num)
 		if (!SV_RunThink (ent))
 			return;
 
-		VectorMA (ent->v.origin, sv.frametime, ent->v.velocity, ent->v.origin);
+		VectorMultiplyAdd (ent->v.origin, sv.frametime, ent->v.velocity, ent->v.origin);
 		break;
 
 	default:
@@ -1180,7 +1207,8 @@ Entities that are "stuck" to another entity
 */
 void SV_Physics_Follow (edict_t *ent)
 {
-	vec3_t  vf, vr, vu, angles, v;
+	avectors_t av;
+	vec3_t  angles, v;
 	edict_t *e;
 
 	// regular thinking
@@ -1200,21 +1228,21 @@ void SV_Physics_Follow (edict_t *ent)
 		angles[1] =  ent->v.punchangle[1];
 		angles[2] =  ent->v.punchangle[2];
 
-		AngleVectors (angles, vf, vr, vu);
+		AngleVectors (angles, &av);
 
-		v[0] = ent->v.view_ofs[0] * vf[0] + ent->v.view_ofs[1] * vr[0] + ent->v.view_ofs[2] * vu[0];
-		v[1] = ent->v.view_ofs[0] * vf[1] + ent->v.view_ofs[1] * vr[1] + ent->v.view_ofs[2] * vu[1];
-		v[2] = ent->v.view_ofs[0] * vf[2] + ent->v.view_ofs[1] * vr[2] + ent->v.view_ofs[2] * vu[2];
+		v[0] = ent->v.view_ofs[0] * av.forward[0] + ent->v.view_ofs[1] * av.right[0] + ent->v.view_ofs[2] * av.up[0];
+		v[1] = ent->v.view_ofs[0] * av.forward[1] + ent->v.view_ofs[1] * av.right[1] + ent->v.view_ofs[2] * av.up[1];
+		v[2] = ent->v.view_ofs[0] * av.forward[2] + ent->v.view_ofs[1] * av.right[2] + ent->v.view_ofs[2] * av.up[2];
 
 		angles[0] = -e->v.angles[0];
 		angles[1] =  e->v.angles[1];
 		angles[2] =  e->v.angles[2];
 
-		AngleVectors (angles, vf, vr, vu);
+		AngleVectors (angles, &av);
 
-		ent->v.origin[0] = v[0] * vf[0] + v[1] * vf[1] + v[2] * vf[2] + e->v.origin[0];
-		ent->v.origin[1] = v[0] * vr[0] + v[1] * vr[1] + v[2] * vr[2] + e->v.origin[1];
-		ent->v.origin[2] = v[0] * vu[0] + v[1] * vu[1] + v[2] * vu[2] + e->v.origin[2];
+		ent->v.origin[0] = v[0] * av.forward[0] + v[1] * av.forward[1] + v[2] * av.forward[2] + e->v.origin[0];
+		ent->v.origin[1] = v[0] * av.right[0] + v[1] * av.right[1] + v[2] * av.right[2] + e->v.origin[1];
+		ent->v.origin[2] = v[0] * av.up[0] + v[1] * av.up[1] + v[2] * av.up[2] + e->v.origin[2];
 	}
 
 	VectorAdd (e->v.angles, ent->v.v_angle, ent->v.angles);
@@ -1235,8 +1263,8 @@ void SV_Physics_Noclip (edict_t *ent)
 	if (!SV_RunThink (ent))
 		return;
 
-	VectorMA (ent->v.angles, sv.frametime, ent->v.avelocity, ent->v.angles);
-	VectorMA (ent->v.origin, sv.frametime, ent->v.velocity, ent->v.origin);
+	VectorMultiplyAdd (ent->v.angles, sv.frametime, ent->v.avelocity, ent->v.angles);
+	VectorMultiplyAdd (ent->v.origin, sv.frametime, ent->v.velocity, ent->v.origin);
 
 	SV_LinkEdict (ent, false);
 }
@@ -1321,7 +1349,7 @@ void SV_Physics_Toss (edict_t *ent)
 		SV_AddGravity (ent);
 
 	// move angles
-	VectorMA (ent->v.angles, sv.frametime, ent->v.avelocity, ent->v.angles);
+	VectorMultiplyAdd (ent->v.angles, sv.frametime, ent->v.avelocity, ent->v.angles);
 
 	// move origin
 	VectorScale (ent->v.velocity, sv.frametime, move);
@@ -1419,6 +1447,8 @@ void SV_Physics (DWORD dwFrameTime)
 	int		i;
 	edict_t	*ent;
 
+	// this one needs to be kept rock steady as it's the master timer for events on both the
+	// client and the server.  changing it to an event timer is a big no-no.
 	sv.frametime = (float) dwFrameTime / 1000.0f;
 
 	// let the progs know that a new frame has started
@@ -1486,7 +1516,7 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	{
 		SV_CheckVelocity (tent);
 		SV_AddGravity (tent);
-		VectorMA (tent->v.angles, sv.frametime, tent->v.avelocity, tent->v.angles);
+		VectorMultiplyAdd (tent->v.angles, sv.frametime, tent->v.avelocity, tent->v.angles);
 		VectorScale (tent->v.velocity, sv.frametime, move);
 		VectorAdd (tent->v.origin, move, end);
 		trace = SV_Move (tent->v.origin, tent->v.mins, tent->v.maxs, end, MOVE_NORMAL, tent);

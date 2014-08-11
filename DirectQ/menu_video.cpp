@@ -37,10 +37,6 @@ int menu_videomodenum = 0;
 char **menu_anisotropicmodes = NULL;
 int menu_anisonum = 0;
 
-extern cvar_t r_smoothcharacters;
-extern cvar_t gl_conscale;
-extern cvar_t scr_fov;
-extern cvar_t scr_fovcompat;
 extern cvar_t d3d_mode;
 extern cvar_t v_gamma;
 extern cvar_t r_gamma;
@@ -65,8 +61,6 @@ extern int d3d_NumWindowedModes;
 
 #define TAG_VIDMODEAPPLY	1
 #define TAG_HLSL			32
-#define TAG_CONSCALE		64
-#define TAG_SMOOTHCHAR		128
 #define TAG_WINDOWED_ENABLE		256
 #define TAG_FULLSCREEN_ENABLE	512
 #define TAG_WINDOWED_HIDE	1024
@@ -89,10 +83,10 @@ void VID_ApplyModeChange (void)
 {
 	// run a screen update after each to make sure they only occur one at a time
 	Cvar_Set (&d3d_mode, menu_videomodenum);
-	SCR_UpdateScreen (0);
+	SCR_UpdateScreen ();
 
 	Cvar_Set (&vid_vsync, dummy_vsync);
-	SCR_UpdateScreen (0);
+	SCR_UpdateScreen ();
 	HUD_Changed ();
 
 	// position the selection back up one as the "apply" option is no longer valid
@@ -435,20 +429,6 @@ int Menu_VideoCustomDraw (int y)
 		menu_Video.DisableMenuOptions (TAG_VIDMODEAPPLY);
 	else menu_Video.EnableMenuOptions (TAG_VIDMODEAPPLY);
 
-	if (d3d_CurrentMode.Width > 640 && d3d_CurrentMode.Height > 480)
-	{
-		menu_Video.EnableMenuOptions (TAG_CONSCALE);
-
-		if (gl_conscale.value < 1)
-			menu_Video.EnableMenuOptions (TAG_SMOOTHCHAR);
-		else menu_Video.DisableMenuOptions (TAG_SMOOTHCHAR);
-	}
-	else
-	{
-		menu_Video.DisableMenuOptions (TAG_SMOOTHCHAR);
-		menu_Video.DisableMenuOptions (TAG_CONSCALE);
-	}
-
 	Menu_VideoEncodeTextureFilter ();
 
 	// no anisotropic filtering available
@@ -509,15 +489,16 @@ void Menu_VideoCustomEnter (void)
 }
 
 
+extern cvar_t r_optimizealiasmodels;
+extern cvar_t r_cachealiasmodels;
+
 void Menu_VideoBuild (void)
 {
 	menu_Video.AddOption (new CQMenuCustomDraw (Menu_VideoCustomDraw));
-	menu_Video.AddOption (new CQMenuSpinControl ("Mode Type", &modetypenum, modelist));
+	menu_Video.AddOption (new CQMenuSpinControl ("Video Mode Type", &modetypenum, modelist));
 	menu_Video.AddOption (TAG_WINDOWED_HIDE, new CQMenuSpinControl ("Resolution", &menu_windnum, &menu_windowedres));
 	menu_Video.AddOption (TAG_FULLSCREEN_HIDE, new CQMenuSpinControl ("Resolution", &menu_fullnum, &menu_fullscrnres));
 	menu_Video.AddOption (TAG_FULLSCREEN_ENABLE, new CQMenuSpinControl ("Color Depth", &bppnum, bpplist));
-
-	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (new CQMenuIntegerToggle ("Vertical Sync", &dummy_vsync, 0, 1));
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuCommand ("Apply Video Mode Change", VID_ApplyModeChange));
@@ -556,13 +537,8 @@ void Menu_VideoBuild (void)
 	}
 
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-
-	// menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
-	menu_Video.AddOption (TAG_CONSCALE, new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
-	menu_Video.AddOption (TAG_SMOOTHCHAR, new CQMenuCvarToggle ("Smooth Characters", &r_smoothcharacters, 0, 1));
-	menu_Video.AddOption (new CQMenuSpacer ());
-	menu_Video.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
-	menu_Video.AddOption (new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
+	menu_Video.AddOption (new CQMenuCvarToggle ("Optimize MDL Files", &r_optimizealiasmodels, 0, 1));
+	menu_Video.AddOption (new CQMenuCvarToggle ("Cache Mesh to Disk", &r_cachealiasmodels, 0, 1));
 }
 
 

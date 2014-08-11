@@ -42,7 +42,7 @@ extern	int nanmask;
 #define VectorCopy2(dst,src) {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];}
 #define VectorClear(vec) {(vec)[0] = (vec)[1] = (vec)[2] = 0.0f;}
 
-void VectorMA (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
+void VectorMultiplyAdd (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
 
 vec_t _DotProduct (vec3_t v1, vec3_t v2);
 void _VectorSubtract (vec3_t veca, vec3_t vecb, vec3_t out);
@@ -63,6 +63,15 @@ void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4]);
 void FloorDivMod (float numer, float denom, int *quotient, int *rem);
 int GreatestCommonDivisor (int i1, int i2);
 
+typedef struct avectors_s
+{
+	vec3_t forward;
+	vec3_t right;
+	vec3_t up;
+} avectors_t;
+
+
+void AngleVectors (vec3_t angles, avectors_t *av);
 void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up);
 int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, struct mplane_s *plane);
 float	anglemod (float a);

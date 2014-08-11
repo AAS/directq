@@ -24,6 +24,57 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "pr_class.h"
 
+class CDQHostTimer
+{
+public:
+	CDQHostTimer (void)
+	{
+		this->dwFrameTime = 0;
+		this->fFrameTime = 0;
+		this->dwOldTime = 0;
+		this->frame = false;
+	}
+
+	bool RunFrame (void) {return this->frame;}
+	DWORD FrameTime (void) {return this->dwFrameTime;}
+	float FloatTime (void) {return this->fFrameTime;}
+
+	void UpdateFrame (DWORD dwTime)
+	{
+		this->dwFrameTime = dwTime - this->dwOldTime;
+		this->fFrameTime = (float) (dwTime - this->dwOldTime) * 0.001f;
+		this->dwOldTime = dwTime;
+		this->frame = true;
+
+		// don't run too slowly (this is primarily needed for demos and loading where there will
+		// be a time discrepency due to time spent loading the map)
+		if (this->dwFrameTime > 100)
+		{
+			this->dwFrameTime = 100;
+			this->fFrameTime = 0.1f;
+		}
+	}
+
+	void Advance (DWORD dwTime, float FPS, bool timedemo = false)
+	{
+		if (timedemo || ((dwTime - this->dwOldTime) >= (DWORD) ((1000.0f / FPS) + 0.5f)))
+			this->UpdateFrame (dwTime);
+		else
+		{
+			this->dwFrameTime = 0;
+			this->fFrameTime = 0;
+			this->frame = false;
+		}
+	}
+
+private:
+	DWORD dwOldTime;
+	DWORD dwFrameTime;
+	float fFrameTime;
+	bool frame;
+};
+
+
 /*
 
 A server can allways be started, even if the system started out as a client
@@ -45,7 +96,6 @@ client_t	*host_client;			// current client
 
 jmp_buf 	host_abortserver;
 
-cvar_t	host_framerate ("host_framerate", "0");	// set for slow motion
 cvar_t	sys_ticrate ("sys_ticrate", "0.05");
 
 cvar_t	fraglimit ("fraglimit", "0", CVAR_SERVER);
@@ -67,7 +117,6 @@ cvar_t	temp1 ("temp1", "0");
 cvar_t	temp2 ("temp2", "0");
 cvar_t	temp3 ("temp3", "0");
 cvar_t	temp4 ("temp4", "0");
-
 
 // reserve space for all clients.  these need to be kept in static memory so that the addresses
 // of member variables remain valid during level transitions/etc
@@ -564,6 +613,8 @@ void Cmd_SignalCacheClear_f (void)
 }
 
 cmd_t Cmd_SignalCacheClear ("cacheclear", Cmd_SignalCacheClear_f);
+cmd_t Cmd_CacheFlush ("cache_flush", Cmd_SignalCacheClear_f);
+
 void CL_ClearCLStruct (void);
 
 void Host_ClearMemory (void)
@@ -598,46 +649,121 @@ void Host_ClearMemory (void)
 //============================================================================
 
 
-/*
-===================
-Host_FilterTime
-
-Returns false if the time is too short to run a frame
-===================
-*/
 cvar_t host_maxfps ("host_maxfps", 72, CVAR_ARCHIVE | CVAR_SERVER);
+cvar_t host_decoupletimers ("host_decoupletimers", 0.0f, CVAR_ARCHIVE | CVAR_SERVER);
 
 cvar_alias_t cl_maxfps ("cl_maxfps", &host_maxfps);
 cvar_alias_t sv_maxfps ("sv_maxfps", &host_maxfps);
 cvar_alias_t pq_maxfps ("pq_maxfps", &host_maxfps);
 
-/*
-==================
-Host_ServerFrame
+void CL_SendLagMove (void);
+void SCR_SetTimeout (float timeout);
+void R_UpdateParticles (void);
+void SCR_SetUpToDrawConsole (void);
 
-==================
-*/
-void Host_ServerFrame (DWORD dwFrameTime, float frametime)
+void Host_SendClientInput (CDQHostTimer *Timer)
 {
-	// run the world state
-	SVProgs->GlobalStruct->frametime = frametime;
+	if (Timer->RunFrame ())
+	{
+		// the functions called by this are misnamed as all that they do is send previously buffered commands
+		CL_SendCmd (Timer->FloatTime ());
+	}
+}
 
-	// set the time and clear the general datagram
-	SV_ClearDatagram ();
 
-	// check for new clients
-	SV_CheckForNewClients ();
+void Host_RunServer (CDQHostTimer *Timer)
+{
+	// only run if a local server is actually running
+	if (!sv.active) return;
 
-	// read client messages
-	SV_RunClients (frametime);
+	if (Timer->RunFrame ())
+	{
+		// run the world state
+		SVProgs->GlobalStruct->frametime = Timer->FloatTime ();
 
-	// move things around and think
-	// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
-		SV_Physics (dwFrameTime);
+		// set the time and clear the general datagram
+		SV_ClearDatagram ();
 
-	// send all messages to the clients
-	SV_SendClientMessages ();
+		// check for new clients
+		SV_CheckForNewClients ();
+
+		// read client messages
+		SV_RunClients (Timer->FloatTime ());
+
+		// move things around and think
+		// always pause in single player if in console or menus
+		if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
+			SV_Physics (Timer->FrameTime ());
+
+		// send all messages to the clients
+		SV_SendClientMessages ();
+	}
+}
+
+
+void Host_ReadServer (CDQHostTimer *Timer)
+{
+	if (Timer->RunFrame ())
+	{
+		CL_ReadFromServer (Timer->FrameTime ());
+	}
+}
+
+
+void Host_PrepRefresh (CDQHostTimer *Timer)
+{
+	if (Timer->RunFrame ())
+	{
+		// set up the console (FPS dependent)
+		SCR_SetUpToDrawConsole ();
+
+		// V_RenderView is now called separately so that SCR_UpdateScreen can be independent of it
+		V_RenderView ();
+	}
+}
+
+
+void Host_RefreshFrame (CDQHostTimer *Timer)
+{
+	if (Timer->RunFrame ())
+	{
+		// update refresh
+		SCR_UpdateScreen ();
+	}
+}
+
+
+void Host_FinishFrame (CDQHostTimer *Timer)
+{
+	if (Timer->RunFrame ())
+	{
+		// particle updates are FPS dependent so run them at a fixed rate too
+		R_UpdateParticles ();
+
+		// finish everything else up on the client
+		// update dlights and sound
+		if (cls.signon == SIGNONS)
+		{
+			CL_DecayLights ();
+			S_Update (r_viewvectors.origin, r_viewvectors.forward, r_viewvectors.right, r_viewvectors.up);
+		}
+		else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
+
+		// finish sound
+		CDAudio_Update ();
+		MediaPlayer_Update ();
+	}
+}
+
+
+void Host_PrepFrame (CDQHostTimer *Timer)
+{
+	if (!Timer->RunFrame ())
+	{
+		// JPG - if we're not doing a frame, still check for lagged moves to send
+		// (this is OK to run - it's normally 0 sent and it only sends if anything is lagged)
+		if (!cls.demoplayback && (cl.movemessages > 2)) CL_SendLagMove ();
+	}
 }
 
 
@@ -649,105 +775,138 @@ Runs all active servers
 ==================
 */
 
-void CL_SendLagMove (void);
-void SCR_SetTimeout (float timeout);
-void R_UpdateParticles (void);
-void SCR_SetUpToDrawConsole (float frametime);
+// 4 timers need to run here; one for the server, one for the client and one for
+// anything else which needs to advance at a fixed rate but isn't influenced by the server being active
+CDQHostTimer *ClientTime = NULL;
+CDQHostTimer *ServerTime = NULL;
+//CDQHostTimer *StableTime = NULL;
+//CDQHostTimer *SteadyTime = NULL;
 
+
+// regular non-decoupled version
 void Host_Frame (DWORD time)
 {
+	// millisecond version to keep timings steady
+	static DWORD dwRealTime = 0;
+
+	// this is the steady ticrate for the server and anything else that needs to be run at a stable rate
+	float host_serverframerate = 72.0f;
+
+	// create our timers the first time they're seen
+	if (!ClientTime) ClientTime = new CDQHostTimer ();
+	if (!ServerTime) ServerTime = new CDQHostTimer ();
+
 	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver)) return;
 
 	// keep the random time dependent
 	rand ();
 
-	static DWORD dwOldRealTime = 0;
-	static DWORD dwRealTime = 0;				// millisecond version to keep timings steady
-
-	// keep timings steady
+	// advance realtime keep timings steady
 	dwRealTime += time;
+	realtime = (float) dwRealTime * 0.001f;
 
 	// prevent division by zero (and stalling the host)
 	if (host_maxfps.value < 1) Cvar_Set (&host_maxfps, 1);
 
-	// attempt to compensate for integer division by rounding to the nearest
-	DWORD dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
+	// nothing is allowed to run faster than the client to keep things nice and consistent
+	// if the client is running slow anyway (perhaps we're on a slow machine or in a busy scene) other timers will
+	// automatically be throttled back to the slowest speed so they don't need special handling; it's only if the
+	// client has been artificially slowed (by host_maxfps) that we need to artificially throttle them too
+	if (host_maxfps.value < host_serverframerate) host_serverframerate = host_maxfps.value;
 
-	// lock FPS to 72 if we're on a local server or if we're recording a demo
-#ifndef _DEBUG
-	if (sv.active || cls.demorecording)
-		dwLockTime = (DWORD) ((1000.0f / 72.0f) + 0.5f);
-#endif
-
-	if (!cls.timedemo && (dwRealTime - dwOldRealTime) < dwLockTime)
+	// advance our timers
+	if (host_decoupletimers.value)
 	{
-		// JPG - if we're not doing a frame, still check for lagged moves to send
-		if (!sv.active && !cls.demoplayback && (cl.movemessages > 2)) CL_SendLagMove ();
+		// advance the timers independently
+		if (cls.state == ca_connected || cls.demoplayback || cls.timedemo)
+			ClientTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
+		else ClientTime->Advance (dwRealTime, host_serverframerate);
+
+		if (cls.timedemo)
+			ServerTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
+		else ServerTime->Advance (dwRealTime, host_serverframerate);
 	}
 	else
 	{
-		// move these back to DWORDs to keep timings steady; there is a tendency for them to drift at present
-		DWORD dwFrameTime = dwRealTime - dwOldRealTime;
-		float host_frametime = (float) dwFrameTime * 0.001f;
-
-		realtime = (float) dwRealTime * 0.001f;
-		dwOldRealTime = dwRealTime;
-
-		// more integer compensation here
-		// weird things happen if we're running at > 1000 fps and we clamp frametimes to 1 ms so don't do that!
-		if (host_framerate.value > 0)
+		// advance the timers at the same rate
+		if (cls.state == ca_connected || cls.demoplayback || cls.timedemo)
 		{
-			dwFrameTime = (DWORD) (host_framerate.value * 1000.0f);
-			host_frametime = host_framerate.value;
+			// if we're connected to a server (which may be a local server for SP games) run at full speed
+			ClientTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
+			ServerTime->Advance (dwRealTime, host_maxfps.value, cls.timedemo);
 		}
-		else if (host_frametime > 0.1f)
+		else
 		{
-			dwFrameTime = 100;
-			host_frametime = 0.1f;
+			// if we're not connected run at throttled back speed
+			ClientTime->Advance (dwRealTime, host_serverframerate);
+			ServerTime->Advance (dwRealTime, host_serverframerate);
 		}
+	}
 
-		IN_Commands ();
+	// allow framerate simulation and PQ synthetic lag
+	Host_PrepFrame (ClientTime);
+
+	// this is based on a comment in DP re: frikbot .way files
+	if (sv.active && ServerTime->RunFrame ())
+	{
 		Cbuf_Execute ();
 		NET_Poll ();
-		CL_SendCmd ();
-
-		// process any queued input events
-		IN_ProcessQueue ();
-
-		if (sv.active) Host_ServerFrame (dwFrameTime, host_frametime);
-
-		// fetch results from server
-		if (cls.state == ca_connected) CL_ReadFromServer (dwFrameTime);
-
-		// set up the console (FPS dependent)
-		SCR_SetUpToDrawConsole (host_frametime);
-
-		// update display - V_RenderView is now called separately so that SCR_UpdateScreen can be independent of it
-		// this needs to run at the filtered speed so that events such as stair step-ups are handled correctly
-		V_RenderView (cl.time, host_frametime);
-
-		// update refresh
-		SCR_UpdateScreen (dwFrameTime);
-
-		// run anything that needs to be done after the screen update
-		// update particles
-		R_UpdateParticles ();
-
-		// update dlights
-		if (cls.signon == SIGNONS) CL_DecayLights ();
-
-		// update sound
-		if (cls.signon == SIGNONS)
-			S_Update (host_frametime, r_origin, vpn, vright, vup);
-		else S_Update (host_frametime, vec3_origin, vec3_origin, vec3_origin, vec3_origin);
-
-		// finish sound
-		CDAudio_Update ();
-		MediaPlayer_Update ();
-
-		host_framecount++;
 	}
+	else if (!sv.active && ClientTime->RunFrame ())
+	{
+		Cbuf_Execute ();
+		NET_Poll ();
+	}
+
+	// basic client input is always allowed to happen even if we're not running a frame
+	// so that input events can be recorded as they actually happen rather than going out
+	// of sync with hardware polling rates
+	IN_Commands ();		// all this does is add joystick movement to the accumulated input commands
+
+	// send accumulated client input to the server
+	if (cls.state == ca_connected)
+	{
+		// run the send at the same rate as the read if we're connected
+		if (cls.demoplayback || sv.active)
+			Host_SendClientInput (ServerTime);
+		else Host_SendClientInput (ClientTime);
+	}
+	else Host_SendClientInput (ServerTime);
+
+	// run a server frame
+	Host_RunServer (ServerTime);
+
+	// fetch results from server
+	if (cls.state == ca_connected)
+	{
+		// run the send at the same rate as the send
+		// if a local active server is running then both this and the send must run at the same
+		// speed as the server does in order to keep buffers happy and everything synchronized
+		if (cls.demoplayback || sv.active)
+			Host_ReadServer (ServerTime);
+		else Host_ReadServer (ClientTime);
+	}
+
+	// now run anything that needs to run on the client before the refresh
+	Host_PrepRefresh (ServerTime);
+
+	// now run the refresh - this is allowed to be slowed down if we're not fully connected yet
+	if (cls.demoplayback || cls.timedemo)
+		Host_RefreshFrame (ClientTime);
+	else if (key_dest != key_game)
+		Host_RefreshFrame (ServerTime);
+	else if (cls.signon == SIGNONS)
+		Host_RefreshFrame (ClientTime);
+	else Host_RefreshFrame (ServerTime);
+
+	// and finally run anything else that's needed to finish the frame
+	// this also runs at the slower rate (one reason being that particles are FPS dependent (gravity),
+	// another being that everything else is sound updates which don't need to flood out)
+	Host_FinishFrame (ServerTime);
+
+	// this is only used for counting timedemo frames
+	if (ClientTime->RunFrame ()) host_framecount++;
 }
 
 

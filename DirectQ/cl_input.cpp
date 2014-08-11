@@ -44,6 +44,7 @@ state bit 2 is edge triggered on the down to up transition
 ===============================================================================
 */
 
+cvar_t pq_moveup ("pq_moveup", 0.0f, CVAR_ARCHIVE);
 
 kbutton_t	in_mlook, in_klook;
 kbutton_t	in_left, in_right, in_forward, in_back;
@@ -67,6 +68,9 @@ void KeyDown (kbutton_t *b)
 		k = atoi (c);
 	else
 		k = -1;		// typed manually at the console for continuous down
+
+	if (b == &in_jump && pq_moveup.value && cl.stats[STAT_HEALTH] > 0 && cl.inwater)
+		b = &in_up;
 
 	if (k == b->down[0] || k == b->down[1])
 		return;		// repeating key
@@ -104,6 +108,19 @@ void KeyUp (kbutton_t *b)
 		return;
 	}
 
+	// JPG 1.05 - check to see if we need to translate -jump to -moveup
+	if (b == &in_jump && pq_moveup.value)
+	{
+		if (k == in_up.down[0] || k == in_up.down[1])
+			b = &in_up;
+		else
+		{
+			// in case a -moveup got lost somewhere
+			in_up.down[0] = in_up.down[1] = 0;
+			in_up.state = 4;
+		}
+	}
+
 	if (b->down[0] == k)
 		b->down[0] = 0;
 	else if (b->down[1] == k)
@@ -130,7 +147,7 @@ void IN_MLookUp (void)
 	extern cvar_t freelook;
 
 	if (!((in_mlook.state & 1) || freelook.integer) && lookspring.value)
-		V_StartPitchDrift();
+		CL_StartPitchDrift();
 }
 void IN_UpDown (void) {KeyDown (&in_up);}
 void IN_UpUp (void) {KeyUp (&in_up);}
@@ -258,28 +275,32 @@ float CL_KeyState (kbutton_t *key)
 	val = 0;
 
 	if (impulsedown && !impulseup)
+	{
 		if (down)
 			val = 0.5;	// pressed and held this frame
-		else
-			val = 0;	//	I_Error ();
+		else val = 0;	//	I_Error ();
+	}
 
 	if (impulseup && !impulsedown)
+	{
 		if (down)
 			val = 0;	//	I_Error ();
-		else
-			val = 0;	// released this frame
+		else val = 0;	// released this frame
+	}
 
 	if (!impulsedown && !impulseup)
+	{
 		if (down)
 			val = 1.0;	// held the entire frame
-		else
-			val = 0;	// up the entire frame
+		else val = 0;	// up the entire frame
+	}
 
 	if (impulsedown && impulseup)
+	{
 		if (down)
 			val = 0.75;	// released and re-pressed this frame
-		else
-			val = 0.25;	// pressed and released this frame
+		else val = 0.25;	// pressed and released this frame
+	}
 
 	key->state &= 1;		// clear impulses
 
@@ -307,19 +328,24 @@ cvar_t cl_fullpitch ("cl_fullpitch", "0", CVAR_ARCHIVE);
 // ProQuake compatibility
 cvar_alias_t pq_fullpitch ("pq_fullpitch", &cl_fullpitch);
 
-void CL_BoundViewPitch (void)
+// fitzquake compatibility
+cvar_t cl_maxpitch ("cl_maxpitch", 80.0f, CVAR_ARCHIVE);
+cvar_t cl_minpitch ("cl_minpitch", -70.0f, CVAR_ARCHIVE);
+
+void CL_BoundViewPitch (float *viewangles)
 {
+	if (cl_maxpitch.value > 90.0f) Cvar_Set (&cl_maxpitch, 90.0f);
+	if (cl_minpitch.value < -90.0f) Cvar_Set (&cl_minpitch, -90.0f);
+
 	if (cl_fullpitch.integer)
 	{
-		if (cl.viewangles[PITCH] > 90) cl.viewangles[PITCH] = 90;
-
-		if (cl.viewangles[PITCH] < -90) cl.viewangles[PITCH] = -90;
+		if (viewangles[PITCH] > 90) viewangles[PITCH] = 90;
+		if (viewangles[PITCH] < -90) viewangles[PITCH] = -90;
 	}
 	else
 	{
-		if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
-
-		if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
+		if (viewangles[PITCH] > cl_maxpitch.value) viewangles[PITCH] = cl_maxpitch.value;
+		if (viewangles[PITCH] < cl_minpitch.value) viewangles[PITCH] = cl_minpitch.value;
 	}
 }
 
@@ -331,15 +357,25 @@ CL_AdjustAngles
 Moves the local angle positions
 ================
 */
+CDQEventTimer *cl_AnglesTimer = NULL;
+
 void CL_AdjustAngles (void)
 {
 	float	speed;
 	float	up, down;
 	extern cvar_t freelook;
 
+	// based on realtime so that the timing is always correct; this will be filtered anyway
+	// (fixme : what if the client pauses?  there may be a discrepancy...)  OK, cl.time it is then!
+	// fixme - this happens before cl.time is updated for the current frame...
+	if (!cl_AnglesTimer)
+		cl_AnglesTimer = new CDQEventTimer (realtime);
+
+	float frametime = cl_AnglesTimer->GetElapsedTime (realtime);
+
 	if (in_speed.state & 1)
-		speed = cl.frametime * cl_anglespeedkey.value;
-	else speed = cl.frametime;
+		speed = frametime * cl_anglespeedkey.value;
+	else speed = frametime;
 
 	if (!(in_strafe.state & 1))
 	{
@@ -350,27 +386,149 @@ void CL_AdjustAngles (void)
 
 	if (in_klook.state & 1)
 	{
-		V_StopPitchDrift ();
+		CL_StopPitchDrift ();
 		cl.viewangles[PITCH] -= speed * cl_pitchspeed.value * CL_KeyState (&in_forward);
 		cl.viewangles[PITCH] += speed * cl_pitchspeed.value * CL_KeyState (&in_back);
 	}
 
 	if (freelook.integer || (in_mlook.state & 1))
-		V_StopPitchDrift ();
+		CL_StopPitchDrift ();
 
-	up = CL_KeyState (&in_lookup);
-	down = CL_KeyState (&in_lookdown);
-
-	cl.viewangles[PITCH] -= speed * cl_pitchspeed.value * up;
-	cl.viewangles[PITCH] += speed * cl_pitchspeed.value * down;
+	if (in_lookup.state & 1) up = CL_KeyState (&in_lookup); else up = 0;
+	if (in_lookdown.state & 1) down = CL_KeyState (&in_lookdown); else down = 0;
 
 	if (up || down)
-		V_StopPitchDrift ();
+	{
+		cl.viewangles[PITCH] -= speed * cl_pitchspeed.value * up;
+		cl.viewangles[PITCH] += speed * cl_pitchspeed.value * down;
+		CL_StopPitchDrift ();
+	}
 
-	CL_BoundViewPitch ();
+	CL_BoundViewPitch (cl.viewangles);
 
 	if (cl.viewangles[ROLL] > 50) cl.viewangles[ROLL] = 50;
 	if (cl.viewangles[ROLL] < -50) cl.viewangles[ROLL] = -50;
+}
+
+
+/*
+=======================================================================================================================================
+
+	PITCH DRIFTING
+
+	This properly should run on the client to keep timings completely consistent with input
+
+=======================================================================================================================================
+*/
+
+cvar_t	v_centermove ("v_centermove", "0.15");
+cvar_t	v_centerspeed ("v_centerspeed", "500");
+
+
+void CL_StartPitchDrift (void)
+{
+	if (cl.laststop == cl.time)
+	{
+		// something else is keeping it from drifting
+		return;
+	}
+
+	if (cl.nodrift || !cl.pitchvel)
+	{
+		cl.pitchvel = v_centerspeed.value;
+		cl.nodrift = false;
+		cl.driftmove = 0;
+	}
+}
+
+void CL_StopPitchDrift (void)
+{
+	cl.laststop = cl.time;
+	cl.nodrift = true;
+	cl.pitchvel = 0;
+}
+
+/*
+===============
+CL_DriftPitch
+
+Moves the client pitch angle towards cl.idealpitch sent by the server.
+
+If the user is adjusting pitch manually, either with lookup/lookdown,
+mlook and mouse, or klook and keyboard, pitch drifting is constantly stopped.
+
+Drifting is enabled when the center view key is hit, mlook is released and
+lookspring is non 0, or when
+===============
+*/
+void CL_DriftPitch (float time)
+{
+	float delta, move;
+	extern cvar_t freelook;
+
+	if (noclip_anglehack || !cl.onground || cls.demoplayback)
+	{
+		cl.driftmove = 0;
+		cl.pitchvel = 0;
+		return;
+	}
+
+	if (freelook.value || (in_mlook.state & 1))
+	{
+		// it seems more reliable to have this check here rather than having multiple calls to CL_StopPitchDrift scattered all over the engine code
+		// (especially if different subsystems can be running at different framerates nowadays)
+		cl.laststop = cl.time;
+		cl.nodrift = true;
+		cl.pitchvel = 0;
+		return;
+	}
+
+	// don't count small mouse motion
+	if (cl.nodrift)
+	{
+		if (fabs (cl.cmd.forwardmove) < cl_forwardspeed.value)
+			cl.driftmove = 0;
+		else cl.driftmove += time;
+
+		if (cl.driftmove > v_centermove.value)
+			CL_StartPitchDrift ();
+
+		return;
+	}
+
+	delta = cl.idealpitch - cl.viewangles[PITCH];
+
+	if (!delta)
+	{
+		cl.pitchvel = 0;
+		return;
+	}
+
+	move = time * cl.pitchvel;
+	cl.pitchvel += time * v_centerspeed.value;
+
+	//Con_Printf ("move: %f (%f)\n", move, time);
+
+	if (delta > 0)
+	{
+		if (move > delta)
+		{
+			cl.pitchvel = 0;
+			move = delta;
+		}
+
+		cl.viewangles[PITCH] += move;
+	}
+	else if (delta < 0)
+	{
+		if (move > -delta)
+		{
+			cl.pitchvel = 0;
+			move = -delta;
+		}
+
+		cl.viewangles[PITCH] -= move;
+	}
 }
 
 
@@ -381,6 +539,7 @@ CL_BaseMove
 Send the intended movement message to the server
 ================
 */
+
 void CL_BaseMove (usercmd_t *cmd)
 {
 	if (cls.signon != SIGNONS)
@@ -388,8 +547,7 @@ void CL_BaseMove (usercmd_t *cmd)
 
 	CL_AdjustAngles ();
 
-	memset (cmd, 0, sizeof (*cmd));
-
+	// fixme - adjust these speeds for frametime?
 	if (in_strafe.state & 1)
 	{
 		cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_right);
@@ -422,14 +580,13 @@ void CL_BaseMove (usercmd_t *cmd)
 sizebuf_t lag_buff[32];
 byte lag_data[32][128];
 unsigned int lag_head, lag_tail;
-double lag_sendtime[32];
+float lag_sendtime[32];
 
 cvar_t	pq_lag ("pq_lag", "0");
 
 void CL_SendLagMove (void)
 {
-	if (cls.demoplayback || cls.state != ca_connected || cls.signon != SIGNONS)
-		return;
+	if (cls.demoplayback || cls.state != ca_connected || cls.signon != SIGNONS) return;
 
 	while ((lag_tail < lag_head) && (lag_sendtime[lag_tail & 31] <= realtime))
 	{
@@ -443,7 +600,7 @@ void CL_SendLagMove (void)
 
 		if (NET_SendUnreliableMessage (cls.netcon, &lag_buff[(lag_tail - 1) & 31]) == -1)
 		{
-			Con_Printf ("CL_SendMove: lost server connection\n");
+			Con_Printf ("CL_SendLagMove: lost server connection\n");
 			CL_Disconnect ();
 		}
 	}
@@ -457,164 +614,69 @@ CL_SendMove
 */
 void CL_SendMove (usercmd_t *cmd)
 {
-	if (sv.active)
+	int		i;
+	int		bits;
+	sizebuf_t	*buf;
+
+	if (pq_lag.value < 0) Cvar_Set (&pq_lag, 0.0f);
+	if (pq_lag.value > 400) Cvar_Set (&pq_lag, 400.0f);
+
+	buf = &lag_buff[lag_head & 31];
+	SZ_Init (buf, lag_data[lag_head & 31], sizeof (lag_data[lag_head & 31]));
+	lag_sendtime[(lag_head++) & 31] = realtime + (pq_lag.value / 1000.0f);
+
+	memcpy (&cl.cmd, cmd, sizeof (usercmd_t));
+
+	// send the movement message
+	MSG_WriteByte (buf, clc_move);
+	MSG_WriteFloat (buf, cl.mtime[0]);	// so server can get ping times
+
+	if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION_NQ)
 	{
-		int		i;
-		int		bits;
-		sizebuf_t	buf;
-		byte	data[256];
-
-		buf.maxsize = 256;
-		buf.cursize = 0;
-		buf.data = data;
-
-		cl.cmd = *cmd;
-
-		// send the movement message
-		MSG_WriteByte (&buf, clc_move);
-		MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
-
-		if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION_NQ)
-		{
-			for (i = 0; i < 3; i++)
-				MSG_WriteProQuakeAngle (&buf, cl.viewangles[i]);
-		}
-		else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
-		{
-			for (i = 0; i < 3; i++)
-				MSG_WriteAngle16 (&buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
-		}
-		else
-		{
-			for (i = 0; i < 3; i++)
-				MSG_WriteAngle (&buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
-		}
-
-		MSG_WriteShort (&buf, cmd->forwardmove);
-		MSG_WriteShort (&buf, cmd->sidemove);
-		MSG_WriteShort (&buf, cmd->upmove);
-
-		// send button bits
-		bits = 0;
-
-		if (in_attack.state & 3)
-			bits |= 1;
-
-		in_attack.state &= ~2;
-
-		if (in_jump.state & 3)
-			bits |= 2;
-
-		in_jump.state &= ~2;
-
-		MSG_WriteByte (&buf, bits);
-		MSG_WriteByte (&buf, in_impulse);
-
-		if (IsWeaponImpulse (in_impulse))
-		{
-			in_lastimpulse[1] = in_lastimpulse[0];
-			in_lastimpulse[0] = in_impulse;
-		}
-
-		in_impulse = 0;
-
-		// deliver the message
-		if (cls.demoplayback)
-			return;
-
-		// allways dump the first two message, because it may contain leftover inputs
-		// from the last level
-		if (++cl.movemessages <= 2)
-			return;
-
-		if (NET_SendUnreliableMessage (cls.netcon, &buf) == -1)
-		{
-			Con_Printf ("CL_SendMove: lost server connection\n");
-			CL_Disconnect ();
-		}
+		for (i = 0; i < 3; i++)
+			MSG_WriteProQuakeAngle (buf, cl.viewangles[i]);
+	}
+	else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
+	{
+		for (i = 0; i < 3; i++)
+			MSG_WriteAngle16 (buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
 	}
 	else
 	{
-		int		i;
-		int		bits;
-		sizebuf_t	*buf;
-
-		if (pq_lag.value < 0) Cvar_Set (&pq_lag, 0.0f);
-		if (pq_lag.value > 400) Cvar_Set (&pq_lag, 400.0f);
-
-		buf = &lag_buff[lag_head & 31];
-		buf->maxsize = 128;
-		buf->cursize = 0;
-		buf->data = lag_data[lag_head & 31]; // JPG - added head index
-		lag_sendtime[(lag_head++) & 31] = realtime + (pq_lag.value / 1000.0);
-
-		memcpy (&cl.cmd, cmd, sizeof (usercmd_t));
-
-		// send the movement message
-		MSG_WriteByte (buf, clc_move);
-		MSG_WriteFloat (buf, cl.mtime[0]);	// so server can get ping times
-
-		if (!cls.demoplayback && (cls.netcon->mod == MOD_PROQUAKE) && cl.Protocol == PROTOCOL_VERSION_NQ)
-		{
-			for (i = 0; i < 3; i++)
-				MSG_WriteProQuakeAngle (buf, cl.viewangles[i]);
-		}
-		else if (cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
-		{
-			for (i = 0; i < 3; i++)
-				MSG_WriteAngle16 (buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
-		}
-		else
-		{
-			for (i = 0; i < 3; i++)
-				MSG_WriteAngle (buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
-		}
-
-		MSG_WriteShort (buf, cmd->forwardmove);
-		MSG_WriteShort (buf, cmd->sidemove);
-		MSG_WriteShort (buf, cmd->upmove);
-
-		// send button bits
-		bits = 0;
-
-		if (in_attack.state & 3) bits |= 1;
-
-		in_attack.state &= ~2;
-
-		if (in_jump.state & 3) bits |= 2;
-
-		in_jump.state &= ~2;
-
-		MSG_WriteByte (buf, bits);
-		MSG_WriteByte (buf, in_impulse);
-
-		if (IsWeaponImpulse (in_impulse))
-		{
-			in_lastimpulse[1] = in_lastimpulse[0];
-			in_lastimpulse[0] = in_impulse;
-		}
-
-		// clear the impulse (if any)
-		in_impulse = 0;
-
-		// deliver the message (unless we're playing a demo in which case there is no server to deliver to)
-		if (cls.demoplayback) return;
-
-		// allways dump the first two message, because it may contain leftover inputs
-		// from the last level
-		if (sv.active)
-		{
-			// if we're playing on a local server we just send the standard move
-			if (++cl.movemessages <= 2) return;
-
-			if (NET_SendUnreliableMessage (cls.netcon, buf) == -1)
-			{
-				Con_Printf ("CL_SendMove: lost server connection\n");
-				CL_Disconnect ();
-			}
-		}
-		else CL_SendLagMove ();
+		for (i = 0; i < 3; i++)
+			MSG_WriteAngle (buf, cl.viewangles[i], cl.Protocol, cl.PrototcolFlags);
 	}
+
+	MSG_WriteShort (buf, cmd->forwardmove);
+	MSG_WriteShort (buf, cmd->sidemove);
+	MSG_WriteShort (buf, cmd->upmove);
+
+	// send button bits
+	bits = 0;
+
+	if (in_attack.state & 3) bits |= 1;
+	if (in_jump.state & 3) bits |= 2;
+
+	in_attack.state &= ~2;
+	in_jump.state &= ~2;
+
+	MSG_WriteByte (buf, bits);
+	MSG_WriteByte (buf, in_impulse);
+
+	if (IsWeaponImpulse (in_impulse))
+	{
+		in_lastimpulse[1] = in_lastimpulse[0];
+		in_lastimpulse[0] = in_impulse;
+	}
+
+	// clear the impulse (if any)
+	in_impulse = 0;
+
+	// deliver the message (unless we're playing a demo in which case there is no server to deliver to)
+	if (cls.demoplayback) return;
+
+	// and deliver it
+	CL_SendLagMove ();
 }
 
 

@@ -298,6 +298,8 @@ makevectors(vector)
 */
 void PF_makevectors (void)
 {
+	// this is the only place where the old anglevectors is used and only exists because the globals table has right and up out of order!!!
+	// i could just adjust my avectors_t struct to this order but wtf.
 	AngleVectors (G_VECTOR (OFS_PARM0), SVProgs->GlobalStruct->v_forward, SVProgs->GlobalStruct->v_right, SVProgs->GlobalStruct->v_up);
 }
 
@@ -1565,7 +1567,7 @@ void PF_aim (void)
 
 	// try sending a trace straight
 	VectorCopy (SVProgs->GlobalStruct->v_forward, dir);
-	VectorMA (start, 2048, dir, end);
+	VectorMultiplyAdd (start, 2048, dir, end);
 	tr = SV_Move (start, vec3_origin, vec3_origin, end, false, ent);
 
 	if (tr.ent && tr.ent->v.takedamage == DAMAGE_AIM

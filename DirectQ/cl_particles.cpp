@@ -246,7 +246,7 @@ void R_EntityParticles (entity_t *ent)
 
 	if (!avelocities[0][0])
 		for (i = 0; i < NUMVERTEXNORMALS * 3; i++)
-			avelocities[0][i] = ((rand () & 255) * 0.01) * 0.001f;
+			avelocities[0][i] = (rand () & 255) * 0.01;
 
 	particle_type_t *pt = R_NewParticleType (ent->origin);
 
@@ -268,7 +268,7 @@ void R_EntityParticles (entity_t *ent)
 
 		if (!(p = R_NewParticle (pt))) return;
 
-		p->die = cl.time + 0.001f;
+		p->die = cl.time + 0.01f;
 		p->color = 0x6f;
 		p->colorramp = ramp1;
 		p->ramptime = 10;
@@ -900,23 +900,15 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 
 // update particles after drawing
+CDQEventTimer *cl_ParticlesTimer = NULL;
+
 void R_UpdateParticles (void)
 {
-	static float oldtime = 0;
+	if (!cl_ParticlesTimer)
+		cl_ParticlesTimer = new CDQEventTimer (cl.time);
 
-	if (oldtime > cl.time)
-	{
-		oldtime = cl.time;
-		return;
-	}
-	else if (oldtime == cl.time)
-		return;
-
-	// keep particle updates independent of render times
-	float time = cl.time - oldtime;
+	float time = cl_ParticlesTimer->GetElapsedTime (cl.time);
 	float grav = time * sv_gravity.value * 0.05f;
-
-	oldtime = cl.time;
 
 	for (particle_type_t *pt = active_particle_types; pt; pt = pt->next)
 	{
@@ -966,7 +958,7 @@ void R_UpdateParticles (void)
 }
 
 
-void R_WipeParticles (void)
+void CL_WipeParticles (void)
 {
 	// these need to be wiped immediately on going to a new server
 	active_particle_types = NULL;

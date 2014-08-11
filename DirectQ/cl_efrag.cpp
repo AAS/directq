@@ -110,7 +110,6 @@ void R_SplitEntityOnNode (mnode_t *node)
 
 	// recurse down the contacted sides
 	if (sides & 1) R_SplitEntityOnNode (node->children[0]);
-
 	if (sides & 2) R_SplitEntityOnNode (node->children[1]);
 }
 
@@ -120,8 +119,10 @@ void R_AddEfrags (entity_t *ent)
 	model_t		*entmodel;
 	int			i;
 
+	// entities with no model won't get drawn
 	if (!ent->model) return;
 
+	// never add the world
 	if (ent == cl_entities[0]) return;
 
 	r_addent = ent;
@@ -152,32 +153,40 @@ void R_StoreEfrags (efrag_t **ppefrag)
 	while ((pefrag = *ppefrag) != NULL)
 	{
 		pent = pefrag->entity;
+		ppefrag = &pefrag->leafnext;
 		clmodel = pent->model;
 
 		// some progs might try to send static ents with no model through here...
 		if (!clmodel) continue;
 
-		switch (clmodel->type)
+		// only add static entities on frames during which a full entity relink occurs otherwise we'll just keep on appending
+		// them and appending them to the list, and as the scene runs faster things will only get worse (this was horrible)
+		if (pent->relinkfame != d3d_RenderDef.relinkframe)
 		{
-		case mod_alias:
-		case mod_brush:
-		case mod_sprite:
-			pent = pefrag->entity;
-
-			if (pent->visframe != d3d_RenderDef.framecount)
+			switch (clmodel->type)
 			{
-				// add it to the visible edicts list
-				D3D_AddVisEdict (pent);
+			case mod_alias:
+			case mod_brush:
+			case mod_sprite:
+				pent = pefrag->entity;
 
-				// mark that we've recorded this entity for this frame
-				pent->visframe = d3d_RenderDef.framecount;
+				if (pent->visframe != d3d_RenderDef.framecount)
+				{
+					// add it to the visible edicts list
+					D3D_AddVisEdict (pent);
+
+					// mark that we've recorded this entity for this frame
+					pent->visframe = d3d_RenderDef.framecount;
+				}
+
+				break;
+
+			default:
+				break;
 			}
 
-			ppefrag = &pefrag->leafnext;
-			break;
-
-		default:
-			break;
+			// mark this static as now having been relinked
+			pent->relinkfame = d3d_RenderDef.relinkframe;
 		}
 	}
 }

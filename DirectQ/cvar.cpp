@@ -144,7 +144,7 @@ void Cvar_SetCommon (cvar_t *var)
 	if ((var->usage & CVAR_MAP) && (cls.state == ca_connected))
 		Con_Printf ("You will need to reload the current map for this change to take effect\n");
 
-	if (var->callback) var->callback ();
+	if (var->callback) var->callback (var);
 
 	if (!(var->usage & CVAR_SERVER)) return;
 	if (!sv.active) return;

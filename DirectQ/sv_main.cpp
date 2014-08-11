@@ -771,6 +771,21 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (ent->baseline.effects != ent->v.effects) bits |= U_EFFECTS;
 		if (ent->baseline.modelindex != ent->v.modelindex) bits |= U_MODEL;
 
+		// assume that alpha is not going to change
+		alpha = ent->baseline.alpha;
+
+		// figure out alpha
+		if (nehahra && sv.Protocol == PROTOCOL_VERSION_NQ)
+		{
+		}
+		else if (nehahra)
+		{
+		}
+		else if (sv.Protocol != PROTOCOL_VERSION_NQ)
+		{
+			alpha = ent->alpha;
+		}
+
 		// Nehahra: Model Alpha
 		eval_t  *val;
 		alpha = ent->alpha;
@@ -799,12 +814,12 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		else fullbright = 0;
 
 		// only send if not protocol 15 - note - FUCKING nehahra uses protocol 15 but sends non-standard messages - FUCK FUCK FUCK
-		if ((alpha < 255 || fullbright) && (sv.Protocol != PROTOCOL_VERSION_NQ || nehahra)) bits |= U_TRANS;
+//		if ((alpha < 255 || fullbright) && (sv.Protocol != PROTOCOL_VERSION_NQ || nehahra)) bits |= U_TRANS;
 
 		if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ)
 		{
 			// certain FQ protocol messages are not yet implemented
-			if (ent->baseline.alpha != alpha) bits |= U_ALPHA;
+			// if (ent->baseline.alpha != alpha) bits |= U_ALPHA;
 			if (bits & U_FRAME && (int) ent->v.frame & 0xFF00) bits |= U_FRAME2;
 			if (bits & U_MODEL && (int) ent->v.modelindex & 0xFF00) bits |= U_MODEL2;
 			if (ent->sendinterval) bits |= U_LERPFINISH;
@@ -818,7 +833,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		// original + missing for worst case
 		int packetsize = 16 + 2;
 
-		if (bits & U_TRANS) packetsize += 12;
+		// if (bits & U_TRANS) packetsize += 12;
 		if (sv.Protocol != PROTOCOL_VERSION_NQ) ++packetsize;
 		if (sv_max_datagram == MAX_DATAGRAM) packetsize += 256;
 
@@ -857,6 +872,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (bits & U_LERPFINISH)
 			MSG_WriteByte (msg, (byte) (Q_rint ((ent->v.nextthink - sv.time) * 255)));
 
+		/*
 		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION_NQ) && (sv.Protocol != PROTOCOL_VERSION_FITZ) && (sv.Protocol != PROTOCOL_VERSION_RMQ))
 		{
 			// Nehahra/.alpha
@@ -864,6 +880,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 			MSG_WriteFloat (msg, (float) ent->alpha / 255.0f);
 			MSG_WriteFloat (msg, fullbright);
 		}
+		*/
 	}
 
 	// if (NumCulledEnts) Con_Printf ("Culled %i entities\n", NumCulledEnts);
@@ -1440,7 +1457,7 @@ This is called at the start of each level
 ================
 */
 extern float ScrCenterTimeOff;
-void R_WipeParticles (void);
+void CL_WipeParticles (void);
 void Mod_InitForMap (model_t *mod);
 
 void SV_SpawnServer (char *server)
@@ -1452,7 +1469,7 @@ void SV_SpawnServer (char *server)
 	if (hostname.string[0] == 0) Cvar_Set ("hostname", "UNNAMED");
 
 	ScrCenterTimeOff = 0;
-	R_WipeParticles ();
+	CL_WipeParticles ();
 
 	Con_DPrintf ("SpawnServer: %s\n", server);
 	svs.changelevel_issued = false;		// now safe to issue another

@@ -293,6 +293,10 @@
 					>
 				</File>
 				<File
+					RelativePath=".\d3d_occlusion.cpp"
+					>
+				</File>
+				<File
 					RelativePath=".\d3d_part.cpp"
 					>
 				</File>
@@ -506,7 +510,7 @@
 				</File>
 			</Filter>
 			<Filter
-				Name="Common"
+				Name="Shared"
 				>
 				<File
 					RelativePath=".\cmd.cpp"

@@ -28,6 +28,9 @@ void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFE
 {
 	DWORD swprocflag = d3d_GlobalCaps.supportHardwareTandL ? 0 : D3DUSAGE_SOFTWAREPROCESSING;
 
+	// ensure
+	usage |= D3DUSAGE_WRITEONLY;
+
 	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
 	hr = d3d_Device->CreateVertexBuffer (length, usage | swprocflag, 0, D3DPOOL_DEFAULT, buf, NULL);
 	if (SUCCEEDED (hr)) return;
@@ -59,6 +62,9 @@ void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUF
 {
 	DWORD swprocflag = d3d_GlobalCaps.supportHardwareTandL ? 0 : D3DUSAGE_SOFTWAREPROCESSING;
 	UINT length = numindexes * sizeof (unsigned short);
+
+	// ensure
+	usage |= D3DUSAGE_WRITEONLY;
 
 	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
 	hr = d3d_Device->CreateIndexBuffer (length, usage | swprocflag, D3DFMT_INDEX16, D3DPOOL_DEFAULT, buf, NULL);
@@ -285,7 +291,7 @@ void D3D_AutomapReset (void)
 {
 }
 
-
+void D3DLight_SetCoronaState (void);
 void RotatePointAroundVector (vec3_t dst, const vec3_t dir, const vec3_t point, float degrees);
 void R_AnimateLight (void);
 void V_CalcBlend (void);
@@ -302,11 +308,15 @@ void D3DAlias_DrawViewModel (void);
 void D3DAlias_RenderAliasModels (void);
 
 void D3D_PrepareAliasModel (entity_t *e);
+void D3DLight_AddCoronas (void);
 
 void D3D_AutomapReset (void);
 
 DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 float d3d_OverbrightModulate = 2.0f;
+
+void D3DOC_ShowBBoxes (void);
+void D3DOQ_RunQueries (void);
 
 D3DMATRIX d3d_ViewMatrix;
 D3DMATRIX d3d_WorldMatrix;
@@ -316,14 +326,10 @@ D3DMATRIX d3d_ProjMatrix;
 // render definition for this frame
 d3d_renderdef_t d3d_RenderDef;
 
-// right left
 mplane_t	frustum[4];
 
 // view origin
-vec3_t	vup;
-vec3_t	vpn;
-vec3_t	vright;
-vec3_t	r_origin;
+r_viewvecs_t	r_viewvectors;
 
 // screen size info
 refdef_t	r_refdef;
@@ -390,6 +396,117 @@ void D3D_BeginVisedicts (void)
 	if (!d3d_RenderDef.visedicts) d3d_RenderDef.visedicts = (entity_t **) MainZone->Alloc (MAX_VISEDICTS * sizeof (entity_t *));
 
 	d3d_RenderDef.numvisedicts = 0;
+	d3d_RenderDef.relinkframe++;
+}
+
+
+void D3DAlias_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr);
+
+void D3DMain_BBoxForEnt (entity_t *ent)
+{
+	if (!ent->model) return;
+
+	float mins[3];
+	float maxs[3];
+	vec3_t bbox[8];
+	avectors_t av;
+	float angles[3];
+
+	if (ent->model->type == mod_alias)
+	{
+		// use per-frame bboxes for entities
+		int *poses = ent->lerppose;
+		float *blends = ent->aliasstate.blend;
+		aliasbbox_t *bboxes = ent->model->aliashdr->bboxes;
+
+		// set up interpolation here to ensure that we get all entities
+		// this also keeps interpolation frames valid even if the model has been culled away (bonus!)
+		D3DAlias_SetupAliasFrame (ent, ent->model->aliashdr);
+
+		// use per-frame interpolated bboxes
+		for (int i = 0; i < 3; i++)
+		{
+			mins[i] = bboxes[poses[LERP_CURR]].mins[i] * blends[LERP_CURR] + bboxes[poses[LERP_LAST]].mins[i] * blends[LERP_LAST];
+			maxs[i] = bboxes[poses[LERP_CURR]].maxs[i] * blends[LERP_CURR] + bboxes[poses[LERP_LAST]].maxs[i] * blends[LERP_LAST];
+		}
+	}
+	else if (ent->model->type == mod_brush)
+	{
+		VectorCopy (ent->model->brushhdr->bmins, mins);
+		VectorCopy (ent->model->brushhdr->bmaxs, maxs);
+	}
+	else
+	{
+		VectorCopy (ent->model->mins, mins);
+		VectorCopy (ent->model->maxs, maxs);
+	}
+
+	// compute a full bounding box
+	for (int i = 0; i < 8; i++)
+	{
+		// the bounding box is expanded by 1 unit in each direction so 
+		// that it won't z-fight with the model (if it's a tight box)
+		bbox[i][0] = (i & 1) ? mins[0] - 1.0f : maxs[0] + 1.0f;
+		bbox[i][1] = (i & 2) ? mins[1] - 1.0f : maxs[1] + 1.0f;
+		bbox[i][2] = (i & 4) ? mins[2] - 1.0f : maxs[2] + 1.0f;
+	}
+
+	// these factors hold valid for both MDLs and brush models; tested brush models with rmq rotate test
+	// and ne_tower; tested alias models by assigning bobjrotate to angles 0/1/2 and observing the result
+	// i guess that ID just left out angles[2] because it never really happened in the original game
+	if (ent->model->type == mod_brush)
+	{
+		angles[0] = -ent->angles[0];
+		angles[1] = -ent->angles[1];
+		angles[2] = -ent->angles[2];
+	}
+	else
+	{
+		angles[0] = ent->angles[0];
+		angles[1] = -ent->angles[1];
+		angles[2] = -ent->angles[2];
+	}
+
+	// derive forward/right/up vectors from the angles
+	AngleVectors (angles, &av);
+
+	// compute the rotated bbox corners
+	mins[0] = mins[1] = mins[2] = 9999999;
+	maxs[0] = maxs[1] = maxs[2] = -9999999;
+
+	// and rotate the bounding box
+	for (int i = 0; i < 8; i++)
+	{
+		vec3_t tmp;
+
+		VectorCopy (bbox[i], tmp);
+
+		bbox[i][0] = DotProduct (av.forward, tmp);
+		bbox[i][1] = -DotProduct (av.right, tmp);
+		bbox[i][2] = DotProduct (av.up, tmp);
+
+		// and convert them to mins and maxs
+		for (int j = 0; j < 3; j++)
+		{
+			if (bbox[i][j] < mins[j]) mins[j] = bbox[i][j];
+			if (bbox[i][j] > maxs[j]) maxs[j] = bbox[i][j];
+		}
+	}
+
+	// compute scaling factors
+	ent->bboxscale[0] = (maxs[0] - mins[0]) * 0.5f;
+	ent->bboxscale[1] = (maxs[1] - mins[1]) * 0.5f;
+	ent->bboxscale[2] = (maxs[2] - mins[2]) * 0.5f;
+
+	// translate the bbox to it's final position at the entity origin
+	VectorAdd (ent->origin, mins, ent->mins);
+	VectorAdd (ent->origin, maxs, ent->maxs);
+
+	// true origin of entity is at bbox center point (needed for bmodels
+	// where the origin could be at (0, 0, 0) or at a corner)
+	ent->trueorigin[0] = ent->mins[0] + (ent->maxs[0] - ent->mins[0]) * 0.5f;
+	ent->trueorigin[1] = ent->mins[1] + (ent->maxs[1] - ent->mins[1]) * 0.5f;
+	ent->trueorigin[2] = ent->mins[2] + (ent->maxs[2] - ent->mins[2]) * 0.5f;
 }
 
 
@@ -407,6 +524,9 @@ void D3D_AddVisEdict (entity_t *ent)
 		if (ent->angles[0] || ent->angles[1] || ent->angles[2])
 			ent->rotated = true;
 		else ent->rotated = false;
+
+		// evaluate the bbox in advance so that we can run occlusion queries properly on it
+		D3DMain_BBoxForEnt (ent);
 
 		if (d3d_RenderDef.numvisedicts < MAX_VISEDICTS)
 		{
@@ -460,18 +580,27 @@ bool R_CullBox (mnode_t *node)
 
 	// the node's parent intersected the frustum (or the node has no parent) so run a full check
 	// BoxOnPlaneSide result flags are unknown
-	node->bops = 0;
+	node->bops = FRUSTUM_UNDEFINED;
 
 	// need to check all 4 sides
 	for (int i = 0; i < 4; i++)
 	{
 		// if the parent is inside the frustum on this side then so is this node
-		if (node->parent && node->parent->sides[i] == INSIDE_FRUSTUM) continue;
+		if (node->parent && node->parent->sides[i] == INSIDE_FRUSTUM)
+		{
+			node->sides[i] = INSIDE_FRUSTUM;
+			continue;
+		}
 
-		// need to check
-		node->sides[i] |= BoxOnPlaneSide (node->mins, node->maxs, frustum + i);
+		// do this right
+		static int bopstable[] = {0x00, 0x01, 0x10, 0x11};
+
+		// need to check (this was |= which was a bug)
+		node->sides[i] = bopstable[BoxOnPlaneSide (node->mins, node->maxs, frustum + i)];
 
 		// if the node is outside the frustum on any side then the entire node is rejected
+		// (is this valid???  one side could be outside but another inside???)
+		// (in fact this whole function looks to be fucked)
 		if (node->sides[i] == OUTSIDE_FRUSTUM)
 		{
 			node->bops = FULLY_OUTSIDE_FRUSTUM;
@@ -486,19 +615,20 @@ bool R_CullBox (mnode_t *node)
 		}
 	}
 
-	// the node will be fully inside the frustum here because none of the sides evaluated to outside or intersecting
-	// set the bops flag correctly as it may have been skipped above
-	node->bops = FULLY_INSIDE_FRUSTUM;
-	return false;
+	// only cull if the final node is fully outside
+	if (node->bops == FULLY_OUTSIDE_FRUSTUM)
+		return true;
+	else return false;
 }
 
 
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m)
 {
-	D3DMatrix_Translate (m, e->origin[0], e->origin[1], e->origin[2]);
-	D3DMatrix_Rotate (m, 0, 0, 1, e->angles[1]);
-	D3DMatrix_Rotate (m, 0, 1, 0, -e->angles[0]);
-	D3DMatrix_Rotate (m, 1, 0, 0, e->angles[2]);
+	D3DMatrix_Translate (m, e->origin);
+
+	if (e->angles[1]) D3DMatrix_Rotate (m, 0, 0, 1, e->angles[1]);
+	if (e->angles[0]) D3DMatrix_Rotate (m, 0, 1, 0, -e->angles[0]);
+	if (e->angles[2]) D3DMatrix_Rotate (m, 1, 0, 0, e->angles[2]);
 }
 
 
@@ -549,9 +679,6 @@ void R_SetupFrame (void)
 
 	d3d_RenderDef.fov_x = r_refdef.fov_x;
 	d3d_RenderDef.fov_y = r_refdef.fov_y;
-
-	VectorCopy (r_refdef.vieworg, r_origin);
-	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
 }
 
 
@@ -598,47 +725,40 @@ void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf)
 }
 
 
-void D3D_SetupProjection (float fovx, float fovy)
+void D3D_SetupProjection (float fovx, float fovy, float zn, float zf)
 {
-#define NEARCLIP 1.0
-	float nudge = 1.0 - 1.0 / (1 << 23);
+	float Q = zf / (zf - zn);
 
-	float right = NEARCLIP * tan (fovx * D3DX_PI / 360.0);
-	float left = -right;
+	d3d_ProjMatrix.m[0][0] = 1.0f / tan (fovx * D3DX_PI / 360.0f);	// equivalent to D3DXToRadian (fovx) / 2
+	d3d_ProjMatrix.m[0][1] = 0;
+	d3d_ProjMatrix.m[0][2] = 0;
+	d3d_ProjMatrix.m[0][3] = 0;
 
-	float top = NEARCLIP * tan (fovy * D3DX_PI / 360.0);
-	float bottom = -top;
+	d3d_ProjMatrix.m[1][0] = 0;
+	d3d_ProjMatrix.m[1][1] = 1.0f / tan (fovy * D3DX_PI / 360.0f);	// equivalent to D3DXToRadian (fovy) / 2
+	d3d_ProjMatrix.m[1][2] = 0;
+	d3d_ProjMatrix.m[1][3] = 0;
 
-	d3d_ProjMatrix._11 = (2 * NEARCLIP) / (right - left);
-	d3d_ProjMatrix._21 = 0;
-	d3d_ProjMatrix._31 = (right + left) / (right - left);
-	d3d_ProjMatrix._41 = 0;
+	d3d_ProjMatrix.m[2][0] = 0;
+	d3d_ProjMatrix.m[2][1] = 0;
+	d3d_ProjMatrix.m[2][2] = -Q;	// flip to RH
+	d3d_ProjMatrix.m[2][3] = -1;	// flip to RH
 
-	d3d_ProjMatrix._12 = 0;
-	d3d_ProjMatrix._22 = (2 * NEARCLIP) / (top - bottom);
-	d3d_ProjMatrix._32 = (top + bottom) / (top - bottom);
-	d3d_ProjMatrix._42 = 0;
-
-	d3d_ProjMatrix._13 = 0;
-	d3d_ProjMatrix._23 = 0;
-	d3d_ProjMatrix._33 = -1 * nudge;
-	d3d_ProjMatrix._43 = -2 * NEARCLIP * nudge;
-
-	d3d_ProjMatrix._14 = 0;
-	d3d_ProjMatrix._24 = 0;
-	d3d_ProjMatrix._34 = -1;
-	d3d_ProjMatrix._44 = 0;
+	d3d_ProjMatrix.m[3][0] = 0;
+	d3d_ProjMatrix.m[3][1] = 0;
+	d3d_ProjMatrix.m[3][2] = -(Q * zn);
+	d3d_ProjMatrix.m[3][3] = 0;
 
 	if (r_waterwarp.value > 1)
 	{
-		int contents = Mod_PointInLeaf (r_origin, cl.worldmodel)->contents;
+		int contents = Mod_PointInLeaf (r_viewvectors.origin, cl.worldmodel)->contents;
 
 		if (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA)
 		{
-			d3d_ProjMatrix._21 = sin (d3d_RenderDef.time * 1.125f) * 0.0666f;
-			d3d_ProjMatrix._12 = cos (d3d_RenderDef.time * 1.125f) * 0.0666f;
+			d3d_ProjMatrix._21 = sin (cl.time * 1.125f) * 0.0666f;
+			d3d_ProjMatrix._12 = cos (cl.time * 1.125f) * 0.0666f;
 
-			D3DMatrix_Scale (&d3d_ProjMatrix, (cos (d3d_RenderDef.time * 0.75f) + 20.0f) * 0.05f, (sin (d3d_RenderDef.time * 0.75f) + 20.0f) * 0.05f, 1);
+			D3DMatrix_Scale (&d3d_ProjMatrix, (cos (cl.time * 0.75f) + 20.0f) * 0.05f, (sin (cl.time * 0.75f) + 20.0f) * 0.05f, 1);
 		}
 	}
 }
@@ -686,7 +806,7 @@ void D3D_ExtractFrustum (void)
 		VectorNormalize (frustum[i].normal);
 
 		frustum[i].type = PLANE_ANYZ;
-		frustum[i].dist = DotProduct (r_origin, frustum[i].normal); //FIXME: shouldn't this always be zero?
+		frustum[i].dist = DotProduct (r_viewvectors.origin, frustum[i].normal); //FIXME: shouldn't this always be zero?
 		frustum[i].signbits = SignbitsForPlane (&frustum[i]);
 	}
 }
@@ -697,6 +817,8 @@ void D3D_ExtractFrustum (void)
 D3D_PrepareRender
 =============
 */
+int D3DRTT_RescaleDimension (int dim);
+
 void D3DMain_SetupD3D (void)
 {
 	// r_wireframe 1 is cheating in multiplayer
@@ -808,9 +930,11 @@ void D3DMain_SetupD3D (void)
 	}
 	else
 	{
-		// put z going up
-		D3DMatrix_Rotate (&d3d_ViewMatrix, 1, 0, 0, -90);
-		D3DMatrix_Rotate (&d3d_ViewMatrix, 0, 0, 1, 90);
+		extern float r_farclip;
+
+		// put z going up (this is done in the world matrix so that view is kept clean and we can derive the view vectors from it)
+		D3DMatrix_Rotate (&d3d_WorldMatrix, 1, 0, 0, -90);
+		D3DMatrix_Rotate (&d3d_WorldMatrix, 0, 0, 1, 90);
 
 		// rotate camera by angles
 		D3DMatrix_Rotate (&d3d_ViewMatrix, 1, 0, 0, -r_refdef.viewangles[2]);
@@ -820,9 +944,30 @@ void D3DMain_SetupD3D (void)
 		// translate camera by origin
 		D3DMatrix_Translate (&d3d_ViewMatrix, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 
-		// set projection frustum (infinite projection)
-		D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y);
+		// create an initial projection matrix for deriving the frustum from; as Quake only culls against the top/bottom/left/right
+		// planes we don't need to worry about the far clipping distance yet; we'll just set it to what it was last frame so it has
+		// a good chance of being as close as possible anyway.  this will be set for real as soon as we gather surfaces together in
+		// the refresh (which we can't do before this as we need to frustum cull there, and we don't know what the frustum is yet!)
+		D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip);
 	}
+
+	// derive these properly
+	r_viewvectors.forward[0] = d3d_ViewMatrix._11;
+	r_viewvectors.forward[1] = d3d_ViewMatrix._21;
+	r_viewvectors.forward[2] = d3d_ViewMatrix._31;
+
+	r_viewvectors.right[0] = -d3d_ViewMatrix._12;	// stupid Quake bug
+	r_viewvectors.right[1] = -d3d_ViewMatrix._22;	// stupid Quake bug
+	r_viewvectors.right[2] = -d3d_ViewMatrix._32;	// stupid Quake bug
+
+	r_viewvectors.up[0] = d3d_ViewMatrix._13;
+	r_viewvectors.up[1] = d3d_ViewMatrix._23;
+	r_viewvectors.up[2] = d3d_ViewMatrix._33;
+
+	// make this the untransformed origin vector
+	r_viewvectors.origin[0] = r_refdef.vieworg[0];
+	r_viewvectors.origin[1] = r_refdef.vieworg[1];
+	r_viewvectors.origin[2] = r_refdef.vieworg[2];
 
 	// calculate concatenated final matrix for use by shaders
 	// because it's only needed once per frame instead of once per vertex we can save some vs instructions
@@ -843,7 +988,9 @@ void D3DMain_SetupD3D (void)
 	sbheight /= vid.height;
 
 	// set up the scaled viewport taking account of the status bar area
-	D3D_SetViewport (0, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height - sbheight, 0, 1);
+	if (d3d_RenderDef.RTT)
+		D3D_SetViewport (0, 0, D3DRTT_RescaleDimension (d3d_CurrentMode.Width), D3DRTT_RescaleDimension (d3d_CurrentMode.Height - sbheight), 0, 1);
+	else D3D_SetViewport (0, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height - sbheight, 0, 1);
 
 	// depth testing and writing
 	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
@@ -932,52 +1079,88 @@ void D3D_DeathBlend (void)
 		cl.cshifts[CSHIFT_DEATH].percent = (deathalpha * 255.0f);
 
 		// update blend (attempt to get close to DP's scale)
-		deathalpha += (d3d_RenderDef.frametime * 10.0f * cl_deathfade.value) / 3.0f;
-		deathred -= (d3d_RenderDef.frametime * 10.0f * cl_deathfade.value) / 5.0f;
+		deathalpha += (cl.frametime * 5.0f * cl_deathfade.value) / 3.0f;
+		deathred -= (cl.frametime * 5.0f * cl_deathfade.value) / 5.0f;
 	}
 }
 
 
+cvar_t r_truecontentscolour ("r_truecontentscolour", "1", CVAR_ARCHIVE);
+
 void D3D_UpdateContentsColor (void)
 {
-	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY)
-	{
-		// brought to you today by "disgusting hacks 'r' us"...
-		// stuffcmd must be the most EVIL thing ever invented, and as soon as QC 1337 h4x0rz start
-		// doing things RIGHT a lot of good will come into the world.
-		extern cshift_t cshift_empty;
+	// the cshift builtin fills the empty colour so we need to handle that
+	extern cshift_t cshift_empty;
 
+	switch (d3d_RenderDef.viewleaf->contents)
+	{
+	case CONTENTS_EMPTY:
 		cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = cshift_empty.destcolor[0];
 		cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = cshift_empty.destcolor[1];
 		cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = cshift_empty.destcolor[2];
 		cl.cshifts[CSHIFT_CONTENTS].percent = cshift_empty.percent;
-	}
-	else if (d3d_RenderDef.viewleaf->contentscolor)
-	{
-		// if the viewleaf has a contents colour set we just override with it
-		cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = d3d_RenderDef.viewleaf->contentscolor[0];
-		cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = d3d_RenderDef.viewleaf->contentscolor[1];
-		cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = d3d_RenderDef.viewleaf->contentscolor[2];
+		// fall through
 
-		// these now have more colour so reduce the percent to compensate
-		if (d3d_RenderDef.viewleaf->contents == CONTENTS_WATER)
-			cl.cshifts[CSHIFT_CONTENTS].percent = 48;
-		else if (d3d_RenderDef.viewleaf->contents == CONTENTS_LAVA)
-			cl.cshifts[CSHIFT_CONTENTS].percent = 112;
-		else if (d3d_RenderDef.viewleaf->contents == CONTENTS_SLIME)
-			cl.cshifts[CSHIFT_CONTENTS].percent = 80;
-		else cl.cshifts[CSHIFT_CONTENTS].percent = 0;
-	}
-	else
-	{
-		// empty or undefined
+	case CONTENTS_SOLID:
+	case CONTENTS_SKY:
+		d3d_RenderDef.lastgoodcontents = NULL;
+		break;
+
+	default:
+		// water, slime or lava
+		if (d3d_RenderDef.viewleaf->contentscolor)
+		{
+			// let the player decide which behaviour they want
+			if (r_truecontentscolour.integer)
+			{
+				// if the viewleaf has a contents colour set we just override with it
+				cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = d3d_RenderDef.viewleaf->contentscolor[0];
+				cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = d3d_RenderDef.viewleaf->contentscolor[1];
+				cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = d3d_RenderDef.viewleaf->contentscolor[2];
+
+				// these now have more colour so reduce the percent to compensate
+				if (d3d_RenderDef.viewleaf->contents == CONTENTS_WATER)
+					cl.cshifts[CSHIFT_CONTENTS].percent = 48;
+				else if (d3d_RenderDef.viewleaf->contents == CONTENTS_LAVA)
+					cl.cshifts[CSHIFT_CONTENTS].percent = 112;
+				else if (d3d_RenderDef.viewleaf->contents == CONTENTS_SLIME)
+					cl.cshifts[CSHIFT_CONTENTS].percent = 80;
+				else cl.cshifts[CSHIFT_CONTENTS].percent = 0;
+			}
+			else V_SetContentsColor (d3d_RenderDef.viewleaf->contents);
+
+			// this was the last good colour used
+			d3d_RenderDef.lastgoodcontents = d3d_RenderDef.viewleaf->contentscolor;
+			break;
+		}
+		else if (d3d_RenderDef.lastgoodcontents)
+		{
+			// the leaf tracing at load time can occasionally miss a leaf so we take it from the last
+			// good one we used unless we've had a contents change since.  this seems to only happen
+			// with watervised maps that have been through bsp2prt so it seems as though there is
+			// something wonky in the BSP tree on these maps.....
+			if (d3d_RenderDef.oldviewleaf->contents == d3d_RenderDef.viewleaf->contents)
+			{
+				// update it and call recursively to get the now updated colour
+				// Con_Printf ("D3D_UpdateContentsColor : fallback to last good contents!\n");
+				d3d_RenderDef.viewleaf->contentscolor = d3d_RenderDef.lastgoodcontents;
+				D3D_UpdateContentsColor ();
+				return;
+			}
+		}
+
+		// either we've had no last good contents colour or a contents transition so we
+		// just fall back to the hard-coded default.  be sure to clear the last good as
+		// we may have had a contents transition!!!
 		V_SetContentsColor (d3d_RenderDef.viewleaf->contents);
+		d3d_RenderDef.lastgoodcontents = NULL;
+		break;
 	}
 
 	// add the death blend to the cshifts
 	D3D_DeathBlend ();
 
-	// now calc the blend
+	// and now calc the final blend
 	V_CalcBlend ();
 }
 
@@ -1056,6 +1239,7 @@ void R_SetupEntitiesOnList (void)
 
 		if (!ent->model) continue;
 
+		// fix up anything crazy mods might have set
 		R_ModParanoia (ent);
 	}
 }
@@ -1113,7 +1297,7 @@ void D3DRMain_HLSLSetup (void)
 	D3DHLSL_SetFogMatrix (&d3d_ViewMatrix);
 
 	D3DHLSL_SetFloat ("Overbright", d3d_OverbrightModulate);
-	D3DHLSL_SetFloatArray ("r_origin", r_origin, 3);
+	D3DHLSL_SetFloatArray ("r_origin", r_viewvectors.origin, 3);
 	D3DHLSL_SetFloatArray ("viewangles", r_refdef.viewangles, 3);
 
 	D3DHLSL_SetFloatArray ("FogColor", d3d_FogColor, 4);
@@ -1145,20 +1329,8 @@ void D3DRMain_HLSLSetup (void)
 }
 
 
-void R_RenderView (DWORD dwTimePassed)
+void R_RenderView (void)
 {
-	// if (sv.active && sv.paused) Con_Printf ("server paused\n");
-
-	// always pause in single player if in the console or the menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game))
-	{
-		// keep timings steady
-		d3d_RenderDef.oldtime = d3d_RenderDef.time;
-		d3d_RenderDef.dwTime += dwTimePassed;
-		d3d_RenderDef.time = (float) d3d_RenderDef.dwTime / 1000.0f;
-	}
-
-	// this needs to be updated here instead of in a callback otherwise it will go out of sync
 	d3d_RenderDef.framecount++;
 
 	DWORD dwTime1, dwTime2;
@@ -1172,12 +1344,10 @@ void R_RenderView (DWORD dwTimePassed)
 		return;
 	}
 
-	// get frametime (this may not be the same as timepassed; e.g. if we returned above)
-	d3d_RenderDef.frametime = d3d_RenderDef.time - d3d_RenderDef.oldtime;
-
 	if (r_speeds.value) dwTime1 = Sys_Milliseconds ();
 
 	// initialize stuff
+	D3DLight_SetCoronaState ();
 	R_SetupFrame ();
 	D3DWarp_InitializeTurb ();
 	D3D_UpdateContentsColor ();
@@ -1194,8 +1364,17 @@ void R_RenderView (DWORD dwTimePassed)
 	// draw our alias models
 	D3DAlias_RenderAliasModels ();
 
+	// run our occlusion queries
+	D3DOQ_RunQueries ();
+
+	// add coronas to the alpha list
+	D3DLight_AddCoronas ();
+
 	// draw all items on the alpha list
 	D3DAlpha_RenderList ();
+
+	// optionally show bboxes
+	D3DOC_ShowBBoxes ();
 
 	// the viewmodel comes last
 	// note - the gun model code assumes that it's the last thing drawn in the 3D view

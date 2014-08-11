@@ -49,14 +49,17 @@ cvar_t r_skybackscroll ("r_skybackscroll", 8, CVAR_ARCHIVE);
 cvar_t r_skyfrontscroll ("r_skyfrontscroll", 16, CVAR_ARCHIVE);
 cvar_t r_skyalpha ("r_skyalpha", 1, CVAR_ARCHIVE);
 
+d3d_modelsurf_t *r_skysurfaces = NULL;
+int r_numskysurfaces = 0;
+
 void D3DSky_Begin (void)
 {
 	if (SkyboxValid)
 	{
-		D3DHLSL_SetCubemap (skyboxcubemap);
+		D3DHLSL_SetTexture (0, skyboxcubemap);
 
 		D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
-		D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+		D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
 
 		D3DHLSL_SetPass (FX_PASS_SKYBOX);
 	}
@@ -65,8 +68,8 @@ void D3DSky_Begin (void)
 		// hlsl sky warp
 		float speedscale[] =
 		{
-			(float) d3d_RenderDef.time * r_skybackscroll.value,
-			(float) d3d_RenderDef.time * r_skyfrontscroll.value,
+			cl.time * r_skybackscroll.value,
+			cl.time * r_skyfrontscroll.value,
 			1
 		};
 
@@ -81,7 +84,8 @@ void D3DSky_Begin (void)
 
 		D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
 		D3D_SetTextureMipmap (1, d3d_TexFilter, D3DTEXF_NONE);
-		D3D_SetTextureAddressMode (D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+		D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
+		D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 
 		D3DHLSL_SetPass (FX_PASS_SKYWARP);
 	}
@@ -90,35 +94,40 @@ void D3DSky_Begin (void)
 
 void D3DSky_AddSurfaceToRender (msurface_t *surf, entity_t *ent)
 {
-	if (d3d_RenderDef.skyframe != d3d_RenderDef.framecount)
+	if (!r_numskysurfaces)
 	{
 		// initialize sky for the frame
-		// bound alpha
 		if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
 		if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
 
-		// this is always done even if the relevant modes are not selected so that things will be correct
-		D3DBrush_SetBuffers ();
-		D3DSky_Begin ();
-
-		// flag sky as having been initialized this frame
-		d3d_RenderDef.skyframe = d3d_RenderDef.framecount;
+		// heh; cool.
+		r_skysurfaces = (d3d_modelsurf_t *) scratchbuf;
 	}
 
-	// add this surface
-	D3DBrush_SubmitSurface (surf, ent);
+	// because the far clipping plane of the final projection matrix is dependent on the surface
+	// dists we can't actually draw sky just yet, so instead we gather the surfs together and draw later
+	r_skysurfaces[r_numskysurfaces].surf = surf;
+	r_skysurfaces[r_numskysurfaces].ent = ent;
+	r_numskysurfaces++;
 }
 
 
 void D3DSky_FinalizeSky (void)
 {
-	if (d3d_RenderDef.skyframe != d3d_RenderDef.framecount) return;
+	if (r_numskysurfaces)
+	{
+		// this is always done even if the relevant modes are not selected so that things will be correct
+		D3DBrush_SetBuffers ();
+		D3DSky_Begin ();
 
-	// draw anything left over
-	D3DBrush_FlushSurfaces ();
+		// now that we've got everything fixed up and set right we can draw the sky
+		for (int i = 0; i < r_numskysurfaces; i++)
+			D3DBrush_SubmitSurface (r_skysurfaces[i].surf, r_skysurfaces[i].ent);
 
-	// ensure
-	d3d_RenderDef.skyframe = -1;
+		// draw anything left over
+		D3DBrush_FlushSurfaces ();
+		r_numskysurfaces = 0;
+	}
 }
 
 
@@ -225,7 +234,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 
 	// upload it - solid sky can go up as 8 bit
 	if (!D3D_LoadExternalTexture (&solidskytexture, va ("%s_solid", mt->name), 0))
-		D3DSky_LoadTexture (&solidskytexture, trans, transwidth, transheight, IMAGE_NOCOMPRESS);
+		D3DSky_LoadTexture (&solidskytexture, trans, transwidth, transheight, 0);
 
 	// bottom layer
 	for (int i = 0; i < transheight; i++)
@@ -243,7 +252,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 	// upload it - alpha sky needs to go up as 32 bit owing to averaging
 	// don't compress it so that we can lock it for alpha updating
 	if (!D3D_LoadExternalTexture (&alphaskytexture, va ("%s_alpha", mt->name), IMAGE_ALPHA))
-		D3DSky_LoadTexture (&alphaskytexture, trans, transwidth, transheight, IMAGE_32BIT | IMAGE_ALPHA | IMAGE_NOCOMPRESS);
+		D3DSky_LoadTexture (&alphaskytexture, trans, transwidth, transheight, IMAGE_32BIT | IMAGE_ALPHA);
 
 	// prevent it happening first time during game play
 	Zone_Free (trans);
@@ -315,10 +324,7 @@ void D3DSky_MakeSkyboxCubeMap (void)
 		if (maxsize < 1) break;
 
 		// attempt to create it
-		// use DXT compression as some modders like to provide humungous sized skyboxes which annihilates your video RAM
-		if (d3d_GlobalCaps.supportDXT1)
-			hr = d3d_Device->CreateCubeTexture (maxsize, 1, 0, D3DFMT_DXT1, D3DPOOL_MANAGED, &skyboxcubemap, NULL);
-		else hr = d3d_Device->CreateCubeTexture (maxsize, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &skyboxcubemap, NULL);
+		hr = d3d_Device->CreateCubeTexture (maxsize, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &skyboxcubemap, NULL);
 
 		if (FAILED (hr))
 		{
@@ -423,8 +429,8 @@ void D3DSky_LoadSkyBox (char *basename, bool feedback)
 	{
 		// attempt to load it (sometimes an underscore is expected)
 		// don't compress these because we're going to copy them later on
-		if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_NOCOMPRESS | IMAGE_SYSMEM))
-			if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s_%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_NOCOMPRESS | IMAGE_SYSMEM))
+		if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM))
+			if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s_%s", basename, suf[sb]), IMAGE_32BIT | IMAGE_SYSMEM))
 				continue;
 
 		// loaded OK

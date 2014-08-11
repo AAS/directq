@@ -680,30 +680,19 @@ void Menu_CustomNameCustomKey (int k)
 	int maxrow = 9;
 
 	if (!custnamechanged) maxrow = 8;
-
 	if (k == K_UPARROW) custnamerow--;
-
 	if (k == K_RIGHTARROW) custnamecol++;
-
 	if (k == K_DOWNARROW) custnamerow++;
-
 	if (k == K_LEFTARROW) custnamecol--;
-
 	if (k == K_HOME) custnamecol -= 8;
-
 	if (k == K_END) custnamecol += 8;
-
 	if (k == K_PGUP) custnamerow -= 3;
-
 	if (k == K_PGDN) custnamerow += 3;
 
 	// in theory if should be ok here, but let's get paranoid about it, OK?
 	while (custnamerow < 0) custnamerow += (maxrow + 1);
-
 	while (custnamerow > maxrow) custnamerow -= (maxrow + 1);
-
 	while (custnamecol < 0) custnamecol += 32;
-
 	while (custnamecol > 31) custnamecol -= 32;
 
 	if (!custnamerow && !custnamecol)
@@ -778,6 +767,9 @@ int Menu_GameConfigCustomDraw1 (int y)
 void Menu_InitMultiplayerMenu (void)
 {
 	extern qpic_t *gfx_mp_menu_lmp;
+	extern cvar_t pq_moveup;
+	extern cvar_t cl_fullpitch;
+	extern cvar_t pq_scoreboard_pings;
 
 	// top level menu
 	menu_Multiplayer.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));
@@ -819,6 +811,11 @@ void Menu_InitMultiplayerMenu (void)
 	menu_Setup.AddOption (new CQMenuColourBar ("Pants Colour", &setup_pants));
 	menu_Setup.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Setup.AddOption (TAG_SETUPAPPLY, new CQMenuCommand ("Apply Changes", Menu_SetupApplyFunc));
+	menu_Setup.AddOption (new CQMenuSpacer ());
+	menu_Setup.AddOption (new CQMenuTitle ("ProQuake Options"));
+	menu_Setup.AddOption (new CQMenuCvarToggle ("Jump is Move Up", &pq_moveup, 0, 1));
+	menu_Setup.AddOption (new CQMenuCvarToggle ("Full View Pitch", &cl_fullpitch, 0, 1));
+	menu_Setup.AddOption (new CQMenuCvarToggle ("Ping in Scoreboard", &pq_scoreboard_pings, 0, 1));
 
 	// start a new game
 	menu_TCPIPNewGame.AddOption (new CQMenuBanner (&gfx_p_multi_lmp));

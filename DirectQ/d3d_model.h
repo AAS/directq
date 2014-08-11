@@ -60,6 +60,7 @@ typedef struct d3d_modelsurf_s
 	int surfalpha;
 	int shaderpass;
 	int addorder;	// so that we can maintain stability in qsort
+	struct d3d_modelsurf_s *next;
 } d3d_modelsurf_t;
 
 
@@ -94,7 +95,7 @@ typedef struct texture_s
 	// 1 extra for 16 char texnames
 	char		name[17];
 
-	unsigned	width, height;
+	float		size[2];
 
 	struct image_s *teximage;
 	struct image_s *lumaimage;
@@ -233,7 +234,7 @@ typedef struct msurface_s
 
 	// rectangle specifying the surface lightmap
 	RECT		LightRect;
-	int			lightmapoffset;
+	int			LightmapOffset;
 
 	mtexinfo_t	*texinfo;
 
@@ -242,7 +243,7 @@ typedef struct msurface_s
 	int			dlightbits[4];
 
 	// direct3d stuff
-	class CD3DLightmap *d3d_Lightmap;
+	int			LightmapTextureNum;
 	LPDIRECT3DTEXTURE9 d3d_LightmapTex;
 
 	// overbright factor for surf
@@ -267,10 +268,12 @@ typedef struct msurface_s
 } msurface_t;
 
 
-#define INSIDE_FRUSTUM		1
-#define OUTSIDE_FRUSTUM		2
-#define INTERSECT_FRUSTUM	3
+// corrected these flags
+#define INSIDE_FRUSTUM		0x01
+#define OUTSIDE_FRUSTUM		0x10
+#define INTERSECT_FRUSTUM	0x11
 
+#define FRUSTUM_UNDEFINED			0x0
 #define FULLY_INSIDE_FRUSTUM		0x01010101
 #define FULLY_OUTSIDE_FRUSTUM		0x10101010
 #define FULLY_INTERSECT_FRUSTUM		0x11111111
@@ -298,6 +301,7 @@ typedef struct mnode_s
 	int			side;
 	mplane_t	*plane;
 	struct mnode_s	*children[2];
+	bool		validside[2];
 	unsigned short		firstsurface;
 	unsigned short		numsurfaces;
 } mnode_t;
@@ -438,6 +442,13 @@ typedef struct aliasskin_s
 } aliasskin_t;
 
 
+typedef struct aliasbbox_s
+{
+	float mins[3];
+	float maxs[3];
+} aliasbbox_t;
+
+
 typedef struct aliashdr_s
 {
 	vec3_t		scale;
@@ -447,8 +458,6 @@ typedef struct aliashdr_s
 	synctype_t	synctype;
 	unsigned int drawflags;
 	float		size;
-
-	bool		mfdelerp;
 
 	int			nummeshframes;
 	int			numtris;
@@ -463,14 +472,17 @@ typedef struct aliashdr_s
 	int					numindexes;
 	int					firstindex;
 
+	// for view model updating
+	float				lastblends[2];
+	bool				mfdelerp;
+
 	struct drawvertx_s	**vertexes;
 	maliasframedesc_t	*frames;
+	aliasbbox_t			*bboxes;
 
-	// number of the vertex/index buffer struct to use for this alias model
+	// vertex and index buffers to use for this model
+	// fixme - we can potentially get rid of the memory storage for these now
 	int			buffernum;
-
-	// last params for caching
-	int cacheposes;
 
 	int			skinwidth;
 	int			skinheight;
@@ -541,6 +553,10 @@ typedef struct brushheader_s
 
 	// 29 (Q1) or 30 (HL)
 	int			bspversion;
+
+	// bounding box used for rendering with
+	float		bmins[3];
+	float		bmaxs[3];
 } brushhdr_t;
 
 
@@ -578,6 +594,9 @@ typedef struct model_s
 	// kept here so that we can explicitly NULL it for other model types and write more general code as a result
 	struct entity_s *cacheent;
 
+	// will be == d3d_RenderDef.RegistrationSequence is this model was touched on this map load
+	int RegistrationSequence;
+
 	// true if the model was ever seen
 	bool wasseen;
 } model_t;
@@ -588,6 +607,12 @@ void	Mod_Init (void);
 void	Mod_ClearAll (void);
 model_t *Mod_ForName (char *name, bool crash);
 void	Mod_TouchModel (char *name);
+
+// this can be greater than MAX_MODELS if an alias model is in the cache
+#define	MAX_MOD_KNOWN	8192
+
+extern model_t	**mod_known;
+extern int mod_numknown;
 
 mleaf_t *Mod_PointInLeaf (float *p, model_t *model);
 byte	*Mod_LeafPVS (mleaf_t *leaf, model_t *model);

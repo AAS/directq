@@ -248,6 +248,7 @@ extern char **skybox_menulist;
 extern char **demolist;
 extern char **saveloadlist;
 extern char *gamedirs[];
+extern char **d3d_TextureNames;
 
 
 typedef struct key_autotablist_s
@@ -414,7 +415,7 @@ void Key_Console (int key)
 		key_linepos = 1;
 
 		// force an update, because the command may take some time
-		if (cls.state != ca_connected) SCR_UpdateScreen (0);
+		if (cls.state != ca_connected) SCR_UpdateScreen ();
 
 		return;
 	}
@@ -438,10 +439,11 @@ void Key_Console (int key)
 			{"gamedir ", gamedirs},
 			{"sv_protocol ", protolist},
 			{"gl_texturemode ", d3d_filtermodelist},
+			{"copytexture ", d3d_TextureNames},
 			{NULL, NULL}
 		};
 
-		for (i = 0; ; i++)
+		for (i = 0;; i++)
 		{
 			if (!key_autotablist[i].str) break;
 			if (!key_autotablist[i].list) break;
@@ -1266,7 +1268,7 @@ void ClearAllStates (void)
 	for (i = 0; i < 256; i++)
 	{
 		// trigger the up action for all down keys
-		if (keydown[i])
+		if (keydown[i] || key_repeats[i])
 		{
 			Key_Event (i, false);
 			keydown[i] = false;

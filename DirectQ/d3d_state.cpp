@@ -61,25 +61,38 @@ void D3D_SetRenderStatef (D3DRENDERSTATETYPE State, float Value)
 }
 
 
-typedef struct d3d_streamsource_s
+DWORD d3d_SamplerStates[8][16];
+
+void D3D_SetSamplerState (UINT sampler, D3DSAMPLERSTATETYPE type, DWORD state)
 {
-	LPDIRECT3DVERTEXBUFFER9 vb;
-	DWORD offset;
-	DWORD stride;
-} d3d_streamsource_t;
-
-d3d_streamsource_t d3d_VertexStreams[16];
-
-void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset, DWORD stride)
-{
-	d3d_streamsource_t *str = &d3d_VertexStreams[stream];
-
-	if (str->offset == offset && str->stride == stride && str->vb == vb)
+	if (d3d_SamplerStates[sampler][(int) type] == state)
 	{
 		// filter out rendundant changes before they go to the API
 		return;
 	}
 	else
+	{
+		d3d_Device->SetSamplerState (sampler, type, state);
+		d3d_SamplerStates[sampler][(int) type] = state;
+	}
+}
+
+
+typedef struct d3d_streamsource_s
+{
+	LPDIRECT3DVERTEXBUFFER9 vb;
+	DWORD offset;
+	DWORD stride;
+	UINT freq;
+} d3d_streamsource_t;
+
+d3d_streamsource_t d3d_VertexStreams[16];
+
+void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset, DWORD stride, UINT freq)
+{
+	d3d_streamsource_t *str = &d3d_VertexStreams[stream];
+
+	if (str->offset != offset || str->stride != stride || str->vb != vb)
 	{
 		d3d_Device->SetStreamSource (stream, vb, offset, stride);
 		if (vb) d3d_RenderDef.numsss++;
@@ -87,6 +100,12 @@ void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset
 		str->offset = offset;
 		str->stride = stride;
 		str->vb = vb;
+	}
+
+	if (str->freq != freq && d3d_GlobalCaps.supportInstancing)
+	{
+		d3d_Device->SetStreamSourceFreq (stream, freq);
+		str->freq = freq;
 	}
 }
 
@@ -130,14 +149,18 @@ void D3D_SetAllStates (void)
 {
 	// force all renderstates to recache
 	for (int i = 0; i < 256; i++)
-		d3d_RenderStates[i] = 0xffffffff; //~d3d_RenderStates[i];
+		d3d_RenderStates[i] = 0x35012560;
+
+	for (int i = 0; i < 16; i++)
+		for (int s = 0; s < 8; s++)
+			d3d_SamplerStates[s][i] = 0x35012560;
 
 	// force vbos, ibos and vertdecls to rebind
 	for (int s = 0; s < 16; s++)
 	{
 		// force a reset with vb NULL
-		d3d_VertexStreams[s].offset = 0xffffffff;
-		d3d_VertexStreams[s].stride = 0xffffffff;
+		d3d_VertexStreams[s].offset = ~d3d_VertexStreams[s].offset;
+		d3d_VertexStreams[s].stride = ~d3d_VertexStreams[s].stride;
 		d3d_VertexStreams[s].vb = NULL;
 	}
 
@@ -157,22 +180,6 @@ void D3D_SetAllStates (void)
 ========================================================================================================================
 */
 
-
-void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor)
-{
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, blendop);
-	D3D_SetRenderState (D3DRS_SRCBLEND, srcfactor);
-	D3D_SetRenderState (D3DRS_DESTBLEND, dstfactor);
-}
-
-
-void D3D_DisableAlphaBlend (void)
-{
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-}
-
-
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE)
 {
 	// culling passes through here instead of direct so that we can test the gl_cull cvar
@@ -182,29 +189,34 @@ void D3D_BackfaceCull (DWORD D3D_CULLTYPE)
 }
 
 
-void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode, DWORD tmu2mode)
+void D3D_SetTextureAddress (DWORD stage, DWORD mode)
 {
-	D3DHLSL_SetAddressMode (0, tmu0mode);
-	D3DHLSL_SetAddressMode (1, tmu1mode);
-	D3DHLSL_SetAddressMode (2, tmu2mode);
+	D3D_SetSamplerState (stage, D3DSAMP_ADDRESSU, mode);
+	D3D_SetSamplerState (stage, D3DSAMP_ADDRESSV, mode);
+	D3D_SetSamplerState (stage, D3DSAMP_ADDRESSW, mode);
 }
 
+
+#define USING_ANISOTROPY(cap) (r_anisotropicfilter.integer > 1 && d3d_DeviceCaps.MaxAnisotropy > 1 && (d3d_DeviceCaps.TextureFilterCaps & cap))
 
 void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILTERTYPE desired)
 {
 	D3DTEXTUREFILTERTYPE actual = desired;
 	extern cvar_t r_anisotropicfilter;
+	int filter = 0;
 
 	// check against caps and gracefully degrade
 	switch (type)
 	{
 	case D3DSAMP_MAGFILTER:
+		filter = 0;
+
 		switch (desired)
 		{
 		case D3DTEXF_LINEAR:
 			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFLINEAR)
 			{
-				if (r_anisotropicfilter.integer > 1 && d3d_DeviceCaps.MaxAnisotropy > 1 && (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFANISOTROPIC))
+				if (USING_ANISOTROPY (D3DPTFILTERCAPS_MAGFANISOTROPIC))
 					actual = D3DTEXF_ANISOTROPIC;
 				else actual = D3DTEXF_LINEAR;
 
@@ -215,16 +227,17 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 			actual = D3DTEXF_POINT;
 		}
 
-		D3DHLSL_SetMagFilter (stage, actual);
 		break;
 
 	case D3DSAMP_MINFILTER:
+		filter = 2;
+
 		switch (desired)
 		{
 		case D3DTEXF_LINEAR:
 			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFLINEAR)
 			{
-				if (r_anisotropicfilter.integer > 1 && d3d_DeviceCaps.MaxAnisotropy > 1 && (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFANISOTROPIC))
+				if (USING_ANISOTROPY (D3DPTFILTERCAPS_MINFANISOTROPIC))
 					actual = D3DTEXF_ANISOTROPIC;
 				else actual = D3DTEXF_LINEAR;
 
@@ -235,11 +248,12 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 			actual = D3DTEXF_POINT;
 		}
 
-		D3DHLSL_SetMinFilter (stage, actual);
 		break;
 
 
 	case D3DSAMP_MIPFILTER:
+		filter = 1;
+
 		switch (desired)
 		{
 		case D3DTEXF_LINEAR:
@@ -263,12 +277,13 @@ void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILT
 			actual = D3DTEXF_NONE;
 		}
 
-		D3DHLSL_SetMipFilter (stage, actual);
 		break;
 
 	default:
 		return;
 	}
+
+	D3D_SetSamplerState (stage, type, actual);
 }
 
 

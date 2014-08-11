@@ -79,25 +79,14 @@ void D3DWarp_InitializeTurb (void)
 		d3d_TeleAlpha = BYTE_CLAMP (r_telealpha.value * 256);
 	}
 
-	// bound factor
-	if (r_warpfactor.value < 0) Cvar_Set (&r_warpfactor, 0.0f);
-	if (r_warpfactor.value > 8) Cvar_Set (&r_warpfactor, 8);
-
-	// bound scale
-	if (r_warpscale.value < 0) Cvar_Set (&r_warpscale, 0.0f);
-	if (r_warpscale.value > 32) Cvar_Set (&r_warpscale, 32);
-
-	// bound speed
-	if (r_warpspeed.value < 1) Cvar_Set (&r_warpspeed, 1);
-	if (r_warpspeed.value > 32) Cvar_Set (&r_warpspeed, 32);
-
 	// set the warp time and factor (moving this calculation out of a loop)
-	warptime = d3d_RenderDef.time * 10.18591625f * r_warpspeed.value;
+	warptime = cl.time * 10.18591625f * r_warpspeed.value;
 
-	// update once only in the master shader
-	D3DHLSL_SetFloat ("warptime", warptime);
-	D3DHLSL_SetFloat ("warpfactor", r_warpfactor.value);
-	D3DHLSL_SetFloat ("warpscale", r_warpscale.value);
+	// all of these below are premultiplied by various factors to save on PS instructions
+	// some day I'll #define them properly so that we don't have scary magic numbers all over the place
+	D3DHLSL_SetFloat ("warptime", warptime * 0.0039215f);
+	D3DHLSL_SetFloat ("warpfactor", r_warpfactor.value * 64.0f * 0.0039215f);
+	D3DHLSL_SetFloat ("warpscale", r_warpscale.value * 2.0f * (1.0f / 64.0f));
 }
 
 
@@ -108,12 +97,13 @@ void D3DWarp_SetupTurbState (void)
 {
 	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
 	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
-	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+	D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
+	D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
+
+	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// warping
 
 	D3DBrush_SetBuffers ();
 	D3DHLSL_SetPass (FX_PASS_LIQUID);
-
-	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// warping
 
 	previouswarptexture = NULL;
 	previouswarpalpha = -1;
@@ -139,13 +129,8 @@ void D3D_EmitModelSurfToAlpha (d3d_modelsurf_t *modelsurf)
 			modelsurf->surf->midpoint[2]
 		};
 
-		// keep the code easier to read
-		D3DMATRIX *m = &modelsurf->ent->matrix;
-
 		// transform the surface midpoint by the modelsurf matrix so that it goes into the proper place
-		modelsurf->surf->midpoint[0] = midpoint[0] * m->_11 + midpoint[1] * m->_21 + midpoint[2] * m->_31 + m->_41;
-		modelsurf->surf->midpoint[1] = midpoint[0] * m->_12 + midpoint[1] * m->_22 + midpoint[2] * m->_32 + m->_42;
-		modelsurf->surf->midpoint[2] = midpoint[0] * m->_13 + midpoint[1] * m->_23 + midpoint[2] * m->_33 + m->_43;
+		D3DMatrix_TransformPoint (&modelsurf->ent->matrix, midpoint, modelsurf->surf->midpoint);
 
 		// now add it
 		D3DAlpha_AddToList (modelsurf);
@@ -270,8 +255,8 @@ rttverts_t d3d_RTTVerts[4];
 void D3DRTT_SetVertex (rttverts_t *dst, float x, float y, float s1, float t1, float s2, float t2)
 {
 	// correct the half-pixel offset
-	dst->xyz[0] = x + 0.5f;
-	dst->xyz[1] = y + 0.5f;
+	dst->xyz[0] = x;
+	dst->xyz[1] = y;
 	dst->xyz[2] = 0;
 
 	dst->st1[0] = s1;
@@ -282,12 +267,35 @@ void D3DRTT_SetVertex (rttverts_t *dst, float x, float y, float s1, float t1, fl
 }
 
 
+int D3DRTT_RescaleDimension (int dim)
+{
+	/*
+	// take a power of 2 equal to or below the requested resolution
+	// this needs to be re-evaluated at runtime every time as sb_lines can change
+	// (although it can probably go into recalc_refdef just as easily...)
+	for (int i = 1; ; i <<= 1)
+	{
+		if (i > dim) return (i >> 1);
+		if (i == dim) return i;
+	}
+	*/
+
+	// never reached; keep compiler happy
+	return dim;
+}
+
+
 void D3DRTT_CreateRTTTexture (void)
 {
+	int i = D3DRTT_RescaleDimension (480);
+	i = D3DRTT_RescaleDimension (500);
+	i = D3DRTT_RescaleDimension (512);
+	i = D3DRTT_RescaleDimension (520);
+
 	hr = d3d_Device->CreateTexture
 	(
-		d3d_CurrentMode.Width,
-		d3d_CurrentMode.Height,
+		D3DRTT_RescaleDimension (d3d_CurrentMode.Width),
+		D3DRTT_RescaleDimension (d3d_CurrentMode.Height),
 		1,
 		D3DUSAGE_RENDERTARGET,
 		D3DFMT_X8R8G8B8,
@@ -339,8 +347,11 @@ cvar_t r_waterwarpfactor ("r_waterwarpfactor", 12.0f, CVAR_ARCHIVE);
 
 void D3DRTT_BeginScene (void)
 {
+	d3d_RenderDef.RTT = false;
+
 	// ensure that this fires only if we're actually running a map
 	if (cls.state != ca_connected) return;
+	if (d3d_RenderDef.automap) return;
 
 	// check if we're underwater first
 	if (r_waterwarp.integer != 666)
@@ -372,6 +383,7 @@ void D3DRTT_BeginScene (void)
 
 	// testing
 	// Con_Printf ("doing rtt\n");
+	d3d_RenderDef.RTT = true;
 
 	// store out the original backbuffer
 	d3d_Device->GetRenderTarget (0, &d3d_RTTBackBuffer);
@@ -406,16 +418,13 @@ void D3DRTT_EndScene (void)
 	D3DMatrix_Identity (&m);
 	D3DMatrix_OrthoOffCenterRH (&m, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
 
-	// disable depth testing and writing
-	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-
-	// no backface culling or alpha blending
-	D3D_BackfaceCull (D3DCULL_NONE);
+	// no alpha blending
 	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 
 	// the 3rd texture needs to wrap as it's drawn shrunken and controls the sine warp
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP);
+	D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
+	D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
+	D3D_SetTextureAddress (2, D3DTADDRESS_WRAP);
 
 	// set up shader for drawing
 	D3DHLSL_SetWorldMatrix (&m);
@@ -456,7 +465,7 @@ void D3DRTT_EndScene (void)
 	sbheight *= d3d_CurrentMode.Height;
 	sbheight /= vid.height;
 
-	float th = (float) (d3d_CurrentMode.Height - sbheight) / (float) d3d_CurrentMode.Height;
+	float th = (float) D3DRTT_RescaleDimension (d3d_CurrentMode.Height - sbheight) / (float) D3DRTT_RescaleDimension (d3d_CurrentMode.Height);
 
 	// update our RTT verts
 	D3DRTT_SetVertex (&d3d_RTTVerts[0], 0, 0, 0, 0, 0, 0);
@@ -470,7 +479,7 @@ void D3DRTT_EndScene (void)
 	d3d_RTTVerts[2].c = blendcolor;
 	d3d_RTTVerts[3].c = blendcolor;
 
-	D3DHLSL_SetFloat ("warptime", d3d_RenderDef.time * r_waterwarpspeed.value);
+	D3DHLSL_SetFloat ("warptime", cl.time * r_waterwarpspeed.value);
 
 	// prevent division by 0 in the shader
 	if (r_waterwarpscale.value < 1) Cvar_Set (&r_waterwarpscale, 1.0f);

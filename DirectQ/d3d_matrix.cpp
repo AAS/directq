@@ -61,8 +61,8 @@ D3DMATRIX *D3DMatrix_OrthoOffCenterRH (D3DMATRIX *matrix, FLOAT l, FLOAT r, FLOA
 	tmp.m[0][0] = 2.0f / (r - l);
 	tmp.m[1][1] = 2.0f / (t - b);
 	tmp.m[2][2] = 1.0f / (zn - zf);
-	tmp.m[3][0] = -1.0f - 2.0f * l / (r - l);
-	tmp.m[3][1] = 1.0f + 2.0f * t / (b - t);
+	tmp.m[3][0] = (l + r) / (l - r);
+	tmp.m[3][1] = (t + b) / (b - t);
 	tmp.m[3][2] = zn / (zn - zf);
 
 	D3DMatrix_Multiply (matrix, &tmp, matrix);
@@ -83,6 +83,19 @@ void D3DMatrix_Translate (D3DMATRIX *matrix, float x, float y, float z)
 }
 
 
+void D3DMatrix_Translate (D3DMATRIX *matrix, float *xyz)
+{
+	D3DMATRIX tmp;
+	D3DMatrix_Identity (&tmp);
+
+	tmp.m[3][0] = xyz[0];
+	tmp.m[3][1] = xyz[1];
+	tmp.m[3][2] = xyz[2];
+
+	D3DMatrix_Multiply (matrix, &tmp, matrix);
+}
+
+
 void D3DMatrix_Scale (D3DMATRIX *matrix, float x, float y, float z)
 {
 	D3DMATRIX tmp;
@@ -93,6 +106,27 @@ void D3DMatrix_Scale (D3DMATRIX *matrix, float x, float y, float z)
 	tmp.m[2][2] = z;
 
 	D3DMatrix_Multiply (matrix, &tmp, matrix);
+}
+
+
+void D3DMatrix_Scale (D3DMATRIX *matrix, float *xyz)
+{
+	D3DMATRIX tmp;
+	D3DMatrix_Identity (&tmp);
+
+	tmp.m[0][0] = xyz[0];
+	tmp.m[1][1] = xyz[1];
+	tmp.m[2][2] = xyz[2];
+
+	D3DMatrix_Multiply (matrix, &tmp, matrix);
+}
+
+
+void D3DMatrix_TransformPoint (D3DMATRIX *matrix, float *in, float *out)
+{
+	out[0] = in[0] * matrix->_11 + in[1] * matrix->_21 + in[2] * matrix->_31 + matrix->_41;
+	out[1] = in[0] * matrix->_12 + in[1] * matrix->_22 + in[2] * matrix->_32 + matrix->_42;
+	out[2] = in[0] * matrix->_13 + in[1] * matrix->_23 + in[2] * matrix->_33 + matrix->_43;
 }
 
 

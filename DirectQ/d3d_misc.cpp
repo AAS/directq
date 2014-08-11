@@ -36,7 +36,7 @@ void R_AnimateLight (void);
 
 void R_InitParticles (void);
 void R_ClearParticles (void);
-void D3D_BuildLightmaps (void);
+void D3DLight_BuildAllLightmaps (void);
 void D3DSky_LoadSkyBox (char *basename, bool feedback);
 
 LPDIRECT3DTEXTURE9 r_notexture = NULL;
@@ -55,7 +55,7 @@ void R_InitTextures (void)
 	// create a simple checkerboard texture for the default
 	r_notexture_mip = (texture_t *) Zone_Alloc (sizeof (texture_t) + 4 * 4);
 
-	r_notexture_mip->width = r_notexture_mip->height = 4;
+	r_notexture_mip->size[0] = r_notexture_mip->size[1] = 4;
 	byte *dest = (byte *) (r_notexture_mip + 1);
 
 	for (int y = 0; y < 4; y++)
@@ -98,34 +98,12 @@ void R_InitResourceTextures (void)
 	D3D_LoadResourceTexture ("YAH", &yahtexture, IDR_YOUAREHERE, 0);
 	D3D_LoadResourceTexture ("IDR_UWWARP", &d3d_WaterWarpTexture, IDR_UWWARP, 0);
 
-	/*
-	{
-		D3DLOCKED_RECT lockrect;
-		byte *rgba;
-
-		d3d_WaterWarpTexture->LockRect (0, &lockrect, NULL, 0);
-		rgba = (byte *) lockrect.pBits;
-
-		for (int i = 0; i < 64 * 64; i++, rgba += 4)
-		{
-			rgba[0] = rgba[2];
-			rgba[1] = rgba[2];
-			rgba[2] = rgba[2];
-			rgba[3] = rgba[2];
-		}
-
-		d3d_WaterWarpTexture->UnlockRect (0);
-
-		SCR_WriteTextureToTGA ("uwwarp.tga", d3d_WaterWarpTexture, D3DFMT_A8R8G8B8);
-	}
-	*/
-
 	// because this is just a square we can upload it as a 1x1 texture and save a lot of performance
 	unsigned int squaredata = 0xffffffff;
 	D3D_UploadTexture (&particlesquaretexture, &squaredata, 1, 1, IMAGE_32BIT);
 
 	// load the notexture properly
-	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->width, r_notexture_mip->height, IMAGE_MIPMAP | IMAGE_NOCOMPRESS);
+	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->size[0], r_notexture_mip->size[1], IMAGE_MIPMAP);
 }
 
 
@@ -261,12 +239,12 @@ void Con_RemoveConsole (void);
 void Menu_RemoveMenu (void);
 void D3DSky_RevalidateSkybox (void);
 void D3D_ModelSurfsBeginMap (void);
-void R_FixupBModelBBoxes (void);
 void Fog_ParseWorldspawn (void);
 void IN_ClearStates (void);
 void D3DAlias_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
 void Mod_InitForMap (model_t *mod);
+void D3DTexture_DefineChains (void);
 
 void R_ParseForNehahra (void)
 {
@@ -279,13 +257,12 @@ void R_NewMap (void)
 	if (!sv.active) Mod_InitForMap (cl.worldmodel);
 
 	// init frame counters
-	d3d_RenderDef.skyframe = -1;
 	d3d_RenderDef.framecount = 1;
 	d3d_RenderDef.visframecount = 0;
 
 	// normal light value - making this consistent with a value of 'm' in R_AnimateLight
 	// will prevent the upload of lightmaps when a surface is first seen!
-	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 264;
+	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 264; // consistency with ('m' - 'a') * 22
 
 	// clear out efrags (one short???)
 	for (int i = 0; i < cl.worldmodel->brushhdr->numleafs; i++)
@@ -307,19 +284,20 @@ void R_NewMap (void)
 	// no viewpoint
 	d3d_RenderDef.viewleaf = NULL;
 	d3d_RenderDef.oldviewleaf = NULL;
+	d3d_RenderDef.lastgoodcontents = NULL;
 
 	// setup stuff
 	R_ClearParticles ();
 
-	D3D_BuildLightmaps ();
+	D3DLight_BuildAllLightmaps ();
 	D3D_FlushTextures ();
 	R_SetLeafContents ();
 	D3DSky_ParseWorldSpawn ();
 	D3D_ModelSurfsBeginMap ();
 	D3DAlpha_NewMap ();
-	R_FixupBModelBBoxes ();
 	Fog_ParseWorldspawn ();
 	D3DAlias_CreateBuffers ();
+	D3DTexture_DefineChains ();
 
 	// release cached skins to save memory
 	for (int i = 0; i < 256; i++) SAFE_RELEASE (d3d_PlayerSkins[i].d3d_Texture);
@@ -357,6 +335,9 @@ void R_NewMap (void)
 
 	// flush all the input buffers and go back to a default state
 	IN_ClearStates ();
+
+	// go to the next registration sequence
+	d3d_RenderDef.RegistrationSequence++;
 }
 
 

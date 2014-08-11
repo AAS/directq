@@ -46,21 +46,17 @@ bool SilentLoad = false;
 char *vs_version;
 char *ps_version;
 
+// ps2.0 defines at least 8 textures as being available
+#define MAX_HLSL_TEXTURES	8
+
 typedef struct d3d_hlslstate_s
 {
 	float AlphaVal;
-	float DepthBias;
 	float CurrLerp;
 	float LastLerp;
 
-	LPDIRECT3DBASETEXTURE9 newtextures[3];
-	LPDIRECT3DBASETEXTURE9 oldtextures[3];
-	LPDIRECT3DBASETEXTURE9 oldcubemap;
-	LPDIRECT3DBASETEXTURE9 newcubemap;
-	DWORD addressmodes[3];
-	DWORD magfilters[3];
-	DWORD minfilters[3];
-	DWORD mipfilters[3];
+	LPDIRECT3DBASETEXTURE9 newtextures[MAX_HLSL_TEXTURES];
+	LPDIRECT3DBASETEXTURE9 oldtextures[MAX_HLSL_TEXTURES];
 
 	bool commitpending;
 	int currentpass;
@@ -77,7 +73,8 @@ void D3DHLSL_CheckCommit (void)
 	// now check for texture changes; this is always done even if we don't commit as we need a reset if we switch shaders
 	// texture changes are done this way rather than through ID3DXBaseEffect::SetTexture to avoid a computationally expensive
 	// AddRef and Release (just profile an app using ID3DXBaseEffect::SetTexture in PIX and you'll see what I mean!)
-	for (int i = 0; i < 3; i++)
+	// we specified explicit registers for our samplers so that we can safely do this (also see use of SetSamplerState)
+	for (int i = 0; i < MAX_HLSL_TEXTURES; i++)
 	{
 		// note - we specified explicit registers for our samplers so that we can safely do this
 		if (d3d_HLSLState.oldtextures[i] != d3d_HLSLState.newtextures[i])
@@ -85,13 +82,6 @@ void D3DHLSL_CheckCommit (void)
 			if (d3d_HLSLState.newtextures[i]) d3d_Device->SetTexture (i, d3d_HLSLState.newtextures[i]);
 			d3d_HLSLState.oldtextures[i] = d3d_HLSLState.newtextures[i];
 		}
-	}
-
-	// note - we specified explicit registers for our samplers so that we can safely do this
-	if (d3d_HLSLState.oldcubemap != d3d_HLSLState.newcubemap)
-	{
-		if (d3d_HLSLState.newcubemap) d3d_Device->SetTexture (3, d3d_HLSLState.newcubemap);
-		d3d_HLSLState.oldcubemap = d3d_HLSLState.newcubemap;
 	}
 
 	// always clear the commit flag so that it doesn't incorrectly fire later on
@@ -103,12 +93,9 @@ void D3DHLSL_SetPass (int passnum)
 {
 	if (d3d_HLSLState.currentpass != passnum)
 	{
-		// end any previous pass we were using
+		// end any previous pass we were using (but only if we were using one)
 		if (d3d_HLSLState.currentpass != FX_PASS_NOTBEGUN)
 		{
-			// this fixes a D3DX runtime warning
-			// D3DHLSL_CheckCommit ();
-
 			// and now we can end the pass
 			d3d_MasterFX->EndPass ();
 		}
@@ -117,10 +104,8 @@ void D3DHLSL_SetPass (int passnum)
 		d3d_HLSLState.commitpending = false;
 
 		// force all textures to recache
-		d3d_HLSLState.oldtextures[0] = NULL;
-		d3d_HLSLState.oldtextures[1] = NULL;
-		d3d_HLSLState.oldtextures[2] = NULL;
-		d3d_HLSLState.oldcubemap = NULL;
+		for (int i = 0; i < MAX_HLSL_TEXTURES; i++)
+			d3d_HLSLState.oldtextures[i] = NULL;
 
 		// interesting - BeginPass clears the currently set textures... how evil...
 		d3d_HLSLState.currentpass = passnum;
@@ -142,21 +127,11 @@ void D3DHLSL_SetAlpha (float alphaval)
 }
 
 
-void D3DHLSL_SetDepthBias (float depthbias)
-{
-	if (depthbias != d3d_HLSLState.DepthBias)
-	{
-		D3DHLSL_SetFloat ("DepthBias", depthbias);
-		d3d_HLSLState.DepthBias = depthbias;
-	}
-}
-
-
 void D3DHLSL_SetCurrLerp (float val)
 {
 	if (val != d3d_HLSLState.CurrLerp)
 	{
-		// 1/200 is used here so that we can get full -1..1 range
+		// 1/200 is used here so that we can get -0.5..0.5 range preventing the normal from overbrighting/overdarking too much
 		float lerpval[2] = {val, val * 0.005f};
 
 		D3DHLSL_SetFloatArray ("currlerp", lerpval, 2);
@@ -169,7 +144,7 @@ void D3DHLSL_SetLastLerp (float val)
 {
 	if (val != d3d_HLSLState.LastLerp)
 	{
-		// 1/200 is used here so that we can get full -1..1 range
+		// 1/200 is used here so that we can get -0.5..0.5 range preventing the normal from overbrighting/overdarking too much
 		float lerpval[2] = {val, val * 0.005f};
 
 		D3DHLSL_SetFloatArray ("lastlerp", lerpval, 2);
@@ -178,64 +153,10 @@ void D3DHLSL_SetLastLerp (float val)
 }
 
 
-D3DXHANDLE d3d_hlslstages[] = {"tmu0Texture", "tmu1Texture", "tmu2Texture"};
-D3DXHANDLE d3d_hlsladdressmodestages[] = {"address0", "address1", "address2"};
-D3DXHANDLE d3d_magfilterstages[] = {"magfilter0", "magfilter1", "magfilter2"};
-D3DXHANDLE d3d_mipfilterstages[] = {"mipfilter0", "mipfilter1", "mipfilter2"};
-D3DXHANDLE d3d_minfilterstages[] = {"minfilter0", "minfilter1", "minfilter2"};
-
-
-void D3DHLSL_SetCubemap (LPDIRECT3DBASETEXTURE9 tex)
-{
-	// changing texture no longer forces a commit here but it does store it out for later
-	d3d_HLSLState.newcubemap = tex;
-}
-
-
 void D3DHLSL_SetTexture (UINT stage, LPDIRECT3DBASETEXTURE9 tex)
 {
 	// changing texture no longer forces a commit here but it does store it out for later
 	d3d_HLSLState.newtextures[stage] = tex;
-}
-
-
-void D3DHLSL_SetAddressMode (UINT stage, DWORD mode)
-{
-	if (d3d_HLSLState.addressmodes[stage] != mode)
-	{
-		D3DHLSL_SetInt (d3d_hlsladdressmodestages[stage], mode);
-		d3d_HLSLState.addressmodes[stage] = mode;
-	}
-}
-
-
-void D3DHLSL_SetMagFilter (UINT stage, DWORD mode)
-{
-	if (d3d_HLSLState.magfilters[stage] != mode)
-	{
-		D3DHLSL_SetInt (d3d_magfilterstages[stage], mode);
-		d3d_HLSLState.magfilters[stage] = mode;
-	}
-}
-
-
-void D3DHLSL_SetMipFilter (UINT stage, DWORD mode)
-{
-	if (d3d_HLSLState.mipfilters[stage] != mode)
-	{
-		D3DHLSL_SetInt (d3d_mipfilterstages[stage], mode);
-		d3d_HLSLState.mipfilters[stage] = mode;
-	}
-}
-
-
-void D3DHLSL_SetMinFilter (UINT stage, DWORD mode)
-{
-	if (d3d_HLSLState.minfilters[stage] != mode)
-	{
-		D3DHLSL_SetInt (d3d_minfilterstages[stage], mode);
-		d3d_HLSLState.minfilters[stage] = mode;
-	}
 }
 
 
@@ -289,12 +210,8 @@ void D3DHLSL_BeginFrame (void)
 	if (blah != r_anisotropicfilter.integer)
 		Cvar_Set (&r_anisotropicfilter, (float) blah);
 
-	// draw MDLs at regular depth by default
-	D3DHLSL_SetDepthBias (1.0f);
-
-	D3DHLSL_SetInt ("aniso0", r_anisotropicfilter.integer);
-	D3DHLSL_SetInt ("aniso1", r_anisotropicfilter.integer);
-	D3DHLSL_SetInt ("aniso2", r_anisotropicfilter.integer);
+	for (int i = 0; i < MAX_HLSL_TEXTURES; i++)
+		D3D_SetSamplerState (i, D3DSAMP_MAXANISOTROPY, r_anisotropicfilter.integer);
 }
 
 
@@ -307,9 +224,8 @@ void D3DHLSL_EndFrame (void)
 		d3d_HLSLState.currentpass = FX_PASS_NOTBEGUN;
 
 		// unbind all resources used by this FX
-		D3DHLSL_SetTexture (0, NULL);
-		D3DHLSL_SetTexture (1, NULL);
-		D3DHLSL_SetTexture (2, NULL);
+		for (int i = 0; i < MAX_HLSL_TEXTURES; i++)
+			D3DHLSL_SetTexture (i, NULL);
 
 		d3d_Device->SetVertexShader (NULL);
 		d3d_Device->SetPixelShader (NULL);
@@ -372,35 +288,14 @@ void D3DHLSL_InvalidateState (void)
 {
 	// this is run at the start of every frame and resets the shader state so that everything is picked up validly
 	d3d_HLSLState.AlphaVal = -1;
-	d3d_HLSLState.DepthBias = -1;
 	d3d_HLSLState.CurrLerp = -1;
 	d3d_HLSLState.LastLerp = -1;
 
-	d3d_HLSLState.oldtextures[0] = NULL;
-	d3d_HLSLState.oldtextures[1] = NULL;
-	d3d_HLSLState.oldtextures[2] = NULL;
-	d3d_HLSLState.oldcubemap = NULL;
-
-	d3d_HLSLState.newtextures[0] = NULL;
-	d3d_HLSLState.newtextures[1] = NULL;
-	d3d_HLSLState.newtextures[2] = NULL;
-	d3d_HLSLState.newcubemap = NULL;
-
-	d3d_HLSLState.addressmodes[0] = 0xffffffff;
-	d3d_HLSLState.addressmodes[1] = 0xffffffff;
-	d3d_HLSLState.addressmodes[2] = 0xffffffff;
-
-	d3d_HLSLState.magfilters[0] = 0xffffffff;
-	d3d_HLSLState.magfilters[1] = 0xffffffff;
-	d3d_HLSLState.magfilters[2] = 0xffffffff;
-
-	d3d_HLSLState.mipfilters[0] = 0xffffffff;
-	d3d_HLSLState.mipfilters[1] = 0xffffffff;
-	d3d_HLSLState.mipfilters[2] = 0xffffffff;
-
-	d3d_HLSLState.minfilters[0] = 0xffffffff;
-	d3d_HLSLState.minfilters[1] = 0xffffffff;
-	d3d_HLSLState.minfilters[2] = 0xffffffff;
+	for (int i = 0; i < MAX_HLSL_TEXTURES; i++)
+	{
+		d3d_HLSLState.oldtextures[i] = NULL;
+		d3d_HLSLState.newtextures[i] = NULL;
+	}
 
 	d3d_HLSLState.currentpass = FX_PASS_NOTBEGUN;
 	d3d_HLSLState.commitpending = false;
@@ -438,12 +333,22 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 	{
 		char *errstr = (char *) errbuf->GetBufferPointer ();
 		Con_Printf ("D3DHLSL_LoadEffect: Fatal error compiling %s\n%s", name, errstr);
+
+#ifdef _DEBUG
+		DebugBreak ();
+#endif
+
 		errbuf->Release ();
 	}
 	else if (errbuf)
 	{
 		char *errstr = (char *) errbuf->GetBufferPointer ();
 		Con_Printf ("D3DHLSL_LoadEffect: Non-fatal error compiling %s\n%s", name, errstr);
+
+#ifdef _DEBUG
+		DebugBreak ();
+#endif
+
 		errbuf->Release ();
 	}
 }

@@ -44,7 +44,6 @@ extern byte *checkpvs;
 // local
 byte	*mod_novis;
 
-#define	MAX_MOD_KNOWN	8192
 model_t	**mod_known = NULL;
 int		mod_numknown = 0;
 
@@ -57,13 +56,18 @@ RadiusFromBounds
 */
 float RadiusFromBounds (vec3_t mins, vec3_t maxs)
 {
-	int		i;
-	vec3_t	corner;
+	vec3_t extent;
+	float radius = 0;
 
-	for (i = 0; i < 3; i++)
-		corner[i] = fabs (mins[i]) > fabs (maxs[i]) ? fabs (mins[i]) : fabs (maxs[i]);
+	extent[0] = fabs (maxs[0] - mins[0]) * 0.5f;
+	extent[1] = fabs (maxs[1] - mins[1]) * 0.5f;
+	extent[2] = fabs (maxs[2] - mins[2]) * 0.5f;
 
-	return Length (corner);
+	if (extent[0] > radius) radius = extent[0];
+	if (extent[1] > radius) radius = extent[1];
+	if (extent[2] > radius) radius = extent[2];
+
+	return radius;
 }
 
 
@@ -252,7 +256,7 @@ void Mod_ClearAll (void)
 		mod_known[i] = NULL;
 
 	// note - this was a nasty memory leak which I'm sure was inherited from the original code.
-	// the models array never went down, so if over 512 unique models get loaded it's crash time.
+	// the models array never went down, so if over MAX_MOD_KNOWN unique models get loaded it's crash time.
 	// very unlikely to happen, but it was there all the same...
 	mod_numknown = 0;
 }
@@ -317,7 +321,12 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	unsigned *buf;
 
 	// already loaded
-	if (!mod->needload) return mod;
+	if (!mod->needload)
+	{
+		mod->RegistrationSequence = d3d_RenderDef.RegistrationSequence;
+		mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
+		return mod;
+	}
 
 	// look for a cached copy
 	model_t *cachemod = (model_t *) MainCache->Check (mod->name);
@@ -329,6 +338,8 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 
 		// don't need to load it
 		mod->needload = false;
+		mod->RegistrationSequence = d3d_RenderDef.RegistrationSequence;
+		mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
 
 		// return the mod we got
 		return mod;
@@ -376,6 +387,8 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
 
 	Zone_Free (buf);
+
+	mod->RegistrationSequence = d3d_RenderDef.RegistrationSequence;
 	return mod;
 }
 
@@ -537,8 +550,8 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 		tx->name[16] = 0;
 		memcpy (tx->name, mt->name, sizeof (mt->name));
 
-		tx->width = mt->width;
-		tx->height = mt->height;
+		tx->size[0] = mt->width;
+		tx->size[1] = mt->height;
 
 		if (mt->offsets[0] == 0 && mod->brushhdr->bspversion == HL_BSPVERSION)
 		{
@@ -569,11 +582,13 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 		// check for water
 		if (mt->name[0] == '*')
 		{
+			int size = mt->width * mt->height;
+
 			tx->contentscolor[0] = 0;
 			tx->contentscolor[1] = 0;
 			tx->contentscolor[2] = 0;
 
-			for (j = 0; j < (tx->width * tx->height); j++)
+			for (j = 0; j < size; j++)
 			{
 				PALETTEENTRY bgra = d3d_QuakePalette.standard[texels[j]];
 
@@ -583,9 +598,9 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 			}
 
 			// bring to approximate scale of the cshifts
-			tx->contentscolor[0] /= ((tx->width * tx->height) / 3);
-			tx->contentscolor[1] /= ((tx->width * tx->height) / 3);
-			tx->contentscolor[2] /= ((tx->width * tx->height) / 3);
+			tx->contentscolor[0] /= (size / 3);
+			tx->contentscolor[1] /= (size / 3);
+			tx->contentscolor[2] /= (size / 3);
 		}
 		else
 		{
@@ -599,8 +614,8 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 			D3DSky_InitTextures (mt);
 
 			// set correct dimensions for texcoord building
-			tx->width = 64;
-			tx->height = 64;
+			tx->size[0] = 64.0f;
+			tx->size[1] = 64.0f;
 		}
 		else
 		{
@@ -609,10 +624,8 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 				int texflags = IMAGE_MIPMAP | IMAGE_BSP;
 				int lumaflags = IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA;
 
-				// load the luma first so that we know if we have it
-				if ((tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, lumaflags)) != NULL)
-					texflags |= IMAGE_NOCOMPRESS;
-
+				// load the luma first so that we know if we have it (remind me again of why we need to know that)
+				tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, lumaflags);
 				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, texflags);
 			}
 			else
@@ -1072,14 +1085,13 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf, brushpolyvert_t *v
 		// texcoords
 		if (surf->flags & SURF_DRAWTURB)
 		{
-			// no division by texture size to keep the warp valid
-			verts->st[0] = verts->st2[0] = st[0] - surf->texinfo->vecs[0][3];
-			verts->st[1] = verts->st2[1] = st[1] - surf->texinfo->vecs[1][3];
+			verts->st[0] = verts->st2[0] = (st[0] - surf->texinfo->vecs[0][3]) / 64.0f;
+			verts->st[1] = verts->st2[1] = (st[1] - surf->texinfo->vecs[1][3]) / 64.0f;
 		}
 		else
 		{
-			verts->st[0] = st[0] / (float) surf->texinfo->texture->width;
-			verts->st[1] = st[1] / (float) surf->texinfo->texture->height;
+			verts->st[0] = st[0] / surf->texinfo->texture->size[0];
+			verts->st[1] = st[1] / surf->texinfo->texture->size[1];
 		}
 	}
 
@@ -1554,8 +1566,8 @@ Mod_LoadPlanes
 void Mod_LoadPlanes (model_t *mod, byte *mod_base, lump_t *l)
 {
 	int			i, j;
-	mplane_t	*out;
 	dplane_t 	*in;
+	mplane_t	*out;
 	int			count;
 	int			bits;
 
@@ -1648,36 +1660,6 @@ static void Mod_RecalcNodeBBox (mnode_t *node)
 }
 
 
-void Mod_CorrectBModelBBox (model_t *mod)
-{
-	// build a tight bbox around the mod
-	mod->mins[0] = mod->mins[1] = mod->mins[2] = 99999999;
-	mod->maxs[0] = mod->maxs[1] = mod->maxs[2] = -99999999;
-
-	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
-
-	for (int c = 0; c < mod->brushhdr->nummodelsurfaces; c++, surf++)
-	{
-		if (surf->mins[0] < mod->mins[0]) mod->mins[0] = surf->mins[0];
-		if (surf->mins[1] < mod->mins[1]) mod->mins[1] = surf->mins[1];
-		if (surf->mins[2] < mod->mins[2]) mod->mins[2] = surf->mins[2];
-
-		if (surf->maxs[0] > mod->maxs[0]) mod->maxs[0] = surf->maxs[0];
-		if (surf->maxs[1] > mod->maxs[1]) mod->maxs[1] = surf->maxs[1];
-		if (surf->maxs[2] > mod->maxs[2]) mod->maxs[2] = surf->maxs[2];
-	}
-
-	// expand the bbox a little to ensure that it's a real box
-	mod->mins[0] -= BBEXPAND;
-	mod->mins[1] -= BBEXPAND;
-	mod->mins[2] -= BBEXPAND;
-
-	mod->maxs[0] += BBEXPAND;
-	mod->maxs[1] += BBEXPAND;
-	mod->maxs[2] += BBEXPAND;
-}
-
-
 void Mod_SetupBModelFromDisk (dheader_t *header)
 {
 	// set up pointers for anything that can just come directly from the BSP file itself but
@@ -1694,6 +1676,25 @@ void Mod_SetupBModelFromDisk (dheader_t *header)
 
 	d_bspmodel.numedges = header->lumps[LUMP_EDGES].filelen / sizeof (dedge_t);
 	d_bspmodel.edges = (dedge_t *) (mod_base + header->lumps[LUMP_EDGES].fileofs);
+}
+
+
+void Mod_CalcBModelBBox (model_t *mod, brushhdr_t *hdr)
+{
+	// qbsp is goddam SLOPPY with bboxes so let's do them right
+	msurface_t *surf = hdr->surfaces + hdr->firstmodelsurface;
+
+	hdr->bmins[0] = hdr->bmins[1] = hdr->bmins[2] = 99999999;
+	hdr->bmaxs[0] = hdr->bmaxs[1] = hdr->bmaxs[2] = -99999999;
+
+	for (int i = 0; i < hdr->nummodelsurfaces; i++, surf++)
+	{
+		for (int j = 0; j < 3; j++)
+		{
+			if (surf->mins[j] < hdr->bmins[j]) hdr->bmins[j] = surf->mins[j];
+			if (surf->maxs[j] > hdr->bmaxs[j]) hdr->bmaxs[j] = surf->maxs[j];
+		}
+	}
 }
 
 
@@ -1741,11 +1742,12 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	Mod_LoadSubmodels (mod, mod_base, &header->lumps[LUMP_MODELS]);
 
 	Mod_RecalcNodeBBox (mod->brushhdr->nodes);
+	Mod_CalcBModelBBox (mod, mod->brushhdr);
 
 	// set up the model for the same usage as submodels and correct it's bbox
+	// (note - correcting the bbox can result in QC crashes in PF_setmodel)
 	mod->brushhdr->firstmodelsurface = 0;
 	mod->brushhdr->nummodelsurfaces = mod->brushhdr->numsurfaces;
-	Mod_CorrectBModelBBox (mod);
 
 	Mod_MakeHull0 (mod);
 
@@ -1785,10 +1787,10 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 		mod->brushhdr->numleafs = bm->visleafs;
 
 		// bounding box
+		// (note - correcting this can result in QC crashes in PF_setmodel)
 		VectorCopy2 (mod->maxs, bm->maxs);
 		VectorCopy2 (mod->mins, bm->mins);
-
-		Mod_CorrectBModelBBox (mod);
+		Mod_CalcBModelBBox (mod, mod->brushhdr);
 
 		// radius
 		mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
@@ -1834,9 +1836,44 @@ ALIAS MODELS
 */
 
 
-// FIXME - store per frame rather than for the entire model???
-float aliasbboxmins[3], aliasbboxmaxs[3];
 extern float r_avertexnormals[162][3];
+
+void Mod_LoadAliasBBoxes (model_t *mod, aliashdr_t *pheader)
+{
+	// compute bounding boxes per-frame as well as for the whole model
+	// per-frame bounding boxes are used in the renderer for frustum culling and occlusion queries
+	// whole model bounding boxes are used on the server
+	aliasbbox_t *framebboxes = (aliasbbox_t *) MainCache->Alloc (pheader->nummeshframes * sizeof (aliasbbox_t));
+	pheader->bboxes = framebboxes;
+
+	mod->mins[0] = mod->mins[1] = mod->mins[2] = 9999999;
+	mod->maxs[0] = mod->maxs[1] = mod->maxs[2] = -9999999;
+
+	for (int i = 0; i < pheader->nummeshframes; i++, framebboxes++)
+	{
+		framebboxes->mins[0] = framebboxes->mins[1] = framebboxes->mins[2] = 9999999;
+		framebboxes->maxs[0] = framebboxes->maxs[1] = framebboxes->maxs[2] = -9999999;
+
+		for (int v = 0; v < pheader->vertsperframe; v++)
+		{
+			for (int n = 0; n < 3; n++)
+			{
+				if (pheader->vertexes[i][v].v[n] < framebboxes->mins[n]) framebboxes->mins[n] = pheader->vertexes[i][v].v[n];
+				if (pheader->vertexes[i][v].v[n] > framebboxes->maxs[n]) framebboxes->maxs[n] = pheader->vertexes[i][v].v[n];
+			}
+		}
+
+		for (int n = 0; n < 3; n++)
+		{
+			framebboxes->mins[n] = framebboxes->mins[n] * pheader->scale[n] + pheader->scale_origin[n];
+			framebboxes->maxs[n] = framebboxes->maxs[n] * pheader->scale[n] + pheader->scale_origin[n];
+
+			if (framebboxes->mins[n] < mod->mins[n]) mod->mins[n] = framebboxes->mins[n];
+			if (framebboxes->maxs[n] > mod->maxs[n]) mod->maxs[n] = framebboxes->maxs[n];
+		}
+	}
+}
+
 
 void Mod_LoadFrameVerts (aliashdr_t *pheader, trivertx_t *verts)
 {
@@ -1850,8 +1887,8 @@ void Mod_LoadFrameVerts (aliashdr_t *pheader, trivertx_t *verts)
 			vertexes->v[n] = verts->v[n];
 
 			// compress normals so that we can assign them directly and save vertex submission overhead
-			// 200 is used here so that we can get full -1..1 range
-			float f = ((r_avertexnormals[verts->lightnormalindex][n] + 1.0f) * 200.0f);
+			// 100 is used here so that we can get full -1..1 range (+1 converts to 0..2 range)
+			float f = ((r_avertexnormals[verts->lightnormalindex][n] + 1.0f) * 100.0f);
 			vertexes->normal4ub[n] = BYTE_CLAMP (f);
 		}
 
@@ -1884,9 +1921,6 @@ void *Mod_LoadAliasFrame (aliashdr_t *pheader, void *pin, maliasframedesc_t *fra
 	{
 		frame->bboxmin.v[i] = pdaliasframe->bboxmin.v[i];
 		frame->bboxmax.v[i] = pdaliasframe->bboxmax.v[i];
-
-		if (frame->bboxmin.v[i] < aliasbboxmins[i]) aliasbboxmins[i] = frame->bboxmin.v[i];
-		if (frame->bboxmax.v[i] > aliasbboxmaxs[i]) aliasbboxmaxs[i] = frame->bboxmax.v[i];
 	}
 
 	verts = (trivertx_t *) (pdaliasframe + 1);
@@ -1920,9 +1954,6 @@ void *Mod_LoadAliasGroup (aliashdr_t *pheader, void *pin, maliasframedesc_t *fra
 	{
 		frame->bboxmin.v[i] = pingroup->bboxmin.v[i];
 		frame->bboxmax.v[i] = pingroup->bboxmax.v[i];
-
-		if (frame->bboxmin.v[i] < aliasbboxmins[i]) aliasbboxmins[i] = frame->bboxmin.v[i];
-		if (frame->bboxmax.v[i] > aliasbboxmaxs[i]) aliasbboxmaxs[i] = frame->bboxmax.v[i];
 	}
 
 	pin_intervals = (daliasinterval_t *) (pingroup + 1);
@@ -2065,9 +2096,7 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 			int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
 			int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
 
-			if ((luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags)) != NULL)
-				texflags |= IMAGE_NOCOMPRESS;
-
+			luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 			tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
 
 			// load fullbright
@@ -2106,9 +2135,7 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 				int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
 				int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
 
-				if ((luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags)) != NULL)
-					texflags |= IMAGE_NOCOMPRESS;
-
+				luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags);
 				tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
 
 				// this tries to catch models with > 4 group skins
@@ -2204,9 +2231,6 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	daliasframetype_t *pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
 	pheader->frames = (maliasframedesc_t *) MainCache->Alloc (pheader->numframes * sizeof (maliasframedesc_t));
 
-	// initial bbox
-	aliasbboxmins[0] = aliasbboxmins[1] = aliasbboxmins[2] = 9999999;
-	aliasbboxmaxs[0] = aliasbboxmaxs[1] = aliasbboxmaxs[2] = -9999999;
 	pheader->nummeshframes = 0;
 
 	// because we don't know how many frames we need in advance we take a copy to the scratch buffer initially
@@ -2225,23 +2249,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	// copy framepointers from the scratch buffer to the final cached copy
 	pheader->vertexes = (drawvertx_t **) MainCache->Alloc (pheader->vertexes, pheader->nummeshframes * sizeof (drawvertx_t *));
 
-	// set correct bbox
-	for (int i = 0; i < 3; i++)
-	{
-		mod->mins[i] = aliasbboxmins[i] * pheader->scale[i] + pheader->scale_origin[i];
-		mod->maxs[i] = aliasbboxmaxs[i] * pheader->scale[i] + pheader->scale_origin[i];
-
-		// clamp to absolutes
-		if (mod->mins[i] > -16) mod->mins[i] = -16;
-		if (mod->maxs[i] < 16) mod->maxs[i] = 16;
-	}
-
-	// take higher of maxs[0] and [1] and lower of mins[0] and [1] as final values for both
-	// this resolves issues with rotating weapon models being clipped when they shouldn't
-	if (mod->maxs[0] > mod->maxs[1]) mod->maxs[1] = mod->maxs[0];
-	if (mod->maxs[1] > mod->maxs[0]) mod->maxs[0] = mod->maxs[1];
-	if (mod->mins[0] < mod->mins[1]) mod->mins[1] = mod->mins[0];
-	if (mod->mins[1] < mod->mins[0]) mod->mins[0] = mod->mins[1];
+	Mod_LoadAliasBBoxes (mod, pheader);
 
 	// build the draw lists
 	D3DAlias_MakeAliasMesh (mod->name, modelhash, pheader, pinstverts, pintriangles);
@@ -2307,13 +2315,13 @@ void *Mod_LoadSpriteFrame (model_t *mod, msprite_t *thespr, void *pin, mspritefr
 	}
 
 	pspriteframe->texture = D3D_LoadTexture
-							(
-								name,
-								width,
-								height,
-								(byte *) (pinframe + 1),
-								IMAGE_MIPMAP | IMAGE_ALPHA | (thespr->version == SPR32_VERSION ? (IMAGE_SPRITE | IMAGE_32BIT) : IMAGE_SPRITE)
-							);
+	(
+		name,
+		width,
+		height,
+		(byte *) (pinframe + 1),
+		IMAGE_MIPMAP | IMAGE_ALPHA | (thespr->version == SPR32_VERSION ? (IMAGE_SPRITE | IMAGE_32BIT) : IMAGE_SPRITE)
+	);
 
 	pspriteframe->s = 1;
 	pspriteframe->t = 1;

@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
 
 LPDIRECT3DTEXTURE9 d3d_CurrentTexture[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+bool texturelist_dirty = false;
+char **d3d_TextureNames = NULL;
 
 typedef struct d3d_texture_s
 {
@@ -133,27 +135,6 @@ void D3D_HashTexture (byte *hash, int width, int height, void *data, int flags)
 	COM_HashData (hash, data, datalen);
 }
 
-
-// to do - clean this out!
-D3DFORMAT D3D_GetTextureFormat (int flags)
-{
-	if (flags & IMAGE_ALPHA)
-	{
-		if ((flags & IMAGE_LUMA) || (flags & IMAGE_NOCOMPRESS))
-			return D3DFMT_A8R8G8B8;
-		else if ((flags & IMAGE_MIPMAP) && (d3d_GlobalCaps.supportDXT5))
-			return D3DFMT_DXT5;
-		else if ((flags & IMAGE_MIPMAP) && (d3d_GlobalCaps.supportDXT3))
-			return D3DFMT_DXT3;
-		else return D3DFMT_A8R8G8B8;
-	}
-
-	if ((flags & IMAGE_LUMA) || (flags & IMAGE_NOCOMPRESS))
-		return d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
-	else if ((flags & IMAGE_MIPMAP) && (d3d_GlobalCaps.supportDXT1))
-		return D3DFMT_DXT1;
-	else return d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8;
-}
 
 bool d3d_ImagePadded = false;
 
@@ -533,6 +514,9 @@ void D3D_LoadTextureData (LPDIRECT3DTEXTURE9 *texture, void *data, int width, in
 	if ((flags & IMAGE_ALPHA) || (flags & IMAGE_FENCE))
 		TM_AlphaEdgeFix ((byte *) lockrect.pBits, scaled_width, scaled_height);
 
+	// to do - mipmap with gamma correction here
+	// (is there a D3DX option to do it?)
+
 	texture[0]->UnlockRect (0);
 	texture[0]->AddDirtyRect (NULL);
 
@@ -688,6 +672,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			{
 				// set last usage to 0
 				d3dtex->texture->LastUsage = 0;
+				d3dtex->texture->RegistrationSequence = d3d_RenderDef.RegistrationSequence;
 
 				// Con_Printf ("reused %s%s\n", identifier, (flags & IMAGE_LUMA) ? "_luma" : "");
 
@@ -775,9 +760,6 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			return NULL;
 		}
 
-		// don't apply compression to native Quake textures
-		tex->flags |= IMAGE_NOCOMPRESS;
-
 		// upload through direct 3d
 		D3D_UploadTexture
 		(
@@ -801,6 +783,10 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 
 	// notify that we got an external texture
 	if (externalloaded) tex->flags |= IMAGE_EXTERNAL;
+
+	texturelist_dirty = true;
+
+	tex->RegistrationSequence = d3d_RenderDef.RegistrationSequence;
 
 	// return the texture we got
 	return tex;
@@ -836,13 +822,13 @@ void R_ReleaseResourceTextures (void);
 void D3DHLSL_Shutdown (void);
 void D3DSky_UnloadSkybox (void);
 void Scrap_Destroy (void);
-void D3D_ReleaseLightmaps (void);
+void D3DLight_ReleaseLightmaps (void);
 
 // fixme - this needs to fully go through the correct shutdown paths so that aux data is also cleared
 void D3D_ReleaseTextures (void)
 {
 	// some of these now go through the device onloss handlers
-	D3D_ReleaseLightmaps ();
+	D3DLight_ReleaseLightmaps ();
 	Scrap_Destroy ();
 	D3DHLSL_Shutdown ();
 	D3DSky_UnloadSkybox ();
@@ -872,9 +858,6 @@ void D3D_ReleaseTextures (void)
 		SAFE_RELEASE (skyboxtextures[i]);
 
 	SAFE_RELEASE (skyboxcubemap);
-
-	// standard lightmaps
-	SAFE_DELETE (d3d_Lightmaps);
 
 	// resource textures
 	R_ReleaseResourceTextures ();
@@ -1367,4 +1350,164 @@ void D3D_EnumExternalTextures (void)
 		// Con_SafePrintf ("registered %s\n", et->basename);
 	}
 }
+
+
+void D3D_GenerateTextureList (void)
+{
+	if (texturelist_dirty)
+	{
+		if (d3d_TextureNames)
+		{
+			for (int i = 0;; i++)
+			{
+				if (!d3d_TextureNames[i]) break;
+				MainZone->Free (d3d_TextureNames[i]);
+			}
+
+			MainZone->Free (d3d_TextureNames);
+			d3d_TextureNames = NULL;
+		}
+
+		int numtextures = 0;
+
+		for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
+		{
+			if (!tex->texture->d3d_Texture) continue;
+			numtextures++;
+		}
+
+		// +1 for NULL termination
+		d3d_TextureNames = (char **) MainZone->Alloc ((numtextures + 1) * sizeof (char *));
+		numtextures = 0;
+
+		for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
+		{
+			if (!tex->texture->d3d_Texture) continue;
+
+			d3d_TextureNames[numtextures] = (char *) MainZone->Alloc (strlen (tex->texture->identifier) + 1);
+			strcpy (d3d_TextureNames[numtextures], tex->texture->identifier);
+			d3d_TextureNames[numtextures + 1] = NULL;
+
+			numtextures++;
+		}
+
+		texturelist_dirty = false;
+	}
+}
+
+
+bool D3D_CopyTextureToClipboard (LPDIRECT3DTEXTURE9 tex)
+{
+	D3DLOCKED_RECT rect;
+	D3DSURFACE_DESC desc;
+	LPDIRECT3DSURFACE9 surf = NULL;
+	LPDIRECT3DSURFACE9 dest = NULL;
+	bool success = false;
+
+	// copy to a new surface in case it's in a different format
+	if (FAILED (tex->GetSurfaceLevel (0, &surf))) goto failed_1;
+	if (FAILED (surf->GetDesc (&desc))) goto failed_1;
+	if (FAILED (d3d_Device->CreateOffscreenPlainSurface (desc.Width, desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &dest, NULL))) goto failed_1;
+	if (FAILED (D3DXLoadSurfaceFromSurface (dest, NULL, NULL, surf, NULL, NULL, D3DX_FILTER_NONE, 0))) goto failed_1;
+	if (FAILED (dest->LockRect (&rect, NULL, 0))) goto failed_1;
+
+	if (OpenClipboard (NULL))
+	{
+		HANDLE hData = NULL;
+		HBITMAP hBitmap = CreateBitmap (desc.Width, desc.Height, 1, 32, rect.pBits);
+
+		if (hBitmap)
+		{
+			hData = SetClipboardData (CF_BITMAP, hBitmap);
+			DeleteObject (hBitmap);
+		}
+
+		if (!CloseClipboard ()) goto failed_2;
+		if (!hData) goto failed_2;
+
+		// phew!  made it!
+		success = true;
+	}
+
+	// clean up
+failed_2:;
+	dest->UnlockRect ();
+failed_1:;
+	if (dest) dest->Release ();
+	if (surf) surf->Release ();
+	return success;
+}
+
+
+void D3D_CopyTexture_f (void)
+{
+	if (Cmd_Argc () != 2)
+	{
+		Con_Printf ("copytexture <texturename> : copy the specified texture to the clipboard\n");
+		Con_Printf ("   if the texture has miplevels, only the first level will be copied\n");
+		return;
+	}
+
+	char *texturename = Cmd_Argv (1);
+
+	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
+	{
+		if (!tex->texture->d3d_Texture) continue;
+
+		if (!stricmp (texturename, tex->texture->identifier))
+		{
+			if (D3D_CopyTextureToClipboard (tex->texture->d3d_Texture))
+				Con_Printf ("copytexture : copied %s OK\n", texturename);
+			else Con_Printf ("copytexture : failed to copy %s\n", texturename);
+
+			return;
+		}
+	}
+
+	Con_Printf ("copytexture : Could not find %s\n", texturename);
+}
+
+
+void D3D_TextureList_f (void)
+{
+	int numtextures = 0;
+
+	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
+	{
+		if (!tex->texture->d3d_Texture) continue;
+
+		Con_Printf ("%s\n", tex->texture->identifier);
+		numtextures++;
+	}
+
+	if (numtextures) Con_Printf ("\nListed %i textures\n", numtextures);
+}
+
+
+cmd_t d3d_TextureList_cmd ("texturelist", D3D_TextureList_f);
+cmd_t d3d_CopyTexture_cmd ("copytexture", D3D_CopyTexture_f);
+
+
+void D3DSurf_BeginBuildingTextureChains (void);
+void D3DSurf_CreateTextureChainObject (image_t *image);
+void D3DSurf_EndBuildingTextureChains (void);
+
+void D3DTexture_DefineChains (void)
+{
+	D3DSurf_BeginBuildingTextureChains ();
+
+	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
+	{
+		// only BSP textures go into chains
+		if (!(tex->texture->flags & IMAGE_BSP)) continue;
+		if (tex->texture->flags & IMAGE_LUMA) continue;
+		if (tex->texture->RegistrationSequence != d3d_RenderDef.RegistrationSequence) continue;
+
+		// add a texture chain object for this texture
+		D3DSurf_CreateTextureChainObject (tex->texture);
+	}
+
+	D3DSurf_EndBuildingTextureChains ();
+}
+
 

@@ -22,7 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern int v_blend[4];
 
 void V_Init (void);		// no time dependencies
-void V_RenderView (float time, float frametime);
+void V_RenderView (void);
 float V_CalcRoll (vec3_t angles, vec3_t velocity);	// no time dependencies
-void V_UpdatePalette (float frametime);
+void V_UpdateCShifts (void);
 

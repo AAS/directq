@@ -716,20 +716,20 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
 	{
 		vec3_t   a;
-		vec3_t   forward, right, up;
+		avectors_t av;
 		vec3_t   temp;
 
-		AngleVectors (ent->v.angles, forward, right, up);
+		AngleVectors (ent->v.angles, &av);
 
 		VectorCopy (start_l, temp);
-		start_l[0] = DotProduct (temp, forward);
-		start_l[1] = -DotProduct (temp, right);
-		start_l[2] = DotProduct (temp, up);
+		start_l[0] = DotProduct (temp, av.forward);
+		start_l[1] = -DotProduct (temp, av.right);
+		start_l[2] = DotProduct (temp, av.up);
 
 		VectorCopy (end_l, temp);
-		end_l[0] = DotProduct (temp, forward);
-		end_l[1] = -DotProduct (temp, right);
-		end_l[2] = DotProduct (temp, up);
+		end_l[0] = DotProduct (temp, av.forward);
+		end_l[1] = -DotProduct (temp, av.right);
+		end_l[2] = DotProduct (temp, av.up);
 	}
 
 	// trace a line through the apropriate clipping hull
@@ -739,23 +739,23 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
 	{
 		vec3_t   a;
-		vec3_t   forward, right, up;
+		avectors_t av;
 		vec3_t   temp;
 
 		if (trace.fraction != 1)
 		{
 			VectorSubtract (vec3_origin, ent->v.angles, a);
-			AngleVectors (a, forward, right, up);
+			AngleVectors (a, &av);
 
 			VectorCopy (trace.endpos, temp);
-			trace.endpos[0] = DotProduct (temp, forward);
-			trace.endpos[1] = -DotProduct (temp, right);
-			trace.endpos[2] = DotProduct (temp, up);
+			trace.endpos[0] = DotProduct (temp, av.forward);
+			trace.endpos[1] = -DotProduct (temp, av.right);
+			trace.endpos[2] = DotProduct (temp, av.up);
 
 			VectorCopy (trace.plane.normal, temp);
-			trace.plane.normal[0] = DotProduct (temp, forward);
-			trace.plane.normal[1] = -DotProduct (temp, right);
-			trace.plane.normal[2] = DotProduct (temp, up);
+			trace.plane.normal[0] = DotProduct (temp, av.forward);
+			trace.plane.normal[1] = -DotProduct (temp, av.right);
+			trace.plane.normal[2] = DotProduct (temp, av.up);
 		}
 
 		// fix trace up by the offset

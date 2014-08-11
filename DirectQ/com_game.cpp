@@ -135,10 +135,10 @@ void Menu_LoadAvailableSkyboxes (void);
 void SHOWLMP_newgame (void);
 void D3D_VidRestart_f (void);
 void D3DSky_UnloadSkybox (void);
-void R_WipeParticles (void);
+void CL_WipeParticles (void);
 void D3DVid_LoseDeviceResources (void);
 void D3DVid_RecoverDeviceResources (void);
-
+void D3DVid_ClearScreen (void);
 
 void COM_UnloadAllStuff (void)
 {
@@ -147,7 +147,8 @@ void COM_UnloadAllStuff (void)
 
 	// disconnect from server and update the screen to keep things nice and clean
 	CL_Disconnect_f ();
-	SCR_UpdateScreen (0);
+	D3DVid_ClearScreen ();
+	SCR_UpdateScreen ();
 
 	// prevent screen updates while changing
 	scr_disabled_for_loading = true;
@@ -158,8 +159,8 @@ void COM_UnloadAllStuff (void)
 
 	// clear everything else
 	S_StopAllSounds (true);
-	Mod_ClearAll ();
 	S_ClearSounds ();
+	Mod_ClearAll ();
 
 	// drop everything we need to drop
 	SAFE_DELETE (GameZone);
@@ -171,7 +172,7 @@ void COM_UnloadAllStuff (void)
 	SHOWLMP_newgame ();
 	D3DSky_UnloadSkybox ();
 	D3D_ReleaseTextures ();
-	R_WipeParticles ();
+	CL_WipeParticles ();
 
 	D3DVid_LoseDeviceResources ();
 
@@ -193,11 +194,22 @@ void COM_LoadAllStuff (void)
 	SCR_Init ();
 	D3DVid_RecoverDeviceResources ();
 	R_InitResourceTextures ();
+
+	// now run a screen update to reassure the user that something did actually happen
+	D3DVid_ClearScreen ();
+	SCR_UpdateScreen ();
+
+	// sprinkle some screen updates through here too to give a better sense of something happening
 	Draw_InvalidateMapshot ();
+	SCR_UpdateScreen ();
 	Menu_SaveLoadInvalidate ();
+	SCR_UpdateScreen ();
 	Menu_MapsPopulate ();
+	SCR_UpdateScreen ();
 	Menu_DemoPopulate ();
+	SCR_UpdateScreen ();
 	Menu_LoadAvailableSkyboxes ();
+	SCR_UpdateScreen ();
 
 	// force a video restart to flush and sync up everything
 	Cbuf_InsertText ("vid_restart\n");
@@ -559,10 +571,6 @@ void COM_LoadGame (char *gamename)
 
 	// hack to get the hipnotic sbar in quoth
 	if (quoth) hipnotic = true;
-
-	// make directories we need
-	Sys_mkdir ("save");
-	Sys_mkdir ("screenshot");
 
 	// enum and register external textures
 	D3D_EnumExternalTextures ();

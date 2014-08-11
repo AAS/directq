@@ -27,13 +27,44 @@ float d3d_FogDensity = 0;
 char lastworldmodel[64] = {0};
 
 
-// nehahra assumes that these cvars are going to be written to config
-cvar_t gl_fogenable ("gl_fogenable", 0.0f);
-cvar_t gl_fogred ("gl_fogred", 0.3f);
-cvar_t gl_foggreen ("gl_foggreen", 0.3f);
-cvar_t gl_fogblue ("gl_fogblue", 0.3f);
-cvar_t gl_fogdensity ("gl_fogdensity", 0.0f);
+void D3DFog_UpdateCvars (cvar_t *var);
+
+cvar_t gl_fogenable ("gl_fogenable", 0.0f, 0, D3DFog_UpdateCvars);
+cvar_t gl_fogred ("gl_fogred", 0.3f, 0, D3DFog_UpdateCvars);
+cvar_t gl_foggreen ("gl_foggreen", 0.3f, 0, D3DFog_UpdateCvars);
+cvar_t gl_fogblue ("gl_fogblue", 0.3f, 0, D3DFog_UpdateCvars);
+cvar_t gl_fogdensity ("gl_fogdensity", 0.0f, 0, D3DFog_UpdateCvars);
 cvar_t gl_fogdensityscale ("gl_fogdensityscale", 0.0f);
+
+bool fog_LockCvars = false;
+
+void D3DFog_UpdateCvars (cvar_t *var)
+{
+	// testing stuff to see if we can figure out just WTF Nehahra is doing
+	// Con_Printf ("%s set to %s\n", var->name, var->string);
+
+	// fog from worldspawn needs to lock the cvars in order to prevent them from wiping stuff while loading
+	if (fog_LockCvars) return;
+
+	// copy the cvars out to our values
+	if (gl_fogenable.value && gl_fogdensity.value)
+	{
+		d3d_FogDensity = gl_fogdensity.value;
+		d3d_FogColor[0] = gl_fogred.value;
+		d3d_FogColor[1] = gl_foggreen.value;
+		d3d_FogColor[2] = gl_fogblue.value;
+		d3d_FogColor[3] = 0;
+	}
+	else
+	{
+		d3d_FogDensity = 0;
+		d3d_FogColor[0] = 0;
+		d3d_FogColor[1] = 0;
+		d3d_FogColor[2] = 0;
+		d3d_FogColor[3] = 0;
+	}
+}
+
 
 void Fog_Update (float density, float r, float g, float b)
 {
@@ -52,6 +83,9 @@ void Fog_Update (float density, float r, float g, float b)
 	d3d_FogColor[2] = b > 1 ? 1 : (b < 0 ? 0 : b);
 	d3d_FogColor[3] = 0;
 
+	// fog from worldspawn needs to lock the cvars in order to prevent them from wiping stuff while loading
+	fog_LockCvars = true;
+
 	// update cvars
 	if (d3d_FogDensity > 0)
 	{
@@ -63,6 +97,10 @@ void Fog_Update (float density, float r, float g, float b)
 	Cvar_Set (&gl_fogred, d3d_FogColor[0]);
 	Cvar_Set (&gl_foggreen, d3d_FogColor[1]);
 	Cvar_Set (&gl_fogblue, d3d_FogColor[2]);
+
+	// now unlock the cvars and do another update to sync things up right
+	fog_LockCvars = false;
+	Cvar_Set (&gl_fogenable, gl_fogenable.value);
 }
 
 
@@ -70,22 +108,8 @@ void D3DHLSL_EnableFog (bool enabled);
 
 void Fog_FrameCheck (void)
 {
-	// compatibility with old cvar system
-	if (gl_fogenable.value)
-	{
-		// ensure that we have a default density
-		if (gl_fogdensity.value <= 0.0f)
-			Cvar_Set (&gl_fogdensity, 0.01f);
-
-		// copy them out to our values
-		d3d_FogDensity = gl_fogdensity.value;
-		d3d_FogColor[0] = gl_fogred.value;
-		d3d_FogColor[1] = gl_foggreen.value;
-		d3d_FogColor[2] = gl_fogblue.value;
-		d3d_FogColor[3] = 0;
-	}
-
-	if (d3d_FogDensity > 0 && gl_fogenable.value)
+	// select the appropriate shaders to use
+	if (d3d_FogDensity > 0)
 		D3DHLSL_EnableFog (true);
 	else D3DHLSL_EnableFog (false);
 }

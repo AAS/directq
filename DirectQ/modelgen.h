@@ -116,7 +116,7 @@ typedef struct drawvertx_s
 		DWORD	normal1dw;
 	};
 
-	bool	lerpvert;
+	bool lerpvert;
 } drawvertx_t;
 
 typedef struct

@@ -22,10 +22,15 @@ float4x4 WorldMatrix;
 float4x4 ModelViewMatrix;
 float4x4 EntMatrix;
 
-Texture2D tmu0Texture;
-Texture2D tmu1Texture;
-Texture2D tmu2Texture;
-TextureCube cubeTexture;
+// ps2.0 guarantees 8 samplers min
+Texture tmu0Texture;
+Texture tmu1Texture;
+Texture tmu2Texture;
+Texture tmu3Texture;
+Texture tmu4Texture;
+Texture tmu5Texture;
+Texture tmu6Texture;
+Texture tmu7Texture;
 
 float warptime;
 float warpscale;
@@ -34,12 +39,6 @@ float Overbright;
 float AlphaVal;
 float SkyFog;
 
-int magfilter0, magfilter1, magfilter2;
-int mipfilter0, mipfilter1, mipfilter2;
-int minfilter0, minfilter1, minfilter2;
-int address0, address1, address2;
-int aniso0, aniso1, aniso2;
-
 float3 Scale;
 float3 r_origin;
 float3 viewangles;
@@ -47,62 +46,15 @@ float3 viewangles;
 float4 FogColor;
 float FogDensity;
 
-sampler2D tmu0Sampler : register(s0) = sampler_state
-{
-	Texture = <tmu0Texture>;
-
-	AddressU = <address0>;
-	AddressV = <address0>;
-
-	MagFilter = <magfilter0>;
-	MinFilter = <minfilter0>;
-	MipFilter = <mipfilter0>;
-
-	MaxAnisotropy = <aniso0>;
-};
-
-sampler2D tmu1Sampler : register(s1) = sampler_state
-{
-	Texture = <tmu1Texture>;
-
-	AddressU = <address1>;
-	AddressV = <address1>;
-
-	MagFilter = <magfilter1>;
-	MinFilter = <minfilter1>;
-	MipFilter = <mipfilter1>;
-
-	MaxAnisotropy = <aniso1>;
-};
-
-sampler2D tmu2Sampler : register(s2) = sampler_state
-{
-	Texture = <tmu2Texture>;
-
-	AddressU = <address2>;
-	AddressV = <address2>;
-
-	MagFilter = <magfilter2>;
-	MinFilter = <minfilter2>;
-	MipFilter = <mipfilter2>;
-
-	MaxAnisotropy = <aniso2>;
-};
-
-samplerCUBE cubeSampler : register(s3) = sampler_state
-{
-	Texture = <cubeTexture>;
-
-	AddressU = <address0>;
-	AddressV = <address0>;
-	AddressW = <address0>;
-
-	MagFilter = <magfilter0>;
-	MinFilter = <minfilter0>;
-	MipFilter = <mipfilter0>;
-
-	MaxAnisotropy = <aniso0>;
-};
+// ps2.0 guarantees 8 samplers min
+sampler tmu0Sampler : register(s0) = sampler_state {Texture = <tmu0Texture>;};
+sampler tmu1Sampler : register(s1) = sampler_state {Texture = <tmu1Texture>;};
+sampler tmu2Sampler : register(s2) = sampler_state {Texture = <tmu2Texture>;};
+sampler tmu3Sampler : register(s3) = sampler_state {Texture = <tmu3Texture>;};
+sampler tmu4Sampler : register(s4) = sampler_state {Texture = <tmu4Texture>;};
+sampler tmu5Sampler : register(s5) = sampler_state {Texture = <tmu5Texture>;};
+sampler tmu6Sampler : register(s6) = sampler_state {Texture = <tmu6Texture>;};
+sampler tmu7Sampler : register(s7) = sampler_state {Texture = <tmu7Texture>;};
 
 
 #ifdef hlsl_fog
@@ -137,6 +89,8 @@ float4 GetLumaColor (float4 texcolor, float4 lightmap, float4 lumacolor)
 /*
 ====================
 2D GUI DRAWING
+
+if these are changed we also need to look out for corona drawing as it reuses them!!!
 ====================
 */
 
@@ -148,25 +102,39 @@ struct DrawVert
 };
 
 
-float4 PSDrawColored (DrawVert Input) : COLOR0
-{
-	return Input.Color;
-}
-
-
 float4 PSDrawTextured (DrawVert Input) : COLOR0
 {
 	return tex2D (tmu0Sampler, Input.Tex0) * Input.Color;
 }
 
 
-DrawVert VSDraw (DrawVert Input)
+float4 PSDrawColored (DrawVert Input) : COLOR0
+{
+	return Input.Color;
+}
+
+
+DrawVert VSDrawTextured (DrawVert Input)
 {
 	DrawVert Output;
-	
-	Output.Position = mul (Input.Position, WorldMatrix);
+
+	// correct the half-pixel offset
+	Output.Position = mul (Input.Position - float4 (0.5f, 0.5f, 0.0f, 0.0f), WorldMatrix);
 	Output.Color = Input.Color;
 	Output.Tex0 = Input.Tex0;
+
+	return (Output);
+}
+
+
+DrawVert VSDrawColored (DrawVert Input)
+{
+	DrawVert Output;
+
+	// gross hack for bboxes
+	Output.Position = mul (mul (Input.Position, EntMatrix), WorldMatrix);
+	Output.Color = Input.Color;
+	Output.Tex0 = Input.Tex0;	// hack for hlsl compiler...
 
 	return (Output);
 }
@@ -209,7 +177,8 @@ PSUnderwaterVert VSDrawUnderwater (VSUnderwaterVert Input)
 {
 	PSUnderwaterVert Output;
 
-	Output.Position = mul (Input.Position, WorldMatrix);
+	// correct the half-pixel offset
+	Output.Position = mul (Input.Position - float4 (0.5f, 0.5f, 0.0f, 0.0f), WorldMatrix);
 
 	Output.Color0 = 1.0f - Input.Color;
 	Output.Color1 = float4 (Input.Color.rgb, 1.0f) * Input.Color.a;
@@ -233,15 +202,24 @@ float2 currlerp;
 float2 lastlerp;
 float3 ShadeVector;
 float3 ShadeLight;
-float DepthBias;
 
 struct VertAliasVS
 {
-	float4 LastPosition : POSITION0;
-	float4 CurrPosition : POSITION1;
-	float4 LastNormal : TEXCOORD0;
-	float4 CurrNormal : TEXCOORD1;
+	float4 CurrPosition : POSITION0;
+	float4 CurrNormal : TEXCOORD0;
+	float4 LastPosition : POSITION1;
+	float4 LastNormal : TEXCOORD1;
 	float2 Tex0 : TEXCOORD2;
+};
+
+struct VertAliasVSViewModel
+{
+	float4 CurrPosition : POSITION0;
+	float4 CurrNormal : TEXCOORD0;
+	float4 LastPosition : POSITION1;
+	float4 LastNormal : TEXCOORD1;
+	float2 Tex0 : TEXCOORD2;
+	float4 Lerps : TEXCOORD3;
 };
 
 struct VertAliasPS
@@ -301,6 +279,33 @@ float4 PSAliasNoLuma (VertAliasPS Input) : COLOR0
 }
 
 
+VertAliasPS VSAliasVSViewModel (VertAliasVSViewModel Input)
+{
+	VertAliasPS Output;
+
+	float4 BasePosition = mul (Input.LastPosition * Input.Lerps.z + Input.CurrPosition * Input.Lerps.x, EntMatrix);
+
+	// this is friendlier for preshaders
+	Output.Position = mul (BasePosition, WorldMatrix);
+
+	// the view model needs a depth range hack and this is the easiest way of doing it
+	// (must find out how software quake did this)
+	Output.Position.z *= 0.15f;
+
+#ifdef hlsl_fog
+	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
+#endif
+
+	// scale, bias and interpolate the normals in the vertex shader for speed
+	// full range normals overbright/overdark too much so we scale it down by half
+	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
+	Output.Normal = ((Input.CurrNormal.xyz * Input.Lerps.y) - 0.5f) + ((Input.LastNormal.xyz * Input.Lerps.w) - 0.5f);
+	Output.Tex0 = Input.Tex0;
+
+	return Output;
+}
+
+
 VertAliasPS VSAliasVS (VertAliasVS Input)
 {
 	VertAliasPS Output;
@@ -310,16 +315,118 @@ VertAliasPS VSAliasVS (VertAliasVS Input)
 	// this is friendlier for preshaders
 	Output.Position = mul (BasePosition, WorldMatrix);
 
-	// the view model needs a depth range hack and this is the easiest way of doing it
-	Output.Position.z *= DepthBias;
+#ifdef hlsl_fog
+	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
+#endif
+
+	// scale, bias and interpolate the normals in the vertex shader for speed
+	// full range normals overbright/overdark too much so we scale it down by half
+	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
+	Output.Normal = ((Input.CurrNormal.xyz * currlerp.y) - 0.5f) + ((Input.LastNormal.xyz * lastlerp.y) - 0.5f);
+	Output.Tex0 = Input.Tex0;
+
+	return Output;
+}
+
+
+struct VertInstancedVS
+{
+	// ps2.0 guarantees up to 16 texcoord sets
+	float4 CurrPosition : POSITION0;
+	float4 CurrNormal : TEXCOORD0;
+	float4 LastPosition : POSITION1;
+	float4 LastNormal : TEXCOORD1;
+	float2 Tex0 : TEXCOORD2;
+	float4 MRow1 : TEXCOORD3;
+	float4 MRow2 : TEXCOORD4;
+	float4 MRow3 : TEXCOORD5;
+	float4 MRow4 : TEXCOORD6;
+	float4 Lerps : TEXCOORD7;
+	float3 SVector : TEXCOORD8;
+	float4 ColorAlpha : TEXCOORD9;
+};
+
+
+struct VertInstancedPS
+{
+	float4 Position : POSITION0;
+	float3 Normal : TEXCOORD0;
+	float2 Tex0 : TEXCOORD1;
+	float3 SVector : TEXCOORD2;
+	float4 ColorAlpha : TEXCOORD3;
+
+#ifdef hlsl_fog
+	float4 FogPosition : TEXCOORD4;
+#endif
+};
+
+
+float4 PSAliasInstancedNoLuma (VertInstancedPS Input) : COLOR0
+{
+	float4 Shade = float4 (Input.ColorAlpha.rgb * (dot (Input.Normal, Input.SVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright), Input.FogPosition);
+#else
+	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright);
+#endif
+
+	color.a = Input.ColorAlpha.a;
+	return color;
+}
+
+
+float4 PSAliasInstancedLuma (VertInstancedPS Input) : COLOR0
+{
+	float4 Shade = float4 (Input.ColorAlpha.rgb * (dot (Input.Normal, Input.SVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), Shade, tex2D (tmu1Sampler, Input.Tex0), Input.FogPosition);
+#else
+	float4 color = GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), Shade, tex2D (tmu1Sampler, Input.Tex0));
+#endif
+
+	color.a = Input.ColorAlpha.a;
+	return color;
+}
+
+
+float4 PSAliasInstancedLumaNoLuma (VertInstancedPS Input) : COLOR0
+{
+	float4 Shade = float4 (Input.ColorAlpha.rgb * (dot (Input.Normal, Input.SVector) * -0.5f + 1.0f), 1.0f);
+
+#ifdef hlsl_fog
+	float4 color = FogCalc ((tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright), Input.FogPosition);
+#else
+	float4 color = (tex2D (tmu0Sampler, Input.Tex0) + tex2D (tmu1Sampler, Input.Tex0)) * (Shade * Overbright);
+#endif
+
+	color.a = Input.ColorAlpha.a;
+	return color;
+}
+
+
+VertInstancedPS VSAliasVSInstanced (VertInstancedVS Input)
+{
+	VertInstancedPS Output;
+	float4x4 EntMatrixInstanced = float4x4 (Input.MRow1, Input.MRow2, Input.MRow3, Input.MRow4);
+
+	float4 BasePosition = mul (Input.LastPosition * Input.Lerps.z + Input.CurrPosition * Input.Lerps.x, EntMatrixInstanced);
+
+	// this is friendlier for preshaders
+	Output.Position = mul (BasePosition, WorldMatrix);
 
 #ifdef hlsl_fog
 	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
 #endif
 
 	// scale, bias and interpolate the normals in the vertex shader for speed
-	Output.Normal = ((Input.CurrNormal.xyz * currlerp.y) - currlerp.x) + ((Input.LastNormal.xyz * lastlerp.y) - lastlerp.x);
+	// full range normals overbright/overdark too much so we scale it down by half
+	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
+	Output.Normal = ((Input.CurrNormal.xyz * Input.Lerps.y) - 0.5f) + ((Input.LastNormal.xyz * Input.Lerps.w) - 0.5f);
 	Output.Tex0 = Input.Tex0;
+	Output.SVector = Input.SVector;
+	Output.ColorAlpha = Input.ColorAlpha;
 
 	return Output;
 }
@@ -327,8 +434,10 @@ VertAliasPS VSAliasVS (VertAliasVS Input)
 
 struct VertShadowVS
 {
-	float4 LastPosition : POSITION0;
-	float4 CurrPosition : POSITION1;
+	float4 CurrPosition : POSITION0;
+	float4 CurrNormal : TEXCOORD0;
+	float4 LastPosition : POSITION1;
+	float4 LastNormal : TEXCOORD1;
 };
 
 
@@ -496,12 +605,13 @@ struct PSLiquidVert
 #endif
 };
 
+
 float4 LiquidPS (PSLiquidVert Input) : COLOR0
 {
 	// same warp calculation as is used for the fixed pipeline path
 	// a lot of the heavier lifting here has been offloaded to the vs
-	// fixme - should use the uwblur texture lookup
-	float4 color = tex2D (tmu0Sampler, (Input.Texcoord0 + sin (Input.Texcoord1.yx) * warpscale) * 0.015625f);
+	// tmu1Sampler contains a 2D sin lookup so we can get two sin calcs with one texture lookup
+	float4 color = tex2D (tmu0Sampler, Input.Texcoord0 + (tex2D (tmu1Sampler, Input.Texcoord1).gr - 0.5f) * warpscale);
 
 #ifdef hlsl_fog
 	color = FogCalc (color, Input.FogPosition);
@@ -522,7 +632,10 @@ PSLiquidVert LiquidVS (VSLiquidVert Input)
 	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
 #endif
 	Output.Texcoord0 = Input.Texcoord;
-	Output.Texcoord1 = (Input.Texcoord * warpfactor + warptime) * 0.024543f;
+
+	// fixme - add an OnChange callback to r_warpfactor and premultiply this in the vertexes (we have a second texcoord so we can)
+	// probably not that big a deal though, but nonetheless.
+	Output.Texcoord1 = Input.Texcoord.yx * warpfactor + warptime;
 
 	return (Output);
 }
@@ -700,7 +813,7 @@ PSSkyVert SkyWarpVS (VSSkyVert Input)
 
 float4 SkyBoxPS (PSSkyVert Input) : COLOR0
 {
-	float4 color = texCUBE (cubeSampler, Input.Texcoord);
+	float4 color = texCUBE (tmu0Sampler, Input.Texcoord);
 	color.a = 1.0;
 #ifdef hlsl_fog
 	return lerp (FogColor, color, SkyFog);
@@ -775,13 +888,14 @@ technique MasterRefresh
 	
 	pass FX_PASS_DRAWTEXTURED
 	{
-		VertexShader = compile vs_2_0 VSDraw ();
+		VertexShader = compile vs_2_0 VSDrawTextured ();
 		PixelShader = compile ps_2_0 PSDrawTextured ();
 	}
 	
 	pass FX_PASS_DRAWCOLORED
 	{
-		VertexShader = compile vs_2_0 VSDraw ();
+		// if these are changed we also need to look out for corona drawing as it reuses them!!!
+		VertexShader = compile vs_2_0 VSDrawColored ();
 		PixelShader = compile ps_2_0 PSDrawColored ();
 	}
 	
@@ -821,22 +935,58 @@ technique MasterRefresh
 		PixelShader = compile ps_2_0 PSDrawUnderwater ();
 	}
 
-	pass FX_PASS_ALIAS_LUMA_NO_LUMA
+	pass FX_PASS_ALIAS_LUMA_NOLUMA
 	{
 		VertexShader = compile vs_2_0 VSAliasVS ();
 		PixelShader = compile ps_2_0 PSAliasLumaNoLuma ();
 	}
 
-	pass FX_PASS_WORLD_LUMA_NO_LUMA
+	pass FX_PASS_WORLD_LUMA_NOLUMA
 	{
 		VertexShader = compile vs_2_0 VSWorldCommon ();
 		PixelShader = compile ps_2_0 PSWorldLumaNoLuma ();
 	}
 
-	pass FX_PASS_WORLD_LUMA_NO_LUMA_ALPHA
+	pass FX_PASS_WORLD_LUMA_NOLUMA_ALPHA
 	{
 		VertexShader = compile vs_2_0 VSWorldCommon ();
 		PixelShader = compile ps_2_0 PSWorldLumaNoLumaAlpha ();
+	}
+
+	pass FX_PASS_ALIAS_INSTANCED_NOLUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVSInstanced ();
+		PixelShader = compile ps_2_0 PSAliasInstancedNoLuma ();
+	}
+
+	pass FX_PASS_ALIAS_INSTANCED_LUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVSInstanced ();
+		PixelShader = compile ps_2_0 PSAliasInstancedLuma ();
+	}
+
+	pass FX_PASS_ALIAS_INSTANCED_LUMA_NOLUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVSInstanced ();
+		PixelShader = compile ps_2_0 PSAliasInstancedLumaNoLuma ();
+	}
+
+	pass FX_PASS_ALIAS_VIEWMODEL_NOLUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVSViewModel ();
+		PixelShader = compile ps_2_0 PSAliasNoLuma ();
+	}
+
+	pass FX_PASS_ALIAS_VIEWMODEL_LUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVSViewModel ();
+		PixelShader = compile ps_2_0 PSAliasLuma ();
+	}
+
+	pass FX_PASS_ALIAS_VIEWMODEL_LUMA_NOLUMA
+	{
+		VertexShader = compile vs_2_0 VSAliasVSViewModel ();
+		PixelShader = compile ps_2_0 PSAliasLumaNoLuma ();
 	}
 }
 

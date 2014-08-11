@@ -29,8 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 typedef struct aliascache_s
 {
 	// all the info we need to draw the model is here
-	float lastlerp;
-	float currlerp;
+	float blend[2];
 
 	struct image_s *teximage;
 	struct image_s *lumaimage;
@@ -59,8 +58,15 @@ typedef struct efrag_s
 // just for consistency although it's not protocol-dependent
 #define LERP_FINISH (1 << 4)
 
+#define LERP_CURR	0
+#define LERP_LAST	1
+
 typedef struct entity_s
 {
+	vec3_t				mins, maxs;		// bounding box used to cull the entity
+	vec3_t				trueorigin;
+	vec3_t				bboxscale;
+
 	bool				forcelink;		// model changed
 
 	int						update_type;
@@ -84,24 +90,33 @@ typedef struct entity_s
 	int						visframe;		// last frame this entity was found in an active leaf
 	vec3_t					modelorg;		// relative to r_origin
 
+	int						relinkfame;
+
+	// occlusion queries
+	bool					Occluded;
+
 	// player skins
 	int						playerskin;
 
 	// allocated at runtime client and server side
 	int						entnum;
 
-	// VBO cache
-	int cacheposes;
+	// sort order for MDLs
+	union
+	{
+		unsigned int sortorder;
+		unsigned short sortpose[2];
+	};
 
 	// interpolation
 	float		framestarttime;
-	int			lastpose, currpose;
+	int			lerppose[2];
 
 	float		translatestarttime;
-	vec3_t		lastorigin, currorigin;
+	vec3_t		lerporigin[2];
 
 	float		rotatestarttime;
-	vec3_t		lastangles, currangles;
+	vec3_t		lerpangles[2];
 
 	// allows an alpha value to be assigned to any entity
 	int			alphaval;
@@ -176,14 +191,24 @@ extern	int		reinit_surfcache;
 
 
 extern	refdef_t	r_refdef;
-extern vec3_t	r_origin, vpn, vright, vup;
+
+typedef struct r_viewvecs_s
+{
+	vec3_t forward;
+	vec3_t up;
+	vec3_t right;
+	vec3_t origin;
+} r_viewvecs_t;
+
+extern	r_viewvecs_t	r_viewvectors;
+
 
 extern	struct texture_s	*r_notexture_mip;
 
 
 void R_Init (void);
 void R_InitTextures (void);
-void R_RenderView (DWORD dwTimePassed);		// must set r_refdef first
+void R_RenderView (void);		// must set r_refdef first
 void R_ViewChanged (vrect_t *pvrect, int lineadj, float aspect);
 // called whenever r_refdef or vid change
 
