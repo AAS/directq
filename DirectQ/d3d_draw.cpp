@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 // draw.c -- this is the only file outside the refresh that touches the
@@ -26,6 +23,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+
+
+cvar_t gl_conscale ("gl_conscale", "1", CVAR_ARCHIVE);
 
 char *gfxlmps[] =
 {
@@ -45,12 +45,13 @@ void Draw_DumpLumps (void)
 		if (!gfxlmps[i]) break;
 
 		// load the pic from disk
-		qpic_t *dat = (qpic_t *) COM_LoadTempFile (va ("gfx/%s", gfxlmps[i]));
+		qpic_t *dat = (qpic_t *) COM_LoadFile (va ("gfx/%s", gfxlmps[i]));
 
 		if (dat->width > 1024) continue;
 		if (dat->height > 1024) continue;
 
 		SCR_WriteDataToTGA (va ("%s.tga", gfxlmps[i]), dat->data, dat->width, dat->height, 8, 24);
+		Zone_Free (dat);
 	}
 }
 
@@ -60,7 +61,6 @@ PALETTEENTRY lumapal[256];
 extern unsigned int lumatable[];
 
 cvar_t		gl_nobind ("gl_nobind", "0");
-cvar_t		gl_conscale ("gl_conscale", "0", CVAR_ARCHIVE);
 
 byte		*draw_chars;				// 8*8 graphic characters
 qpic_t		*draw_disc;
@@ -71,6 +71,19 @@ int			translate_texture;
 LPDIRECT3DTEXTURE9 char_texture = NULL;
 LPDIRECT3DTEXTURE9 R_PaletteTexture = NULL;
 LPDIRECT3DTEXTURE9 crosshairtexture = NULL;
+
+typedef struct crosshair_s
+{
+	float l;
+	float t;
+	float r;
+	float b;
+	bool replaced;
+	LPDIRECT3DTEXTURE9 texture;
+} crosshair_t;
+
+int d3d_NumCrosshairs = 0;
+crosshair_t *d3d_Crosshairs = NULL;
 
 // faster lookup for char and palette coords
 typedef struct quadcoord_s
@@ -87,6 +100,8 @@ typedef struct
 {
 	struct image_s *tex;
 	float	sl, tl, sh, th;
+	float scaled_width;
+	float scaled_height;
 } glpic_t;
 
 
@@ -98,21 +113,17 @@ int		texels;
 #define MAX_2D_VERTS	666
 int Num2DVerts = 0;
 LPDIRECT3DTEXTURE9 Current2DTexture = NULL;
-DWORD Current2DFVF = -1;
+LPDIRECT3DVERTEXDECLARATION9 Current2DFVF = NULL;
 DWORD Current2DAddrMode = -1;
 DWORD Current2DColor = 0;
 
 // 2d drawing
 DWORD d3d_2DTextureColor = 0xffffffff;
 
-float vert2dscale_x = 1;
-float vert2dscale_y = 1;
-
 typedef struct flatpolyvert_s
 {
 	// switched to rhw to avoid matrix transforms and state updates
 	float x, y, z;
-	float rhw;
 	DWORD c;
 	float s;
 	float t;
@@ -125,7 +136,6 @@ typedef struct coloredpolyvert_s
 {
 	// switched to rhw to avoid matrix transforms and state updates
 	float x, y, z;
-	float rhw;
 	DWORD c;
 } coloredpolyvert_t;
 
@@ -135,10 +145,10 @@ void D3D_ScissorRect (float l, float t, float r, float b)
 {
 	RECT SRect;
 
-	SRect.bottom = b * vert2dscale_y;
-	SRect.left = l * vert2dscale_x;
-	SRect.right = r * vert2dscale_x;
-	SRect.top = t * vert2dscale_y;
+	SRect.bottom = b;
+	SRect.left = l;
+	SRect.right = r;
+	SRect.top = t;
 
 	d3d_Device->SetScissorRect (&SRect);
 }
@@ -146,10 +156,9 @@ void D3D_ScissorRect (float l, float t, float r, float b)
 
 __inline void D3D_EmitFlatPolyVert (int vertnum, float x, float y, D3DCOLOR c, float s, float t)
 {
-	verts2d[vertnum].x = x * vert2dscale_x;
-	verts2d[vertnum].y = y * vert2dscale_y;
+	verts2d[vertnum].x = x - 0.5f;
+	verts2d[vertnum].y = y - 0.5f;
 	verts2d[vertnum].z = 0;
-	verts2d[vertnum].rhw = 1;
 	verts2d[vertnum].c = c;
 	verts2d[vertnum].s = s;
 	verts2d[vertnum].t = t;
@@ -158,10 +167,9 @@ __inline void D3D_EmitFlatPolyVert (int vertnum, float x, float y, D3DCOLOR c, f
 
 __inline void D3D_EmitColoredPolyVert (int vertnum, float x, float y, D3DCOLOR c)
 {
-	verts2dcolored[vertnum].x = x * vert2dscale_x;
-	verts2dcolored[vertnum].y = y * vert2dscale_y;
+	verts2dcolored[vertnum].x = x;
+	verts2dcolored[vertnum].y = y;
 	verts2dcolored[vertnum].z = 0;
-	verts2dcolored[vertnum].rhw = 1;
 	verts2dcolored[vertnum].c = c;
 }
 
@@ -201,7 +209,7 @@ void D3D_DrawColoredPoly (float x, float y, float w, float h, D3DCOLOR c)
 
 	// untextured
 	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
-	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuse);
 
 	D3D_EmitColoredPolyVert (0, x, y, c);
 	D3D_EmitColoredPolyVert (1, x + w, y, c);
@@ -215,7 +223,7 @@ void D3D_DrawColoredPoly (float x, float y, float w, float h, D3DCOLOR c)
 
 	// back to texturing
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
-	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
 }
 
 
@@ -227,14 +235,14 @@ void D3D_EndFlatDraw (void)
 
 	// reset
 	Num2DVerts = 0;
-	Current2DFVF = -1;
+	Current2DFVF = NULL;
 	Current2DAddrMode = -1;
 	Current2DTexture = NULL;
 	Current2DColor = 0;
 }
 
 
-void D3D_PrepareFlatDraw (DWORD texfvf, DWORD addrmode, LPDIRECT3DTEXTURE9 stage0tex, DWORD color)
+void D3D_PrepareFlatDraw (LPDIRECT3DVERTEXDECLARATION9 texfvf, DWORD addrmode, LPDIRECT3DTEXTURE9 stage0tex, DWORD color)
 {
 	if (Num2DVerts >= MAX_2D_VERTS || texfvf != Current2DFVF || addrmode != Current2DAddrMode || stage0tex != Current2DTexture || color != Current2DColor)
 	{
@@ -250,7 +258,7 @@ void D3D_PrepareFlatDraw (DWORD texfvf, DWORD addrmode, LPDIRECT3DTEXTURE9 stage
 		Current2DColor = color;
 
 		// set state
-		D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | texfvf);
+		D3D_SetVertexDeclaration (texfvf);
 		D3D_SetTextureAddressMode (addrmode);
 		D3D_SetTexture (0, stage0tex);
 	}
@@ -302,7 +310,7 @@ qpic_t *Draw_CachePic (char *path)
 	for (pic = menu_cachepics, freepic = NULL; pic; pic = pic->next)
 	{
 		if (!pic->name[0]) freepic = pic;
-		if (!stricmp (path, pic->name)) return &pic->pic;
+		if (!stricmp (path, pic->name)) 	return &pic->pic;
 	}
 
 	// if a free slot is available we use that, otherwise we alloc a new one
@@ -311,7 +319,7 @@ qpic_t *Draw_CachePic (char *path)
 	else
 	{
 		// add a new pic to the game pool
-		pic = (cachepic_t *) Pool_Game->Alloc (sizeof (cachepic_t));
+		pic = (cachepic_t *) GameZone->Alloc (sizeof (cachepic_t));
 		pic->next = menu_cachepics;
 		menu_cachepics = pic;
 	}
@@ -319,13 +327,15 @@ qpic_t *Draw_CachePic (char *path)
 	Q_strncpy (pic->name, path, 63);
 
 	// load the pic from disk
-	dat = (qpic_t *) COM_LoadTempFile (path);
+	dat = (qpic_t *) COM_LoadFile (path);
+	bool freezone = true;
 
 	if (!dat)
 	{
 		// don't swap draw_failsafe!!!
 		Con_Printf ("Draw_CachePic: failed to load %s", path);
 		dat = draw_failsafe;
+		freezone = false;
 	}
 	else
 	{
@@ -339,11 +349,8 @@ qpic_t *Draw_CachePic (char *path)
 		// seems preferable to crashing
 		Con_Printf ("Draw_CachePic: dat->width < 1 || dat->height < 1 for %s\n(I fucked up - sorry)\n", path);
 		dat = draw_failsafe;
-
-#ifdef _DEBUG
-		// prevent an exception in release builds
-		DebugBreak ();
-#endif
+		freezone = false;
+		assert (false);
 	}
 
 	// HACK HACK HACK --- we need to keep the bytes for
@@ -352,10 +359,10 @@ qpic_t *Draw_CachePic (char *path)
 	if (!strcmp (path, "gfx/menuplyr.lmp"))
 	{
 		// this should only happen once
-		menuplyr_pixels = (byte *) Pool_Game->Alloc (dat->width * dat->height);
-		menuplyr_pixels_translated = (byte *) Pool_Game->Alloc (dat->width * dat->height);
-		memcpy (menuplyr_pixels, dat->data, dat->width * dat->height);
-		memcpy (menuplyr_pixels_translated, dat->data, dat->width * dat->height);
+		menuplyr_pixels = (byte *) GameZone->Alloc (dat->width * dat->height);
+		menuplyr_pixels_translated = (byte *) GameZone->Alloc (dat->width * dat->height);
+		Q_MemCpy (menuplyr_pixels, dat->data, dat->width * dat->height);
+		Q_MemCpy (menuplyr_pixels_translated, dat->data, dat->width * dat->height);
 	}
 
 	pic->pic.width = dat->width;
@@ -364,26 +371,25 @@ qpic_t *Draw_CachePic (char *path)
 	gl = (glpic_t *) pic->pic.data;
 
 	gl->tex = D3D_LoadTexture (path, dat->width, dat->height, dat->data, IMAGE_ALPHA | IMAGE_PADDABLE);
+
 	gl->sl = 0;
 	gl->tl = 0;
+	gl->sh = 1;
+	gl->th = 1;
 
 	if (gl->tex->flags & IMAGE_PADDED)
 	{
-		// unpad texcoords
-		int scaled_width = D3D_PowerOf2Size (dat->width);
-		int scaled_height = D3D_PowerOf2Size (dat->height);
-
-		gl->sh = (float) dat->width / (float) scaled_width;
-		gl->th = (float) dat->height / (float) scaled_height;
+		gl->scaled_width = D3D_PowerOf2Size (dat->width);
+		gl->scaled_height = D3D_PowerOf2Size (dat->height);
 	}
 	else
 	{
-		gl->sh = 1;
-		gl->th = 1;
+		gl->scaled_width = dat->width;
+		gl->scaled_height = dat->height;
 	}
 
 	// don't pollute the temp pool with small fry
-	Pool_Temp->Free ();
+	if (freezone) Zone_Free (dat);
 
 	return &pic->pic;
 }
@@ -411,7 +417,7 @@ qpic_t *Draw_PicFromWad (char *name)
 
 #ifdef _DEBUG
 		// prevent an exception in release builds
-		DebugBreak ();
+		assert (false);
 #endif
 	}
 
@@ -422,22 +428,21 @@ qpic_t *Draw_PicFromWad (char *name)
 	_snprintf (picloadname, 255, "gfx/%s.blah", name);
 
 	gl->tex = D3D_LoadTexture (picloadname, p->width, p->height, p->data, IMAGE_ALPHA | IMAGE_PADDABLE);
+
 	gl->sl = 0;
 	gl->tl = 0;
+	gl->sh = 1;
+	gl->th = 1;
 
 	if (gl->tex->flags & IMAGE_PADDED)
 	{
-		// unpad texcoords
-		int scaled_width = D3D_PowerOf2Size (p->width);
-		int scaled_height = D3D_PowerOf2Size (p->height);
-
-		gl->sh = (float) p->width / (float) scaled_width;
-		gl->th = (float) p->height / (float) scaled_height;
+		gl->scaled_width = D3D_PowerOf2Size (p->width);
+		gl->scaled_height = D3D_PowerOf2Size (p->height);
 	}
 	else
 	{
-		gl->sh = 1;
-		gl->th = 1;
+		gl->scaled_width = p->width;
+		gl->scaled_height = p->height;
 	}
 
 	return p;
@@ -451,10 +456,10 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	int i, j, c;
 
 	// allocate memory for a new charset
-	newchars = (byte *) Pool_Temp->Alloc (w * h * 4);
+	newchars = (byte *) Zone_Alloc (w * h * 4);
 
 	// clear to all alpha
-	memset (newchars, 0, w * h * 4);
+	Q_MemSet (newchars, 0, w * h * 4);
 
 	// copy them in with better spacing
 	for (i = 0, j = 0; i < w * h; )
@@ -531,6 +536,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 
 	// now turn them into textures
 	D3D_UploadTexture (&char_texture, newchars, 256, 256, IMAGE_ALPHA);
+	Zone_Free (newchars);
 }
 
 
@@ -539,8 +545,101 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 Draw_Init
 ===============
 */
-extern cvar_t gl_texturedir;
-int COM_BuildContentList (char ***FileList, char *basedir, char *filetype);
+void Draw_FreeCrosshairs (void)
+{
+	if (!d3d_Crosshairs) return;
+
+	for (int i = 0; i < d3d_NumCrosshairs; i++)
+	{
+		// only textures which were replaced can be released here
+		// the others are released separately
+		if (d3d_Crosshairs[i].replaced && d3d_Crosshairs[i].texture)
+		{
+			SAFE_RELEASE (d3d_Crosshairs[i].texture);
+
+			// prevent multiple release attempts
+			d3d_Crosshairs[i].texture = NULL;
+			d3d_Crosshairs[i].replaced = false;
+		}
+	}
+
+	// this will force a load the first time we draw
+	d3d_NumCrosshairs = 0;
+	d3d_Crosshairs = NULL;
+}
+
+
+void Draw_LoadCrosshairs (void)
+{
+	// free anything that we may have had previously
+	Draw_FreeCrosshairs ();
+
+	// load them into the scratch buffer to begin with because we don't know how many we'll have
+	d3d_Crosshairs = (crosshair_t *) scratchbuf;
+
+	// full texcoords for each value
+	float xhairs[] = {0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75};
+	float xhairt[] = {0, 0, 0, 0, 0.5, 0.5, 0.5, 0.5};
+
+	// load default crosshairs
+	for (int i = 0; i < 10; i++)
+	{
+		if (i < 2)
+		{
+			// + sign crosshairs
+			d3d_Crosshairs[i].texture = char_texture;
+			d3d_Crosshairs[i].l = quadcoords['+' + (128 * i)].s;
+			d3d_Crosshairs[i].t = quadcoords['+' + (128 * i)].t;
+			d3d_Crosshairs[i].r = quadcoords['+' + (128 * i)].smax;
+			d3d_Crosshairs[i].b = quadcoords['+' + (128 * i)].tmax;
+		}
+		else
+		{
+			// crosshair images
+			d3d_Crosshairs[i].texture = crosshairtexture;
+			d3d_Crosshairs[i].l = xhairs[i - 2];
+			d3d_Crosshairs[i].t = xhairt[i - 2];
+			d3d_Crosshairs[i].r = xhairs[i - 2] + 0.25f;
+			d3d_Crosshairs[i].b = xhairt[i - 2] + 0.5f;
+		}
+
+		// we need to track if the image has been replaced so that we know to add colour to crosshair 1 and 2 if so
+		d3d_Crosshairs[i].replaced = false;
+	}
+
+	// nothing here to begin with
+	d3d_NumCrosshairs = 0;
+
+	// now attempt to load replacements
+	for (int i = 0; ; i++)
+	{
+		// attempt to load one
+		LPDIRECT3DTEXTURE9 newcrosshair;
+
+		// standard loader; qrack crosshairs begin at 1 and so should we
+		if (!D3D_LoadExternalTexture (&newcrosshair, va ("crosshair%i", i + 1), 0))
+			break;
+
+		// fill it in
+		d3d_Crosshairs[i].texture = newcrosshair;
+		d3d_Crosshairs[i].l = 0;
+		d3d_Crosshairs[i].t = 0;
+		d3d_Crosshairs[i].r = 1;
+		d3d_Crosshairs[i].b = 1;
+		d3d_Crosshairs[i].replaced = true;
+
+		// mark a new crosshair
+		d3d_NumCrosshairs++;
+	}
+
+	// always include the standard images
+	if (d3d_NumCrosshairs < 10) d3d_NumCrosshairs = 10;
+
+	// now set them up in memory for real - put them in the main zone so that we can free replacement textures properly
+	d3d_Crosshairs = (crosshair_t *) MainZone->Alloc (d3d_NumCrosshairs * sizeof (crosshair_t));
+	Q_MemCpy (d3d_Crosshairs, scratchbuf, d3d_NumCrosshairs * sizeof (crosshair_t));
+}
+
 
 void Draw_Init (void)
 {
@@ -577,7 +676,7 @@ void Draw_Init (void)
 		int failsafedatasize = D3D_PowerOf2Size ((int) sqrt ((float) (sizeof (glpic_t))) + 1);
 
 		// persist in memory
-		failsafedata = (byte *) Pool_Permanent->Alloc (sizeof (int) * 2 + (failsafedatasize * failsafedatasize));
+		failsafedata = (byte *) Zone_Alloc (sizeof (int) * 2 + (failsafedatasize * failsafedatasize));
 		draw_failsafe = (qpic_t *) failsafedata;
 		draw_failsafe->height = failsafedatasize;
 		draw_failsafe->width = failsafedatasize;
@@ -649,7 +748,7 @@ void Draw_Character (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, 8, 8, quadcoords[num].s, quadcoords[num].t, quadcoords[num].smax, quadcoords[num].tmax);
 }
 
@@ -658,7 +757,7 @@ void Draw_InvertCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, 8, 8, quadcoords[num].s, quadcoords[num].tmax, quadcoords[num].smax, quadcoords[num].t);
 }
 
@@ -667,7 +766,7 @@ void Draw_BackwardsCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, 8, 8, quadcoords[num].smax, quadcoords[num].t, quadcoords[num].s, quadcoords[num].tmax);
 }
 
@@ -676,7 +775,7 @@ void Draw_RotateCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 
 	// rotation needs to go direct as y and y + h are the same t texcoord
 	D3D_EmitFlatPolyVert (Num2DVerts + 0, x, y, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax);
@@ -755,14 +854,32 @@ void Draw_DebugChar (char num)
 Draw_Pic
 =============
 */
+void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int height)
+{
+	glpic_t *gl;
+	float newsl, newtl, newsh, newth;
+
+	gl = (glpic_t *) pic->data;
+
+	newsl = srcx / gl->scaled_width;
+	newsh = (srcx + width + 1) / gl->scaled_width;
+
+	newtl = srcy / gl->scaled_height;
+	newth = (srcy + height + 1) / gl->scaled_height;
+
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, d3d_2DTextureColor);
+	D3D_DrawFlatPoly (x, y, width, height, newsl, newtl, newsh, newth);
+}
+
+
 void Draw_Pic (int x, int y, qpic_t *pic, float alpha)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
 	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha * 255), 255, 255, 255);
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, alphacolor);
-	D3D_DrawFlatPoly (x, y, pic->width, pic->height, alphacolor, gl->sl, gl->tl, gl->sh, gl->th);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, alphacolor);
+	D3D_DrawFlatPoly (x, y, gl->scaled_width, gl->scaled_height, alphacolor, gl->sl, gl->tl, gl->sh, gl->th);
 }
 
 
@@ -770,15 +887,97 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, d3d_2DTextureColor);
-	D3D_DrawFlatPoly (x, y, pic->width, pic->height, gl->sl, gl->tl, gl->sh, gl->th);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, d3d_2DTextureColor);
+	D3D_DrawFlatPoly (x, y, gl->scaled_width, gl->scaled_height, gl->sl, gl->tl, gl->sh, gl->th);
 }
 
 
 void Draw_Pic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic)
 {
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, texpic, d3d_2DTextureColor);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, texpic, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, w, h, 0, 0, 1, 1);
+}
+
+
+void Draw_Crosshair (int x, int y)
+{
+	// deferred loading because the crosshair texture is not yet up in Draw_Init
+	if (!d3d_Crosshairs) Draw_LoadCrosshairs ();
+
+	// we don't know about these cvars
+	extern cvar_t crosshair;
+	extern cvar_t scr_crosshaircolor;
+	extern cvar_t scr_crosshairscale;
+
+	// no crosshair
+	if (!crosshair.integer) return;
+
+	// get scale
+	int crossscale = (int) (32.0f * scr_crosshairscale.value);
+
+	// - 1 because crosshair 0 is no crosshair
+	int currcrosshair = crosshair.integer - 1;
+
+	// wrap it
+	if (currcrosshair >= d3d_NumCrosshairs) currcrosshair -= d3d_NumCrosshairs;
+
+	// bound colour
+	if (scr_crosshaircolor.integer < 0) Cvar_Set (&scr_crosshaircolor, (float) 0.0f);
+	if (scr_crosshaircolor.integer > 13) Cvar_Set (&scr_crosshaircolor, 13.0f);
+
+	// handle backwards ranges
+	int cindex = scr_crosshaircolor.integer * 16 + (scr_crosshaircolor.integer < 8 ? 15 : 0);
+
+	// bound
+	if (cindex < 0) cindex = 0;
+	if (cindex > 255) cindex = 255;
+
+	// colour for custom pics
+	D3DCOLOR xhaircolor = D3DCOLOR_XRGB
+	(
+		((byte *) &d_8to24table[cindex])[2],
+		((byte *) &d_8to24table[cindex])[1],
+		((byte *) &d_8to24table[cindex])[0]
+	);
+
+	// classic crosshairs are just drawn with the default colour and fixed scale
+	if (currcrosshair < 2 && !d3d_Crosshairs[currcrosshair].replaced)
+	{
+		xhaircolor = 0xffffffff;
+		crossscale = 8;
+	}
+
+	// don't draw it if too small
+	if (crossscale < 2) return;
+
+	// center it properly
+	x -= (crossscale / 2);
+	y -= (crossscale / 2);
+
+	// end previous because this is a state change
+	D3D_EndFlatDraw ();
+
+	// bind it (modulate by color)
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, d3d_Crosshairs[currcrosshair].texture, xhaircolor);
+	D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+
+	// draw it
+	D3D_DrawFlatPoly
+	(
+		x,
+		y,
+		crossscale,
+		crossscale,
+		xhaircolor,
+		d3d_Crosshairs[currcrosshair].l,
+		d3d_Crosshairs[currcrosshair].t,
+		d3d_Crosshairs[currcrosshair].r,
+		d3d_Crosshairs[currcrosshair].b
+	);
+
+	// end this
+	D3D_EndFlatDraw ();
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 }
 
 
@@ -813,11 +1012,11 @@ void Draw_Crosshair (int x, int y, int size)
 	int xhairimage = crosshair.integer - 3;
 
 	// 0 to 15 scale
-	while (xhairimage > 15) xhairimage -= 16;
+	while (xhairimage > 7) xhairimage -= 8;
 
 	// full texcoords for each value
-	float xhairs[] = {0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75};
-	float xhairt[] = {0, 0, 0, 0, 0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0.5, 0.5, 0.75, 0.75, 0.75, 0.75};
+	float xhairs[] = {0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75};
+	float xhairt[] = {0, 0, 0, 0, 0.5, 0.5, 0.5, 0.5};
 
 	// actual coords we'll use
 	float s = xhairimage[xhairs];
@@ -827,19 +1026,13 @@ void Draw_Crosshair (int x, int y, int size)
 	D3D_EndFlatDraw ();
 
 	// bind it (modulate by color)
-#if 1
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, crosshairtexture, xhaircolor);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, crosshairtexture, xhaircolor);
 	D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-	D3D_DrawFlatPoly (x, y, size, size, xhaircolor, s, t, s + 0.25, t + 0.25);
+	D3D_DrawFlatPoly (x, y, size, size, xhaircolor, s, t, s + 0.25, t + 0.5);
 
 	// end this
 	D3D_EndFlatDraw ();
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-#else
-	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
-	D3D_SetTexture (0, crosshairtexture);
-#endif
 }
 
 
@@ -847,8 +1040,8 @@ void Draw_HalfPic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, d3d_2DTextureColor);
-	D3D_DrawFlatPoly (x, y, pic->width / 2, pic->height / 2, gl->sl, gl->tl, gl->sh, gl->th);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, d3d_2DTextureColor);
+	D3D_DrawFlatPoly (x, y, gl->scaled_width / 2, gl->scaled_height / 2, gl->sl, gl->tl, gl->sh, gl->th);
 }
 
 
@@ -918,7 +1111,7 @@ void Draw_InvalidateMapshot (void)
 void Draw_MapshotTexture (LPDIRECT3DTEXTURE9 mstex, int x, int y)
 {
 	Draw_TextBox (x - 8, y - 8, 128, 128);
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, mstex, 0xffffffff);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, mstex, 0xffffffff);
 	D3D_DrawFlatPoly (x, y, 128, 128, 0, 0, 1, 1);
 }
 
@@ -930,8 +1123,10 @@ void Draw_Mapshot (char *name, int x, int y)
 		// no name supplied so display the console image instead
 		glpic_t *gl = (glpic_t *) conback->data;
 
-		// note - sl/tl/sh/th for the conback are correct 0 and 1 values
-		Draw_MapshotTexture (gl->tex->d3d_Texture, x, y);
+		// ugh, can't send it through Draw_MapshotTexture because of padding.
+		// at this kind of scale integer division is hopefully no big deal
+		Draw_TextBox (x - 8, y - 8, 128, 128);
+		Draw_Pic (x, y, (128 * gl->scaled_width) / gl->tex->width, (128 * gl->scaled_height) / gl->tex->height, gl->tex->d3d_Texture);
 		return;
 	}
 
@@ -949,7 +1144,7 @@ void Draw_Mapshot (char *name, int x, int y)
 			if (!com_games[i]) continue;
 
 			// attempt to load it
-			if (D3D_LoadExternalTexture (&d3d_MapshotTexture, va ("%s\\%s", com_games[i], cached_name), IMAGE_MAPSHOT))
+			if (D3D_LoadExternalTexture (&d3d_MapshotTexture, va ("%s\\%s", com_games[i], cached_name), IMAGE_KEEPPATH))
 			{
 				break;
 			}
@@ -1036,16 +1231,44 @@ void Draw_ConsoleBackground (int lines)
 {
 	int y = (vid.height * 3) >> 2;
 
-	// ensure these are always valid
-	conback->width = vid.width;
-	conback->height = vid.height;
+	// because the conback needs scaling/etc we need to handle it specially
+	glpic_t *gl = (glpic_t *) conback->data;
+	float alpha;
 
-	if (lines <= y)
-		Draw_Pic (0, lines - vid.height, conback, (float) lines / y);
-	else Draw_Pic (0, lines - vid.height, conback);
+	if (lines < y)
+		alpha = (float) lines / y;
+	else alpha = 1;
 
-	Draw_String (vid.width - 84, (lines - vid.height) + vid.height - 30, "DirectQ", 128);
-	Draw_String (vid.width - 76, (lines - vid.height) + vid.height - 22, va ("%s", DIRECTQ_VERSION), 128);
+	// end previous because this is a state change
+	D3D_EndFlatDraw ();
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
+
+	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha * 255), 255, 255, 255);
+
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, alphacolor);
+
+	y = lines - vid.height;
+
+	D3D_DrawFlatPoly
+	(
+		0,
+		(float) lines - vid.height,
+		vid.width,
+		vid.height,
+		alphacolor,
+		0,
+		0,
+		(float) conback->width / (float) gl->scaled_width,
+		(float) conback->height / (float) gl->scaled_height
+	);
+
+	// end this one
+	D3D_EndFlatDraw ();
+
+	// back to normal scaling mode
+	if (gl_conscale.value < 1)
+		D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
+	else D3D_SetTextureMipmap (0, D3DTEXF_NONE, D3DTEXF_NONE, D3DTEXF_NONE);
 }
 
 
@@ -1061,7 +1284,7 @@ void Draw_TileClear (int x, int y, int w, int h)
 {
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_WRAP, gl->tex->d3d_Texture, 0xffffffff);
+	D3D_PrepareFlatDraw (d3d_VDXyzDiffuseTex1, D3DTADDRESS_WRAP, gl->tex->d3d_Texture, 0xffffffff);
 	D3D_DrawFlatPoly (x, y, w, h, x / 64.0, y / 64.0, (x + w) / 64.0, (y + h) / 64.0);
 }
 
@@ -1207,21 +1430,29 @@ void D3D_Set2D (void)
 	// no backface culling
 	D3D_BackfaceCull (D3DCULL_NONE);
 
-	// evaluate scaling factor for 2d rendering (uses D3DFVF_RHW instead of transforms)
-	vert2dscale_x = (float) d3d_CurrentMode.Width / (float) vid.width;
-	vert2dscale_y = (float) d3d_CurrentMode.Height / (float) vid.height;
-
 	// draw the underwater warp here - all the above state is common but it uses a different orthographic matrix
 	if (!d3d_RenderDef.automap) D3D_Draw3DSceneToBackbuffer ();
 
-	// back to normal
-	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
+	// back to normal - set a filtering mode depending on whether or not we're scaling the console
+	if (gl_conscale.value < 1)
+		D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
+	else D3D_SetTextureMipmap (0, D3DTEXF_NONE, D3DTEXF_NONE, D3DTEXF_NONE);
+
 	D3D_SetTexCoordIndexes (0, 0, 0);
+
+	// revert to standard ortho projections here (simplicity/reuse of vertex decls/shift some load to gpu/etc)
+	D3DXMATRIX m;
+	D3D_LoadIdentity (&m);
+	d3d_Device->SetTransform (D3DTS_VIEW, &m);
+	d3d_Device->SetTransform (D3DTS_WORLD, &m);
+
+	QD3DXMatrixOrthoOffCenterRH (&m, 0, vid.width, vid.height, 0, 0, 1);
+	d3d_Device->SetTransform (D3DTS_PROJECTION, &m);
 
 	// initialize states
 	Num2DVerts = 0;
 	Current2DTexture = NULL;
-	Current2DFVF = -1;
+	Current2DFVF = NULL;
 	Current2DAddrMode = -1;
 
 	// modulate alpha always here

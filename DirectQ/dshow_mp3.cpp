@@ -52,7 +52,6 @@ Note: DS_FindTrack is a bit messy right now; I should go back and clean it up.
 
 #pragma comment (lib, "Strmiids.lib")
 
-
 char *IsURLContainer (char *filename)
 {
 	static char urlname[1024];
@@ -241,10 +240,81 @@ public:
 // this must be created before playing each track
 CDSClass *DSManager = NULL;
 
-cvar_t ds_musicdir ("ds_musicdir", "music", CVAR_ARCHIVE);
+
+void MediaPlayer_Init (void)
+{
+	// just attempt to initialize COM
+	hr = CoInitialize (NULL);
+
+	if (FAILED (hr))
+	{
+		// if this fails we likely have a broken OS...
+		Sys_Error ("MediaPlayer_Init: FAILED (hr) on CoInitialize\n");
+		return;
+	}
+}
 
 
-void DS_Event (void)
+void MediaPlayer_Shutdown (void)
+{
+	// stop everything
+	MediaPlayer_Stop ();
+
+	// unload COM
+	CoUninitialize ();
+}
+
+
+bool FindMediaFile (char *subdir, int track, bool looping)
+{
+	char **foundtracks = NULL;
+	bool mediaplaying = false;
+
+	// welcome to the world of char ***!  we want to be able to play all types of tracks here
+	// don't sort the result so that the tracks will appear in the order of the specified gamedirs
+	int listlen = COM_BuildContentList (&foundtracks, subdir, ".*", NO_PAK_CONTENT | PREPEND_PATH | NO_SORT_RESULT);
+
+	if (listlen)
+	{
+		// we need to walk the entire list anyway to free memory so may as well search for the specified file here too
+		// COM_BuildContentList returns files in alphabetical order so we just take the correct number
+		for (int i = 0; i < listlen; i++)
+		{
+			// quake tracks are 2-based because the first track on the CD is the data track and CD tracks are 1-based
+			if (i == (track - 2) && !mediaplaying)
+			{
+				// attempt to play it
+				DSManager = new CDSClass (foundtracks[i], looping);
+				mediaplaying = true;
+			}
+
+			// it's our responsibility to free memory allocated by COM_BuildContentList
+			Zone_Free (foundtracks[i]);
+		}
+	}
+
+	// return if the media is playing
+	return mediaplaying;
+}
+
+
+bool MediaPlayer_Play (int track, bool looping)
+{
+	// stop any previous tracks
+	MediaPlayer_Stop ();
+
+	// every other ID game that uses music tracks in the filesystem has them in music, so it's
+	// a reasonable assumption that that's what users will be expecting...
+	if (FindMediaFile ("music/", track, looping)) return true;
+
+	// darkplaces on the other hand does something *completely* different.  standards?  who needs 'em!
+	if (FindMediaFile ("sound/cdtracks/", track, looping)) return true;
+
+	return false;
+}
+
+
+void MediaPlayer_Update (void)
 {
 	// check that DS is up
 	if (!DSManager) return;
@@ -254,116 +324,7 @@ void DS_Event (void)
 }
 
 
-void DS_Init (void)
-{
-	// just attempt to initialize COM
-	hr = CoInitialize (NULL);
-
-	if (FAILED (hr))
-	{
-		// if this fails we likely have a broken OS...
-		Sys_Error ("DS_Init: FAILED (hr) on CoInitialize\n");
-		return;
-	}
-}
-
-
-void DS_Shutdown (void)
-{
-	// stop everything
-	DS_Stop ();
-
-	// unload COM
-	CoUninitialize ();
-}
-
-
-bool DS_FindTrack (const char *trackdir, const char *musicdir, int track, bool looping)
-{
-	char MusicPath[256];
-
-	// build the path to search
-	// we don't need this for FindFirstFile/FindNextFile, but we do for DirectShow
-	_snprintf (MusicPath, 256, "%s\\%s", trackdir, musicdir);
-
-	WIN32_FIND_DATA FindFileData;
-	HANDLE hFind = INVALID_HANDLE_VALUE;
-
-	// Quake track numbers start at 2 as they are CD track numbers (1 based, #1 is data on the Quake CD)
-	// so here we convert it into what we expect it to be.
-	track -= 2;
-
-	// look for a file
-	hFind = FindFirstFile (va ("%s\\*.*", MusicPath), &FindFileData);
-
-	if (hFind == INVALID_HANDLE_VALUE)
-	{
-		// found no files
-		FindClose (hFind);
-
-		// false as there was nothing to check against
-		return false;
-	}
-
-	int seektrack = 0;
-
-	do
-	{
-		// not interested in these types
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
-		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-
-		if (track == seektrack)
-		{
-			// attempt to play it
-			DSManager = new CDSClass (va ("%s\\%s", MusicPath, FindFileData.cFileName), looping);
-
-			// no need to find any more
-			FindClose (hFind);
-			return true;
-		}
-
-		// go to the next track
-		seektrack++;
-	} while (FindNextFile (hFind, &FindFileData));
-
-	// close the finder
-	FindClose (hFind);
-
-	// didn't find anything
-	return false;
-}
-
-
-bool DS_Play (int track, bool looping)
-{
-	// stop any previous tracks
-	DS_Stop ();
-
-	// ensure
-	COM_CheckContentDirectory (&ds_musicdir, false);
-
-	// look for the track in the current gamedir, then fall back on ID1
-	// note - this will actually search ID1 twice if the current game is ID1
-	if (DS_FindTrack (com_gamedir, ds_musicdir.string, track, looping)) return true;
-	if (DS_FindTrack (GAMENAME, ds_musicdir.string, track, looping)) return true;
-
-	// because ONE engine has gotten popular enough to insist on doing things it's own way and get away with it
-	if (DS_FindTrack (com_gamedir, "sound/cdtracks", track, looping)) return true;
-	if (DS_FindTrack (GAMENAME, "sound/cdtracks", track, looping)) return true;
-
-	// if things get really screwy we fall back on /music as a final fallback
-	if (DS_FindTrack (com_gamedir, "music", track, looping)) return true;
-	if (DS_FindTrack (GAMENAME, "music", track, looping)) return true;
-
-	return false;
-}
-
-
-void DS_Stop (void)
+void MediaPlayer_Stop (void)
 {
 	if (DSManager)
 	{
@@ -374,7 +335,7 @@ void DS_Stop (void)
 }
 
 
-void DS_Pause (void)
+void MediaPlayer_Pause (void)
 {
 	if (!DSManager) return;
 
@@ -382,7 +343,7 @@ void DS_Pause (void)
 }
 
 
-void DS_Resume (void)
+void MediaPlayer_Resume (void)
 {
 	if (!DSManager) return;
 
@@ -390,7 +351,7 @@ void DS_Resume (void)
 }
 
 
-void DS_ChangeVolume (void)
+void MediaPlayer_ChangeVolume (void)
 {
 	if (!DSManager) return;
 
@@ -402,4 +363,3 @@ void DS_ChangeVolume (void)
 void NehahraAbuseMeBaby (void) {}
 cmd_t Cmd_PlayMod ("playmod", NehahraAbuseMeBaby);
 cmd_t Cmd_StopMod ("stopmod", NehahraAbuseMeBaby);
-

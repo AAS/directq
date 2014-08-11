@@ -1,6 +1,8 @@
 
+float4x4 WorldMatrix;
+float4x4 ProjMatrix;
+
 texture ScreenTexture;
-float warptime;
 float warpscale;
 float4 polyblend;
 
@@ -12,28 +14,45 @@ sampler SrcColor = sampler_state
 };
 
 
-float4 PSPassThru (float2 Tex : TEXCOORD0) : COLOR0
+struct ScreenVert
 {
-	return tex2D (SrcColor, Tex.xy);
+	// 2 sets of texcoords needed for the warp; it's only 4 verts so no big deal on the overhead
+	float4 Position : POSITION0;
+	float2 Tex0 : TEXCOORD0;
+	float2 Tex1 : TEXCOORD1;
+};
+
+
+float4 PSPassThru (ScreenVert Input) : COLOR0
+{
+	return tex2D (SrcColor, Input.Tex0);
 }
 
 
-float4 PSBlendLerp (float2 Tex : TEXCOORD0) : COLOR0
+float4 PSBlendLerp (ScreenVert Input) : COLOR0
 {
-	return lerp (tex2D (SrcColor, Tex.xy), polyblend, polyblend.a);
+	return lerp (tex2D (SrcColor, Input.Tex0), polyblend, polyblend.a);
 }
 
 
-float4 PSUnderwaterPostProcess (float2 Tex : TEXCOORD0) : COLOR0
+float4 PSUnderwaterPostProcess (ScreenVert Input) : COLOR0
 {
-	float4 Color;
+	// that's a little more like it!
+	return lerp (tex2D (SrcColor, Input.Tex0 + sin (Input.Tex1) * warpscale), polyblend, polyblend.a);
+}
 
-	float2 st;
-	st.x = (Tex.x + sin (Tex.y + warptime) * warpscale) * 0.03125;
-	st.y = (Tex.y + sin (Tex.x + warptime) * warpscale) * 0.03125;
 
-	Color = lerp (tex2D (SrcColor, st.xy), polyblend, polyblend.a);
-	return Color;
+ScreenVert VSCommon (ScreenVert Input)
+{
+	ScreenVert Output;
+
+	// this is friendlier for preshaders
+	Output.Position = mul (Input.Position, mul (WorldMatrix, ProjMatrix));
+
+	Output.Tex0 = Input.Tex0;
+	Output.Tex1 = Input.Tex1;
+
+	return Output;
 }
 
 
@@ -41,19 +60,19 @@ technique ScreenUpdate
 {
 	pass P0
 	{
-		VertexShader = null;
+		VertexShader = compile vs_2_0 VSCommon ();
 		PixelShader = compile ps_2_0 PSUnderwaterPostProcess ();
 	}
 
 	pass P1
 	{
-		VertexShader = null;
+		VertexShader = compile vs_2_0 VSCommon ();
 		PixelShader = compile ps_2_0 PSPassThru ();
 	}
 
 	pass P2
 	{
-		VertexShader = null;
+		VertexShader = compile vs_2_0 VSCommon ();
 		PixelShader = compile ps_2_0 PSBlendLerp ();
 	}
 }

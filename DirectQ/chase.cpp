@@ -48,7 +48,7 @@ void TraceLine (vec3_t start, vec3_t end, vec3_t impact)
 {
 	trace_t	trace;
 
-	memset (&trace, 0, sizeof(trace));
+	Q_MemSet (&trace, 0, sizeof(trace));
 	SV_RecursiveHullCheck (cl.worldmodel->brushhdr->hulls, 0, 0, 1, start, end, &trace);
 
 	VectorCopy (trace.endpos, impact);
@@ -241,7 +241,7 @@ void Chase_Update (void)
 
 	if (dist < 1) dist = 1;
 
-	r_refdef.viewangles[PITCH] = -atan (stop[2] / dist) / M_PI * 180;
+	r_refdef.viewangles[PITCH] = -atan (stop[2] / dist) / D3DX_PI * 180;
 
 	// move towards destination
 	VectorCopy (chase_dest, r_refdef.vieworg);

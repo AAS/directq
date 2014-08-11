@@ -167,7 +167,7 @@ cmd_t PR_Extension_List_Cmd ("extensionlist", PR_Extension_List_f);
 */
 
 #define PR_MAX_TEMP_STRING		1024
-#define PR_NUM_TEMP_STRINGS		32
+#define PR_NUM_TEMP_STRINGS		8
 #define PR_TEMP_STRING_MASK		(PR_NUM_TEMP_STRINGS - 1)
 
 char *PR_GetTempString (void)
@@ -178,9 +178,9 @@ char *PR_GetTempString (void)
 	if (!pr_temp_strings)
 	{
 		// place these in the permanent pool cos they'll always be needed
-		pr_temp_strings = (char **) Pool_Permanent->Alloc (sizeof (char *) * PR_NUM_TEMP_STRINGS);
+		pr_temp_strings = (char **) Zone_Alloc (sizeof (char *) * PR_NUM_TEMP_STRINGS);
 
-		for (int i = 0; i < PR_NUM_TEMP_STRINGS; i++) pr_temp_strings[i] = (char *) Pool_Permanent->Alloc (PR_MAX_TEMP_STRING);
+		for (int i = 0; i < PR_NUM_TEMP_STRINGS; i++) pr_temp_strings[i] = (char *) Zone_Alloc (PR_MAX_TEMP_STRING);
 	}
 
 	// go to a new temp string, rotate the buffer if needed, and ensure that it's null termed
@@ -335,7 +335,7 @@ void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 		// find min / max for rotations
 		angles = e->v.angles;
 
-		a = angles[1]/180 * M_PI;
+		a = angles[1]/180 * D3DX_PI;
 
 		xvector[0] = cos(a);
 		xvector[1] = sin(a);
@@ -586,7 +586,7 @@ void PF_vectoyaw (void)
 		yaw = 0;
 	else
 	{
-		yaw = (int) (atan2(value1[1], value1[0]) * 180 / M_PI);
+		yaw = (int) (atan2(value1[1], value1[0]) * 180 / D3DX_PI);
 		if (yaw < 0)
 			yaw += 360;
 	}
@@ -620,12 +620,12 @@ void PF_vectoangles (void)
 	}
 	else
 	{
-		yaw = (int) (atan2(value1[1], value1[0]) * 180 / M_PI);
+		yaw = (int) (atan2(value1[1], value1[0]) * 180 / D3DX_PI);
 		if (yaw < 0)
 			yaw += 360;
 
 		forward = sqrt (value1[0]*value1[0] + value1[1]*value1[1]);
-		pitch = (int) (atan2(value1[2], forward) * 180 / M_PI);
+		pitch = (int) (atan2(value1[2], forward) * 180 / D3DX_PI);
 		if (pitch < 0)
 			pitch += 360;
 	}
@@ -811,10 +811,10 @@ void PF_traceline (void)
 	VectorCopy (trace.endpos, SVProgs->GlobalStruct->trace_endpos);
 	VectorCopy (trace.plane.normal, SVProgs->GlobalStruct->trace_plane_normal);
 	SVProgs->GlobalStruct->trace_plane_dist =  trace.plane.dist;	
+
 	if (trace.ent)
 		SVProgs->GlobalStruct->trace_ent = EDICT_TO_PROG(trace.ent);
-	else
-		SVProgs->GlobalStruct->trace_ent = EDICT_TO_PROG(SVProgs->Edicts);
+	else SVProgs->GlobalStruct->trace_ent = EDICT_TO_PROG(SVProgs->EdictPointers[0]);
 }
 
 
@@ -841,8 +841,7 @@ void PF_TraceToss (void)
 	SVProgs->GlobalStruct->trace_plane_dist =  trace.plane.dist;	
 	if (trace.ent)
 		SVProgs->GlobalStruct->trace_ent = EDICT_TO_PROG(trace.ent);
-	else
-		SVProgs->GlobalStruct->trace_ent = EDICT_TO_PROG(SVProgs->Edicts);
+	else SVProgs->GlobalStruct->trace_ent = EDICT_TO_PROG(SVProgs->EdictPointers[0]);
 }
 
 
@@ -909,7 +908,7 @@ int PF_newcheckclient (int check)
 	VectorAdd (ent->v.origin, ent->v.view_ofs, org);
 	leaf = Mod_PointInLeaf (org, sv.worldmodel);
 	pvs = Mod_LeafPVS (leaf, sv.worldmodel);
-	memcpy (checkpvs, pvs, (sv.worldmodel->brushhdr->numleafs+7)>>3 );
+	Q_MemCpy (checkpvs, pvs, (sv.worldmodel->brushhdr->numleafs+7)>>3 );
 
 	return i;
 }
@@ -949,7 +948,7 @@ void PF_checkclient (void)
 	ent = GetEdictForNumber(sv.lastcheck);
 	if (ent->free || ent->v.health <= 0)
 	{
-		RETURN_EDICT(SVProgs->Edicts);
+		RETURN_EDICT(SVProgs->EdictPointers[0]);
 		return;
 	}
 
@@ -961,7 +960,7 @@ void PF_checkclient (void)
 	if ( (l<0) || !(checkpvs[l>>3] & (1<<(l&7)) ) )
 	{
 c_notvis++;
-		RETURN_EDICT(SVProgs->Edicts);
+		RETURN_EDICT(SVProgs->EdictPointers[0]);
 		return;
 	}
 
@@ -1074,12 +1073,12 @@ void PF_findradius (void)
 	vec3_t	eorg;
 	int		i, j;
 
-	chain = (edict_t *)SVProgs->Edicts;
+	chain = (edict_t *)SVProgs->EdictPointers[0];
 	
 	org = G_VECTOR(OFS_PARM0);
 	rad = G_FLOAT(OFS_PARM1);
 
-	ent = NEXT_EDICT(SVProgs->Edicts);
+	ent = NEXT_EDICT(SVProgs->EdictPointers[0]);
 	for (i=1; i<SVProgs->NumEdicts; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
@@ -1206,7 +1205,7 @@ void PF_Find (void)
 		}
 	}
 
-	RETURN_EDICT(SVProgs->Edicts);
+	RETURN_EDICT(SVProgs->EdictPointers[0]);
 }
 
 
@@ -1319,7 +1318,7 @@ void PF_walkmove (void)
 		return;
 	}
 
-	yaw = yaw*M_PI*2 / 360;
+	yaw = yaw*D3DX_PI*2 / 360;
 	
 	move[0] = cos(yaw)*dist;
 	move[1] = sin(yaw)*dist;
@@ -1466,7 +1465,7 @@ void PF_nextent (void)
 		i++;
 		if (i == SVProgs->NumEdicts)
 		{
-			RETURN_EDICT(SVProgs->Edicts);
+			RETURN_EDICT(SVProgs->EdictPointers[0]);
 			return;
 		}
 		ent = GetEdictForNumber(i);
@@ -1520,7 +1519,7 @@ void PF_aim (void)
 	bestdist = sv_aim.value;
 	bestent = NULL;
 	
-	check = NEXT_EDICT(SVProgs->Edicts);
+	check = NEXT_EDICT(SVProgs->EdictPointers[0]);
 	for (i=1; i<SVProgs->NumEdicts; i++, check = NEXT_EDICT(check) )
 	{
 		if (check->v.takedamage != DAMAGE_AIM)
@@ -1617,7 +1616,7 @@ void PF_changepitch (void)
 
 	ent = G_EDICT (OFS_PARM0);
 
-	if (ent == SVProgs->Edicts)
+	if (ent == SVProgs->EdictPointers[0])
 	{
 		// attempt to modify the world entity; just fail silently
 		// EdictErr ("PF_changepitch", "modify", true, ent);

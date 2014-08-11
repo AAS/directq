@@ -24,7 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 int			wad_numlumps;
 lumpinfo_t	*wad_lumps;
-byte		*wad_base;
+byte		*wad_base = NULL;
 
 void SwapPic (qpic_t *pic);
 
@@ -73,7 +73,8 @@ bool W_LoadWadFile (char *filename)
 	unsigned		i;
 	int				infotableofs;
 
-	if (!(wad_base = COM_LoadHunkFile (filename))) return false;
+	if (wad_base) Zone_Free (wad_base);
+	if (!(wad_base = COM_LoadFile (filename))) return false;
 
 	header = (wadinfo_t *) wad_base;
 
@@ -264,7 +265,7 @@ miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipda
 				// found it!!!  alloc a buffer to hold the new texture - this must be big enough for 4
 				// miplevels plus the palette
 				mipdata[0] = (miptex_t *) Zone_Alloc (sizeof (miptex_t) + ((texmip->width * texmip->height * 85) >> 6) + 770);
-				memcpy (mipdata[0], texmip, sizeof (miptex_t));
+				Q_MemCpy (mipdata[0], texmip, sizeof (miptex_t));
 
 				// now read the rest of the data
 				COM_FReadFile (fh, (byte *) (mipdata[0] + 1), ((texmip->width * texmip->height * 85) >> 6) + 770);
@@ -276,5 +277,17 @@ miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipda
 	}
 
 	return NULL;
+}
+
+
+bool W_LoadPalette (void)
+{
+	if (host_basepal) Zone_Free (host_basepal);
+	if (host_colormap) Zone_Free (host_colormap);
+
+	host_basepal = (byte *) COM_LoadFile ("gfx/palette.lmp");
+	host_colormap = (byte *) COM_LoadFile ("gfx/colormap.lmp");
+
+	return (host_basepal && host_colormap);
 }
 

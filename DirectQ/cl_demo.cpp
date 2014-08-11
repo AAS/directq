@@ -213,7 +213,7 @@ int CL_GetMessage (void)
 	// JPG 1.05 - support for recording demos after connecting
 	if (cls.signon < 2)
 	{
-		memcpy (demo_head[cls.signon], net_message.data, net_message.cursize);
+		Q_MemCpy (demo_head[cls.signon], net_message.data, net_message.cursize);
 		demo_head_size[cls.signon] = net_message.cursize;
 
 		if (!cls.signon)

@@ -760,7 +760,7 @@ void NET_Init (void)
 
 	for (i = 0; i < net_numsockets; i++)
 	{
-		s = (qsocket_t *) Pool_Permanent->Alloc (sizeof (qsocket_t));
+		s = (qsocket_t *) Zone_Alloc (sizeof (qsocket_t));
 		s->next = net_freeSockets;
 		net_freeSockets = s;
 		s->disconnected = true;

@@ -169,9 +169,9 @@ int COM_FReadChar (void *fh);
 int COM_FWriteFile (void *fh, void *buf, int len);
 void COM_FCloseFile (void *fh);
 
-byte *COM_LoadTempFile (char *path);
-byte *COM_LoadHunkFile (char *path);
-byte *COM_LoadZoneFile (char *path);
+byte *COM_LoadFile (char *path, class CQuakeHunk *spacebuf);
+byte *COM_LoadFile (char *path, class CQuakeZone *heapbuf);
+byte *COM_LoadFile (char *path);
 
 void COM_ExecQuakeRC (void);
 
@@ -188,4 +188,13 @@ void COM_SortStringList (char **stringlist, bool ascending);
 
 extern int com_numgames;
 extern char *com_games[];
+
+#define NO_PAK_CONTENT	1
+#define NO_FS_CONTENT	2
+#define PREPEND_PATH	4
+#define NO_SORT_RESULT	8
+
+// finding content
+int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int flags = 0);
+
 

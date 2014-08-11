@@ -15,74 +15,90 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
-
-
-// pools
-#define POOL_PERMANENT		1
-#define POOL_GAME			2
-#define POOL_CACHE			4
-#define POOL_MAP			8
-#define POOL_FILELOAD		16
-#define POOL_TEMP			32
 
 
 extern byte *scratchbuf;
 #define SCRATCHBUF_SIZE 262144
 
+// fast memcpy and memset replacements
+// memcpy and memset in MS CRT are just straight char-by-char operations!!!
+void *Q_MemCpy (void *dst, void *src, int size);
+void *Q_MemSet (void *dst, int val, int size);
+
 // interface
 void Pool_Init (void);
-void *Cache_Check (char *name);
-void Cache_Invalidate (char *name);
-void *Cache_Alloc (char *name, void *data, int size);
-void *Cache_Alloc (int size);
-void *Cache_Alloc (void *data, int size);
+
 void *Zone_Alloc (int size);
-void Zone_Free (void *ptr);
+void Zone_FreeMemory (void *ptr);
 void Zone_Compact (void);
 
+// wrapper to ensure that the pointer is NULL after a free op
+#define Zone_Free(ptr) {Zone_FreeMemory (ptr); ptr = NULL;}
 
-class CSpaceBuffer
+
+class CQuakeHunk
 {
 public:
-	CSpaceBuffer (char *name, int maxsizemb, int usage);
-	~CSpaceBuffer (void);
+	CQuakeHunk (int maxsizemb);
+	~CQuakeHunk (void);
 	void *Alloc (int size);
 	void Free (void);
-	void Rewind (void);
 
-	int GetMaxSize (void) {return this->MaxSize;}
-	int GetLowMark (void) {return this->LowMark;}
-	int GetHighMark (void) {return this->HighMark;}
-	int GetPeakMark (void) {return this->PeakMark;}
-	int GetUsage (void) {return this->Usage;}
+	int GetLowMark (void);
+	void FreeToLowMark (int mark);
 
 private:
 	void Initialize (void);
 	int MaxSize;	// maximum memory reserved by this buffer (converted to bytes in constructor)
 	int LowMark;	// current memory pointer position
 	int HighMark;	// size of all committed memory so far
-	int PeakMark;	// maximum memory ever used in this pool
 
 	char Name[64];
-	int Registration;
-	int Usage;
 
 	byte *BasePtr;
 };
 
 
+class CQuakeZone
+{
+public:
+	CQuakeZone (void);
+	~CQuakeZone (void);
+	void *Alloc (int size);
+	void Free (void *data);
+	void Compact (void);
+	void Discard (void);
+
+private:
+	void EnsureHeap (void);
+	HANDLE hHeap;
+	int Size;
+	int Peak;
+};
+
+
+class CQuakeCache
+{
+public:
+	CQuakeCache (void);
+	~CQuakeCache (void);
+	void *Alloc (int size);
+	void *Alloc (void *data, int size);
+	void *Alloc (char *name, void *data, int size);
+	void *Check (char *name);
+	void Flush (void);
+
+private:
+	void Init (void);
+	CQuakeZone *Heap;
+	struct cacheobject_s *Head;
+};
+
+
 // space buffers
-extern CSpaceBuffer *Pool_Game;
-extern CSpaceBuffer *Pool_Permanent;
-extern CSpaceBuffer *Pool_Map;
-extern CSpaceBuffer *Pool_Cache;
-extern CSpaceBuffer *Pool_FileLoad;
-extern CSpaceBuffer *Pool_Temp;
-extern CSpaceBuffer *Pool_PolyVerts;
-
-void FreeSpaceBuffers (int usage);
-
+extern CQuakeHunk *MainHunk;
+extern CQuakeZone *GameZone;
+extern CQuakeZone *MapZone;
+extern CQuakeCache *MainCache;
+extern CQuakeZone *MainZone;

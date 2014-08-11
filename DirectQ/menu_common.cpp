@@ -2347,7 +2347,6 @@ void Menu_InitSPMenu (void);
 void Menu_InitMainMenu (void);
 void Menu_InitSaveLoadMenu (void);
 void Menu_InitMultiplayerMenu (void);
-void Menu_InitHUDMenu (void);
 void Menu_InitControllerMenu (void);
 void Menu_InitContentMenu (void);
 
@@ -2363,7 +2362,6 @@ void Menu_CommonInit (void)
 	Menu_InitMultiplayerMenu ();
 	Menu_InitOptionsMenu ();
 	Menu_InitHelpMenu ();
-	Menu_InitHUDMenu ();
 	Menu_InitControllerMenu ();
 	Menu_InitContentMenu ();
 }

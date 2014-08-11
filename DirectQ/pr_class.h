@@ -51,7 +51,7 @@ class CProgsDat
 {
 public:
 	// default progs def
-	dprograms_t		QC;
+	dprograms_t		*QC;
 	dfunction_t		*Functions;
 	char			*Strings;
 	ddef_t			*FieldDefs;
@@ -79,7 +79,6 @@ public:
 	~CProgsDat (void);
 
 	void LoadProgs (char *progsname, cvar_t *overridecvar);
-	void *LoadProgsLump (byte *lumpbegin, int lumplen, int lumpitemsize);
 
 	// execution
 	void ExecuteProgram (func_t fnum);
@@ -92,7 +91,8 @@ public:
 	void CProgsDat::StackTrace (void);
 
 	// the edicts more properly belong to the progs than to the server
-	edict_t *Edicts;
+	// edict_t *Edicts;
+	edict_t **EdictPointers;
 	int NumEdicts;
 	int MaxEdicts;
 private:

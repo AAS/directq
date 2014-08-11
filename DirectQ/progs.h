@@ -61,9 +61,13 @@ typedef struct edict_s
 	float			tracetimer;		// timer for cullentities tracing
 	int				alpha;
 	bool			sendinterval;
+	int				gravframe;
+	float			lastgrav;
+	int				ednum;
+	int				Prog;
 	entvars_t		v;				// C exported fields from progs
 
-	// other fields from progs come immediately after
+	// DO NOT ADD ANY MEMBERS BEYOND THIS POINT - other fields from progs come immediately after
 } edict_t;
 
 #define	EDICT_FROM_AREA(l) STRUCT_FROM_LINK(l,edict_t,area)
@@ -92,20 +96,24 @@ void ED_LoadFromFile (char *data);
 edict_t *GetEdictForNumber(int n);
 int GetNumberForEdict(edict_t *e);
 
-#define	NEXT_EDICT(e) ((edict_t *)( (byte *)e + SVProgs->EdictSize))
+#define	NEXT_EDICT2(e) ((edict_t *) ((byte *)e + SVProgs->EdictSize))
+#define	NEXT_EDICT(e) (SVProgs->EdictPointers[(e)->ednum + 1])
 
-#define	EDICT_TO_PROG(e) ((byte *)e - (byte *)SVProgs->Edicts)
-#define PROG_TO_EDICT(e) ((edict_t *)((byte *)SVProgs->Edicts + e))
+#define	EDICT_TO_PROG2(e) ((byte *)e - (byte *)SVProgs->Edicts)
+#define	EDICT_TO_PROG(e) ((e)->Prog)
+#define PROG_TO_EDICT2(e) ((edict_t *) ((byte *)SVProgs->Edicts + e))
+#define PROG_TO_EDICT(e) (SVProgs->EdictPointers[e / SVProgs->EdictSize])
 
 //============================================================================
 
 #define	G_FLOAT(o) (SVProgs->Globals[o])
 #define	G_INT(o) (*(int *)&SVProgs->Globals[o])
-#define	G_EDICT(o) ((edict_t *)((byte *)SVProgs->Edicts+ *(int *)&SVProgs->Globals[o]))
+#define	G_EDICT2(o) ((edict_t *) ((byte *) SVProgs->Edicts + *(int *) &SVProgs->Globals[o]))
+#define	G_EDICT(o) (PROG_TO_EDICT(*(int *) &SVProgs->Globals[o]))
 #define G_EDICTNUM(o) GetNumberForEdict(G_EDICT(o))
 #define	G_VECTOR(o) (&SVProgs->Globals[o])
-#define	G_STRING(o) (SVProgs->Strings + *(string_t *)&SVProgs->Globals[o])
-#define	G_FUNCTION(o) (*(func_t *)&SVProgs->Globals[o])
+#define	G_STRING(o) (SVProgs->Strings + *(string_t *) &SVProgs->Globals[o])
+#define	G_FUNCTION(o) (*(func_t *) &SVProgs->Globals[o])
 
 #define	E_FLOAT(e,o) (((float*)&e->v)[o])
 #define	E_INT(e,o) (*(int *)&((float*)&e->v)[o])

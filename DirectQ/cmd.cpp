@@ -358,8 +358,8 @@ Cbuf_Init
 void Cbuf_Init (void)
 {
 	// space for commands and script files
-	// take 1 MB
-	SZ_Alloc (&cmd_text, 0x100000);
+	// take 64 k
+	SZ_Alloc (&cmd_text, 0x10000);
 }
 
 
@@ -404,7 +404,7 @@ void Cbuf_InsertText (char *text)
 	if (templen)
 	{
 		temp = (char *) Zone_Alloc (templen);
-		memcpy (temp, cmd_text.data, templen);
+		Q_MemCpy (temp, cmd_text.data, templen);
 		SZ_Clear (&cmd_text);
 	}
 
@@ -448,7 +448,7 @@ void Cbuf_Execute (void)
 			if (text[i] == '\n') break;
 		}
 
-		memcpy (line, text, i);
+		Q_MemCpy (line, text, i);
 		line[i] = 0;
 
 		// delete the text from the command buffer and move remaining commands down
@@ -460,7 +460,7 @@ void Cbuf_Execute (void)
 		{
 			i++;
 			cmd_text.cursize -= i;
-			memcpy (text, text + i, cmd_text.cursize);
+			Q_MemCpy (text, text + i, cmd_text.cursize);
 		}
 
 		// execute the command line
@@ -576,13 +576,13 @@ void Cmd_Exec_f (void)
 
 	char cfgfile[128];
 	Q_strncpy (cfgfile, Cmd_Argv (1), 127);
-	char *f = (char *) COM_LoadTempFile (cfgfile);
+	char *f = (char *) COM_LoadFile (cfgfile);
 
 	if (!f)
 	{
 		// i hate it when i forget to add ".cfg" to an exec command, so i fixed it
 		COM_DefaultExtension (cfgfile, ".cfg");
-		f = (char *) COM_LoadTempFile (cfgfile);
+		f = (char *) COM_LoadFile (cfgfile);
 
 		if (!f)
 		{
@@ -596,6 +596,7 @@ void Cmd_Exec_f (void)
 	// fix if a config file isn't \n terminated
 	Cbuf_InsertText (f);
 	Cbuf_InsertText ("\n");
+	Zone_Free (f);
 }
 
 
@@ -820,10 +821,10 @@ void Cmd_TokenizeString (char *text)
 	{
 		// because these are reused every frame as commands are executed,
 		// we put them in a large one-time-only block instead of dynamically allocating
-		cmd_argv = (char **) Pool_Permanent->Alloc (80 * sizeof (char *));
+		cmd_argv = (char **) Zone_Alloc (80 * sizeof (char *));
 
 		for (i = 0; i < MAX_ARGS; i++)
-			cmd_argv[i] = (char *) Pool_Permanent->Alloc (1024);
+			cmd_argv[i] = (char *) Zone_Alloc (1024);
 	}
 
 	cmd_argc = 0;

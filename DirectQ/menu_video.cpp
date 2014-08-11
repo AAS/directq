@@ -192,12 +192,12 @@ void Menu_VideoBuild (void)
 	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++);
 
 	// add 1 for terminating NULL
-	menu_videomodes = (char **) Pool_Permanent->Alloc ((nummodes + 1) * sizeof (char *));
+	menu_videomodes = (char **) Zone_Alloc ((nummodes + 1) * sizeof (char *));
 
 	// now write them in
 	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
 	{
-		menu_videomodes[nummodes] = (char *) Pool_Permanent->Alloc (128);
+		menu_videomodes[nummodes] = (char *) Zone_Alloc (128);
 
 		_snprintf
 		(
@@ -236,11 +236,11 @@ void Menu_VideoBuild (void)
 		{
 			if (mode == d3d_DeviceCaps.MaxAnisotropy)
 			{
-				menu_anisotropicmodes = (char **) Pool_Permanent->Alloc ((i + 1) * sizeof (char *));
+				menu_anisotropicmodes = (char **) Zone_Alloc ((i + 1) * sizeof (char *));
 
 				for (int m = 0, f = 1; m < i; m++, f *= 2)
 				{
-					menu_anisotropicmodes[m] = (char *) Pool_Permanent->Alloc (32);
+					menu_anisotropicmodes[m] = (char *) Zone_Alloc (32);
 
 					if (f == 1)
 						Q_strncpy (menu_anisotropicmodes[m], "Off", 32);

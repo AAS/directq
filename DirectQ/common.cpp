@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // used for generating md5 hashes
 #include <wincrypt.h>
 
+CQuakeZone *GameZone;
 
 static bool listsortascorder = false;
 
@@ -177,7 +178,7 @@ and is provided for mods that use a custom quake.rc containing commands of their
 */
 void COM_ExecQuakeRC (void)
 {
-	char *rcfile = (char *) COM_LoadZoneFile ("quake.rc");
+	char *rcfile = (char *) COM_LoadFile ("quake.rc");
 
 	// didn't find it
 	if (!rcfile) return;
@@ -610,7 +611,7 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	if (startsize < 256)
 		startsize = 256;
 
-	buf->data = (byte *) Pool_Permanent->Alloc (startsize);
+	buf->data = (byte *) Zone_Alloc (startsize);
 	buf->maxsize = startsize;
 	buf->cursize = 0;
 }
@@ -646,7 +647,7 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 void SZ_Write (sizebuf_t *buf, void *data, int length)
 {
-	memcpy (SZ_GetSpace (buf,length), data, length);         
+	Q_MemCpy (SZ_GetSpace (buf,length), data, length);         
 }
 
 void SZ_Print (sizebuf_t *buf, char *data)
@@ -657,9 +658,9 @@ void SZ_Print (sizebuf_t *buf, char *data)
 
 	// byte * cast to keep VC++ happy
 	if (buf->data[buf->cursize-1])
-		memcpy ((byte *)SZ_GetSpace(buf, len),data,len); // no trailing 0
+		Q_MemCpy ((byte *)SZ_GetSpace(buf, len),data,len); // no trailing 0
 	else
-		memcpy ((byte *)SZ_GetSpace(buf, len-1)-1,data,len); // write over trailing 0
+		Q_MemCpy ((byte *)SZ_GetSpace(buf, len-1)-1,data,len); // write over trailing 0
 }
 
 
@@ -1031,11 +1032,11 @@ char *va (char *format, ...)
 
 	if (!string)
 	{
-		string = (char **) Pool_Permanent->Alloc (16 * sizeof (char *));
+		string = (char **) Zone_Alloc (16 * sizeof (char *));
 
 		// we can reduce to 1024 now that we're using the safe(r) version
 		for (int i = 0; i < 16; i++)
-			string[i] = (char *) Pool_Permanent->Alloc (1024 * sizeof (char));
+			string[i] = (char *) Zone_Alloc (1024 * sizeof (char));
 	}
 
 	bufnum++;
@@ -1100,7 +1101,8 @@ int     com_filesize;
 
 typedef struct
 {
-	char    name[MAX_QPATH];
+	// keep this the same as the on-disk version so that we can use the same memory for both
+	char    name[56];
 	int     filepos, filelen;
 } packfile_t;
 
@@ -1120,15 +1122,6 @@ typedef struct pk3_s
 	packfile_t      *files;
 } pk3_t;
 
-
-//
-// on disk
-//
-typedef struct
-{
-	char    name[56];
-	int             filepos, filelen;
-} dpackfile_t;
 
 typedef struct
 {
@@ -1218,20 +1211,17 @@ bool CheckExists (char **fl, char *mapname)
 }
 
 
-int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
+int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int flags)
 {
 	char **fl = FileList[0];
 	int len = 0;
 
 	if (!fl)
 	{
-		// be careful where you call this from as it frees the temp pool!!!
-		Pool_Temp->Rewind ();
-
 		// we never know how much we need, so alloc enough for 256k items
 		// at this stage they're only pointers so we can afford to do this.  if it becomes a problem
 		// we might make a linked list then copy from that into an array and do it all in the Zone.
-		FileList[0] = (char **) Pool_Temp->Alloc (sizeof (char *) * 0x40000);
+		FileList[0] = (char **) scratchbuf;
 
 		// need to reset the pointer as it will have changed (fl is no longer NULL)
 		fl = FileList[0];
@@ -1255,7 +1245,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 		// prevent overflow
 		if ((len + 1) == 0x40000) break;
 
-		if (search->pack)
+		if (search->pack && !(flags & NO_PAK_CONTENT))
 		{
 			pack_t *pak = search->pack;
 
@@ -1273,7 +1263,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 				fl[len] = NULL;
 			}
 		}
-		else if (search->pk3)
+		else if (search->pk3 && !(flags & NO_PAK_CONTENT))
 		{
 			pk3_t *pak = search->pk3;
 
@@ -1291,7 +1281,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 				fl[len] = NULL;
 			}
 		}
-		else
+		else if (!(flags & NO_FS_CONTENT))
 		{
 			WIN32_FIND_DATA FindFileData;
 			HANDLE hFind = INVALID_HANDLE_VALUE;
@@ -1322,10 +1312,21 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
+				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
 				if (CheckExists (fl, FindFileData.cFileName)) continue;
 
-				fl[len] = (char *) Zone_Alloc (strlen (FindFileData.cFileName) + 1);
-				strcpy (fl[len++], FindFileData.cFileName);
+				if (flags & PREPEND_PATH)
+				{
+					int itemlen = strlen (FindFileData.cFileName) + strlen (search->filename) + strlen (basedir) + 3;
+					fl[len] = (char *) Zone_Alloc (itemlen);
+					sprintf (fl[len++], "%s\\%s%s", search->filename, basedir, FindFileData.cFileName);
+				}
+				else
+				{
+					fl[len] = (char *) Zone_Alloc (strlen (FindFileData.cFileName) + 1);
+					strcpy (fl[len++], FindFileData.cFileName);
+				}
+
 				fl[len] = NULL;
 			} while (FindNextFile (hFind, &FindFileData));
 
@@ -1334,8 +1335,8 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 		}
 	}
 
-	// sort the list
-	qsort (fl, len, sizeof (char *), COM_ListSortFunc);
+	// sort the list unless there is no list or we've specified not to sort it
+	if (len && !(flags & NO_SORT_RESULT)) qsort (fl, len, sizeof (char *), COM_ListSortFunc);
 
 	// return how many we got
 	return len;
@@ -1639,9 +1640,11 @@ COM_LoadFile
 
 Filename are reletive to the quake directory.
 Always appends a 0 byte.
+
+Loads a file into the specified buffer or the zone.
 ============
 */
-static byte *COM_LoadFile (char *path, int usehunk)
+static byte *COM_LoadFile (char *path, class CQuakeHunk *spacebuf, class CQuakeZone *heapbuf)
 {
 	HANDLE	fh = INVALID_HANDLE_VALUE;
 	byte    *buf = NULL;
@@ -1651,18 +1654,11 @@ static byte *COM_LoadFile (char *path, int usehunk)
 
 	if (fh == INVALID_HANDLE_VALUE) return NULL;
 
-	if (usehunk == 1)
-		buf = (byte *) Pool_Game->Alloc (len + 1);
-	else if (usehunk == 2)
-		buf = (byte *) Pool_FileLoad->Alloc (len + 1);
-	else if (usehunk == 3)
-		buf = (byte *) Zone_Alloc (len + 1);
-	else
-	{
-		Con_DPrintf ("COM_LoadFile: bad usehunk\n");
-		COM_FCloseFile (&fh);
-		return NULL;
-	}
+	if (spacebuf)
+		buf = (byte *) spacebuf->Alloc (len + 1);
+	else if (heapbuf)
+		buf = (byte *) heapbuf->Alloc (len + 1);
+	else buf = (byte *) Zone_Alloc (len + 1);
 
 	if (!buf)
 	{
@@ -1681,19 +1677,21 @@ static byte *COM_LoadFile (char *path, int usehunk)
 }
 
 
-byte *COM_LoadHunkFile (char *path)
+byte *COM_LoadFile (char *path, class CQuakeHunk *spacebuf)
 {
-	return COM_LoadFile (path, 1);
+	return COM_LoadFile (path, spacebuf, NULL);
 }
 
-byte *COM_LoadTempFile (char *path)
+
+byte *COM_LoadFile (char *path, class CQuakeZone *heapbuf)
 {
-	return COM_LoadFile (path, 2);
+	return COM_LoadFile (path, NULL, heapbuf);
 }
 
-byte *COM_LoadZoneFile (char *path)
+
+byte *COM_LoadFile (char *path)
 {
-	return COM_LoadFile (path, 3);
+	return COM_LoadFile (path, NULL, NULL);
 }
 
 
@@ -1711,11 +1709,10 @@ pack_t *COM_LoadPackFile (char *packfile)
 {
 	dpackheader_t header;
 	int i;
-	packfile_t *newfiles;
 	int numpackfiles;
 	pack_t *pack;
 	FILE *packfp;
-	dpackfile_t *info;
+	packfile_t *info;
 	unsigned short crc;
 
 	// read and validate the header
@@ -1732,10 +1729,9 @@ pack_t *COM_LoadPackFile (char *packfile)
 	header.dirofs = LittleLong (header.dirofs);
 	header.dirlen = LittleLong (header.dirlen);
 
-	numpackfiles = header.dirlen / sizeof (dpackfile_t);
+	numpackfiles = header.dirlen / sizeof (packfile_t);
 
-	newfiles = (packfile_t *) Pool_Game->Alloc (numpackfiles * sizeof (packfile_t));
-	info = (dpackfile_t *) Pool_Temp->Alloc (numpackfiles * sizeof (dpackfile_t));
+	info = (packfile_t *) GameZone->Alloc (numpackfiles * sizeof (packfile_t));
 
 	fseek (packfp, header.dirofs, SEEK_SET);
 	fread (info, header.dirlen, 1, packfp);
@@ -1744,15 +1740,14 @@ pack_t *COM_LoadPackFile (char *packfile)
 	// parse the directory
 	for (i = 0; i < numpackfiles; i++)
 	{
-		Q_strncpy (newfiles[i].name, info[i].name, 63);
-		newfiles[i].filepos = LittleLong (info[i].filepos);
-		newfiles[i].filelen = LittleLong (info[i].filelen);
+		info[i].filepos = LittleLong (info[i].filepos);
+		info[i].filelen = LittleLong (info[i].filelen);
 	}
 
-	pack = (pack_t *) Pool_Game->Alloc (sizeof (pack_t));
+	pack = (pack_t *) GameZone->Alloc (sizeof (pack_t));
 	Q_strncpy (pack->filename, packfile, 127);
 	pack->numfiles = numpackfiles;
-	pack->files = newfiles;
+	pack->files = info;
 
 	Con_SafePrintf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
 	return pack;
@@ -1808,7 +1803,7 @@ void COM_AddGameDirectory (char *dir)
 	// store out the names of all currently loaded games
 	if (com_numgames != COM_MAXGAMES)
 	{
-		com_games[com_numgames] = (char *) Pool_Game->Alloc (strlen (com_gamename) + 1);
+		com_games[com_numgames] = (char *) GameZone->Alloc (strlen (com_gamename) + 1);
 		strcpy (com_games[com_numgames], com_gamename);
 		com_numgames++;
 		com_games[com_numgames] = NULL;
@@ -1827,7 +1822,7 @@ void COM_AddGameDirectory (char *dir)
 		if (pak)
 		{
 			// link it in
-			search = (searchpath_t *) Pool_Game->Alloc (sizeof (searchpath_t));
+			search = (searchpath_t *) GameZone->Alloc (sizeof (searchpath_t));
 			search->pack = pak;
 			search->pk3 = NULL;
 			search->next = com_searchpaths;
@@ -1876,7 +1871,7 @@ void COM_AddGameDirectory (char *dir)
 				if (pak)
 				{
 					// link it in
-					search = (searchpath_t *) Pool_Game->Alloc (sizeof (searchpath_t));
+					search = (searchpath_t *) GameZone->Alloc (sizeof (searchpath_t));
 					search->pack = pak;
 					search->pk3 = NULL;
 					search->next = com_searchpaths;
@@ -1897,13 +1892,13 @@ void COM_AddGameDirectory (char *dir)
 
 				if (err == UNZ_OK)
 				{
-					pk3_t *pk3 = (pk3_t *) Pool_Game->Alloc (sizeof (pk3_t));
+					pk3_t *pk3 = (pk3_t *) GameZone->Alloc (sizeof (pk3_t));
 					char filename_inzip[64];
 					int good_files = 0;
 
 					pk3->numfiles = gi.number_entry;
 					Q_strncpy (pk3->filename, pakfile, 127);
-					pk3->files = (packfile_t *) Pool_Game->Alloc (sizeof (packfile_t) * pk3->numfiles);
+					pk3->files = (packfile_t *) GameZone->Alloc (sizeof (packfile_t) * pk3->numfiles);
 
 					unzGoToFirstFile (uf);
 
@@ -1935,7 +1930,7 @@ void COM_AddGameDirectory (char *dir)
 					if (good_files)
 					{
 						// link it in
-						search = (searchpath_t *) Pool_Game->Alloc (sizeof (searchpath_t));
+						search = (searchpath_t *) GameZone->Alloc (sizeof (searchpath_t));
 						search->pack = NULL;
 						search->pk3 = pk3;
 						search->next = com_searchpaths;
@@ -1955,7 +1950,7 @@ void COM_AddGameDirectory (char *dir)
 	// add the directory to the search path
 	// this is done last as using a linked list will search in the reverse order to which they
 	// are added, so we ensure that the filesystem overrides pak files
-	search = (searchpath_t *) Pool_Game->Alloc (sizeof(searchpath_t));
+	search = (searchpath_t *) GameZone->Alloc (sizeof(searchpath_t));
 	Q_strncpy (search->filename, dir, 127);
 	search->next = com_searchpaths;
 	search->pack = NULL;
@@ -1997,7 +1992,7 @@ void SHOWLMP_newgame (void);
 void D3D_VidRestart_f (void);
 void D3D_InitHLSL (void);
 void R_UnloadSkybox (void);
-void Sound_CacheFree (void);
+void Snd_Restart_f (void);
 
 bool COM_StringContains (char *str1, char *str2)
 {
@@ -2022,6 +2017,10 @@ void COM_UnloadAllStuff (void)
 	extern bool scr_initialized;
 	extern bool signal_cacheclear;
 
+	// disconnect from server and update the screen to keep things nice and clean
+	CL_Disconnect_f ();
+	SCR_UpdateScreen ();
+
 	// prevent screen updates while changing
 	scr_disabled_for_loading = true;
 	scr_initialized = false;
@@ -2029,34 +2028,36 @@ void COM_UnloadAllStuff (void)
 	// clear cached models
 	signal_cacheclear = true;
 
-	// start with a clean filesystem
-	com_searchpaths = NULL;
-
-	// drop everything we need to drop
-	FreeSpaceBuffers (POOL_GAME | POOL_CACHE);
-	SHOWLMP_newgame ();
-	CL_Disconnect_f ();
-	R_UnloadSkybox ();
-	D3D_ReleaseTextures ();
-
 	// clear everything else
 	S_StopAllSounds (true);
 	Mod_ClearAll ();
 	S_ClearSounds ();
 
-	// clear sounds from cache memory too
-	Sound_CacheFree ();
+	// drop everything we need to drop
+	SAFE_DELETE (GameZone);
+	MainCache->Flush ();
+	SoundCache->Flush ();
+	SoundHeap->Discard ();
+	active_sfx = NULL;
+	Snd_Restart_f ();
+
+	SHOWLMP_newgame ();
+	R_UnloadSkybox ();
+	D3D_ReleaseTextures ();
 
 	// do this too...
 	Host_ClearMemory ();
+
+	// start with a clean filesystem
+	com_searchpaths = NULL;
 }
 
 
 void COM_LoadAllStuff (void)
 {
-	host_basepal = (byte *) COM_LoadHunkFile ("gfx/palette.lmp");
-	host_colormap = (byte *) COM_LoadHunkFile ("gfx/colormap.lmp");
+	if (!W_LoadPalette ()) Sys_Error ("Could not locate Quake on your computer");
 	if (!W_LoadWadFile ("gfx.wad")) Sys_Error ("Could not locate Quake on your computer");
+
 	Draw_Init ();
 	HUD_Init ();
 	SCR_Init ();
@@ -2089,6 +2090,7 @@ void COM_LoadGame (char *gamename)
 		COM_UnloadAllStuff ();
 	}
 
+	if (!GameZone) GameZone = new CQuakeZone ();
 	char basedir[MAX_PATH];
 
 	// -basedir <path>
@@ -2310,10 +2312,22 @@ typedef struct d3d_externaltexture_s
 } d3d_externaltexture_t;
 
 
-d3d_externaltexture_t *d3d_ExternalTextures = NULL;
+d3d_externaltexture_t **d3d_ExternalTextures = NULL;
+int d3d_MaxExternalTextures = 0;
 int d3d_NumExternalTextures = 0;
 
 int d3d_ExternalTextureTable[256] = {-1};
+
+// hmmm - can be used for both bsearch and qsort
+// clever boy, bill!
+int D3D_ExternalTextureCompareFunc (const void *a, const void *b)
+{
+	d3d_externaltexture_t *t1 = *(d3d_externaltexture_t **) a;
+	d3d_externaltexture_t *t2 = *(d3d_externaltexture_t **) b;
+
+	return stricmp (t1->basename, t2->basename);
+}
+
 
 char *D3D_FindExternalTexture (char *basename)
 {
@@ -2326,7 +2340,7 @@ char *D3D_FindExternalTexture (char *basename)
 	for (int i = texnum; i < d3d_NumExternalTextures; i++)
 	{
 		// retrieve texture def
-		d3d_externaltexture_t *et = &d3d_ExternalTextures[i];
+		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
 
 		// first char changes
 		if (et->basename[0] != basename[0]) break;
@@ -2376,24 +2390,39 @@ void D3D_RegisterExternalTexture (char *texname)
 
 	// not a supported type
 	if (!goodext) return;
+	if (d3d_NumExternalTextures == d3d_MaxExternalTextures) return;
 
-	d3d_externaltexture_t *et = NULL;
+	char *typefilter = NULL;
+	bool passedext = false;
 
-	// alloc space in the per-game pool for the texture
-	if (!d3d_ExternalTextures)
+	for (int i = strlen (texname); i; i--)
 	{
-		// alloc the first and set the pointer
-		d3d_ExternalTextures = (d3d_externaltexture_t *) Pool_Game->Alloc (sizeof (d3d_externaltexture_t));
-		et = d3d_ExternalTextures;
+		if (texname[i] == '/') break;
+		if (texname[i] == '\\') break;
+		if (texname[i] == '.' && passedext) break;
+		if (texname[i] == '.' && !passedext) passedext = true;
+
+		if (texname[i] == '_' && passedext)
+		{
+			typefilter = &texname[i + 1];
+			break;
+		}
 	}
-	else
+
+	// filter out types unsupported by DirectQ so that the likes of Rygel's pack
+	// won't overflow the max textures allowed (will need to get the full list of types from DP)
+	// although with space for 65536 textures that should never happen...
+	if (typefilter)
 	{
-		// alloc linear space to expand the array
-		Pool_Game->Alloc (sizeof (d3d_externaltexture_t));
-		et = &d3d_ExternalTextures[d3d_NumExternalTextures];
+		if (!strnicmp (typefilter, "gloss.", 6)) return;
+		if (!strnicmp (typefilter, "norm.", 5)) return;
+		if (!strnicmp (typefilter, "normal.", 7)) return;
+		if (!strnicmp (typefilter, "bump.", 5)) return;
 	}
 
 	// register a new external texture
+	d3d_externaltexture_t *et = (d3d_externaltexture_t *) GameZone->Alloc (sizeof (d3d_externaltexture_t));
+	d3d_ExternalTextures[d3d_NumExternalTextures] = et;
 	d3d_NumExternalTextures++;
 
 	// fill in the path (also copy to basename in case the next stage doesn't get it)
@@ -2401,12 +2430,18 @@ void D3D_RegisterExternalTexture (char *texname)
 	Q_strncpy (et->basename, texname, 255);
 	strlwr (et->texpath);
 
+	if (strstr (et->texpath, "\\crosshairs\\"))
+	{
+		d3d_NumExternalTextures = d3d_NumExternalTextures;
+	}
+
 	// check for special handling of some types
 	char *checkstuff = strstr (et->texpath, "\\save\\");
 
 	if (!checkstuff) checkstuff = strstr (et->texpath, "\\maps\\");
 	if (!checkstuff) checkstuff = strstr (et->texpath, "\\screenshot\\");
 
+	// ignoring textures in maps, save and screenshot
 	if (!checkstuff)
 	{
 		// base name is the path without directories or extension; first remove directories.
@@ -2535,16 +2570,11 @@ void D3D_ExternalTextureDirectoryRecurse (char *dirname)
 }
 
 
-int D3D_ExternalTextureSortFunc (d3d_externaltexture_t *t1, d3d_externaltexture_t *t2)
-{
-	return stricmp (t1->basename, t2->basename);
-}
-
-
 void D3D_EnumExternalTextures (void)
 {
 	// explicitly none to start with
-	d3d_ExternalTextures = NULL;
+	d3d_ExternalTextures = (d3d_externaltexture_t **) scratchbuf;
+	d3d_MaxExternalTextures = SCRATCHBUF_SIZE / sizeof (d3d_externaltexture_t *);
 	d3d_NumExternalTextures = 0;
 
 	// we need 256 of these because textures can - in theory - begin with any allowable byte value
@@ -2576,11 +2606,19 @@ void D3D_EnumExternalTextures (void)
 	}
 
 	// no external textures were found
-	if (!d3d_NumExternalTextures) return;
+	if (!d3d_NumExternalTextures)
+	{
+		d3d_ExternalTextures = NULL;
+		return;
+	}
+
+	// alloc them for real
+	d3d_ExternalTextures = (d3d_externaltexture_t **) GameZone->Alloc (d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
+	Q_MemCpy (d3d_ExternalTextures, scratchbuf, d3d_NumExternalTextures * sizeof (d3d_externaltexture_t *));
 
 	for (int i = 0; i < d3d_NumExternalTextures; i++)
 	{
-		d3d_externaltexture_t *et = &d3d_ExternalTextures[i];
+		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
 
 		for (int j = 0;; j++)
 		{
@@ -2598,14 +2636,14 @@ void D3D_EnumExternalTextures (void)
 	(
 		d3d_ExternalTextures,
 		d3d_NumExternalTextures,
-		sizeof (d3d_externaltexture_t),
-		(int (*) (const void *, const void *)) D3D_ExternalTextureSortFunc
+		sizeof (d3d_externaltexture_t *),
+		D3D_ExternalTextureCompareFunc
 	);
 
 	// set up byte pointers and remove dummy sort order extensions
 	for (int i = 0; i < d3d_NumExternalTextures; i++)
 	{
-		d3d_externaltexture_t *et = &d3d_ExternalTextures[i];
+		d3d_externaltexture_t *et = d3d_ExternalTextures[i];
 
 		// swap non-printing chars
 		if (et->basename[0] == '#') et->basename[0] = '*';

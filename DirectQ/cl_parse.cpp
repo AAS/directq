@@ -22,8 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "webdownload.h"
 
-void D3D_TranslatePlayerSkin (int playernum);
-
 char *svc_strings[] =
 {
 	"svc_bad",
@@ -137,12 +135,11 @@ entity_t *CL_EntityNum (int num)
 			if (!cl_entities[cl.num_entities])
 			{
 				// alloc a new entity and set it's number
-				cl_entities[cl.num_entities] = (entity_t *) Pool_Map->Alloc (sizeof (entity_t));
+				cl_entities[cl.num_entities] = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
 			}
 
 			// force cl.numentities up until it exceeds the number we're looking for
-			cl_entities[cl.num_entities]->colormap = vid.colormap;
 			cl.num_entities++;
 		}
 	}
@@ -226,7 +223,7 @@ void CL_KeepaliveMessage (bool showmsg = true)
 
 	// read messages from server, should just be nops
 	old = net_message;
-	memcpy (olddata, net_message.data, net_message.cursize);
+	Q_MemCpy (olddata, net_message.data, net_message.cursize);
 	
 	do
 	{
@@ -248,7 +245,7 @@ void CL_KeepaliveMessage (bool showmsg = true)
 	} while (ret);
 
 	net_message = old;
-	memcpy (net_message.data, olddata, net_message.cursize);
+	Q_MemCpy (net_message.data, olddata, net_message.cursize);
 
 	// check time
 	time = Sys_DWORDTime ();
@@ -396,36 +393,38 @@ void CL_DoWebDownload (char *filename)
 }
 
 
+CQuakeZone *PrecacheHeap = NULL;
+
 void CL_ParseServerInfo (void)
 {
 	char	*str;
 	int		i;
 	int		nummodels, numsounds;
 
-	if (!model_precache)
-	{
-		model_precache = (char **) Pool_Permanent->Alloc (MAX_MODELS * sizeof (char *));
+	// we can't rely on the map heap being good here as it may not exist on the first demo run
+	// so we create a new heap for storing anything used in it.  is this correct?  surely it calls mod_forname?
+	SAFE_DELETE (PrecacheHeap);
+	PrecacheHeap = new CQuakeZone ();
 
-		for (i = 0; i < MAX_MODELS; i++)
-			model_precache[i] = (char *) Pool_Permanent->Alloc (MAX_QPATH * sizeof (char));
-	}
+	model_precache = (char **) PrecacheHeap->Alloc (MAX_MODELS * sizeof (char *));
+	sound_precache = (char **) PrecacheHeap->Alloc (MAX_SOUNDS * sizeof (char *));
 
-	if (!sound_precache)
-	{
-		sound_precache = (char **) Pool_Permanent->Alloc (MAX_SOUNDS * sizeof (char *));
-
-		for (i = 0; i < MAX_SOUNDS; i++)
-			sound_precache[i] = (char *) Pool_Permanent->Alloc (MAX_QPATH * sizeof (char));
-	}
-
-	// alloc these in permanent memory first time they're needed
-	if (!static_cl_model_precache) static_cl_model_precache = (model_t **) Pool_Permanent->Alloc (MAX_MODELS * sizeof (model_t *));
-	if (!static_cl_sfx_precache) static_cl_sfx_precache = (sfx_t **) Pool_Permanent->Alloc (MAX_SOUNDS * sizeof (sfx_t *));
+	static_cl_model_precache = (model_t **) PrecacheHeap->Alloc (MAX_MODELS * sizeof (model_t *));
+	static_cl_sfx_precache = (sfx_t **) PrecacheHeap->Alloc (MAX_SOUNDS * sizeof (sfx_t *));
 
 	// wipe the model and sounds precaches fully so that an attempt to reference one beyond
 	// the limit of what's loaded will always fail
-	for (i = 0; i < MAX_MODELS; i++) static_cl_model_precache[i] = NULL;
-	for (i = 0; i < MAX_SOUNDS; i++) static_cl_sfx_precache[i] = NULL;
+	for (i = 0; i < MAX_MODELS; i++)
+	{
+		model_precache[i] = NULL;
+		static_cl_model_precache[i] = NULL;
+	}
+
+	for (i = 0; i < MAX_SOUNDS; i++)
+	{
+		sound_precache[i] = NULL;
+		static_cl_sfx_precache[i] = NULL;
+	}
 
 	Con_DPrintf ("Serverinfo packet received.\n");
 
@@ -459,14 +458,14 @@ void CL_ParseServerInfo (void)
 		return;
 	}
 
-	cl.scores = (scoreboard_t *) Pool_Map->Alloc (cl.maxclients * sizeof (scoreboard_t));
+	cl.scores = (scoreboard_t *) PrecacheHeap->Alloc (MAX_SCOREBOARD * sizeof (scoreboard_t));
 
 	// parse gametype
 	cl.gametype = MSG_ReadByte ();
 
 	// parse signon message
 	str = MSG_ReadString ();
-	cl.levelname = (char *) Pool_Map->Alloc (strlen (str) + 1);
+	cl.levelname = (char *) PrecacheHeap->Alloc (strlen (str) + 1);
 	strcpy (cl.levelname, str);
 
 	// seperate the printfs so the server message can have a color
@@ -496,7 +495,8 @@ void CL_ParseServerInfo (void)
 			return;
 		}
 
-		Q_strncpy (model_precache[nummodels], str, MAX_QPATH - 1);
+		model_precache[nummodels] = (char *) PrecacheHeap->Alloc (strlen (str) + 1);
+		strcpy (model_precache[nummodels], str);
 		Mod_TouchModel (str);
 	}
 
@@ -511,7 +511,8 @@ void CL_ParseServerInfo (void)
 			return;
 		}
 
-		Q_strncpy (sound_precache[numsounds], str, MAX_QPATH - 1);
+		sound_precache[numsounds] = (char *) PrecacheHeap->Alloc (strlen (str) + 1);
+		strcpy (sound_precache[numsounds], str);
 		S_TouchSound (str);
 	}
 
@@ -521,7 +522,7 @@ void CL_ParseServerInfo (void)
 		// don't crash because we're attempting downloads here
 		cl.model_precache[i] = Mod_ForName (model_precache[i], false);
 
-		// avoid memset 0 requirement
+		// avoid Q_MemSet 0 requirement
 		cl.model_precache[i + 1] = NULL;
 
 		if (cl.model_precache[i] == NULL)
@@ -555,7 +556,7 @@ void CL_ParseServerInfo (void)
 	{
 		cl.sound_precache[i] = S_PrecacheSound (sound_precache[i]);
 
-		// avoid memset 0 requirement
+		// avoid Q_MemSet 0 requirement
 		cl.sound_precache[i + 1] = NULL;
 
 		CL_KeepaliveMessage ();
@@ -689,16 +690,27 @@ void CL_ParseUpdate (int bits)
 	else ent->frame = ent->baseline.frame;
 
 	if (bits & U_COLORMAP)
-		i = MSG_ReadByte();
+		i = MSG_ReadByte ();
 	else i = ent->baseline.colormap;
 
 	if (!i)
-		ent->colormap = vid.colormap;
+	{
+		// no defined skin color
+		ent->playerskin = -1;
+	}
 	else
 	{
 		if (i > cl.maxclients)
+		{
+			// no defined skin color
+			ent->playerskin = -1;
 			Con_DPrintf ("CL_ParseUpdate: i >= cl.maxclients\n");
-		else ent->colormap = cl.scores[i - 1].translations;
+		}
+		else
+		{
+			// store out the skin color for this player slot
+			ent->playerskin = cl.scores[i - 1].colors;
+		}
 	}
 
 	if (bits & U_SKIN)
@@ -709,9 +721,6 @@ void CL_ParseUpdate (int bits)
 	{
 		// skin has changed
 		ent->skinnum = skin;
-
-		// retranslate it if it's a player skin
-		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
 	}
 
 	if (bits & U_EFFECTS)
@@ -773,7 +782,7 @@ void CL_ParseUpdate (int bits)
 		ent->alphaval = 255;
 	}
 
-	// an alpha of 0 is equivalent to 255 (so that memset 0 will work correctly)
+	// an alpha of 0 is equivalent to 255 (so that Q_MemSet 0 will work correctly)
 	if (ent->alphaval < 1) ent->alphaval = 255;
 
 	if (bits & U_NOLERP) ent->forcelink = true;
@@ -804,9 +813,6 @@ void CL_ParseUpdate (int bits)
 			ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
 		}
 		else forcelink = true;	// hack to make null model players work
-
-		// if the moddl has changed and it's a player skin we need to retranslate it
-		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
 
 		// if the model has changed we must also reset the interpolation data
 		// lastpose and currpose are critical as they might be pointing to invalid frames in the new model!!!
@@ -996,45 +1002,6 @@ void CL_ParseClientdata (void)
 	else cl.viewent.alphaval = 255;
 }
 
-/*
-=====================
-CL_NewTranslation
-=====================
-*/
-void CL_NewTranslation (int slot)
-{
-	int		i, j;
-	int		top, bottom;
-	byte	*dest, *source;
-
-	if (slot > cl.maxclients)
-		Sys_Error ("CL_NewTranslation: slot > cl.maxclients");
-	dest = cl.scores[slot].translations;
-	source = vid.colormap;
-	memcpy (dest, vid.colormap, sizeof(cl.scores[slot].translations));
-	top = cl.scores[slot].colors & 0xf0;
-	bottom = (cl.scores[slot].colors & 15) << 4;
-
-	// retranslate it (runtime change of colour)
-	D3D_TranslatePlayerSkin (slot);
-
-	// fixme - old winquake?
-	for (i = 0; i < VID_GRADES; i++, dest += 256, source += 256)
-	{
-		if (top < 128)	// the artists made some backwards ranges.  sigh.
-			memcpy (dest + TOP_RANGE, source + top, 16);
-		else
-			for (j=0; j<16; j++)
-				dest[TOP_RANGE+j] = source[top+15-j];
-				
-		if (bottom < 128)
-			memcpy (dest + BOTTOM_RANGE, source + bottom, 16);
-		else
-			for (j=0; j<16; j++)
-				dest[BOTTOM_RANGE+j] = source[bottom+15-j];		
-	}
-}
-
 
 /*
 =====================
@@ -1052,8 +1019,8 @@ void CL_ParseStatic (int version)
 	}
 
 	// just alloc in the map pool
-	entity_t *ent = (entity_t *) Pool_Map->Alloc (sizeof (entity_t));
-	memset (ent, 0, sizeof (entity_t));
+	entity_t *ent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
+	Q_MemSet (ent, 0, sizeof (entity_t));
 
 	// read in baseline state
 	CL_ParseBaseline (ent, version);
@@ -1061,7 +1028,6 @@ void CL_ParseStatic (int version)
 	// copy it to the current state
 	ent->model = cl.model_precache[ent->baseline.modelindex];
 	ent->frame = ent->baseline.frame;
-	ent->colormap = vid.colormap;
 	ent->skinnum = ent->baseline.skin;
 	ent->effects = ent->baseline.effects;
 	ent->alphaval = 255;
@@ -1071,6 +1037,10 @@ void CL_ParseStatic (int version)
 
 	VectorCopy (ent->baseline.origin, ent->origin);
 	VectorCopy (ent->baseline.angles, ent->angles);
+
+	// ST_RAND is not always set on animations that should be out of lockstep
+	ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
+	ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
 
 	// some static ents don't have models; that's OK as we only use this for rendering them!
 	if (ent->model) R_AddEfrags (ent);
@@ -1106,8 +1076,6 @@ void CL_ParseStaticSound (int version)
 
 void SHOWLMP_decodehide (void);
 void SHOWLMP_decodeshow (void);
-
-void D3D_DeleteTranslation (int playernum);
 
 int MSG_PeekByte (void);
 void CL_ParseProQuakeMessage (void);
@@ -1326,12 +1294,8 @@ void CL_ParseServerMessage (void)
 				break;
 			}
 
-			// delete the old translation if it's unused
-			D3D_DeleteTranslation (i);
-
 			// make the new translation
 			cl.scores[i].colors = MSG_ReadByte ();
-			CL_NewTranslation (i);
 			break;
 
 		case svc_particle:

@@ -612,13 +612,13 @@ void AllowAccessibilityShortcutKeys (bool bAllowKeys)
 /* main window procedure */
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
+	// wow, this is a WEIRD way of doing a window proc...
     LONG    lRet = 1;
 	int		fActive, fMinimized, temp;
 	extern unsigned int uiWheelMessage;
 
 	if (Msg == uiWheelMessage) Msg = WM_MOUSEWHEEL;
 
-	// this is a WEIRD way of doing a window proc...
     switch (Msg)
     {
 	case WM_SYSCOMMAND:
@@ -637,10 +637,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	case WM_PAINT:
 		// minimal WM_PAINT processing
 		ValidateRect (hWnd, NULL);
-		break;
-
-	case WM_GRAPHEVENT:
-		DS_Event ();
 		break;
 
 	case WM_ERASEBKGND:
@@ -689,7 +685,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		if (wParam & MK_RBUTTON) temp |= 2;
 		if (wParam & MK_MBUTTON) temp |= 4;
 
-		// 3 buttons and we always send the event (event if temp is 0) so that we'll get up events too
+		// 3 buttons and we always send even if temp is 0 so that we'll get key up events on them too
 		IN_MouseEvent (temp, 3, false);
 		break;
 
@@ -781,6 +777,53 @@ void D3D_CreateShadeDots (void);
 
 int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+	//MessageBox (NULL, "boo", "boo", MB_OK);
+
+	InitCommonControls ();
+
+	// set up and register the window class (d3d doesn't need CS_OWNDC)
+	// do this before anything else so that we'll have it available for the splash too
+	WNDCLASS wc;
+
+	// here we use DefWindowProc because we're going to change it a few times and we don't want spurious messages
+	wc.style = CS_CLASSDC | CS_HREDRAW | CS_VREDRAW;
+	wc.lpfnWndProc = (WNDPROC) DefWindowProc;
+	wc.cbClsExtra = 0;
+	wc.cbWndExtra = 0;
+	wc.hInstance = GetModuleHandle (NULL);
+	wc.hIcon = 0;
+	wc.hCursor = LoadCursor (NULL,IDC_ARROW);
+	wc.hbrBackground = NULL;
+	wc.lpszMenuName = 0;
+	wc.lpszClassName = D3D_WINDOW_CLASS_NAME;
+
+	if (!RegisterClass (&wc))
+	{
+		Sys_Error ("D3D_CreateWindowClass: Failed to register Window Class");
+		return 666;
+	}
+
+	// create our default window that we're going to use with everything
+	d3d_Window = CreateWindowEx
+	(
+		0,
+		D3D_WINDOW_CLASS_NAME,
+		va ("DirectQ Release %s", DIRECTQ_VERSION),
+		0,
+		CW_DEFAULT, CW_DEFAULT,
+		CW_DEFAULT, CW_DEFAULT,
+		GetDesktopWindow (),
+		NULL,
+		GetModuleHandle (NULL),
+		NULL
+	);
+
+	if (!d3d_Window)
+	{
+		Sys_Error ("Couldn't create window");
+		return 666;
+	}
+
 	OSVERSIONINFO vinfo;
 
 	vinfo.dwOSVersionInfoSize = sizeof (vinfo);
@@ -886,26 +929,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	// initialize the splash screen
 	Splash_Init ();
-
-	// set up and register the window class (d3d doesn't need CS_OWNDC)
-	WNDCLASS wc;
-
-	wc.style = CS_CLASSDC;
-	wc.lpfnWndProc = (WNDPROC) MainWndProc;
-	wc.cbClsExtra = 0;
-	wc.cbWndExtra = 0;
-	wc.hInstance = GetModuleHandle (NULL);
-	wc.hIcon = 0;
-	wc.hCursor = LoadCursor (NULL,IDC_ARROW);
-	wc.hbrBackground = NULL;
-	wc.lpszMenuName = 0;
-	wc.lpszClassName = D3D_WINDOW_CLASS_NAME;
-
-	if (!RegisterClass (&wc))
-	{
-		Sys_Error ("D3D_CreateWindowClass: Failed to register Window Class");
-		return 666;
-	}
 
 	DWORD time, oldtime, newtime;
 

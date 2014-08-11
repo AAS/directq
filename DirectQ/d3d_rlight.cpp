@@ -158,12 +158,12 @@ void D3D_BuildLightmaps (void)
 	int blsize = ((MaxExtents[0] >> 4) + 1) * ((MaxExtents[1] >> 4) + 1);
 
 	// rgb array
-	d3d_blocklights = (unsigned int **) Pool_Map->Alloc (sizeof (unsigned int *) * 3);
+	d3d_blocklights = (unsigned int **) MainHunk->Alloc (sizeof (unsigned int *) * 3);
 
 	// each component
-	d3d_blocklights[0] = (unsigned int *) Pool_Map->Alloc (sizeof (unsigned int) * blsize);
-	d3d_blocklights[1] = (unsigned int *) Pool_Map->Alloc (sizeof (unsigned int) * blsize);
-	d3d_blocklights[2] = (unsigned int *) Pool_Map->Alloc (sizeof (unsigned int) * blsize);
+	d3d_blocklights[0] = (unsigned int *) MainHunk->Alloc (sizeof (unsigned int) * blsize);
+	d3d_blocklights[1] = (unsigned int *) MainHunk->Alloc (sizeof (unsigned int) * blsize);
+	d3d_blocklights[2] = (unsigned int *) MainHunk->Alloc (sizeof (unsigned int) * blsize);
 
 	// for the next map
 	MaxExtents[0] = MaxExtents[1] = 0;
@@ -184,7 +184,7 @@ void D3D_BuildLightmaps (void)
 		// alloc space for caching the entity state
 		if (mod->name[0] == '*')
 		{
-			mod->cacheent = (entity_t *) Pool_Map->Alloc (sizeof (entity_t));
+			mod->cacheent = (entity_t *) MainHunk->Alloc (sizeof (entity_t));
 			continue;
 		}
 
@@ -983,10 +983,10 @@ CD3DLightmap::CD3DLightmap (msurface_t *surf)
 
 	// texture is locked
 	this->modified = true;
-	this->allocated = (int *) Pool_Map->Alloc (sizeof (int) * this->width);
+	this->allocated = (int *) MainHunk->Alloc (sizeof (int) * this->width);
 
 	// clear allocations
-	memset (this->allocated, 0, sizeof (int) * this->width);
+	Q_MemSet (this->allocated, 0, sizeof (int) * this->width);
 }
 
 

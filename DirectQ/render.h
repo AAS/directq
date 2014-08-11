@@ -67,11 +67,13 @@ typedef struct entity_s
 	float					syncbase;		// for client-side animations
 	float					skinbase;
 	float					posebase;
-	byte					*colormap;
 	int						effects;		// light, particals, etc
 	int						skinnum;		// for Alias models
 	int						visframe;		// last frame this entity was found in an active leaf
 	vec3_t					modelorg;		// relative to r_origin
+
+	// player skins
+	int						playerskin;
 
 	// allocated at runtime client and server side
 	int						entnum;

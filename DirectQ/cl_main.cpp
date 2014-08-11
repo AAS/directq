@@ -80,19 +80,19 @@ void CL_ClearState (void)
 	if (!sv.active) Host_ClearMemory ();
 
 	// wipe the entire cl structure
-	memset (&cl, 0, sizeof(cl));
+	Q_MemSet (&cl, 0, sizeof(cl));
 
 	SZ_Clear (&cls.message);
 
-	cl.teamscores = (teamscore_t *) Pool_Map->Alloc (sizeof (teamscore_t) * 14);
+	cl.teamscores = (teamscore_t *) MainHunk->Alloc (sizeof (teamscore_t) * 16);
 
 	// clear down anything that was allocated one-time-only at startup
-	memset (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
-	memset (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
+	Q_MemSet (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
+	Q_MemSet (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
 	// allocate space for the first 512 entities - also clears the array
 	// the remainder are left at NULL and allocated on-demand if they are ever needed
-	entity_t *cl_dynamic_entities = (entity_t *) Pool_Map->Alloc (sizeof (entity_t) * BASE_ENTITIES);
+	entity_t *cl_dynamic_entities = (entity_t *) MainHunk->Alloc (sizeof (entity_t) * BASE_ENTITIES);
 
 	// now fill them in
 	// this array was allocated in CL_Init as it's a one-time-only need.
@@ -351,7 +351,7 @@ dlight_t *CL_FindDlight (int key)
 		{
 			if (dl->key == key)
 			{
-				memset (dl, 0, sizeof(*dl));
+				Q_MemSet (dl, 0, sizeof(*dl));
 				dl->key = key;
 				return dl;
 			}
@@ -365,14 +365,14 @@ dlight_t *CL_FindDlight (int key)
 	{
 		if (dl->die < cl.time)
 		{
-			memset (dl, 0, sizeof(*dl));
+			Q_MemSet (dl, 0, sizeof(*dl));
 			dl->key = key;
 			return dl;
 		}
 	}
 
 	dl = &cl_dlights[0];
-	memset (dl, 0, sizeof(*dl));
+	Q_MemSet (dl, 0, sizeof(*dl));
 	dl->key = key;
 	return dl;
 }
@@ -984,11 +984,11 @@ void CL_Init (void)
 	// referenced during a changelevel (?only when there's no intermission?) so it needs to be in
 	// the persistent heap, and (3) the full thing is allocated each map anyway, so why not shift
 	// the overhead (small as it is) to one time only.
-	cl_entities = (entity_t **) Pool_Permanent->Alloc (MAX_EDICTS * sizeof (entity_t *));
+	cl_entities = (entity_t **) Zone_Alloc (MAX_EDICTS * sizeof (entity_t *));
 
 	// these were static arrays but we put them into memory pools so that we can track usage more accurately
-	cl_dlights = (dlight_t *) Pool_Permanent->Alloc (MAX_DLIGHTS * sizeof (dlight_t));
-	cl_lightstyle = (lightstyle_t *) Pool_Permanent->Alloc (MAX_LIGHTSTYLES * sizeof (lightstyle_t));
+	cl_dlights = (dlight_t *) Zone_Alloc (MAX_DLIGHTS * sizeof (dlight_t));
+	cl_lightstyle = (lightstyle_t *) Zone_Alloc (MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
 	CL_InitInput ();
 }

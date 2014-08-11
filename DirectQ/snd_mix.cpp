@@ -39,8 +39,8 @@ __inline void Snd_InitPaintBuffer (void)
 {
 	if (!paintbuffer)
 	{
-		paintbuffer = (portable_samplepair_t *) Pool_Permanent->Alloc (PAINTBUF_SIZE * sizeof (portable_samplepair_t));
-		memset (paintbuffer, 0, PAINTBUF_SIZE * sizeof (portable_samplepair_t));
+		paintbuffer = (portable_samplepair_t *) Zone_Alloc (PAINTBUF_SIZE * sizeof (portable_samplepair_t));
+		Q_MemSet (paintbuffer, 0, PAINTBUF_SIZE * sizeof (portable_samplepair_t));
 	}
 }
 
@@ -179,14 +179,15 @@ void SND_InitScaletable (void)
 	{
 		// use a higher quality scale table than the Quake default
 		// (this is just an array lookup so the only real penalty comes from memory overhead)
-		snd_scaletable = (int **) Pool_Permanent->Alloc (256 * sizeof (int *));
+		snd_scaletable = (int **) Zone_Alloc (256 * sizeof (int *));
 		for (int i = 0; i < 256; i++) snd_scaletable[i] = NULL;
 	}
 
 	for (int i = 0; i < 256; i++)
 	{
-		if (!snd_scaletable[i]) snd_scaletable[i] = (int *) Pool_Permanent->Alloc (256 * sizeof (int));
-		for (int j = 0; j < 256; j++) snd_scaletable[i][j] = ((signed char) j) * i;
+		if (!snd_scaletable[i]) snd_scaletable[i] = (int *) Zone_Alloc (256 * sizeof (int));
+
+		for (int j = 0; j < 256; j++) snd_scaletable[i][j] = ((j < 128) ? j : j - 0xff) * i; //((signed char) j) * i;
 	}
 }
 
@@ -221,21 +222,17 @@ void SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count)
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
-	int data;
-	int left, right;
-	int leftvol, rightvol;
-	signed short *sfx;
-	int	i;
+	int leftvol = ch->leftvol;
+	int rightvol = ch->rightvol;
 
-	leftvol = ch->leftvol;
-	rightvol = ch->rightvol;
-	sfx = (signed short *) sc->data + ch->pos;
+	signed short *sfx = (signed short *) sc->data + ch->pos;
 
-	for (i = 0; i < count; i++)
+	for (int i = 0; i < count; i++)
 	{
-		data = sfx[i];
-		left = (data * leftvol) >> 8;
-		right = (data * rightvol) >> 8;
+		int data = sfx[i];
+		int left = (data * leftvol) >> 8;
+		int right = (data * rightvol) >> 8;
+
 		paintbuffer[i].left += left;
 		paintbuffer[i].right += right;
 	}
@@ -249,32 +246,28 @@ void S_PaintChannels (int endtime)
 	// init the paintbuffer if we need to
 	Snd_InitPaintBuffer ();
 
-	int 	i;
-	int 	end;
-	channel_t *ch;
-	sfxcache_t	*sc;
-	int		ltime, count;
-
 	while (paintedtime < endtime)
 	{
 		// if paintbuffer is smaller than DMA buffer
-		end = endtime;
+		int end = endtime;
 
 		if (endtime - paintedtime > PAINTBUF_SIZE) end = paintedtime + PAINTBUF_SIZE;
 
 		// clear the paint buffer
-		memset (paintbuffer, 0, (end - paintedtime) * sizeof (portable_samplepair_t));
+		Q_MemSet (paintbuffer, 0, (end - paintedtime) * sizeof (portable_samplepair_t));
 
 		// paint in the channels.
-		ch = channels;
+		channel_t *ch = channels;
+		sfxcache_t *sc;
 
-		for (i = 0; i < total_channels; i++, ch++)
+		for (int i = 0; i < total_channels; i++, ch++)
 		{
 			if (!ch->sfx) continue;
 			if (!ch->leftvol && !ch->rightvol) continue;
 			if (!(sc = S_LoadSound (ch->sfx))) continue;
 
-			ltime = paintedtime;
+			int ltime = paintedtime;
+			int count;
 
 			while (ltime < end)
 			{
@@ -284,10 +277,15 @@ void S_PaintChannels (int endtime)
 				else count = end - ltime;
 
 				if (count > 0)
-				{	
-					if (sc->width == 1)
-						SND_PaintChannelFrom8 (ch, sc, count);
-					else SND_PaintChannelFrom16 (ch, sc, count);
+				{
+					// this should never happen but does if you rapidly switch between samplemodes via the menu
+					// make sure that ltime += count still happens or we get an infinite loop!
+					if (ch->pos + count < sc->length)
+					{
+						if (sc->width == 1)
+							SND_PaintChannelFrom8 (ch, sc, count);
+						else SND_PaintChannelFrom16 (ch, sc, count);
+					}
 	
 					ltime += count;
 				}
@@ -301,7 +299,8 @@ void S_PaintChannels (int endtime)
 						ch->end = ltime + sc->length - ch->pos;
 					}
 					else				
-					{	// channel just stopped
+					{
+						// channel just stopped
 						ch->sfx = NULL;
 						break;
 					}

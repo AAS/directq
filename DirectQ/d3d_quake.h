@@ -42,9 +42,29 @@ typedef struct d3d_shader_s
 } d3d_shader_t;
 
 
+#define D3D_EmitSingleSurfaceVert(src,dst,m) {\
+if ((m)) \
+{ \
+	(dst)[0] = (src)[0] * (m)->_11 + (src)[1] * (m)->_21 + (src)[2] * (m)->_31 + (m)->_41; \
+	(dst)[1] = (src)[0] * (m)->_12 + (src)[1] * (m)->_22 + (src)[2] * (m)->_32 + (m)->_42; \
+	(dst)[2] = (src)[0] * (m)->_13 + (src)[1] * (m)->_23 + (src)[2] * (m)->_33 + (m)->_43; \
+} \
+else \
+{ \
+	(dst)[0] = (src)[0]; \
+	(dst)[1] = (src)[1]; \
+	(dst)[2] = (src)[2]; \
+}}
+
+#define D3D_EmitSingleSurfaceTexCoord(src,dst) {\
+	(dst)[0] = (src)[0]; \
+	(dst)[1] = (src)[1]; \
+}
+
 void D3D_VBOBegin (D3DPRIMITIVETYPE PrimitiveType, int Stride);
 void D3D_VBOAddShader (d3d_shader_t *Shader, LPDIRECT3DTEXTURE9 Stage0Tex, LPDIRECT3DTEXTURE9 Stage1Tex = NULL, LPDIRECT3DTEXTURE9 Stage2Tex = NULL);
 void D3D_VBOAddSurfaceVerts (msurface_t *surf);
+void D3D_VBOEmitIndexes (unsigned short *src, unsigned short *dst, int num, int base);
 void D3D_VBORender (void);
 void D3D_VBOCheckOverflow (int numverts, int numindexes);
 void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, aliasstate_t *aliasstate);
@@ -75,6 +95,7 @@ typedef HRESULT (WINAPI *D3DXSAVESURFACETOFILEPROC) (LPCSTR, D3DXIMAGE_FILEFORMA
 typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) (LPDIRECT3DDEVICE9, LPCVOID, UINT, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
 typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMRESOURCEEXAPROC) (LPDIRECT3DDEVICE9, HMODULE, LPCSTR, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
 typedef HRESULT (WINAPI *D3DXCREATERENDERTOSURFACEPROC) (LPDIRECT3DDEVICE9, UINT, UINT, D3DFORMAT, BOOL, D3DFORMAT, LPD3DXRENDERTOSURFACE *);
+typedef HRESULT (WINAPI *D3DXDDECLARATORFROMFVFPROC) (DWORD FVF, D3DVERTEXELEMENT9 *);
 typedef HRESULT (WINAPI *D3DXOPTIMIZEFACEVERTPROC) (LPCVOID, UINT, UINT, BOOL, DWORD *);
 typedef HRESULT (WINAPI *D3DXCREATEMESHFVFPROC) (DWORD, DWORD, DWORD, DWORD, LPDIRECT3DDEVICE9, LPD3DXMESH *);
 
@@ -101,6 +122,7 @@ extern D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA;
 extern D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx;
 extern D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA;
 extern D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface;
+extern D3DXDDECLARATORFROMFVFPROC QD3DXDeclaratorFromFVF;
 extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeFaces;
 extern D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeVertices;
 extern D3DXCREATEMESHFVFPROC QD3DXCreateMeshFVF;
@@ -125,20 +147,23 @@ extern D3DMATRIX d3d_ProjMatrix;
 void D3D_TranslateMatrix (D3DMATRIX *matrix, float x, float y, float z);
 void D3D_ScaleMatrix (D3DMATRIX *matrix, float x, float y, float z);
 void D3D_RotateMatrix (D3DMATRIX *matrix, float x, float y, float z, float angle);
-void D3D_LoadIdentity (D3DMATRIX *matrix);
+D3DMATRIX *D3D_LoadIdentity (D3DMATRIX *matrix);
+D3DXMATRIX *D3D_LoadIdentity (D3DXMATRIX *matrix);
 void D3D_MultMatrix (D3DMATRIX *matrix1, D3DMATRIX *matrix2);
 D3DXMATRIX *D3D_MakeD3DXMatrix (D3DMATRIX *matrix);
 
 extern HRESULT hr;
 
 // hlsl
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_LiquidDeclaration;
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_SkyDeclaration;
-extern LPDIRECT3DVERTEXDECLARATION9 d3d_UnderwaterDeclaration;
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex1;
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzTex2;
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyz;
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuseTex1;
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_VDXyzDiffuse;
 
 extern LPD3DXEFFECT d3d_LiquidFX;
 extern LPD3DXEFFECT d3d_SkyFX;
-extern LPD3DXEFFECT d3d_UnderwaterFX;
+extern LPD3DXEFFECT d3d_ScreenFX;
 
 void D3D_InitHLSL (void);
 void D3D_ShutdownHLSL (void);
@@ -181,8 +206,6 @@ extern	cvar_t	gl_affinemodels;
 extern	cvar_t	gl_polyblend;
 extern	cvar_t	gl_nocolors;
 extern	cvar_t	gl_doubleeyes;
-
-void D3D_TranslatePlayerSkin (int playernum);
 
 
 /*
@@ -261,7 +284,7 @@ extern D3DDISPLAYMODE d3d_CurrentMode;
 #define IMAGE_NOCOMPRESS	512
 #define IMAGE_NOEXTERN		2048
 #define IMAGE_HALFLIFE		4096
-#define IMAGE_MAPSHOT		8192
+#define IMAGE_KEEPPATH		8192
 #define IMAGE_PADDABLE		16384
 #define IMAGE_PADDED		32768
 
@@ -385,7 +408,7 @@ void D3D_SetSamplerStatef (DWORD Stage, D3DSAMPLERSTATETYPE Type, float Value);
 void D3D_SetTextureState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value);
 void D3D_SetTextureStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Value);
 void D3D_SetTexture (DWORD Sampler, LPDIRECT3DBASETEXTURE9 pTexture);
-void D3D_SetFVF (DWORD FVF);
+void D3D_SetVertexDeclaration (LPDIRECT3DVERTEXDECLARATION9 vd);
 
 void D3D_SetColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
 void D3D_SetAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);

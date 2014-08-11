@@ -6,14 +6,6 @@ IDR_SPLASH			RCDATA		"splash.png"
 
 IDR_PARTICLEDOT			RCDATA		"particledot.png"
 
-IDR_QMBBLOOD			RCDATA		"qmbblood.png"
-IDR_QMBBUBBLE			RCDATA		"qmbbubble.png"
-IDR_QMBLIGHTNING		RCDATA		"qmblightning.png"
-IDR_QMBLIGHTNING_OLD		RCDATA		"qmblightning_old.png"
-IDR_QMBSMOKE			RCDATA		"qmbsmoke.png"
-IDR_QMBSPARK			RCDATA		"qmbspark.png"
-IDR_QMBTRAIL			RCDATA		"qmbtrail.png"
-
 IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
 IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
 

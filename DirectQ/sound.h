@@ -56,11 +56,14 @@ typedef struct
 typedef struct sfx_s
 {
 	char 	name[MAX_QPATH];
-
-	// soundcache - no longer put in the cache, it's everything on the hunk now
 	sfxcache_t *sndcache;
+	struct sfx_s *next;
 } sfx_t;
 
+extern sfx_t *active_sfx;
+
+extern CQuakeCache *SoundCache;
+extern CQuakeZone *SoundHeap;
 
 typedef struct
 {

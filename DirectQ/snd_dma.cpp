@@ -63,8 +63,7 @@ int			soundtime;		// sample PAIRS
 int   		paintedtime; 	// sample PAIRS
 
 
-sfx_t		*known_sfx;		// hunk allocated [MAX_SFX]
-int			num_sfx;
+sfx_t		*active_sfx;		// hunk allocated [MAX_SFX]
 
 sfx_t		*ambient_sfx[NUM_AMBIENTS];
 
@@ -162,9 +161,12 @@ cmd_t S_SoundInfo_f_Cmd ("soundinfo", S_SoundInfo_f);
 
 void S_Init (void)
 {
+	// alloc the cache that we'll use for the rest of the game
+	SoundCache = new CQuakeCache ();
+	SoundHeap = new CQuakeZone ();
+
 	// always init this otherwise we'll crash during sound clearing
-	known_sfx = (sfx_t *) Pool_Permanent->Alloc (MAX_SFX * sizeof (sfx_t));
-	num_sfx = 0;
+	active_sfx = NULL;
 
 	if (COM_CheckParm("-nosound"))
 		return;
@@ -190,14 +192,21 @@ void S_InitAmbients (void)
 // Shutdown sound engine
 // =======================================================================
 
-void S_Shutdown(void)
+void S_Shutdown (void)
 {
 	if (!sound_started) return;
 
 	if (shm) shm->gamealive = 0;
 
-	shm = 0;
+	shm = NULL;
 	sound_started = 0;
+
+	// clear down all channels
+	for (int i = 0; i < MAX_CHANNELS; i++)
+	{
+		channels[i].sfx = NULL;
+		channels[i].pos = 0;
+	}
 
 	SNDDMA_Shutdown ();
 }
@@ -224,23 +233,25 @@ sfx_t *S_FindName (char *name)
 		Sys_Error ("Sound name too long: %s", name);
 
 	// see if already loaded
-	for (i=0; i < num_sfx; i++)
+	for (sfx = active_sfx; sfx; sfx = sfx->next)
 	{
-		if (!strcmp (known_sfx[i].name, name))
+		if (!strcmp (sfx->name, name))
 		{
-			known_sfx[i].sndcache = NULL;
-			return &known_sfx[i];
+			sfx->sndcache = NULL;
+			return sfx;
 		}
 	}
 
-	if (num_sfx == MAX_SFX)
-		Sys_Error ("S_FindName: out of sfx_t");
+	// create a new heap for them
+	if (!SoundHeap) SoundHeap = new CQuakeZone ();
 
-	sfx = &known_sfx[i];
+	sfx = (sfx_t *) SoundHeap->Alloc (sizeof (sfx_t));
+
 	strcpy (sfx->name, name);
 	sfx->sndcache = NULL;
 
-	num_sfx++;
+	sfx->next = active_sfx;
+	active_sfx = sfx;
 
 	return sfx;
 }
@@ -251,15 +262,8 @@ void S_ClearSounds (void)
 	// just clear the names of all known sfx so that they will be forced to load again
 	// this *doesn't* clear them from cache memory which needs to be cleared as a separate operation
 	// (because this is called on map load as well as on game change)
-	for (int i = 0; i < MAX_SFX; i++)
-	{
-		// clear the name and set the pointer to null
-		known_sfx[i].name[0] = 0;
-		known_sfx[i].sndcache = NULL;
-	}
-
-	// start with no sounds
-	num_sfx = 0;
+	SoundHeap->Discard ();
+	active_sfx = NULL;
 }
 
 
@@ -435,7 +439,7 @@ void S_StartSound(int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float f
 		return;
 		
 // spatialize
-	memset (target_chan, 0, sizeof(*target_chan));
+	Q_MemSet (target_chan, 0, sizeof(*target_chan));
 	VectorCopy(origin, target_chan->origin);
 	target_chan->dist_mult = attenuation / sound_nominal_clip_dist.value;
 	target_chan->master_vol = vol;
@@ -513,7 +517,7 @@ void S_StopAllSounds (bool clear)
 		if (channels[i].sfx)
 			channels[i].sfx = NULL;
 
-	memset (channels, 0, MAX_CHANNELS * sizeof (channel_t));
+	Q_MemSet (channels, 0, MAX_CHANNELS * sizeof (channel_t));
 
 	if (clear) S_ClearBuffer ();
 }
@@ -542,7 +546,7 @@ void S_ClearBuffer (void)
 
 	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &pData, &dwSize, NULL, NULL, 0)) return;
 
-	memset (pData, clear, shm->samples * shm->samplebits / 8);
+	Q_MemSet (pData, clear, shm->samples * shm->samplebits / 8);
 	ds_SecondaryBuffer8->Unlock (pData, dwSize, NULL, 0);
 }
 
@@ -914,21 +918,21 @@ void S_SoundList(void)
 	int		size, total;
 
 	total = 0;
-	for (sfx=known_sfx, i=0; i<num_sfx; i++, sfx++)
-	{
-		sc = sfx->sndcache;
 
-		if (!sc)
-			continue;
+	for (sfx = active_sfx; sfx; sfx = sfx->next)
+	{
+		if (!(sc = sfx->sndcache)) continue;
 
 		size = sc->length*sc->width*(sc->stereo+1);
 		total += size;
+
 		if (sc->loopstart >= 0)
 			Con_Printf ("L");
-		else
-			Con_Printf (" ");
+		else Con_Printf (" ");
+
 		Con_Printf ("(%2db) %6i : %s\n",sc->width*8,  size, sfx->name);
 	}
+
 	Con_Printf ("Total resident: %i\n", total);
 }
 
@@ -943,7 +947,8 @@ void S_LocalSound (char *sound)
 
 	// look for a cached version
 	// there is no standard cache lookup!!!
-	for (sfx = known_sfx, i = 0; i < num_sfx; i++, sfx++)
+	// (surely a cache lookup should be used here...)
+	for (sfx = active_sfx; sfx; sfx = sfx->next)
 	{
 		// no cache
 		if (!sfx->sndcache) continue;
@@ -952,7 +957,7 @@ void S_LocalSound (char *sound)
 		if (!stricmp (sound, sfx->name)) break;
 	}
 
-	if (i == num_sfx)
+	if (!sfx)
 	{
 		// not cached
 		sfx = S_PrecacheSound (sound);

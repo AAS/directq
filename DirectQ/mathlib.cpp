@@ -31,8 +31,6 @@ int nanmask = 255<<23;
 
 /*-----------------------------------------------------------------*/
 
-#define DEG2RAD( a ) ( a * M_PI ) / 180.0F
-
 void ProjectPointOnPlane( vec3_t dst, const vec3_t p, const vec3_t normal )
 {
 	float d;
@@ -121,7 +119,7 @@ void RotatePointAroundVector( vec3_t dst, const vec3_t dir, const vec3_t point, 
 	m[1][2] = vf[1];
 	m[2][2] = vf[2];
 
-	memcpy( im, m, sizeof( im ) );
+	Q_MemCpy( im, m, sizeof( im ) );
 
 	im[0][1] = m[1][0];
 	im[0][2] = m[2][0];
@@ -130,13 +128,13 @@ void RotatePointAroundVector( vec3_t dst, const vec3_t dir, const vec3_t point, 
 	im[2][0] = m[0][2];
 	im[2][1] = m[1][2];
 
-	memset( zrot, 0, sizeof( zrot ) );
+	Q_MemSet( zrot, 0, sizeof( zrot ) );
 	zrot[0][0] = zrot[1][1] = zrot[2][2] = 1.0F;
 
-	zrot[0][0] = cos( DEG2RAD( degrees ) );
-	zrot[0][1] = sin( DEG2RAD( degrees ) );
-	zrot[1][0] = -sin( DEG2RAD( degrees ) );
-	zrot[1][1] = cos( DEG2RAD( degrees ) );
+	zrot[0][0] = cos( D3DXToRadian( degrees ) );
+	zrot[0][1] = sin( D3DXToRadian( degrees ) );
+	zrot[1][0] = -sin( D3DXToRadian( degrees ) );
+	zrot[1][1] = cos( D3DXToRadian( degrees ) );
 
 	R_ConcatRotations( m, zrot, tmpmat );
 	R_ConcatRotations( tmpmat, im, rot );
@@ -405,13 +403,13 @@ void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 	float		angle;
 	float		sr, sp, sy, cr, cp, cy;
 	
-	angle = angles[YAW] * (M_PI*2 / 360);
+	angle = angles[YAW] * (D3DX_PI*2 / 360);
 	sy = sin(angle);
 	cy = cos(angle);
-	angle = angles[PITCH] * (M_PI*2 / 360);
+	angle = angles[PITCH] * (D3DX_PI*2 / 360);
 	sp = sin(angle);
 	cp = cos(angle);
-	angle = angles[ROLL] * (M_PI*2 / 360);
+	angle = angles[ROLL] * (D3DX_PI*2 / 360);
 	sr = sin(angle);
 	cr = cos(angle);
 

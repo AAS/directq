@@ -29,10 +29,6 @@ typedef	int	fixed4_t;
 typedef	int	fixed8_t;
 typedef	int	fixed16_t;
 
-#ifndef M_PI
-#define M_PI		3.1415926535897932384626433832795	// matches value from Windows 7 calc.exe
-#endif
-
 struct mplane_s;
 
 extern vec3_t vec3_origin;

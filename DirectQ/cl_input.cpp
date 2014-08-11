@@ -370,7 +370,7 @@ void CL_BaseMove (usercmd_t *cmd)
 			
 	CL_AdjustAngles ();
 	
-	memset (cmd, 0, sizeof(*cmd));
+	Q_MemSet (cmd, 0, sizeof(*cmd));
 	
 	if (in_strafe.state & 1)
 	{

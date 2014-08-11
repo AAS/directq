@@ -27,7 +27,7 @@ float3 Scale;
 float3 r_origin;
 
 
-// this needs to mirror the layout of warppolyvert_t in gl_warp.cpp
+// this no longer needs to mirror the layout of warppolyvert_t in gl_warp.cpp
 struct VS_INPUT 
 {
 	float4 Position : POSITION0;

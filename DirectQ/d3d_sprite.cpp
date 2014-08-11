@@ -123,7 +123,7 @@ void D3D_SetupSpriteModel (entity_t *ent)
 	vec3_t		tvec;
 	float		angle, sr, cr;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
 
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
@@ -188,7 +188,7 @@ void D3D_SetupSpriteModel (entity_t *ent)
 		break;
 
 	case SPR_VP_PARALLEL_ORIENTED:
-		angle = ent->angles[ROLL] * (M_PI / 180.0);
+		angle = ent->angles[ROLL] * (D3DX_PI / 180.0);
 		sr = sin (angle);
 		cr = cos (angle);
 

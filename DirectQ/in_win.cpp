@@ -872,7 +872,7 @@ void IN_StartupJoystick (void)
 	// cycle through the joystick ids for the first valid one
 	for (joy_id = 0; joy_id < numdevs; joy_id++)
 	{
-		memset (&ji, 0, sizeof (ji));
+		Q_MemSet (&ji, 0, sizeof (ji));
 		ji.dwSize = sizeof (ji);
 		ji.dwFlags = JOY_RETURNCENTERED;
 
@@ -889,7 +889,7 @@ void IN_StartupJoystick (void)
 
 	// get the capabilities of the selected joystick
 	// abort startup if command fails
-	memset (&jc, 0, sizeof (jc));
+	Q_MemSet (&jc, 0, sizeof (jc));
 
 	if ((mmr = joyGetDevCaps (joy_id, &jc, sizeof (jc))) != JOYERR_NOERROR)
 	{
@@ -1070,7 +1070,7 @@ IN_ReadJoystick
 */  
 bool IN_ReadJoystick (void)
 {
-	memset (&ji, 0, sizeof (ji));
+	Q_MemSet (&ji, 0, sizeof (ji));
 	ji.dwSize = sizeof (ji);
 	ji.dwFlags = joy_flags;
 
@@ -1312,7 +1312,7 @@ void IN_StartupXInput (void)
 	// only support up to 4 controllers (in a PC scenario usually just one will be attached)
 	for (int c = 0; c < 4; c++)
 	{
-		memset (&xiCaps, 0, sizeof (XINPUT_CAPABILITIES));
+		Q_MemSet (&xiCaps, 0, sizeof (XINPUT_CAPABILITIES));
 		DWORD gc = QXInputGetCapabilities (c, XINPUT_FLAG_GAMEPAD, &xiCaps);
 
 		if (gc == ERROR_SUCCESS)

@@ -24,13 +24,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "menu_common.h"
 #include "d3d_quake.h"
 
-CQMenu menu_HUD (m_hudoptions);
-
 extern cvar_t	crosshair;
 extern cvar_t	cl_crossx;
 extern cvar_t	cl_crossy;
 extern cvar_t	scr_crosshairscale;
 extern cvar_t	scr_crosshaircolor;
+extern cvar_t	scr_viewsize;
 
 #define STAT_MINUS		10	// num frame for '-' stats digit
 
@@ -253,289 +252,39 @@ HUD_Init
 cmd_t HUD_ShowScores_Cmd ("+showscores", HUD_ShowScores);
 cmd_t HUD_DontShowScores_Cmd ("-showscores", HUD_DontShowScores);
 
-// specify a HUD to load on startup
-cvar_t hud_defaulthud ("defaulthud", "classichud", CVAR_ARCHIVE);
+// new names for compatibility with other engines
+cvar_t cl_sbar ("cl_sbar", "0", CVAR_ARCHIVE);
+cvar_t scr_sbaralpha ("scr_sbaralpha", "1", CVAR_ARCHIVE);
+cvar_t scr_centersbar ("scr_centersbar", "1", CVAR_ARCHIVE);
 
-// switch on or off center alignment for entire HUD
-cvar_t hud_centerhud ("hud_centerhud", "1", CVAR_ARCHIVE);
-
-// whether to autoload or autosave the HUD
-cvar_t hud_autoload ("hud_autoload", "0", CVAR_ARCHIVE);
-cvar_t hud_autosave ("hud_autosave", "0", CVAR_ARCHIVE);
+// aliases so that the old dq cvars will still work
+cvar_alias_t hud_sbaralpha ("hud_sbaralpha", &scr_sbaralpha);
+cvar_alias_t hud_centerhud ("hud_centerhud", &scr_centersbar);
+cvar_alias_t hud_overlay ("hud_overlay", &cl_sbar);
 
 // called scr_* for consistency with other engines
 cvar_t scr_showfps ("scr_showfps", 0.0f, CVAR_ARCHIVE);
 cvar_t scr_clock ("scr_clock", 0.0f, CVAR_ARCHIVE);
 
-// allow a custom HUD layout
-// positive = from left (or from top, for y)
-// negative = from right (or from bottom)
-// some of these have moved to archive cvars as there is a significant perf boost to be had from using them
-cvar_t hud_overlay ("hud_overlay", "0", CVAR_HUD | CVAR_ARCHIVE);
+#include "hud_layout.h"
 
-cvar_t hud_dmoverlay_x ("hud_dmoverlay_x", 8, CVAR_HUD);
-cvar_t hud_dmoverlay_y ("hud_dmoverlay_y", -44, CVAR_HUD);
-
-cvar_t hud_fps_x ("hud_fps_x", -76, CVAR_HUD);
-cvar_t hud_fps_y ("hud_fps_y", -64, CVAR_HUD);
-
-cvar_t hud_clock_x ("hud_clock_x", -52, CVAR_HUD);
-cvar_t hud_clock_y ("hud_clock_y", -76, CVAR_HUD);
-
-cvar_t hud_sbaralpha ("hud_sbaralpha", 1, CVAR_HUD | CVAR_ARCHIVE);
-
-cvar_t hud_drawsbar ("hud_drawsbar", 1, CVAR_HUD | CVAR_ARCHIVE);
-cvar_t hud_sbar_x ("hud_sbar_x", -160, CVAR_HUD);
-cvar_t hud_sbar_y ("hud_sbar_y", -24, CVAR_HUD);
-cvar_t hud_sbar_cx ("hud_sbar_cx", 1, CVAR_HUD);
-cvar_t hud_sbar_cy ("hud_sbar_cy", 0.0f, CVAR_HUD);
-
-cvar_t hud_drawibar ("hud_drawibar", 1, CVAR_HUD | CVAR_ARCHIVE);
-cvar_t hud_ibar_x ("hud_ibar_x", -160, CVAR_HUD);
-cvar_t hud_ibar_y ("hud_ibar_y", -48, CVAR_HUD);
-cvar_t hud_ibar_cx ("hud_ibar_cx", 1, CVAR_HUD);
-cvar_t hud_ibar_cy ("hud_ibar_cy", 0.0f, CVAR_HUD);
-
-cvar_t hud_facepic_x ("hud_facepic_x", -48, CVAR_HUD);
-cvar_t hud_facepic_y ("hud_facepic_y", -24, CVAR_HUD);
-cvar_t hud_facepic_cx ("hud_facepic_cx", 1, CVAR_HUD);
-cvar_t hud_facepic_cy ("hud_facepic_cy", 0.0f, CVAR_HUD);
-
-cvar_t hud_faceval_x ("hud_faceval_x", -24, CVAR_HUD);
-cvar_t hud_faceval_y ("hud_faceval_y", -24, CVAR_HUD);
-cvar_t hud_faceval_cx ("hud_faceval_cx", 1, CVAR_HUD);
-cvar_t hud_faceval_cy ("hud_faceval_cy", 0.0f, CVAR_HUD);
-
-cvar_t hud_teamcolor_x ("hud_teamcolor_x", -48, CVAR_HUD);
-cvar_t hud_teamcolor_y ("hud_teamcolor_y", -24, CVAR_HUD);
-cvar_t hud_teamcolor_cx ("hud_teamcolor_cx", 1, CVAR_HUD);
-cvar_t hud_teamcolor_cy ("hud_teamcolor_cy", 0.0f, CVAR_HUD);
-
-cvar_t hud_armorpic_x ("hud_armorpic_x", -160, CVAR_HUD);
-cvar_t hud_armorpic_y ("hud_armorpic_y", -24, CVAR_HUD);
-cvar_t hud_armorpic_cx ("hud_armorpic_cx", 1, CVAR_HUD);
-cvar_t hud_armorpic_cy ("hud_armorpic_cy", 0.0f, CVAR_HUD);
-
-cvar_t hud_armorval_x ("hud_armorval_x", -136, CVAR_HUD);
-cvar_t hud_armorval_y ("hud_armorval_y", -24, CVAR_HUD);
-cvar_t hud_armorval_cx ("hud_armorval_cx", 1, CVAR_HUD);
-cvar_t hud_armorval_cy ("hud_armorval_cy", 0.0f, CVAR_HUD);
-cvar_t hud_armorval_no0 ("hud_armorval_no0", "0", CVAR_HUD);
-
-cvar_t hud_ammopic_x ("hud_ammopic_x", 64, CVAR_HUD);
-cvar_t hud_ammopic_y ("hud_ammopic_y", -24, CVAR_HUD);
-cvar_t hud_ammopic_cx ("hud_ammopic_cx", 1, CVAR_HUD);
-cvar_t hud_ammopic_cy ("hud_ammopic_cy", 0.0f, CVAR_HUD);
-
-cvar_t hud_ammoval_x ("hud_ammoval_x", 88, CVAR_HUD);
-cvar_t hud_ammoval_y ("hud_ammoval_y", -24, CVAR_HUD);
-cvar_t hud_ammoval_cx ("hud_ammoval_cx", 1, CVAR_HUD);
-cvar_t hud_ammoval_cy ("hud_ammoval_cy", 0.0f, CVAR_HUD);
-cvar_t hud_ammoval_no0 ("hud_ammoval_no0", "0", CVAR_HUD);
-
-cvar_t hud_sigils_x ("hud_sigils_x", 128, CVAR_HUD);
-cvar_t hud_sigils_y ("hud_sigils_y", -40, CVAR_HUD);
-cvar_t hud_sigils_cx ("hud_sigils_cx", 1, CVAR_HUD);
-cvar_t hud_sigils_cy ("hud_sigils_cy", "0", CVAR_HUD);
-cvar_t hud_sigils_h ("hud_sigils_h", 1, CVAR_HUD);
-cvar_t hud_sigils_v ("hud_sigils_v", "0", CVAR_HUD);
-cvar_t hud_sigils_hs ("hud_sigils_hs", "0", CVAR_HUD);
-cvar_t hud_sigils_vs ("hud_sigils_vs", "0", CVAR_HUD);
-
-cvar_t hud_keys_x ("hud_keys_x", 32, CVAR_HUD);
-cvar_t hud_keys_y ("hud_keys_y", -40, CVAR_HUD);
-cvar_t hud_keys_cx ("hud_keys_cx", 1, CVAR_HUD);
-cvar_t hud_keys_cy ("hud_keys_cy", "0", CVAR_HUD);
-cvar_t hud_keys_h ("hud_keys_h", 1, CVAR_HUD);
-cvar_t hud_keys_v ("hud_keys_v", "0", CVAR_HUD);
-cvar_t hud_keys_hs ("hud_keys_hs", "0", CVAR_HUD);
-cvar_t hud_keys_vs ("hud_keys_vs", "0", CVAR_HUD);
-
-cvar_t hud_items_x ("hud_items_x", 64, CVAR_HUD);
-cvar_t hud_items_y ("hud_items_y", -40, CVAR_HUD);
-cvar_t hud_items_cx ("hud_items_cx", 1, CVAR_HUD);
-cvar_t hud_items_cy ("hud_items_cy", "0", CVAR_HUD);
-cvar_t hud_items_h ("hud_items_h", 1, CVAR_HUD);
-cvar_t hud_items_v ("hud_items_v", "0", CVAR_HUD);
-cvar_t hud_items_hs ("hud_items_hs", "0", CVAR_HUD);
-cvar_t hud_items_vs ("hud_items_vs", "0", CVAR_HUD);
-
-cvar_t hud_ammocount_x ("hud_ammocount_x", -152, CVAR_HUD);
-cvar_t hud_ammocount_y ("hud_ammocount_y", -48, CVAR_HUD);
-cvar_t hud_ammocount_cx ("hud_ammocount_cx", 1, CVAR_HUD);
-cvar_t hud_ammocount_cy ("hud_ammocount_cy", "0", CVAR_HUD);
-cvar_t hud_ammocount_hs ("hud_ammocount_hs", 48, CVAR_HUD);
-cvar_t hud_ammocount_vs ("hud_ammocount_vs", "0", CVAR_HUD);
-cvar_t hud_ammobox_show ("hud_ammobox_show", "0", CVAR_HUD);
-cvar_t hud_ammobox_x ("hud_ammobox_x", "0", CVAR_HUD);
-cvar_t hud_ammobox_y ("hud_ammobox_y", "0", CVAR_HUD);
-
-cvar_t hud_weapons_x ("hud_weapons_x", -160, CVAR_HUD);
-cvar_t hud_weapons_y ("hud_weapons_y", -40, CVAR_HUD);
-cvar_t hud_weapons_cx ("hud_weapons_cx", 1, CVAR_HUD);
-cvar_t hud_weapons_cy ("hud_weapons_cy", "0", CVAR_HUD);
-cvar_t hud_weapons_h ("hud_weapons_h", 1, CVAR_HUD);
-cvar_t hud_weapons_v ("hud_weapons_v", "0", CVAR_HUD);
-cvar_t hud_weapons_hs ("hud_weapons_hs", "0", CVAR_HUD);
-cvar_t hud_weapons_vs ("hud_weapons_vs", "0", CVAR_HUD);
-
-// hipnotic hackery - these are a bit off the real thing (one less and one more respectively)
-// to make them multiples of 4 so that i don't have to get silly with the menu code.  it was
-// always a bit of a dirty hack anyway...
-cvar_t hud_hipnokeys_x ("hud_hipnokeys_x", 48, CVAR_HUD);
-cvar_t hud_hipnokeys_y ("hud_hipnokeys_y", -20, CVAR_HUD);
-cvar_t hud_hipnokeys_cx ("hud_hipnokeys_cx", 1, CVAR_HUD);
-cvar_t hud_hipnokeys_cy ("hud_hipnokeys_cy", "0", CVAR_HUD);
-cvar_t hud_hipnokeys_h ("hud_hipnokeys_h", "0", CVAR_HUD);
-cvar_t hud_hipnokeys_v ("hud_hipnokeys_v", 1, CVAR_HUD);
-cvar_t hud_hipnokeys_hs ("hud_hipnokeys_hs", "0", CVAR_HUD);
-cvar_t hud_hipnokeys_vs ("hud_hipnokeys_vs", 1, CVAR_HUD);
+// set to true to draw all items whether we have them or not (testing)
+bool hud_drawfull = false;
 
 // needed for crosshair drawing
 extern vrect_t scr_vrect;
 
 
-// HUD saving
-void HUD_SaveHUD (void)
+int HUD_GetX (huditem_t *hi)
 {
-	if (Cmd_Argc () != 2)
+	int xpos = hi->x;
+
+	if (hi->flags & HUD_CENTERX)
 	{
-		Con_Printf ("savehud <filename> : save HUD layout to a script file\n");
-		return;
-	}
-
-	char hudscript[128];
-
-	Q_strncpy (hudscript, Cmd_Argv (1), 127);
-
-	COM_DefaultExtension (hudscript, ".cfg");
-
-	if (!stricmp (hudscript, "autoexec.cfg"))
-	{
-		Con_Printf ("You cannot save a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "directq.cfg"))
-	{
-		Con_Printf ("You cannot save a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "config.cfg"))
-	{
-		Con_Printf ("You cannot save a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "default.cfg"))
-	{
-		Con_Printf ("You cannot save a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "quake.rc"))
-	{
-		Con_Printf ("You cannot save a HUD with that name!\n");
-		return;
-	}
-
-	FILE *f = fopen (va ("%s/%s", com_gamedir, hudscript), "w");
-
-	if (!f)
-	{
-		Con_Printf ("Failed to create \"%s\"\n", hudscript);
-		return;
-	}
-
-	// need to write these as floats because of alpha
-	for (cvar_t *var = cvar_vars; var; var = var->next)
-		if (var->usage & CVAR_HUD)
-			fprintf (f, "%s \"%g\"\n", var->name, var->value);
-
-	fclose (f);
-	Con_Printf ("Wrote HUD layout to \"%s\"\n", hudscript);
-}
-
-
-void HUD_LoadHUD (void)
-{
-	if (Cmd_Argc () != 2)
-	{
-		Con_Printf ("loadhud <filename> : load HUD layout from a script file\n");
-		return;
-	}
-
-	char hudscript[128];
-
-	Q_strncpy (hudscript, Cmd_Argv (1), 127);
-
-	COM_DefaultExtension (hudscript, ".cfg");
-
-	if (!stricmp (hudscript, "autoexec.cfg"))
-	{
-		Con_Printf ("You cannot load a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "directq.cfg"))
-	{
-		Con_Printf ("You cannot load a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "config.cfg"))
-	{
-		Con_Printf ("You cannot load a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "default.cfg"))
-	{
-		Con_Printf ("You cannot load a HUD with that name!\n");
-		return;
-	}
-
-	if (!stricmp (hudscript, "quake.rc"))
-	{
-		Con_Printf ("You cannot load a HUD with that name!\n");
-		return;
-	}
-
-	char *f = (char *) COM_LoadTempFile (hudscript);
-
-	if (!f)
-	{
-		Con_Printf ("couldn't load \"%s\"\n", hudscript);
-		return;
-	}
-
-	Con_Printf ("loading HUD from \"%s\"\n", hudscript);
-
-	// fix if a config file isn't \n terminated
-	Cbuf_InsertText (f);
-	Cbuf_InsertText ("\n");
-}
-
-
-cmd_t HUD_SaveHUD_Cmd ("savehud", HUD_SaveHUD);
-cmd_t HUD_LoadHUD_Cmd ("loadhud", HUD_LoadHUD);
-
-
-// positioning
-int HUD_GetX (cvar_t *xcvar, cvar_t *xccvar = NULL)
-{
-	float xpos = xcvar->value;
-
-	if (xccvar)
-	{
-		if (!hud_centerhud.integer)
+		if (!scr_centersbar.integer && cl_sbar.integer < 2)
 			xpos += 160;
-		else if (xccvar->value) return (vid.width / 2) + xpos;
+		else return (vid.width / 2) + xpos;
 	}
-
-	// hack to reposition the deathmatch overlay
-	if (xcvar == &hud_dmoverlay_x && !hud_centerhud.integer) xpos -= 320;
 
 	if (xpos < 0)
 		return vid.width + xpos;
@@ -543,15 +292,14 @@ int HUD_GetX (cvar_t *xcvar, cvar_t *xccvar = NULL)
 }
 
 
-int HUD_GetY (cvar_t *ycvar, cvar_t *yccvar = NULL)
+int HUD_GetY (huditem_t *hi)
 {
-	if (yccvar)
-		if (yccvar->value)
-			return (vid.height / 2) + ycvar->value;
+	if (hi->flags & HUD_CENTERY)
+		return (vid.height / 2) + hi->y;
 
-	if (ycvar->value < 0)
-		return vid.height + ycvar->value;
-	else return ycvar->value;
+	if (hi->y < 0)
+		return vid.height + hi->y;
+	else return hi->y;
 }
 
 
@@ -685,6 +433,7 @@ int	HUD_ColorForMap (int m)
 void HUD_DrawFrags (void)
 {
 	if (cl.maxclients < 2) return;
+	if (!(hud_ibar[cl_sbar.integer].flags & HUD_VISIBLE)) return;
 
 	int i, k, l;
 	int top, bottom;
@@ -701,8 +450,8 @@ void HUD_DrawFrags (void)
 	x = 23;
 
 	// positioning is locked to the ibar position
-	xofs = HUD_GetX (&hud_ibar_x, &hud_ibar_cx);
-	y = HUD_GetY (&hud_ibar_y, &hud_ibar_cy);
+	xofs = HUD_GetX (&hud_ibar[cl_sbar.integer]);
+	y = HUD_GetY (&hud_ibar[cl_sbar.integer]);
 
 	for (i = 0; i < l; i++)
 	{
@@ -1021,17 +770,18 @@ void HUD_SoloScoreboard (char *picname, float solotime)
 void HUD_DrawFace (int ActiveItems, int HealthStat)
 {
 	int f, anim;
-	int x = HUD_GetX (&hud_facepic_x, &hud_facepic_cx);
-	int y = HUD_GetY (&hud_facepic_y, &hud_facepic_cy);
+	int x = HUD_GetX (&hud_facepic[cl_sbar.integer]);
+	int y = HUD_GetY (&hud_facepic[cl_sbar.integer]);
+	qpic_t *facepic = NULL;
 
 	if ((ActiveItems & (IT_INVISIBILITY | IT_INVULNERABILITY)) == (IT_INVISIBILITY | IT_INVULNERABILITY))
-		Draw_Pic (x, y, sb_face_invis_invuln);
+		facepic = sb_face_invis_invuln;
 	else if (ActiveItems & IT_QUAD)
-		Draw_Pic (x, y, sb_face_quad);
+		facepic = sb_face_quad;
 	else if (ActiveItems & IT_INVISIBILITY)
-		Draw_Pic (x, y, sb_face_invis);
+		facepic = sb_face_invis;
 	else if (ActiveItems & IT_INVULNERABILITY)
-		Draw_Pic (x, y, sb_face_invuln);
+		facepic = sb_face_invuln;
 	else
 	{
 		// fix crash when health goes below -19
@@ -1045,11 +795,19 @@ void HUD_DrawFace (int ActiveItems, int HealthStat)
 			anim = 1;
 		else anim = 0;
 
-		Draw_Pic (x, y, sb_faces[f][anim]);
+		facepic = sb_faces[f][anim];
 	}
 
-	x = HUD_GetX (&hud_faceval_x, &hud_faceval_cx);
-	y = HUD_GetY (&hud_faceval_y, &hud_faceval_cy);
+	if (hud_drawfull)
+	{
+		facepic = sb_face_quad;
+		HealthStat = 200;
+	}
+
+	Draw_Pic (x, y, facepic);
+
+	x = HUD_GetX (&hud_faceval[cl_sbar.integer]);
+	y = HUD_GetY (&hud_faceval[cl_sbar.integer]);
 
 	HUD_DrawNum (x, y, HealthStat, 3, HealthStat <= 25);
 }
@@ -1093,34 +851,41 @@ void HUD_DrawArmor (int ActiveItems, int ArmorStat)
 		}
 	}
 
+	if (hud_drawfull)
+	{
+		armorpic = sb_armor[2];
+		armorval = 200;
+	}
+
 	if (armorpic)
 	{
-		x = HUD_GetX (&hud_armorpic_x, &hud_armorpic_cx);
-		y = HUD_GetY (&hud_armorpic_y, &hud_armorpic_cy);
+		x = HUD_GetX (&hud_armorpic[cl_sbar.integer]);
+		y = HUD_GetY (&hud_armorpic[cl_sbar.integer]);
 
 		Draw_Pic (x, y, armorpic);
 	}
 
-	if (!armorval && hud_armorval_no0.value) return;
+	if (!armorval && (hud_armorval[cl_sbar.integer].flags & HUD_HIDEIF0)) return;
 
-	x = HUD_GetX (&hud_armorval_x, &hud_armorval_cx);
-	y = HUD_GetY (&hud_armorval_y, &hud_armorval_cy);
+	x = HUD_GetX (&hud_armorval[cl_sbar.integer]);
+	y = HUD_GetY (&hud_armorval[cl_sbar.integer]);
 
 	HUD_DrawNum (x, y, armorval, 3, armorval <= 25 || armorval == 666);
 }
 
 
+void Draw_Crosshair (int x, int y);
 void Draw_Crosshair (int x, int y, int size);
 
 void HUD_DrawCrossHair (int basex, int basey)
 {
-	if (m_state != m_hudoptions)
-	{
-		// adjust for chosen positioning
-		basex += cl_crossx.value;
-		basey += cl_crossy.value;
-	}
+	// adjust for chosen positioning
+	basex += cl_crossx.value;
+	basey += cl_crossy.value;
 
+#if 1
+	Draw_Crosshair (basex, basey);
+#else
 	if (crosshair.integer == 1)
 		Draw_Character (basex - 4, basey - 4, '+');
 	else if (crosshair.integer == 2)
@@ -1136,6 +901,7 @@ void HUD_DrawCrossHair (int basex, int basey)
 		// draw it
 		Draw_Crosshair (basex - (crossscale / 2), basey - (crossscale / 2), crossscale);
 	}
+#endif
 }
 
 
@@ -1176,21 +942,27 @@ void HUD_DrawAmmo (int ActiveItems, int AmmoStat)
 			ammopic = sb_ammo[3];
 	}
 
+	if (hud_drawfull)
+	{
+		ammopic = sb_ammo[1];
+		AmmoStat = 200;
+	}
+
 	if (ammopic)
 	{
-		x = HUD_GetX (&hud_ammopic_x, &hud_ammopic_cx);
-		y = HUD_GetY (&hud_ammopic_y, &hud_ammopic_cy);
+		x = HUD_GetX (&hud_ammopic[cl_sbar.integer]);
+		y = HUD_GetY (&hud_ammopic[cl_sbar.integer]);
 
 		Draw_Pic (x, y, ammopic);
 	}
 
 	// add crosshair drawing here too... (centered better)
-	if (m_state != m_hudoptions) HUD_DrawCrossHair (scr_vrect.x + scr_vrect.width / 2, scr_vrect.y + scr_vrect.height / 2);
+	HUD_DrawCrossHair (scr_vrect.x + scr_vrect.width / 2, scr_vrect.y + scr_vrect.height / 2);
 
-	if (!AmmoStat && hud_ammoval_no0.value) return;
+	if (!AmmoStat && (hud_ammoval[cl_sbar.integer].flags & HUD_HIDEIF0)) return;
 
-	x = HUD_GetX (&hud_ammoval_x, &hud_ammoval_cx);
-	y = HUD_GetY (&hud_ammoval_y, &hud_ammoval_cy);
+	x = HUD_GetX (&hud_ammoval[cl_sbar.integer]);
+	y = HUD_GetY (&hud_ammoval[cl_sbar.integer]);
 
 	HUD_DrawNum (x, y, AmmoStat, 3, AmmoStat <= 10);
 }
@@ -1202,16 +974,22 @@ void HUD_DrawSigils (int ActiveItems)
 	if (rogue || hipnotic) return;
 
 	// normal sane way of doing things
-	int x = HUD_GetX (&hud_sigils_x, &hud_sigils_cx);
-	int y = HUD_GetY (&hud_sigils_y, &hud_sigils_cy);
+	int x = HUD_GetX (&hud_sigils[cl_sbar.integer]);
+	int y = HUD_GetY (&hud_sigils[cl_sbar.integer]);
+
+	if (cl_sbar.integer > 1)
+	{
+		// sigil background
+		Draw_SubPic (x, y, sb_ibar, 288, 8, 32, 16);
+	}
 
 	for (int i = 0; i < 4; i++)
 	{
-		if (ActiveItems & (1 << (28 + i)))
+		if ((ActiveItems & (1 << (28 + i))) || hud_drawfull)
 			Draw_Pic (x, y, sb_sigil[i]);
 
-		x += sb_sigil[i]->width * hud_sigils_h.value + hud_sigils_hs.value;
-		y += sb_sigil[i]->height * hud_sigils_v.value + hud_sigils_vs.value;
+		x += hud_sigils[cl_sbar.integer].hx;
+		y += hud_sigils[cl_sbar.integer].hy;
 	}
 }
 
@@ -1221,31 +999,31 @@ void HUD_DrawKeys (int ActiveItems)
 	if (hipnotic)
 	{
 		// hipnotic hackery
-		int x = HUD_GetX (&hud_hipnokeys_x, &hud_hipnokeys_cx);
-		int y = HUD_GetY (&hud_hipnokeys_y, &hud_hipnokeys_cy);
+		int x = HUD_GetX (&hud_hipnokeys[cl_sbar.integer]);
+		int y = HUD_GetY (&hud_hipnokeys[cl_sbar.integer]);
 
 		for (int i = 0; i < 2; i++)
 		{
-			if (ActiveItems & (1 << (17 + i)))
+			if ((ActiveItems & (1 << (17 + i))) || hud_drawfull)
 				Draw_Pic (x, y, sb_items[i]);
 
-			x += sb_items[i]->width * hud_hipnokeys_h.value + hud_hipnokeys_hs.value;
-			y += sb_items[i]->height * hud_hipnokeys_v.value + hud_hipnokeys_vs.value;
+			x += hud_hipnokeys[cl_sbar.integer].hx;
+			y += hud_hipnokeys[cl_sbar.integer].hy;
 		}
 	}
 	else
 	{
 		// normal sane way of doing things
-		int x = HUD_GetX (&hud_keys_x, &hud_keys_cx);
-		int y = HUD_GetY (&hud_keys_y, &hud_keys_cy);
+		int x = HUD_GetX (&hud_keys[cl_sbar.integer]);
+		int y = HUD_GetY (&hud_keys[cl_sbar.integer]);
 
 		for (int i = 0; i < 2; i++)
 		{
-			if (ActiveItems & (1 << (17 + i)))
+			if ((ActiveItems & (1 << (17 + i))) || hud_drawfull)
 				Draw_Pic (x, y, sb_items[i]);
 
-			x += sb_items[i]->width * hud_keys_h.value + hud_keys_hs.value;
-			y += sb_items[i]->height * hud_keys_v.value + hud_keys_vs.value;
+			x += hud_keys[cl_sbar.integer].hx;
+			y += hud_keys[cl_sbar.integer].hy;
 		}
 	}
 }
@@ -1254,30 +1032,29 @@ void HUD_DrawKeys (int ActiveItems)
 void HUD_DrawItems (int ActiveItems)
 {
 	// normal same way of doing things
-	int x = HUD_GetX (&hud_items_x, &hud_items_cx);
-	int y = HUD_GetY (&hud_items_y, &hud_items_cy);
+	int x = HUD_GetX (&hud_items[cl_sbar.integer]);
+	int y = HUD_GetY (&hud_items[cl_sbar.integer]);
 
 	for (int i = 2; i < 6; i++)
 	{
-		if (ActiveItems & (1 << (17 + i)))
+		if ((ActiveItems & (1 << (17 + i))) || hud_drawfull)
 			Draw_Pic (x, y, sb_items[i]);
 
-		x += sb_items[i]->width * hud_items_h.value + hud_items_hs.value;
-		y += sb_items[i]->height * hud_items_v.value + hud_items_vs.value;
+		x += hud_items[cl_sbar.integer].hx;
+		y += hud_items[cl_sbar.integer].hy;
 	}
 
 	// note - these overwrite the sigils slots so we just continue where we left off
-
 	if (hipnotic)
 	{
 		// hipnotic hackery
 		for (int i = 0; i < 2; i++)
 		{
-			if (ActiveItems & (1 << (24 + i)))
+			if ((ActiveItems & (1 << (24 + i))) || hud_drawfull)
 				Draw_Pic (x, y, hsb_items[i]);
 
-			x += hsb_items[i]->width * hud_items_h.value + hud_items_hs.value;
-			y += hsb_items[i]->height * hud_items_v.value + hud_items_vs.value;
+			x += hud_items[cl_sbar.integer].hx;
+			y += hud_items[cl_sbar.integer].hy;
 		}
 	}
 
@@ -1286,11 +1063,11 @@ void HUD_DrawItems (int ActiveItems)
 		// rogue hackery
 		for (int i = 0; i < 2; i++)
 		{
-			if (ActiveItems & (1 << (29 + i)))
+			if ((ActiveItems & (1 << (29 + i))) || hud_drawfull)
 				Draw_Pic (x, y, rsb_items[i]);
 
-			x += rsb_items[i]->width * hud_items_h.value + hud_items_hs.value;
-			y += rsb_items[i]->height * hud_items_v.value + hud_items_vs.value;
+			x += hud_items[cl_sbar.integer].hx;
+			y += hud_items[cl_sbar.integer].hy;
 		}
 	}
 }
@@ -1302,39 +1079,25 @@ void HUD_DrawAmmoCounts (int ac1, int ac2, int ac3, int ac4, int ActiveWeapon)
 	char num[10];
 	int ActiveAmmo[] = {ac1, ac2, ac3, ac4};
 
-	x = HUD_GetX (&hud_ammocount_x, &hud_ammocount_cx);
-	y = HUD_GetY (&hud_ammocount_y, &hud_ammocount_cy);
+	x = HUD_GetX (&hud_ammocount[cl_sbar.integer]);
+	y = HUD_GetY (&hud_ammocount[cl_sbar.integer]);
 
 	for (int i = 0; i < 4; i++)
 	{
+		if (cl_sbar.integer > 1)
+		{
+			// background pic at x/y
+			Draw_SubPic (x - 4, y, sb_ibar, 3 + (i * 48), 0, 42, 11);
+		}
+
 		_snprintf (num, 10, "%3i", ActiveAmmo[i]);
 
 		if (num[0] != ' ') Draw_Character (x, y, 18 + num[0] - '0');
 		if (num[1] != ' ') Draw_Character (x + 8, y, 18 + num[1] - '0');
 		if (num[2] != ' ') Draw_Character (x + 16, y, 18 + num[2] - '0');
 
-		if (hud_ammobox_show.value)
-		{
-			qpic_t *boxpic;
-
-			if (rogue && ActiveWeapon >= RIT_LAVA_NAILGUN)
-			{
-				// switch the icon to powered-up ammo
-				if (i == 0)
-					boxpic = sb_ammo[0];
-				else if (i == 1)
-					boxpic = rsb_ammo[0];
-				else if (i == 2)
-					boxpic = rsb_ammo[2];
-				else boxpic = rsb_ammo[1];
-			}
-			else boxpic = sb_ammo[i];
-
-			Draw_HalfPic (x + hud_ammobox_x.value, y + hud_ammobox_y.value, boxpic);
-		}
-
-		x += hud_ammocount_hs.value;
-		y += hud_ammocount_vs.value;
+		x += hud_ammocount[cl_sbar.integer].hx;
+		y += hud_ammocount[cl_sbar.integer].hy;
 	}
 }
 
@@ -1342,8 +1105,8 @@ void HUD_DrawAmmoCounts (int ac1, int ac2, int ac3, int ac4, int ActiveWeapon)
 void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 {
 	// normal sane way of doing things
-	int x = HUD_GetX (&hud_weapons_x, &hud_weapons_cx);
-	int y = HUD_GetY (&hud_weapons_y, &hud_weapons_cy);
+	int x = HUD_GetX (&hud_weapons[cl_sbar.integer]);
+	int y = HUD_GetY (&hud_weapons[cl_sbar.integer]);
 
 	// save baseline x and y for hipnotic and rogue hackery
 	int savedx[8];
@@ -1355,7 +1118,7 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 		savedx[i] = x;
 		savedy[i] = y;
 
-		if (ActiveItems & (IT_SHOTGUN << i))
+		if ((ActiveItems & (IT_SHOTGUN << i)) || hud_drawfull)
 		{
 			float time = cl.item_gettime[i];
 			int flashon = (int) ((cl.time - time) * 10);
@@ -1368,11 +1131,14 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 			}
 			else flashon = (flashon % 5) + 2;
 
-			Draw_Pic (x, y, sb_weapons[flashon][i]);
+			// handle wider lightning gun pic
+			if (cl_sbar.value > 1)
+				Draw_Pic (x - sb_weapons[flashon][i]->width, y, sb_weapons[flashon][i]);
+			else Draw_Pic (x, y, sb_weapons[flashon][i]);
 		}
 
-		x += sb_weapons[0][i]->width * hud_weapons_h.value + hud_weapons_hs.value;
-		y += sb_weapons[0][i]->height * hud_weapons_v.value + hud_weapons_vs.value;
+		x += hud_weapons[cl_sbar.integer].hx;
+		y += hud_weapons[cl_sbar.integer].hy;
 	}
 
 	// now here's where it starts to get REAL ugly...
@@ -1381,14 +1147,16 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 		// hipnotic hackery
 		// jesus this is REALLY ugly stuff...
 		int grenadeflashing = 0;
-		qpic_t *hipnopic = NULL;
 
 		for (int i = 0; i < 4; i++)
 		{
-			if (ActiveItems & (1 << hipweapons[i]))
+			if ((ActiveItems & (1 << hipweapons[i])) || hud_drawfull)
 			{
 				float time = cl.item_gettime[hipweapons[i]];
 				int flashon = (int) ((cl.time - time) * 10);
+				qpic_t *hipnopic = NULL;
+				int hipnox = x;
+				int hipnoy = y;
 
 				if (flashon >= 10)
 				{
@@ -1398,43 +1166,61 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 				}
 				else flashon = (flashon % 5) + 2;
 
-				// baseline pic - can change later on
-				hipnopic = hsb_weapons[flashon][i];
-
 				// check grenade launcher
-				if (i == 2)
+				switch (i)
 				{
+				case 2:
 					if (ActiveItems & HIT_PROXIMITY_GUN)
 					{
 						if (flashon)
 						{
 							grenadeflashing = 1;
-							Draw_Pic (savedx[4], savedy[4], hsb_weapons[flashon][2]);
+							hipnopic = hsb_weapons[flashon][2];
+							hipnox = savedx[4];
+							hipnoy = savedy[4];
 						}
 					}
-				}
-				else if (i == 3)
-				{
+					break;
+
+				case 3:
 					if (ActiveItems & (IT_SHOTGUN << 4))
 					{
 						if (flashon && !grenadeflashing)
 						{
-							Draw_Pic (savedx[4], savedy[4], hsb_weapons[flashon][3]);
+							hipnopic = hsb_weapons[flashon][3];
+							hipnox = savedx[4];
+							hipnoy = savedy[4];
 						}
 						else if (!grenadeflashing)
 						{
-							Draw_Pic (savedx[4], savedy[4], hsb_weapons[0][3]);
+							hipnopic = hsb_weapons[0][3];
+							hipnox = savedx[4];
+							hipnoy = savedy[4];
 						}
 					}
-					else Draw_Pic (savedx[4], savedy[4], hsb_weapons[flashon][4]);
+					else
+					{
+						hipnopic = hsb_weapons[flashon][4];
+						hipnox = savedx[4];
+						hipnoy = savedy[4];
+					}
+
+					break;
+
+				default:
+					hipnopic = hsb_weapons[flashon][i];
 				}
-				else
+
+				if (hipnopic)
 				{
-					Draw_Pic (x, y, hsb_weapons[flashon][i]);
-					x += hsb_weapons[0][i]->width * hud_weapons_h.value + hud_weapons_hs.value;
-					y += hsb_weapons[0][i]->height * hud_weapons_v.value + hud_weapons_vs.value;
+					if (cl_sbar.value > 1)
+						Draw_Pic (hipnox - hipnopic->width, hipnoy, hipnopic);
+					else Draw_Pic (hipnox, hipnoy, hipnopic);
 				}
 			}
+
+			x += hud_weapons[cl_sbar.integer].hx;
+			y += hud_weapons[cl_sbar.integer].hy;
 		}
 	}
 
@@ -1446,9 +1232,12 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 		{
 			for (int i = 0; i < 5; i++)
 			{
-				if (ActiveWeapon == (RIT_LAVA_NAILGUN << i))
+				if ((ActiveWeapon == (RIT_LAVA_NAILGUN << i)) || hud_drawfull)
 				{
-					Draw_Pic (savedx[i + 2], savedy[i + 2], rsb_weapons[i]);
+					// handle pic widths
+					if (cl_sbar.value > 1)
+						Draw_Pic (savedx[i + 2] - rsb_weapons[i]->width, savedy[i + 2], rsb_weapons[i]);
+					else Draw_Pic (savedx[i + 2], savedy[i + 2], rsb_weapons[i]);
 				}
 			}
 		}
@@ -1456,20 +1245,21 @@ void HUD_DrawWeapons (int ActiveItems, int ActiveWeapon)
 }
 
 
-void HUD_DrawTeamBorder (void)
-{
-	// the menu needs this
-	int x = HUD_GetX (&hud_teamcolor_x, &hud_teamcolor_cx);
-	int y = HUD_GetY (&hud_teamcolor_y, &hud_teamcolor_cy);
-
-	Draw_Pic (x, y, rsb_teambord);
-}
-
-
 void HUD_DrawTeamColors (void)
 {
 	// couldn't be arsed reversing the logic and changing && to || here...
-	if (!(rogue && (cl.maxclients != 1) && (teamplay.value > 3) && (teamplay.value < 7))) return;
+	if (!rogue) return;
+
+	int x = HUD_GetX (&hud_teamcolor[cl_sbar.integer]);
+	int y = HUD_GetY (&hud_teamcolor[cl_sbar.integer]);
+
+	if (hud_drawfull)
+	{
+		Draw_Pic (x, y, rsb_teambord);
+		return;
+	}
+
+	if (!((cl.maxclients != 1) && (teamplay.value > 3) && (teamplay.value < 7))) return;
 
 	// these aren't as precisely aligned as they could be, and may tend to move about a little
 	// as gl_conscale changes.  i don't suppose many folks play rogue ctf these days anyway.
@@ -1487,9 +1277,6 @@ void HUD_DrawTeamColors (void)
 	bottom = (s->colors & 15) << 4;
 	top = HUD_ColorForMap (top);
 	bottom = HUD_ColorForMap (bottom);
-
-	int x = HUD_GetX (&hud_teamcolor_x, &hud_teamcolor_cx);
-	int y = HUD_GetY (&hud_teamcolor_y, &hud_teamcolor_cy);
 
 	Draw_Pic (x, y, rsb_teambord);
 
@@ -1518,20 +1305,20 @@ void HUD_DrawTeamColors (void)
 void HUD_DrawSBar (void)
 {
 	// basic layout
-	if (hud_drawsbar.value)
+	if (hud_sbar[cl_sbar.integer].flags & HUD_VISIBLE)
 	{
 		// status bar background
-		int x = HUD_GetX (&hud_sbar_x, &hud_sbar_cx);
-		int y = HUD_GetY (&hud_sbar_y, &hud_sbar_cy);
+		int x = HUD_GetX (&hud_sbar[cl_sbar.integer]);
+		int y = HUD_GetY (&hud_sbar[cl_sbar.integer]);
 
-		Draw_Pic (x, y, sb_sbar, hud_sbaralpha.value);
+		Draw_Pic (x, y, sb_sbar, scr_sbaralpha.value);
 	}
 }
 
 
 void HUD_DrawIBar (int ActiveWeapon, bool DrawFrags)
 {
-	if (hud_drawibar.value)
+	if (hud_ibar[cl_sbar.integer].flags & HUD_VISIBLE)
 	{
 		// inventory bar background
 		qpic_t *ibarpic = sb_ibar;
@@ -1544,10 +1331,10 @@ void HUD_DrawIBar (int ActiveWeapon, bool DrawFrags)
 			else ibarpic = rsb_invbar[1];
 		}
 
-		int x = HUD_GetX (&hud_ibar_x, &hud_ibar_cx);
-		int y = HUD_GetY (&hud_ibar_y, &hud_ibar_cy);
+		int x = HUD_GetX (&hud_ibar[cl_sbar.integer]);
+		int y = HUD_GetY (&hud_ibar[cl_sbar.integer]);
 
-		Draw_Pic (x, y, ibarpic, hud_sbaralpha.value);
+		Draw_Pic (x, y, ibarpic, scr_sbaralpha.value);
 
 		// the 4 mini frag-lists are only drawn on this one
 		if (DrawFrags) HUD_DrawFrags ();
@@ -1555,27 +1342,64 @@ void HUD_DrawIBar (int ActiveWeapon, bool DrawFrags)
 }
 
 
+void HUD_MiniDMOverlayItem (int fragsort, int x, int y, int top, int bottom, int frags, char *name)
+{
+	char num[12];
+
+	Draw_Fill (x, y + 1, 40, 3, top);
+	Draw_Fill (x, y + 4, 40, 4, bottom);
+
+	_snprintf (num, 12, "%3i", frags);
+
+	Draw_Character (x + 8, y, num[0]);
+	Draw_Character (x + 16, y, num[1]);
+	Draw_Character (x + 24, y, num[2]);
+
+	if (fragsort == cl.viewentity - 1)
+	{
+		Draw_Character (x, y, 16);
+		Draw_Character (x + 32, y, 17);
+	}
+
+	// draw name
+	Draw_String (x + 48, y, name);
+}
+
+
 void HUD_MiniDeathmatchOverlay (void)
 {
+	int x = HUD_GetX (&hud_dmoverlay[cl_sbar.integer]);
+	int y = HUD_GetY (&hud_dmoverlay[cl_sbar.integer]);
+
+	if (!scr_centersbar.integer && cl_sbar.integer < 2)
+	{
+		// make room for the team colours in rogue
+		if (rogue)
+			x += 344;
+		else x += 320;
+	}
+
+	if (hud_drawfull)
+	{
+		for (int n = 0; n < 4; n++)
+		{
+			HUD_MiniDMOverlayItem (n, x, y, n * 2, 12 - n * 2, 666, va ("player %i", n));
+			y += 10;
+		}
+
+		return;
+	}
+
 	if (cl.gametype != GAME_DEATHMATCH) return;
 
 	// don't need the mini overlay if the full is showing
 	if ((hud_showscores && !cls.demoplayback) || (hud_showdemoscores && cls.demoplayback)) return;
 
-	int				i, k, l;
-	int				top, bottom;
-	int				x, y, f;
-	char			num[12];
-	scoreboard_t	*s;
-
 	// scores
 	HUD_SortFrags ();
 
-	x = HUD_GetX (&hud_dmoverlay_x, NULL);
-	y = HUD_GetY (&hud_dmoverlay_y, NULL);
-
 	// draw the text
-	l = hud_scoreboardlines;
+	int i = 0, l = hud_scoreboardlines;
 
 	//find us
 	for (i = 0; i < hud_scoreboardlines; i++)
@@ -1588,36 +1412,15 @@ void HUD_MiniDeathmatchOverlay (void)
 	// no more than 4 lines in the mini overlay
 	for (int n = 0; i < hud_scoreboardlines && n < 4; i++, n++)
 	{
-		k = hud_fragsort[i];
-		s = &cl.scores[k];
+		scoreboard_t *s = &cl.scores[hud_fragsort[i]];
 
 		if (!s->name[0]) continue;
 
 		// draw background
-		top = s->colors & 0xf0;
-		bottom = (s->colors & 15) << 4;
-		top = HUD_ColorForMap (top);
-		bottom = HUD_ColorForMap (bottom);
+		int top = HUD_ColorForMap (s->colors & 0xf0);
+		int bottom = HUD_ColorForMap ((s->colors & 15) << 4);
 
-		Draw_Fill (x, y + 1, 40, 3, top);
-		Draw_Fill (x, y + 4, 40, 4, bottom);
-
-		// draw number
-		f = s->frags;
-		_snprintf (num, 12, "%3i", f);
-
-		Draw_Character (x + 8, y, num[0]);
-		Draw_Character (x + 16, y, num[1]);
-		Draw_Character (x + 24, y, num[2]);
-
-		if (k == cl.viewentity - 1)
-		{
-			Draw_Character (x, y, 16);
-			Draw_Character (x + 32, y, 17);
-		}
-
-		// draw name
-		Draw_String (x + 48, y, s->name);
+		HUD_MiniDMOverlayItem (hud_fragsort[i], x, y, top, bottom, s->frags, s->name);
 
 		y += 10;
 	}
@@ -1646,12 +1449,13 @@ void HUD_DrawFPS (bool force)
 	if (scr_showfps.value || force)
 	{
 		// positioning
-		int x = HUD_GetX (&hud_fps_x, NULL);
-		int y = HUD_GetY (&hud_fps_y, NULL);
 		char str[17];
 
 		_snprintf (str, 16, "%4.1f fps", fps_fps);
-		Draw_String (x, y, str);
+
+		if (cl_sbar.integer > 2)
+			Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 40, str);
+		else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 11, str);
 	}
 }
 
@@ -1670,10 +1474,9 @@ void HUD_DrawClock (bool force)
 	else return;
 
 	// positioning
-	int x = HUD_GetX (&hud_clock_x, NULL);
-	int y = HUD_GetY (&hud_clock_y, NULL);
-
-	Draw_String (x, y, str);
+	if (cl_sbar.integer > 2)
+		Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 50, str);
+	else Draw_String (vid.width - (strlen (str) * 8 + 4), vid.height - 21, str);
 }
 
 
@@ -1689,32 +1492,15 @@ void HUD_DrawHUD (void)
 	// console is fullscreen
 	if (scr_con_current == vid.height) return;
 
-	static char oldhud[128] = {0};
-
-	// i suppose one strcmp per frame is ok...
-	if (strcmp (oldhud, hud_defaulthud.string) && hud_autoload.value)
-	{
-		// this is a hack to suppress "Execing..." when the HUD loads
-		con_initialized = false;
-
-		// run anything that's left in the command buffer, load our HUD, then run it again
-		Cbuf_Execute ();
-		Cbuf_InsertText (va ("exec %s\n", hud_defaulthud.string));
-		Cbuf_Execute ();
-
-		// store back
-		Q_strncpy (oldhud, hud_defaulthud.string, 127);
-
-		// go back to normal console mode
-		con_initialized = true;
-	}
-
-	// don't confuse things if we're customizing the HUD
-	// (deferred to here as gl_clear 1 will mean that the bottom portion of the screen won't get drawn this frame)
-	if (m_state == m_hudoptions) return;
-
 	// no HUD
 	if (scr_viewsize.value > 111) return;
+
+	// none here either!!!
+	if (cl.intermission) return;
+
+	// bound sbar
+	if (cl_sbar.integer < 0) Cvar_Set (&cl_sbar, "0");
+	if (cl_sbar.integer > 3) Cvar_Set (&cl_sbar, "3");
 
 	if ((hud_showscores && !cls.demoplayback) || (hud_showdemoscores && cls.demoplayback) || cl.stats[STAT_HEALTH] <= 0)
 	{
@@ -1774,382 +1560,4 @@ void HUD_FinaleOverlay (void)
 		Draw_Pic ((vid.width - pic->width) / 2, 16, pic);
 	}
 }
-
-
-/*
-==================================================================================================================================
-
-		HUD MENU
-
-	Placed here instead of in the menus code so that I don't have to extern all of those bloody cvars!
-
-==================================================================================================================================
-*/
-
-// hack to create a functioning spin control for the crosshair image
-char *crosshairnames[] =
-{
-	" Off ",
-	"     ",	// +
-	"     ",	// +
-	"     ",	// custom 0
-	"     ",	// custom 1
-	"     ",	// custom 2
-	"     ",	// custom 3
-	"     ",	// custom 4
-	"     ",	// custom 5
-	"     ",	// custom 6
-	"     ",	// custom 7
-	"     ",	// custom 8
-	"     ",	// custom 9
-	"     ",	// custom 10
-	"     ",	// custom 11
-	"     ",	// custom 12
-	"     ",	// custom 13
-	"     ",	// custom 14
-	"     ",	// custom 15
-
-	// list terminator
-	NULL
-};
-
-
-// menu tags for hiding/showing items
-#define TAG_SBAR		(1 << 0)
-#define TAG_IBAR		(1 << 1)
-#define TAG_FACE		(1 << 2)
-#define TAG_HEALTH		(1 << 3)
-#define TAG_ARMORPIC	(1 << 4)
-#define TAG_ARMORVAL	(1 << 5)
-#define TAG_AMMOPIC		(1 << 6)
-#define TAG_AMMOVAL		(1 << 7)
-#define TAG_SIGILS		(1 << 8)
-#define TAG_KEYS		(1 << 9)
-#define TAG_ITEMS		(1 << 10)
-#define TAG_WEAPONS		(1 << 11)
-#define TAG_AMMOCNT		(1 << 12)
-#define TAG_TEAM		(1 << 13)
-#define TAG_OSD			(1 << 14)
-#define TAG_CROSSHAIR	(1 << 15)
-#define TAG_DMOVERLAY	(1 << 16)
-#define TAG_HIPNOKEYS	(1 << 17)
-
-
-char *hud_items[] =
-{
-	"Status Bar",
-	"Inventory Bar",
-	"Face Picture",
-	"Health Value",
-	"Armor Picture",
-	"Armor Value",
-	"Ammo Picture",
-	"Ammo Value",
-	"Sigils",
-	"Keys",
-	"Pickup Items",
-	"Weapons",
-	"Ammo Counts",
-	"Team Colors",
-	"OSD Items",
-	"Crosshair",
-	"Deathmatch Overlay",
-
-	// terminates list
-	NULL,
-};
-
-int hud_itemnum = 0;
-
-int Menu_HUDCustomDraw (int y)
-{
-	// fixme - would this be easier with enable/disable options???
-	// done.  show/hide i meant, obviously
-	static int last_hud_itemnum = -1;
-
-	// fix up crosshair stuff
-	if (hud_itemnum == 15)
-	{
-		// bound cvars
-		if (crosshair.integer < 0) crosshair.integer = 0;
-		if (crosshair.integer > 18) crosshair.integer = 18;
-		if (scr_crosshaircolor.integer < 0) scr_crosshaircolor.integer = 0;
-		if (scr_crosshaircolor.integer > 13) scr_crosshaircolor.integer = 13;
-
-		// these are hacks as the controls reference the integer directly
-		Cvar_Set (&crosshair, crosshair.integer);
-		Cvar_Set (&scr_crosshaircolor, scr_crosshaircolor.integer);
-	}
-
-	// nothing changed here
-	if (last_hud_itemnum == hud_itemnum) return y;
-
-	// check for sigils
-	if ((rogue || hipnotic) && hud_itemnum == 8)
-	{
-		// skip over sigils
-		if (last_hud_itemnum == 7) hud_itemnum = 9;
-		if (last_hud_itemnum == 9) hud_itemnum = 7;
-	}
-
-	// check for team colors
-	if (!rogue && hud_itemnum == 13)
-	{
-		// skip over team colors
-		if (last_hud_itemnum == 12) hud_itemnum = 14;
-		if (last_hud_itemnum == 14) hud_itemnum = 12;
-	}
-
-	// store back
-	last_hud_itemnum = hud_itemnum;
-
-	// so hipnotic doesn't trash the menu item number
-	int real_huditemnum = hud_itemnum;
-
-	// switch keys for hipnotic
-	if (hipnotic && hud_itemnum == 9) real_huditemnum = 19;
-
-	// hide all tags
-	for (int i = 1; i < 21; i++)
-		menu_HUD.HideMenuOptions (1 << i);
-
-	// show selected tag (the defines are the num + 1 because 0 is the default tag)
-	menu_HUD.ShowMenuOptions (1 << (real_huditemnum + 1));
-
-	return y;
-}
-
-
-void HUD_DummyMiniDMOverlay (void)
-{
-	char num[10];
-
-	int x = HUD_GetX (&hud_dmoverlay_x, NULL);
-	int y = HUD_GetY (&hud_dmoverlay_y, NULL);
-
-	for (int i = 0; i < 4; i++)
-	{
-		Draw_Fill (x, y + 1, 40, 3, HUD_ColorForMap (i * 3));
-		Draw_Fill (x, y + 4, 40, 4, HUD_ColorForMap (i + 6));
-
-		_snprintf (num, 10, "%3i", 10);
-
-		Draw_Character (x + 8, y, num[0]);
-		Draw_Character (x + 16, y, num[1]);
-		Draw_Character (x + 24, y, num[2]);
-
-		if (!i)
-		{
-			Draw_Character (x, y, 16);
-			Draw_Character (x + 32, y, 17);
-		}
-
-		// draw name
-		Draw_String (x + 48, y, va ("Player %i", i));
-
-		y += 10;
-	}
-}
-
-
-int Menu_HUDDrawHUD (int y)
-{
-	// draw all of the hud elements
-	if (!hud_overlay.value) Draw_TileClear (0, vid.height - 48, vid.width, 48);
-	HUD_DrawSBar ();
-	HUD_DrawFace (0, 200);
-	if (rogue) HUD_DrawTeamBorder ();
-	HUD_DrawArmor (IT_ARMOR1 | RIT_ARMOR1, 200);
-	HUD_DrawAmmo (IT_NAILS | RIT_NAILS, 200);
-	HUD_DrawIBar (IT_SHOTGUN, false);
-	HUD_DrawSigils (0xffffffff);
-	HUD_DrawKeys (0xffffffff);
-	HUD_DrawItems (0xffffffff);
-	HUD_DrawWeapons (0xffffffff, IT_SHOTGUN);
-	HUD_DrawAmmoCounts (100, 200, 100, 100, IT_SHOTGUN);
-	HUD_DummyMiniDMOverlay ();
-	HUD_DrawOSDItems (true);
-
-	// only draw the crosshair if we're adjusting it - hacky positioning, will break if layout changes
-	if (hud_itemnum == 15) HUD_DrawCrossHair ((vid.width / 2) + 32, 247);
-
-	return y;
-}
-
-
-void Menu_HUDSaveLayout (void)
-{
-	Cbuf_AddText (va ("savehud %s\n", hud_defaulthud.string));
-	Cbuf_Execute ();
-}
-
-
-void Menu_InitHUDMenu (void)
-{
-	// this needs to come first so that it can link up the inserted items
-	menu_HUD.AddOption (new CQMenuCustomDraw (Menu_HUDCustomDraw));
-
-	// now add the rest of the options
-	menu_HUD.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
-	menu_HUD.AddOption (new CQMenuTitle ("HUD Layout and Configuration"));
-	menu_HUD.AddOption (new CQMenuCvarTextbox ("Default HUD", &hud_defaulthud, TBFLAGS_FILENAMEFLAGS));
-	menu_HUD.AddOption (new CQMenuCvarToggle ("Auto-load HUD", &hud_autoload));
-	menu_HUD.AddOption (new CQMenuCvarToggle ("Auto-save HUD", &hud_autosave));
-	menu_HUD.AddOption (new CQMenuCvarToggle ("Draw as Overlay", &hud_overlay));
-	menu_HUD.AddOption (new CQMenuCvarToggle ("Center-align HUD", &hud_centerhud));
-	menu_HUD.AddOption (new CQMenuTitle ("Customize HUD Layout"));
-	menu_HUD.AddOption (new CQMenuSpinControl ("Select HUD Item", &hud_itemnum, hud_items));
-	menu_HUD.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-
-	// status bar
-	menu_HUD.AddOption (TAG_SBAR, new CQMenuCvarToggle ("Show this Item", &hud_drawsbar));
-	menu_HUD.AddOption (TAG_SBAR, new CQMenuCvarSlider ("Alpha", &hud_sbaralpha, 0, 1, 0.1));
-	menu_HUD.AddOption (TAG_SBAR, new CQMenuSpinControl ("X Position", &hud_sbar_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_SBAR, new CQMenuSpinControl ("Y Position", &hud_sbar_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_SBAR, new CQMenuCvarToggle ("Center Align X", &hud_sbar_cx));
-	menu_HUD.AddOption (TAG_SBAR, new CQMenuCvarToggle ("Center Align Y", &hud_sbar_cy));
-
-	// inventory bar
-	menu_HUD.AddOption (TAG_IBAR, new CQMenuCvarToggle ("Show this Item", &hud_drawibar));
-	menu_HUD.AddOption (TAG_IBAR, new CQMenuCvarSlider ("Alpha", &hud_sbaralpha, 0, 1, 0.1));
-	menu_HUD.AddOption (TAG_IBAR, new CQMenuSpinControl ("X Position", &hud_ibar_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_IBAR, new CQMenuSpinControl ("Y Position", &hud_ibar_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_IBAR, new CQMenuCvarToggle ("Center Align X", &hud_ibar_cx));
-	menu_HUD.AddOption (TAG_IBAR, new CQMenuCvarToggle ("Center Align Y", &hud_ibar_cy));
-
-	// face picture
-	menu_HUD.AddOption (TAG_FACE, new CQMenuSpinControl ("X Position", &hud_facepic_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_FACE, new CQMenuSpinControl ("Y Position", &hud_facepic_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_FACE, new CQMenuCvarToggle ("Center Align X", &hud_facepic_cx));
-	menu_HUD.AddOption (TAG_FACE, new CQMenuCvarToggle ("Center Align Y", &hud_facepic_cy));
-
-	// health
-	menu_HUD.AddOption (TAG_HEALTH, new CQMenuSpinControl ("X Position", &hud_faceval_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_HEALTH, new CQMenuSpinControl ("Y Position", &hud_faceval_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_HEALTH, new CQMenuCvarToggle ("Center Align X", &hud_faceval_cx));
-	menu_HUD.AddOption (TAG_HEALTH, new CQMenuCvarToggle ("Center Align Y", &hud_faceval_cy));
-
-	// armor picture
-	menu_HUD.AddOption (TAG_ARMORPIC, new CQMenuSpinControl ("X Position", &hud_armorpic_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_ARMORPIC, new CQMenuSpinControl ("Y Position", &hud_armorpic_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_ARMORPIC, new CQMenuCvarToggle ("Center Align X", &hud_armorpic_cx));
-	menu_HUD.AddOption (TAG_ARMORPIC, new CQMenuCvarToggle ("Center Align Y", &hud_armorpic_cy));
-
-	// armor value
-	menu_HUD.AddOption (TAG_ARMORVAL, new CQMenuSpinControl ("X Position", &hud_armorval_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_ARMORVAL, new CQMenuSpinControl ("Y Position", &hud_armorval_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_ARMORVAL, new CQMenuCvarToggle ("Center Align X", &hud_armorval_cx));
-	menu_HUD.AddOption (TAG_ARMORVAL, new CQMenuCvarToggle ("Center Align Y", &hud_armorval_cy));
-	menu_HUD.AddOption (TAG_ARMORVAL, new CQMenuCvarToggle ("Hide if 0", &hud_armorval_no0));
-
-	// ammo picture
-	menu_HUD.AddOption (TAG_AMMOPIC, new CQMenuSpinControl ("X Position", &hud_ammopic_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_AMMOPIC, new CQMenuSpinControl ("Y Position", &hud_ammopic_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_AMMOPIC, new CQMenuCvarToggle ("Center Align X", &hud_ammopic_cx));
-	menu_HUD.AddOption (TAG_AMMOPIC, new CQMenuCvarToggle ("Center Align Y", &hud_ammopic_cy));
-
-	// ammo value
-	menu_HUD.AddOption (TAG_AMMOVAL, new CQMenuSpinControl ("X Position", &hud_ammoval_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_AMMOVAL, new CQMenuSpinControl ("Y Position", &hud_ammoval_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_AMMOVAL, new CQMenuCvarToggle ("Center Align X", &hud_ammoval_cx));
-	menu_HUD.AddOption (TAG_AMMOVAL, new CQMenuCvarToggle ("Center Align Y", &hud_ammoval_cy));
-	menu_HUD.AddOption (TAG_AMMOVAL, new CQMenuCvarToggle ("Hide if 0", &hud_ammoval_no0));
-
-	// sigils
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuSpinControl ("X Position", &hud_sigils_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuSpinControl ("Y Position", &hud_sigils_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuCvarToggle ("Center Align X", &hud_sigils_cx));
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuCvarToggle ("Center Align Y", &hud_sigils_cy));
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuCvarToggle ("Horizontal Align", &hud_sigils_h));
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuCvarToggle ("Vertical Align", &hud_sigils_v));
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuSpinControl ("Horizontal Spacing", &hud_sigils_hs, -32, 32, 1));
-	menu_HUD.AddOption (TAG_SIGILS, new CQMenuSpinControl ("Vertical Spacing", &hud_sigils_vs, -32, 32, 1));
-
-	// keys
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuSpinControl ("X Position", &hud_keys_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuSpinControl ("Y Position", &hud_keys_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuCvarToggle ("Center Align X", &hud_keys_cx));
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuCvarToggle ("Center Align Y", &hud_keys_cy));
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuCvarToggle ("Horizontal Align", &hud_keys_h));
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuCvarToggle ("Vertical Align", &hud_keys_v));
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuSpinControl ("Horizontal Spacing", &hud_keys_hs, -32, 32, 1));
-	menu_HUD.AddOption (TAG_KEYS, new CQMenuSpinControl ("Vertical Spacing", &hud_keys_vs, -32, 32, 1));
-
-	// items
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuSpinControl ("X Position", &hud_items_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuSpinControl ("Y Position", &hud_items_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuCvarToggle ("Center Align X", &hud_items_cx));
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuCvarToggle ("Center Align Y", &hud_items_cy));
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuCvarToggle ("Horizontal Align", &hud_items_h));
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuCvarToggle ("Vertical Align", &hud_items_v));
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuSpinControl ("Horizontal Spacing", &hud_items_hs, -32, 32, 1));
-	menu_HUD.AddOption (TAG_ITEMS, new CQMenuSpinControl ("Vertical Spacing", &hud_items_vs, -32, 32, 1));
-
-	// weapons
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuSpinControl ("X Position", &hud_weapons_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuSpinControl ("Y Position", &hud_weapons_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuCvarToggle ("Center Align X", &hud_weapons_cx));
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuCvarToggle ("Center Align Y", &hud_weapons_cy));
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuCvarToggle ("Horizontal Align", &hud_weapons_h));
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuCvarToggle ("Vertical Align", &hud_weapons_v));
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuSpinControl ("Horizontal Spacing", &hud_weapons_hs, -32, 32, 1));
-	menu_HUD.AddOption (TAG_WEAPONS, new CQMenuSpinControl ("Vertical Spacing", &hud_weapons_vs, -32, 32, 1));
-
-	// ammo counts
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuSpinControl ("X Position", &hud_ammocount_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuSpinControl ("Y Position", &hud_ammocount_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuCvarToggle ("Center Align X", &hud_ammocount_cx));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuCvarToggle ("Center Align Y", &hud_ammocount_cy));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuSpinControl ("Horizontal Spacing", &hud_ammocount_hs, -128, 128, 1));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuSpinControl ("Vertical Spacing", &hud_ammocount_vs, -128, 128, 1));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuCvarToggle ("Show Ammo Boxes", &hud_ammobox_show));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuSpinControl ("Ammo Box X Offset", &hud_ammobox_x, -128, 128, 1));
-	menu_HUD.AddOption (TAG_AMMOCNT, new CQMenuSpinControl ("Ammo Box Y Offset", &hud_ammobox_y, -128, 128, 1));
-
-	// team colors (rogue only)
-	menu_HUD.AddOption (TAG_TEAM, new CQMenuSpinControl ("X Position", &hud_teamcolor_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_TEAM, new CQMenuSpinControl ("Y Position", &hud_teamcolor_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_TEAM, new CQMenuCvarToggle ("Center Align X", &hud_teamcolor_cx));
-	menu_HUD.AddOption (TAG_TEAM, new CQMenuCvarToggle ("Center Align Y", &hud_teamcolor_cy));
-
-	// OSD Items
-	menu_HUD.AddOption (TAG_OSD, new CQMenuCvarToggle ("Show FPS", &scr_showfps));
-	menu_HUD.AddOption (TAG_OSD, new CQMenuSpinControl ("X Position", &hud_fps_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_OSD, new CQMenuSpinControl ("Y Position", &hud_fps_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_OSD, new CQMenuSpacer (DIVIDER_LINE));
-	menu_HUD.AddOption (TAG_OSD, new CQMenuCvarToggle ("Show Clock", &scr_clock));
-	menu_HUD.AddOption (TAG_OSD, new CQMenuSpinControl ("X Position", &hud_clock_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_OSD, new CQMenuSpinControl ("Y Position", &hud_clock_y, -1280, 1280, 4));
-
-	// crosshair
-	menu_HUD.AddOption (TAG_CROSSHAIR, new CQMenuSpacer ());
-	menu_HUD.AddOption (TAG_CROSSHAIR, new CQMenuSpinControl ("Crosshair Image", &crosshair.integer, crosshairnames));
-	menu_HUD.AddOption (TAG_CROSSHAIR, new CQMenuSpacer ());
-	menu_HUD.AddOption (TAG_CROSSHAIR, new CQMenuColourBar ("Colour", &scr_crosshaircolor.integer));
-	menu_HUD.AddOption (TAG_CROSSHAIR, new CQMenuSpinControl ("X Offset", &cl_crossx, -30, 30, 1));
-	menu_HUD.AddOption (TAG_CROSSHAIR, new CQMenuSpinControl ("Y Offset", &cl_crossy, -30, 30, 1));
-	menu_HUD.AddOption (TAG_CROSSHAIR, new CQMenuCvarSlider ("Scale", &scr_crosshairscale, 0, 2, 0.1));
-
-	// deathmatch overlay
-	menu_HUD.AddOption (TAG_DMOVERLAY, new CQMenuSpinControl ("X Position", &hud_dmoverlay_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_DMOVERLAY, new CQMenuSpinControl ("Y Position", &hud_dmoverlay_y, -1280, 1280, 4));
-
-	// hipnotic keys
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuSpinControl ("X Position", &hud_hipnokeys_x, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuSpinControl ("Y Position", &hud_hipnokeys_y, -1280, 1280, 4));
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuCvarToggle ("Center Align X", &hud_hipnokeys_cx));
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuCvarToggle ("Center Align Y", &hud_hipnokeys_cy));
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuCvarToggle ("Horizontal Align", &hud_hipnokeys_h));
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuCvarToggle ("Vertical Align", &hud_hipnokeys_v));
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuSpinControl ("Horizontal Spacing", &hud_hipnokeys_hs, -32, 32, 1));
-	menu_HUD.AddOption (TAG_HIPNOKEYS, new CQMenuSpinControl ("Vertical Spacing", &hud_hipnokeys_vs, -32, 32, 1));
-
-	// last stuff
-	menu_HUD.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_HUD.AddOption (new CQMenuCommand ("Save Layout", Menu_HUDSaveLayout));
-
-	// this last one draws the hud layout based on the current selections
-	menu_HUD.AddOption (new CQMenuCustomDraw (Menu_HUDDrawHUD));
-}
-
 

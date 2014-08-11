@@ -453,10 +453,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\splash.cpp"
-				>
-			</File>
-			<File
 				RelativePath=".\sv_main.cpp"
 				>
 			</File>
@@ -556,6 +552,10 @@
 			</File>
 			<File
 				RelativePath=".\hud.h"
+				>
+			</File>
+			<File
+				RelativePath=".\hud_layout.h"
 				>
 			</File>
 			<File
@@ -705,26 +705,39 @@
 				>
 			</File>
 			<File
+				RelativePath=".\CrosshairFont.png"
+				>
+			</File>
+			<File
 				RelativePath=".\DirectQ.rc"
+				>
+			</File>
+			<File
+				RelativePath=".\dq.ico"
 				>
 			</File>
 			<File
 				RelativePath=".\fxLiquid.fx"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-					<Tool
-						Name="VCCustomBuildTool"
-					/>
-				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\fxQ1Sky.fx"
 				>
 			</File>
 			<File
-				RelativePath=".\fxUnderwater.fx"
+				RelativePath=".\fxScreen.fx"
+				>
+			</File>
+			<File
+				RelativePath=".\particledot.png"
+				>
+			</File>
+			<File
+				RelativePath=".\splash.png"
+				>
+			</File>
+			<File
+				RelativePath=".\YouAreHere.png"
 				>
 			</File>
 		</Filter>

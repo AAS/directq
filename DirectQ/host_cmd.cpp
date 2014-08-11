@@ -453,7 +453,7 @@ void Host_SavegameComment (char *text)
 	_snprintf (kills, 20, "kills:%3i/%3i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
 
 	// copy it in - kills is always guaranteed to start at 22
-	memcpy (text + 22, kills, strlen (kills));
+	Q_MemCpy (text + 22, kills, strlen (kills));
 
 	// convert space to _ to make stdio happy
 	// also convert \0 - this is a hack to fix a hack in aguirre quake
@@ -715,7 +715,7 @@ void Host_Loadgame_f (void)
 	for (i=0; i<MAX_LIGHTSTYLES; i++)
 	{
 		fscanf (f, "%s\n", str);
-		sv.lightstyles[i] = (char *) Pool_Map->Alloc (strlen(str)+1);
+		sv.lightstyles[i] = (char *) MainHunk->Alloc (strlen(str)+1);
 		strcpy (sv.lightstyles[i], str);
 	}
 
@@ -754,7 +754,7 @@ void Host_Loadgame_f (void)
 		{
 			// parse an edict
 			ent = GetEdictForNumber(entnum);
-			memset (&ent->v, 0, SVProgs->QC.entityfields * 4);
+			Q_MemSet (&ent->v, 0, SVProgs->QC->entityfields * 4);
 			ent->free = false;
 			ED_ParseEdict (start, ent);
 
@@ -1180,7 +1180,7 @@ void Host_Spawn_f (void)
 		// set up the edict
 		ent = host_client->edict;
 
-		memset (&ent->v, 0, SVProgs->QC.entityfields * 4);
+		Q_MemSet (&ent->v, 0, SVProgs->QC->entityfields * 4);
 		ent->v.colormap = GetNumberForEdict(ent);
 		ent->v.team = (host_client->colors & 15) + 1;
 		ent->v.netname = host_client->name - SVProgs->Strings;

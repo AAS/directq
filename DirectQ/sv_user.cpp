@@ -61,7 +61,7 @@ void SV_SetIdealPitch (void)
 	if (!((int)sv_player->v.flags & FL_ONGROUND))
 		return;
 		
-	angleval = sv_player->v.angles[YAW] * M_PI*2 / 360;
+	angleval = sv_player->v.angles[YAW] * D3DX_PI*2 / 360;
 	sinval = sin(angleval);
 	cosval = cos(angleval);
 
@@ -625,7 +625,7 @@ void SV_RunClients (void)
 		if (!host_client->spawned)
 		{
 		// clear client movement until a new packet is received
-			memset (&host_client->cmd, 0, sizeof(host_client->cmd));
+			Q_MemSet (&host_client->cmd, 0, sizeof(host_client->cmd));
 			continue;
 		}
 

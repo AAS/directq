@@ -74,6 +74,7 @@ D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA = NULL;
 D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx = NULL;
 D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA = NULL;
 D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface = NULL;
+D3DXDDECLARATORFROMFVFPROC QD3DXDeclaratorFromFVF = NULL;
 D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeFaces = NULL;
 D3DXOPTIMIZEFACEVERTPROC QD3DXOptimizeVertices = NULL;
 D3DXCREATEMESHFVFPROC QD3DXCreateMeshFVF = NULL;
@@ -119,6 +120,7 @@ void D3D_LoadD3DXVersion (int ver)
 			if (!(QD3DXCreateTextureFromFileInMemoryEx = (D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromFileInMemoryEx"))) continue;
 			if (!(QD3DXCreateTextureFromResourceExA = (D3DXCREATETEXTUREFROMRESOURCEEXAPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromResourceExA"))) continue;
 			if (!(QD3DXCreateRenderToSurface = (D3DXCREATERENDERTOSURFACEPROC) D3DX_GetProcAddress ("D3DXCreateRenderToSurface"))) continue;
+			if (!(QD3DXDeclaratorFromFVF = (D3DXDDECLARATORFROMFVFPROC) D3DX_GetProcAddress ("D3DXDeclaratorFromFVF"))) continue;
 			if (!(QD3DXOptimizeFaces = (D3DXOPTIMIZEFACEVERTPROC) D3DX_GetProcAddress ("D3DXOptimizeFaces"))) continue;
 			if (!(QD3DXOptimizeVertices = (D3DXOPTIMIZEFACEVERTPROC) D3DX_GetProcAddress ("D3DXOptimizeVertices"))) continue;
 			if (!(QD3DXCreateMeshFVF = (D3DXCREATEMESHFVFPROC) D3DX_GetProcAddress ("D3DXCreateMeshFVF"))) continue;
@@ -276,13 +278,13 @@ void D3D_ResetWindow (D3DDISPLAYMODE *mode)
 	{
 		// windowed mode
 		WindowStyle = WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-		ExWindowStyle = 0;
+		ExWindowStyle = WS_EX_TOPMOST;
 	}
 	else
 	{
 		// fullscreen mode
 		WindowStyle = WS_POPUP;
-		ExWindowStyle = 0;
+		ExWindowStyle = WS_EX_TOPMOST;
 	}
 
 	RECT rect;
@@ -409,7 +411,7 @@ DWORD D3D_GetPresentInterval (void)
 
 void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 {
-	memset (pp, 0, sizeof (D3DPRESENT_PARAMETERS));
+	Q_MemSet (pp, 0, sizeof (D3DPRESENT_PARAMETERS));
 
 	if (mode->RefreshRate == 0)
 	{
@@ -537,8 +539,6 @@ void D3D_DescribeMode_f (void)
 }
 
 
-void D3D_PreloadTextures (void);
-
 void D3D_RecoverDeviceResources (void)
 {
 	// recreate anything that needs to be recreated
@@ -548,9 +548,6 @@ void D3D_RecoverDeviceResources (void)
 
 	// recover all states back to what they should be
 	D3D_SetAllStates ();
-
-	// pull textures back to vram
-	D3D_PreloadTextures ();
 
 	// force a recalc of the refdef
 	vid.recalc_refdef = true;
@@ -713,7 +710,7 @@ void D3D_EnumerateVideoModes (void)
 			// we need to keep our own list because d3d makes it awkward for us by maintaining a separate list for each format
 			if (!d3d_ModeList)
 			{
-				d3d_ModeList = (d3d_ModeDesc_t *) Pool_Permanent->Alloc (sizeof (d3d_ModeDesc_t));
+				d3d_ModeList = (d3d_ModeDesc_t *) Zone_Alloc (sizeof (d3d_ModeDesc_t));
 				newmode = d3d_ModeList;
 			}
 			else
@@ -723,7 +720,7 @@ void D3D_EnumerateVideoModes (void)
 					if (!newmode->Next)
 						break;
 
-				newmode->Next = (d3d_ModeDesc_t *) Pool_Permanent->Alloc (sizeof (d3d_ModeDesc_t));
+				newmode->Next = (d3d_ModeDesc_t *) Zone_Alloc (sizeof (d3d_ModeDesc_t));
 				newmode = newmode->Next;
 			}
 
@@ -778,7 +775,7 @@ void D3D_EnumerateVideoModes (void)
 	if (!NumWindowedModes) return;
 
 	// now we emulate winquake by pushing windowed modes to the start of the list
-	d3d_ModeDesc_t *WindowedModes = (d3d_ModeDesc_t *) Pool_Permanent->Alloc (NumWindowedModes * sizeof (d3d_ModeDesc_t));
+	d3d_ModeDesc_t *WindowedModes = (d3d_ModeDesc_t *) Zone_Alloc (NumWindowedModes * sizeof (d3d_ModeDesc_t));
 	int wm = 0;
 
 	// walk the main list adding any windowed modes to the windowed modes list
@@ -1228,6 +1225,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 		ExWindowStyle = 0;
 	}
 
+	// the window has already been created so all we need is to update it's properties
 	RECT rect;
 
 	rect.top = rect.left = 0;
@@ -1239,26 +1237,14 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	int width = rect.right - rect.left;
 	int height = rect.bottom - rect.top;
 
-	d3d_Window = CreateWindowEx
-	(
-		ExWindowStyle,
-		D3D_WINDOW_CLASS_NAME,
-		va ("DirectQ Release %s", DIRECTQ_VERSION),
-		WindowStyle,
-		rect.left, rect.top,
-		width,
-		height,
-		GetDesktopWindow (),
-		NULL,
-		GetModuleHandle (NULL),
-		NULL
-	);
+	// switch size and position (also hide the window here)
+	SetWindowPos (d3d_Window, NULL, rect.left, rect.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOCOPYBITS | SWP_FRAMECHANGED | SWP_HIDEWINDOW);
+	SetWindowPos (d3d_Window, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOCOPYBITS | SWP_FRAMECHANGED | SWP_HIDEWINDOW);
 
-	if (!d3d_Window)
-	{
-		Sys_Error ("Couldn't create DIB window");
-		return;
-	}
+	// switch window properties
+	SetWindowLong (d3d_Window, GWL_EXSTYLE, ExWindowStyle);
+	SetWindowLong (d3d_Window, GWL_STYLE, WindowStyle);
+	SetWindowLong (d3d_Window, GWL_WNDPROC, (LONG) MainWndProc);
 
 	if (mode->RefreshRate == 0)
 	{
@@ -1290,6 +1276,9 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	SendMessage (d3d_Window, WM_SETICON, (WPARAM) TRUE, (LPARAM) hIcon);
 	SendMessage (d3d_Window, WM_SETICON, (WPARAM) FALSE, (LPARAM) hIcon);
 
+	// set internal active flags otherwise we'll get 40 FPS and no mouse!!!
+	AppActivate (TRUE, FALSE);
+
 	// set cursor clip region
 	IN_UpdateClipCursor ();
 }
@@ -1309,8 +1298,7 @@ void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
 	// even if a mode is found we pass through here
 	if (mode->RefreshRate == 0)
 		D3D_FindBestWindowedMode (mode);
-	else
-		D3D_FindBestFullscreenMode (mode);
+	else D3D_FindBestFullscreenMode (mode);
 
 	// retrieve and store the gamma ramp for the desktop
 	HDC hdc = GetDC (NULL);
@@ -1450,7 +1438,7 @@ static void PaletteFromColormap (byte *pal, byte *map)
 
 	// now reset the palette
 	byte basepal[768];
-	memcpy (basepal, pal, 768);
+	Q_MemCpy (basepal, pal, 768);
 
 	// take the midline of the colormap for the palette; we *could* average the
 	// entire column for each colour, but we lose some palette colours that way
@@ -1534,10 +1522,8 @@ cmd_t D3D_VidRestart_f_Cmd ("vid_restart", D3D_VidRestart_f);
 
 void D3D_VidInit (byte *palette)
 {
-	InitCommonControls ();
-
 	// ensure
-	memset (&d3d_RenderDef, 0, sizeof (d3d_renderdef_t));
+	Q_MemSet (&d3d_RenderDef, 0, sizeof (d3d_renderdef_t));
 
 	vid_initialized = true;
 
@@ -1810,11 +1796,16 @@ void D3D_TextureMode_f (void)
 		if (minfilter == D3DTEXF_ANISOTROPIC) minfilter = D3DTEXF_LINEAR;
 		if (magfilter == D3DTEXF_ANISOTROPIC) magfilter = D3DTEXF_LINEAR;
 
+		Con_Printf ("Available Filters:\n");
+
+		for (int i = 0; i < 6; i++)
+			Con_Printf ("%i: %s\n", i, d3d_filtermodes[i].name);
+
 		for (int i = 0; i < 6; i++)
 		{
 			if (magfilter == d3d_filtermodes[i].magfilter && minfilter == d3d_filtermodes[i].minfilter && mipfilter == d3d_filtermodes[i].mipfilter)
 			{
-				Con_Printf ("%s\n", d3d_filtermodes[i].name);
+				Con_Printf ("\nCurrent filter: %s\n", d3d_filtermodes[i].name);
 				return;
 			}
 		}
@@ -1825,7 +1816,7 @@ void D3D_TextureMode_f (void)
 
 	for (int i = 0; i < 6; i++)
 	{
-		if (!stricmp (d3d_filtermodes[i].name, Cmd_Argv (1)))
+		if (!stricmp (d3d_filtermodes[i].name, Cmd_Argv (1)) || i == atoi (Cmd_Argv (1)))
 		{
 			// reset filter
 			d3d_3DFilterMin = d3d_filtermodes[i].minfilter;
@@ -2053,7 +2044,7 @@ void D3D_CheckPixelShaders (void)
 			// switch shaders off and set fvf to something invalid to force an update
 			d3d_Device->SetPixelShader (NULL);
 			d3d_Device->SetVertexShader (NULL);
-			D3D_SetFVF (D3DFVF_XYZ | D3DFVF_XYZRHW);
+			D3D_SetVertexDeclaration (NULL);
 			// Con_SafePrintf ("Disabled pixel shaders\n");
 		}
 
@@ -2104,6 +2095,8 @@ void D3D_CheckD3DXVersion (void)
 }
 
 
+void D3D_SubdivideWater (void);
+
 void D3D_BeginRendering (void)
 {
 	// check for device recovery and recover it if needed
@@ -2113,7 +2106,6 @@ void D3D_BeginRendering (void)
 	D3D_CheckGamma ();
 	D3D_CheckVidMode ();
 	D3D_CheckTextureFiltering ();
-	D3D_CheckPixelShaders ();
 	D3D_CheckTripleBuffer ();
 	D3D_CheckVSync ();
 	D3D_CheckD3DXVersion ();
@@ -2135,6 +2127,13 @@ void D3D_EndRendering (void)
 	d3d_Device->EndScene ();
 
 	hr = d3d_Device->Present (NULL, NULL, NULL, NULL);
+
+	// defer the pixel shaders check to here to ensure that we're in the right mode before subdividing
+	D3D_CheckPixelShaders ();
+
+	// check for water subdivision changes
+	// done here so that the scratch buffer will be valid for use
+	D3D_SubdivideWater ();
 
 	// check for a lost device
 	if (hr == D3DERR_DEVICELOST)
@@ -2177,5 +2176,125 @@ void D3D_EndRendering (void)
 			mouseactive = true;
 		}
 	}
+}
+
+
+#include <gdiplus.h>
+#pragma comment (lib, "gdiplus.lib")
+#include "CGdiPlusBitmap.h"
+
+Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+ULONG_PTR gdiplusToken;
+CGdiPlusBitmapResource *SplashBMP = NULL;
+
+LRESULT CALLBACK SplashProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	HDC          hdc;
+	PAINTSTRUCT  ps;
+
+	switch (message)
+	{
+	case WM_PAINT:
+		if (SplashBMP)
+		{
+			hdc = BeginPaint (hWnd, &ps);
+			Gdiplus::Graphics g (hdc);
+
+			int w = SplashBMP->TheBitmap->GetWidth ();
+			int h = SplashBMP->TheBitmap->GetHeight ();
+
+			g.DrawImage (SplashBMP->TheBitmap, 0, 0, w, h);
+
+			// this pretty much replicates the functionality of my splash screen maker app but brings it back into the engine
+			// unicode sucks cocks in hell, by the way.
+			Gdiplus::FontFamily   fontFamily (L"Arial");
+			Gdiplus::Font         font (&fontFamily, 10, Gdiplus::FontStyleBold, Gdiplus::UnitPoint);
+			Gdiplus::RectF        rectF (0, (h / 2) + 10, w, h);
+			Gdiplus::StringFormat stringFormat;
+			Gdiplus::SolidBrush   solidBrush (Gdiplus::Color (255, 192, 192, 192));
+
+			stringFormat.SetAlignment (Gdiplus::StringAlignmentCenter);
+			stringFormat.SetLineAlignment (Gdiplus::StringAlignmentNear);
+
+			g.SetTextRenderingHint (Gdiplus::TextRenderingHintAntiAliasGridFit);
+			g.DrawString (QASCIIToUnicode ("Release "DIRECTQ_VERSION), -1, &font, rectF, &stringFormat, &solidBrush);
+
+			g.Flush (Gdiplus::FlushIntentionFlush);
+			g.ReleaseHDC (hdc);
+			EndPaint (hWnd, &ps);
+
+			// sleep a little to give the splash a chance to show
+			Sleep (500);
+		}
+		else
+		{
+			// this is to cover cases where this window proc may be triggered with no valid bitmap
+			hdc = GetDC (d3d_Window);
+			RECT cr;
+			GetClientRect (d3d_Window, &cr);
+			PatBlt (hdc, cr.left, cr.top, cr.right - cr.left, cr.bottom - cr.top, BLACKNESS);
+			ReleaseDC (d3d_Window, hdc);
+		}
+
+		return 0;
+
+	default:
+		return DefWindowProc (hWnd, message, wParam, lParam);
+	}
+}
+
+
+void Splash_Init (void)
+{
+	// switch window properties
+	SetWindowLong (d3d_Window, GWL_WNDPROC, (LONG) SplashProc);
+	SetWindowLong (d3d_Window, GWL_EXSTYLE, WS_EX_TOPMOST);
+	SetWindowLong (d3d_Window, GWL_STYLE, WS_POPUP);
+
+	// Initialize GDI+.
+	Gdiplus::GdiplusStartup (&gdiplusToken, &gdiplusStartupInput, NULL);
+
+	// load our bitmap; basic GDI+ doesn't provide support for loading PNGs from resources so
+	// we use the code found at http://www.codeproject.com/KB/GDI-plus/cgdiplusbitmap.aspx
+	SplashBMP = new CGdiPlusBitmapResource ();
+	SplashBMP->Load (IDR_SPLASH, RT_RCDATA, GetModuleHandle (NULL));
+
+	int BMPWidth = SplashBMP->TheBitmap->GetWidth ();
+	int BMPHeight = SplashBMP->TheBitmap->GetHeight ();
+
+	// get the desktop resolution
+	HDC DesktopDC = GetDC (NULL);
+	int DeskWidth = GetDeviceCaps (DesktopDC, HORZRES);
+	int DeskHeight = GetDeviceCaps (DesktopDC, VERTRES);
+	ReleaseDC (NULL, DesktopDC);
+
+	// center and show the splash window (resizing it to the bitmap size as we go)
+	SetWindowPos (d3d_Window, NULL, (DeskWidth - BMPWidth) / 2, (DeskHeight - BMPHeight) / 2, BMPWidth, BMPHeight, 0);
+
+	ShowWindow (d3d_Window, SW_SHOW);
+	UpdateWindow (d3d_Window);
+
+	SetForegroundWindow (d3d_Window);
+
+	// pump all messages
+	MSG msg;
+
+	while (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
+	{
+      	TranslateMessage (&msg);
+      	DispatchMessage (&msg);
+	}
+}
+
+
+void Splash_Destroy (void)
+{
+	if (SplashBMP) delete SplashBMP;
+	SplashBMP = NULL;
+	Gdiplus::GdiplusShutdown (gdiplusToken);
+	SetWindowLong (d3d_Window, GWL_WNDPROC, (LONG) DefWindowProc);
+
+	// hide the window
+	ShowWindow (d3d_Window, SW_HIDE);
 }
 

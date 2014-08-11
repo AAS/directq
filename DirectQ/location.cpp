@@ -23,8 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "location.h"
 
 
-char *locDefault = "somewhere";
-char *locNowhere = "nowhere";
+char *locDefault = "unknown";
+char *locNowhere = "unknown";
 
 location_t	*locations = NULL;
 int			numlocations = 0;
@@ -44,17 +44,18 @@ void LOC_LoadLocations (void)
 	locname[3] = 's';
 	COM_DefaultExtension (locname, ".loc");
 
-	char *locdata = (char *) COM_LoadTempFile (locname);
+	char *locdataload = (char *) COM_LoadFile (locname);
 
-	if (!locdata)
+	if (!locdataload)
 	{
 		Con_DPrintf ("Failed to load %s\n", locname);
 		return;
 	}
 
+	char *locdata = locdataload;
 	Con_DPrintf ("Loading %s\n", locname);
 
-	locations = (location_t *) Pool_Map->Alloc (sizeof (location_t));
+	locations = (location_t *) MainHunk->Alloc (sizeof (location_t));
 	location_t *l = locations;
 
 	while (1)
@@ -116,11 +117,12 @@ void LOC_LoadLocations (void)
 			Con_DPrintf ("Read location %s\n", l->name);
 
 			// set up a new empty location (this may not be used...)
-			l = (location_t *) Pool_Map->Alloc (sizeof (location_t));
+			l = (location_t *) MainHunk->Alloc (sizeof (location_t));
 			numlocations++;
 		}
 	}
 
+	Zone_Free (locdataload);
 	Con_DPrintf ("Read %i locations\n", numlocations);
 }
 

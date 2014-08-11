@@ -47,15 +47,16 @@ void Loop_SearchForHosts (bool xmit)
 		return;
 
 	hostCacheCount = 1;
+
 	if (strcmp(hostname.string, "UNNAMED") == 0)
 		strcpy(hostcache[0].name, "local");
-	else
-		strcpy(hostcache[0].name, hostname.string);
-	strcpy(hostcache[0].map, sv.name);
+	else strcpy(hostcache[0].name, hostname.string);
+
+	strcpy (hostcache[0].map, sv.name);
 	hostcache[0].users = net_activeconnections;
 	hostcache[0].maxusers = svs.maxclients;
 	hostcache[0].driver = net_driverlevel;
-	strcpy(hostcache[0].cname, "local");
+	strcpy (hostcache[0].cname, "local");
 }
 
 
@@ -139,7 +140,7 @@ int Loop_GetMessage (qsocket_t *sock)
 	sock->receiveMessageLength -= length;
 
 	if (sock->receiveMessageLength)
-		memcpy(sock->receiveMessage, &sock->receiveMessage[length], sock->receiveMessageLength);
+		Q_MemCpy(sock->receiveMessage, &sock->receiveMessage[length], sock->receiveMessageLength);
 
 	if (sock->driverdata && ret == 1)
 		((qsocket_t *)sock->driverdata)->canSend = true;
@@ -174,7 +175,7 @@ int Loop_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	buffer++;
 
 	// message
-	memcpy(buffer, data->data, data->cursize);
+	Q_MemCpy(buffer, data->data, data->cursize);
 	*bufferLength = IntAlign(*bufferLength + data->cursize + 4);
 
 	sock->canSend = false;
@@ -208,7 +209,7 @@ int Loop_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	buffer++;
 
 	// message
-	memcpy(buffer, data->data, data->cursize);
+	Q_MemCpy(buffer, data->data, data->cursize);
 	*bufferLength = IntAlign(*bufferLength + data->cursize + 4);
 	return 1;
 }

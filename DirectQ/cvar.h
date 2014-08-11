@@ -139,3 +139,6 @@ cvar_t *Cvar_FindVar (char *var_name);
 
 extern cvar_t	*cvar_vars;
 extern cvar_alias_t *cvar_alias_vars;
+
+// i no longer have to extern my cvars.  FUCK yeah.
+#define Cvar_Get(var, varname) static cvar_t *(var) = NULL; if (!(var)) (var) = Cvar_FindVar (varname);if (!(var)) Sys_Error ("%s is not a cvar", varname);

@@ -129,7 +129,7 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 		Sys_Error("SendMessage: called with canSend == false\n");
 #endif
 
-	memcpy(sock->sendMessage, data->data, data->cursize);
+	Q_MemCpy(sock->sendMessage, data->data, data->cursize);
 	sock->sendMessageLength = data->cursize;
 
 	if (data->cursize <= MAX_DATAGRAM2)
@@ -146,7 +146,7 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 
 	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
 	packetBuffer.sequence = BigLong(sock->sendSequence++);
-	memcpy (packetBuffer.data, sock->sendMessage, dataLen);
+	Q_MemCpy (packetBuffer.data, sock->sendMessage, dataLen);
 
 	sock->canSend = false;
 
@@ -179,7 +179,7 @@ int SendMessageNext (qsocket_t *sock)
 
 	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
 	packetBuffer.sequence = BigLong(sock->sendSequence++);
-	memcpy (packetBuffer.data, sock->sendMessage, dataLen);
+	Q_MemCpy (packetBuffer.data, sock->sendMessage, dataLen);
 
 	sock->sendNext = false;
 
@@ -212,7 +212,7 @@ int ReSendMessage (qsocket_t *sock)
 
 	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
 	packetBuffer.sequence = BigLong(sock->sendSequence - 1);
-	memcpy (packetBuffer.data, sock->sendMessage, dataLen);
+	Q_MemCpy (packetBuffer.data, sock->sendMessage, dataLen);
 
 	sock->sendNext = false;
 
@@ -256,7 +256,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 
 	packetBuffer.length = BigLong(packetLen | NETFLAG_UNRELIABLE);
 	packetBuffer.sequence = BigLong(sock->unreliableSendSequence++);
-	memcpy (packetBuffer.data, data->data, data->cursize);
+	Q_MemCpy (packetBuffer.data, data->data, data->cursize);
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
@@ -375,7 +375,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			sock->sendMessageLength -= MAX_DATAGRAM2;
 			if (sock->sendMessageLength > 0)
 			{
-				memcpy(sock->sendMessage, sock->sendMessage+MAX_DATAGRAM2, sock->sendMessageLength);
+				Q_MemCpy(sock->sendMessage, sock->sendMessage+MAX_DATAGRAM2, sock->sendMessageLength);
 				sock->sendNext = true;
 			}
 			else
@@ -412,7 +412,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				break;
 			}
 
-			memcpy(sock->receiveMessage + sock->receiveMessageLength, packetBuffer.data, length);
+			Q_MemCpy(sock->receiveMessage + sock->receiveMessageLength, packetBuffer.data, length);
 			sock->receiveMessageLength += length;
 			continue;
 		}
@@ -559,7 +559,7 @@ static void Test_f (void)
 					continue;
 				net_landriverlevel = hostcache[n].ldriver;
 				max = hostcache[n].maxusers;
-				memcpy(&sendaddr, &hostcache[n].addr, sizeof(struct qsockaddr));
+				Q_MemCpy(&sendaddr, &hostcache[n].addr, sizeof(struct qsockaddr));
 				break;
 			}
 		if (n < hostCacheCount)
@@ -686,7 +686,7 @@ static void Test2_f (void)
 				if (hostcache[n].driver != myDriverLevel)
 					continue;
 				net_landriverlevel = hostcache[n].ldriver;
-				memcpy(&sendaddr, &hostcache[n].addr, sizeof(struct qsockaddr));
+				Q_MemCpy(&sendaddr, &hostcache[n].addr, sizeof(struct qsockaddr));
 				break;
 			}
 		if (n < hostCacheCount)
@@ -1119,7 +1119,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 			strcpy(hostcache[n].name, "*");
 			strcat(hostcache[n].name, hostcache[n].cname);
 		}
-		memcpy(&hostcache[n].addr, &readaddr, sizeof(struct qsockaddr));
+		Q_MemCpy(&hostcache[n].addr, &readaddr, sizeof(struct qsockaddr));
 		hostcache[n].driver = net_driverlevel;
 		hostcache[n].ldriver = net_landriverlevel;
 		strcpy(hostcache[n].cname, net_DriverFunc.AddrToString(&readaddr));
@@ -1283,7 +1283,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 
 	if (ret == CCREP_ACCEPT)
 	{
-		memcpy(&sock->addr, &sendaddr, sizeof(struct qsockaddr));
+		Q_MemCpy(&sock->addr, &sendaddr, sizeof(struct qsockaddr));
 		net_DriverFunc.SetSocketPort (&sock->addr, MSG_ReadLong());
 	}
 	else

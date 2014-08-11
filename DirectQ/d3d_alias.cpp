@@ -31,6 +31,7 @@ image_t d3d_PlayerSkins[256];
 void D3D_RotateForEntity (entity_t *e);
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
 
+
 /*
 =================================================================
 
@@ -50,9 +51,7 @@ void D3D_FinalizeAliasMeshPart (aliashdr_t *hdr, aliaspart_t *part)
 	// don't require a d3d device; they're purely algorithmic.
 	QD3DXOptimizeFaces (part->indexes, part->numindexes / 3, part->nummesh, FALSE, d3d_RemapTable);
 
-	// memcpy on MS CRT is just a straight byte copy
-	for (int i = 0; i < part->numindexes; i++)
-		d3d_CopyIndexes[i] = part->indexes[i];
+	Q_MemCpy (d3d_CopyIndexes, part->indexes, part->numindexes * sizeof (unsigned short));
 
 	// reverse the order because the remap table is reversed
 	for (int i = 0, j = (part->numindexes / 3) - 1; i < part->numindexes; i += 3, j--)
@@ -63,7 +62,7 @@ void D3D_FinalizeAliasMeshPart (aliashdr_t *hdr, aliaspart_t *part)
 	}
 
 	// copy out the verts
-	part->meshverts = (aliasmesh_t *) Cache_Alloc (part->meshverts, part->nummesh * sizeof (aliasmesh_t));
+	part->meshverts = (aliasmesh_t *) MainCache->Alloc (part->meshverts, part->nummesh * sizeof (aliasmesh_t));
 }
 
 
@@ -89,17 +88,17 @@ void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangl
 	d3d_CopyIndexes = (unsigned short *) (d3d_RemapTable + max_mesh);
 
 	// create a pool of indexes for use by the model
-	unsigned short *indexes = (unsigned short *) Cache_Alloc (3 * sizeof (unsigned short) * hdr->numtris);
+	unsigned short *indexes = (unsigned short *) MainCache->Alloc (3 * sizeof (unsigned short) * hdr->numtris);
 
 	for (int i = 0, v = 0; i < hdr->numtris; i++)
 	{
-		if (!hdr->parts || (part && (part->nummesh >= max_mesh || part->numindexes >= 65534)))
+		if (!hdr->parts || (part && part->nummesh >= max_mesh))
 		{
 			// copy to the cache
 			if (part) D3D_FinalizeAliasMeshPart (hdr, part);
 
 			// go to a new part
-			part = (aliaspart_t *) Cache_Alloc (sizeof (aliaspart_t));
+			part = (aliaspart_t *) MainCache->Alloc (sizeof (aliaspart_t));
 
 			// link it in
 			part->next = hdr->parts;
@@ -153,31 +152,13 @@ void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangl
 	// finish the last one
 	if (part) D3D_FinalizeAliasMeshPart (hdr, part);
 
-	// tidy up the verts by calculating final s and t
+	// dropped alias skin padding because there are too many special cases
 	for (part = hdr->parts; part; part = part->next)
 	{
-		// now do s/t
 		for (int i = 0; i < part->nummesh; i++)
 		{
-			part->meshverts[i].s = ((float) part->meshverts[i].s + 0.5f) / (float) hdr->skinwidth;
-			part->meshverts[i].t = ((float) part->meshverts[i].t + 0.5f) / (float) hdr->skinheight;
-		}
-	}
-
-	// all skins must be the same size
-	if (hdr->skins[0].texture[0]->flags & IMAGE_PADDED)
-	{
-		// unpad texcoords for the model
-		int scaled_width = D3D_PowerOf2Size (hdr->skins[0].texture[0]->width);
-		int scaled_height = D3D_PowerOf2Size (hdr->skins[0].texture[0]->height);
-
-		for (part = hdr->parts; part; part = part->next)
-		{
-			for (int i = 0; i < part->nummesh; i++)
-			{
-				part->meshverts[i].s = (part->meshverts[i].s * hdr->skins[0].texture[0]->width) / scaled_width;
-				part->meshverts[i].t = (part->meshverts[i].t * hdr->skins[0].texture[0]->height) / scaled_height;
-			}
+			part->meshverts[i].s = part->meshverts[i].s / (float) hdr->skinwidth;
+			part->meshverts[i].t = part->meshverts[i].t / (float) hdr->skinheight;
 		}
 	}
 
@@ -327,7 +308,7 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 			D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 			D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-			D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
+			D3D_SetVertexDeclaration (d3d_VDXyzDiffuse);
 
 			if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
 			{
@@ -476,6 +457,109 @@ float D3D_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 
 void D3D_DrawAliasModel (entity_t *ent);
 
+// to do -
+// a more robust general method is needed.  use the middle line of the colormap, always store out texels
+// detect if the colormap changes and work on the actual proper texture instead of a copy in the playerskins array
+// no, because we're not creating a colormap for the entity any more.  in fact storing the colormap in the ent
+// and the translation in cl.scores is now largely redundant...
+// also no because working on the skin directly will break with instanced models
+bool D3D_TranslateAliasSkin (entity_t *ent)
+{
+	// no translation
+	if (ent->playerskin < 0) return false;
+	if (!ent->model) return false;
+	if (ent->model->type != mod_alias) return false;
+	if (!(ent->model->flags & EF_PLAYER)) return false;
+
+	// sanity
+	ent->playerskin &= 255;
+
+	// already built a skin for this colour
+	if (d3d_PlayerSkins[ent->playerskin].d3d_Texture) return true;
+
+	byte	translate[256];
+	byte	*original;
+	static int skinsize = -1;
+	static byte *translated = NULL;
+
+	aliashdr_t *paliashdr = ent->model->aliashdr;
+	int s = paliashdr->skinwidth * paliashdr->skinheight;
+
+	if (ent->skinnum < 0 || ent->skinnum >= paliashdr->numskins)
+	{
+		Con_Printf ("(%d): Invalid player skin #%d\n", ent->playerskin, ent->skinnum);
+		original = paliashdr->skins[0].texels;
+	}
+	else original = paliashdr->skins[ent->skinnum].texels;
+
+	// no texels were saved
+	if (!original) return false;
+
+	if (s & 3)
+	{
+		Con_Printf ("D3D_TranslateAliasSkin: s & 3\n");
+		return false;
+	}
+
+	int top = ent->playerskin & 0xf0;
+	int bottom = (ent->playerskin & 15) << 4;
+
+	// baseline has no palette translation
+	for (int i = 0; i < 256; i++) translate[i] = i;
+
+	for (int i = 0; i < 16; i++)
+	{
+		if (top < 128)	// the artists made some backwards ranges.  sigh.
+			translate[TOP_RANGE + i] = top + i;
+		else
+			translate[TOP_RANGE + i] = top + 15 - i;
+				
+		if (bottom < 128)
+			translate[BOTTOM_RANGE + i] = bottom + i;
+		else translate[BOTTOM_RANGE + i] = bottom + 15 - i;
+	}
+
+	// recreate the texture
+	SAFE_RELEASE (d3d_PlayerSkins[ent->playerskin].d3d_Texture);
+
+	// check for size change
+	if (skinsize != s)
+	{
+		// cache the size
+		skinsize = s;
+
+		// free the current buffer
+		if (translated) Zone_Free (translated);
+		translated = NULL;
+	}
+
+	// create a new buffer only if required (more optimization)
+	if (!translated) translated = (byte *) Zone_Alloc (s);
+
+	for (int i = 0; i < s; i += 4)
+	{
+		translated[i] = translate[original[i]];
+		translated[i + 1] = translate[original[i + 1]];
+		translated[i + 2] = translate[original[i + 2]];
+		translated[i + 3] = translate[original[i + 3]];
+	}
+
+	// don't compress these because it takes too long
+	D3D_UploadTexture
+	(
+		&d3d_PlayerSkins[ent->playerskin].d3d_Texture,
+		translated,
+		paliashdr->skinwidth,
+		paliashdr->skinheight,
+		IMAGE_MIPMAP | IMAGE_NOCOMPRESS | IMAGE_NOEXTERN | IMAGE_PADDABLE
+	);
+
+	// Con_Printf ("Translated skin to %i\n", ent->playerskin);
+	// success
+	return true;
+}
+
+
 void D3D_SetupAliasModel (entity_t *ent)
 {
 	vec3_t mins, maxs;
@@ -542,20 +626,46 @@ void D3D_SetupAliasModel (entity_t *ent)
 	// software quake randomises the base animation and so should we
 	int anim = (int) ((cl.time + ent->skinbase) * 10) & 3;
 
-	// base texture
-	aliasstate->teximage = hdr->skins[ent->skinnum].texture[anim];
-
-	// switch player skin (entnum - 1 is the same playernum as is used for calling into D3D_TranslatePlayerSkin so it's valid)
-	// need to make sure that it actually *is* a player model in case a head model uses the same entity number
-	if (ent->colormap != vid.colormap &&
-		!gl_nocolors.value &&
-		ent->entnum >= 1 &&
-		ent->entnum <= cl.maxclients &&
-		(ent->model->flags & EF_PLAYER))
-		aliasstate->teximage = &d3d_PlayerSkins[cl.scores[ent->entnum - 1].colors];
+	// switch the entity to a skin texture at &d3d_PlayerSkins[ent->playerskin]
+	// move all skin translation to here (only if translation succeeds)
+	if (D3D_TranslateAliasSkin (ent))
+	{
+		aliasstate->teximage = &d3d_PlayerSkins[ent->playerskin];
+		d3d_PlayerSkins[ent->playerskin].LastUsage = 0;
+	}
+	else aliasstate->teximage = hdr->skins[ent->skinnum].texture[anim];
 
 	// fullbright texture (can be NULL)
 	aliasstate->lumaimage = hdr->skins[ent->skinnum].fullbright[anim];
+}
+
+
+bool R_ViewInsideBBox (entity_t *ent)
+{
+	float bbmins[3] =
+	{
+		ent->origin[0] + ent->model->mins[0],
+		ent->origin[1] + ent->model->mins[1],
+		ent->origin[2] + ent->model->mins[2]
+	};
+
+	float bbmaxs[3] =
+	{
+		ent->origin[0] + ent->model->maxs[0],
+		ent->origin[1] + ent->model->maxs[1],
+		ent->origin[2] + ent->model->maxs[2]
+	};
+
+	if (r_origin[0] < bbmins[0]) return false;
+	if (r_origin[1] < bbmins[1]) return false;
+	if (r_origin[2] < bbmins[2]) return false;
+
+	if (r_origin[0] > bbmaxs[0]) return false;
+	if (r_origin[1] > bbmaxs[1]) return false;
+	if (r_origin[2] > bbmaxs[2]) return false;
+
+	// inside
+	return true;
 }
 
 
@@ -652,6 +762,7 @@ d3d_shader_t d3d_AliasShaderNoLuma =
 	}
 };
 
+
 void D3D_DrawAliasBatch (entity_t **ents, int numents)
 {
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
@@ -664,7 +775,7 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 	d3d_AliasShaderNoLuma.ColorDef[0].Op = D3D_OVERBRIGHT_MODULATE;
 
 	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
 
 	// begin a new render batch
 	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (aliaspolyvert_t));
@@ -687,6 +798,7 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 
 		// build the transformation for this entity.
 		// we need to run this in software as we are now potentially submitting multiple alias models in a single batch
+		// breaking out to hardware t&l for batches that contain a single ent is actually slower in all cases...
 		D3D_LoadIdentity (&ent->matrix);
 		D3D_RotateForEntity (ent, &ent->matrix);
 
@@ -741,8 +853,8 @@ typedef struct d3d_occlusionquery_s
 } d3d_occlusionquery_t;
 
 
-CSpaceBuffer *Pool_Occlusions = NULL;
-d3d_occlusionquery_t *d3d_OcclusionQueries = NULL;
+CQuakeZone *OcclusionsHeap = NULL;
+d3d_occlusionquery_t **d3d_OcclusionQueries = NULL;
 int d3d_NumOcclusionQueries = 0;
 int numoccluded = 0;
 
@@ -767,16 +879,18 @@ void D3D_RegisterOcclusionQuery (entity_t *ent)
 		if (ent->occlusion) return;
 	}
 
-	if (!Pool_Occlusions)
+	if (!OcclusionsHeap)
 	{
-		Pool_Occlusions = new CSpaceBuffer ("Occlusion Queries", 4, POOL_PERMANENT);
-		d3d_OcclusionQueries = (d3d_occlusionquery_t *) Pool_Occlusions->Alloc (1);
+		OcclusionsHeap = new CQuakeZone ();
+		d3d_OcclusionQueries = (d3d_occlusionquery_t **) OcclusionsHeap->Alloc (MAX_VISEDICTS * sizeof (d3d_occlusionquery_t *));
 		d3d_NumOcclusionQueries = 0;
 	}
 
 	// create a new query
-	Pool_Occlusions->Alloc (sizeof (d3d_occlusionquery_t));
-	ent->occlusion = &d3d_OcclusionQueries[d3d_NumOcclusionQueries++];
+	d3d_occlusionquery_t *q = (d3d_occlusionquery_t *) OcclusionsHeap->Alloc (sizeof (d3d_occlusionquery_t));
+	ent->occlusion = q;
+	d3d_OcclusionQueries[d3d_NumOcclusionQueries] = ent->occlusion;
+	d3d_NumOcclusionQueries++;
 
 	ent->occlusion->Query = NULL;
 	ent->occlusion->State = QUERY_IDLE;
@@ -789,19 +903,19 @@ void D3D_RegisterOcclusionQuery (entity_t *ent)
 
 void D3D_ClearOcclusionQueries (void)
 {
-	if (!Pool_Occlusions) return;
+	if (!OcclusionsHeap) return;
 	if (!d3d_GlobalCaps.supportOcclusion) return;
 
 	for (int i = 0; i < d3d_NumOcclusionQueries; i++)
 	{
-		d3d_OcclusionQueries[i].Entity->occlusion = NULL;
-		d3d_OcclusionQueries[i].Entity->occluded = false;
-		SAFE_RELEASE (d3d_OcclusionQueries[i].Query);
+		d3d_OcclusionQueries[i]->Entity->occlusion = NULL;
+		d3d_OcclusionQueries[i]->Entity->occluded = false;
+		SAFE_RELEASE (d3d_OcclusionQueries[i]->Query);
 	}
 
+	d3d_OcclusionQueries = NULL;
 	d3d_NumOcclusionQueries = 0;
-	Pool_Occlusions->Free ();
-	Pool_Occlusions->Rewind ();
+	SAFE_DELETE (OcclusionsHeap);
 }
 
 
@@ -895,8 +1009,14 @@ void D3D_RunOcclusionQueries (entity_t **ents, int numents)
 		// if there are a small enough number of entities on screen we don't bother either
 		if (d3d_NumAliasEdicts < 5)
 		{
-			// hack for a specific bug in the renderer where if you're in a 90 degree corner and so is a torch, and the viewmodel
-			// pokes into the torch, the torch becomes occluded
+			ents[i]->occluded = false;
+			continue;
+		}
+
+		// if the view is inside the bbox don't check for occlusion on the entity
+		if (R_ViewInsideBBox (ents[i]))
+		{
+			// Con_Printf ("view inside bbox for %s\n", ents[i]->model->name);
 			ents[i]->occluded = false;
 			continue;
 		}
@@ -915,7 +1035,7 @@ void D3D_RunOcclusionQueries (entity_t **ents, int numents)
 		if (!stateset)
 		{
 			// only change state if we need to
-			D3D_SetFVF (D3DFVF_XYZ);
+			D3D_SetVertexDeclaration (d3d_VDXyz);
 			D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
 			D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0);
 			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
@@ -969,7 +1089,7 @@ void D3D_UpdateOcclusionQueries (void)
 	// have the best chance of being available for testing again the next time the entity is visible.
 	for (int i = 0; i < d3d_NumOcclusionQueries; i++)
 	{
-		entity_t *ent = d3d_OcclusionQueries[i].Entity;
+		entity_t *ent = d3d_OcclusionQueries[i]->Entity;
 
 		if (!ent->occlusion) continue;
 		if (ent->effects & EF_NEVEROCCLUDE) continue;
@@ -1014,7 +1134,7 @@ void D3D_RenderAliasModels (void)
 {
 	if (!r_drawentities.integer) return;
 
-	if (!d3d_AliasEdicts) d3d_AliasEdicts = (entity_t **) Pool_Permanent->Alloc (sizeof (entity_t *) * MAX_VISEDICTS);
+	if (!d3d_AliasEdicts) d3d_AliasEdicts = (entity_t **) Zone_Alloc (sizeof (entity_t *) * MAX_VISEDICTS);
 	d3d_NumAliasEdicts = 0;
 
 	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
@@ -1037,6 +1157,7 @@ void D3D_RenderAliasModels (void)
 	if (!d3d_NumAliasEdicts) return;
 
 	// sort the alias edicts by model
+	// (to do - chain these in a list instead to save memory, remove limits and run faster...)
 	qsort
 	(
 		d3d_AliasEdicts,
@@ -1098,7 +1219,7 @@ void R_DrawViewModel (void)
 	}
 
 	// adjust projection to a constant y fov for wide-angle views
-	if (d3d_RenderDef.fov_x >= 84)
+	if (d3d_RenderDef.fov_x > 88.741)
 	{
 		D3DXMATRIX fovmatrix;
 		QD3DXMatrixPerspectiveFovRH (&fovmatrix, D3DXToRadian (68.038704f), ((float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height), 4, 4096);
@@ -1110,7 +1231,7 @@ void R_DrawViewModel (void)
 	D3D_DrawAliasBatch (&ent, 1);
 
 	// restore original projection
-	if (d3d_RenderDef.fov_x >= 84)
+	if (d3d_RenderDef.fov_x >= 90)
 		d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjMatrix);
 
 	if (cl.items & IT_INVISIBILITY)
@@ -1138,10 +1259,10 @@ void D3D_CreateShadeDots (void)
 	if (dotslen != 16384) Sys_Error ("Corrupted dots lump!");
 
 	// create the buffer to hold it
-	r_avertexnormal_dots_lerp = (float **) Pool_Permanent->Alloc (sizeof (float *) * SHADEDOT_QUANT_LERP);
+	r_avertexnormal_dots_lerp = (float **) Zone_Alloc (sizeof (float *) * SHADEDOT_QUANT_LERP);
 
 	for (int i = 0; i < SHADEDOT_QUANT_LERP; i++)
-		r_avertexnormal_dots_lerp[i] = (float *) Pool_Permanent->Alloc (sizeof (float) * 256);
+		r_avertexnormal_dots_lerp[i] = (float *) Zone_Alloc (sizeof (float) * 256);
 
 	// now interpolate between them
 	for (int i = 0, j = 1; i < SHADEDOT_QUANT; i++, j++)

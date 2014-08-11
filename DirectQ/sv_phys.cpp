@@ -63,7 +63,7 @@ void SV_CheckAllEnts (void)
 	edict_t		*check;
 
 	// see if any solid entities are inside the final position
-	check = NEXT_EDICT (SVProgs->Edicts);
+	check = NEXT_EDICT (SVProgs->EdictPointers[0]);
 
 	for (e = 1; e < SVProgs->NumEdicts; e++, check = NEXT_EDICT (check))
 	{
@@ -147,7 +147,7 @@ bool SV_RunThink (edict_t *ent)
 	ent->v.nextthink = 0;
 	SVProgs->GlobalStruct->time = thinktime;
 	SVProgs->GlobalStruct->self = EDICT_TO_PROG(ent);
-	SVProgs->GlobalStruct->other = EDICT_TO_PROG(SVProgs->Edicts);
+	SVProgs->GlobalStruct->other = EDICT_TO_PROG(SVProgs->EdictPointers[0]);
 
 	// now run the think function
 	SVProgs->ExecuteProgram (ent->v.think);
@@ -391,20 +391,57 @@ SV_AddGravity
 
 ============
 */
+// make this 0 by default (compatibility with ID Quake)
+cvar_t sv_fpsindependentgrav ("sv_gameplayfix_gravityunaffectedbyticrate", "0", CVAR_ARCHIVE | CVAR_SERVER);
+
 void SV_AddGravity (edict_t *ent)
 {
-	float	ent_gravity;
+	if (sv_fpsindependentgrav.integer)
+	{
+		float	ent_gravity;
+		eval_t	*val = GETEDICTFIELDVALUEFAST (ent, ed_gravity);
 
-	eval_t	*val;
+		if (val && val->_float)
+			ent_gravity = val->_float;
+		else ent_gravity = 1.0;
 
-	val = GETEDICTFIELDVALUEFAST (ent, ed_gravity);
+		if (ent->gravframe < (host_framecount - 1))
+		{
+			// no previously valid gravity frame to come from so apply full gravity but store half
+			ent->lastgrav = (ent_gravity * sv_gravity.value * host_frametime);
+			ent->v.velocity[2] -= ent->lastgrav;
+			ent->lastgrav /= 2.0f;
+			ent->gravframe = host_framecount;
+		}
+		else
+		{
+			if (ent->gravframe != host_framecount)
+			{
+				// this is the half gravity that's applied after physics have been run, but here we just defer it to the next frame
+				ent->v.velocity[2] -= ent->lastgrav;
+				ent->gravframe = host_framecount;
+			}
 
-	if (val && val->_float)
-		ent_gravity = val->_float;
+			// and this is the half gravity that's applied before physics are run.  it's stored out in lastgrav
+			// so that it can be applied again after physics are run (which can be at any time after, so we defer to the following frame
+			ent->lastgrav = (ent_gravity * sv_gravity.value * host_frametime) / 2.0f;
+			ent->v.velocity[2] -= ent->lastgrav;
+		}
+	}
 	else
-		ent_gravity = 1.0;
+	{
+		float	ent_gravity;
 
-	ent->v.velocity[2] -= ent_gravity * sv_gravity.value * host_frametime;
+		eval_t	*val = GETEDICTFIELDVALUEFAST (ent, ed_gravity);
+
+		if (val && val->_float)
+			ent_gravity = val->_float;
+		else ent_gravity = 1.0;
+
+		ent->v.velocity[2] -= ent_gravity * sv_gravity.value * host_frametime;
+		ent->lastgrav = (ent_gravity * sv_gravity.value * host_frametime) / 2.0f;
+		ent->gravframe = host_framecount;
+	}
 }
 
 
@@ -454,8 +491,8 @@ vec3_t *moved_from = NULL;
 void SV_MakePushBuffers (void)
 {
 	// keep these off the stack - 1 MB (OUCH!)
-	if (!moved_edict) moved_edict = (edict_t **) Pool_Permanent->Alloc (MAX_EDICTS * sizeof (edict_t *));
-	if (!moved_from) moved_from = (vec3_t *) Pool_Permanent->Alloc (MAX_EDICTS * sizeof (vec3_t));
+	if (!moved_edict) moved_edict = (edict_t **) Zone_Alloc (MAX_EDICTS * sizeof (edict_t *));
+	if (!moved_from) moved_from = (vec3_t *) Zone_Alloc (MAX_EDICTS * sizeof (vec3_t));
 }
 
 
@@ -497,7 +534,7 @@ void SV_PushMove (edict_t *pusher, float movetime)
 
 	// see if any solid entities are inside the final position
 	num_moved = 0;
-	check = NEXT_EDICT(SVProgs->Edicts);
+	check = NEXT_EDICT(SVProgs->EdictPointers[0]);
 
 	for (e = 1; e < SVProgs->NumEdicts; e++, check = NEXT_EDICT (check))
 	{
@@ -633,7 +670,7 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 
 // see if any solid entities are inside the final position
 	num_moved = 0;
-	check = NEXT_EDICT(SVProgs->Edicts);
+	check = NEXT_EDICT(SVProgs->EdictPointers[0]);
 
 	for (e=1; e<SVProgs->NumEdicts; e++, check = NEXT_EDICT(check))
 	{
@@ -773,7 +810,7 @@ void SV_Physics_Pusher (edict_t *ent)
 		ent->v.nextthink = 0;
 		SVProgs->GlobalStruct->time = SV_TIME;
 		SVProgs->GlobalStruct->self = EDICT_TO_PROG(ent);
-		SVProgs->GlobalStruct->other = EDICT_TO_PROG(SVProgs->Edicts);
+		SVProgs->GlobalStruct->other = EDICT_TO_PROG(SVProgs->EdictPointers[0]);
 		SVProgs->ExecuteProgram (ent->v.think);
 
 		if (ent->free) return;
@@ -1586,8 +1623,8 @@ void SV_Physics (void)
 	edict_t	*ent;
 
 // let the progs know that a new frame has started
-	SVProgs->GlobalStruct->self = EDICT_TO_PROG(SVProgs->Edicts);
-	SVProgs->GlobalStruct->other = EDICT_TO_PROG(SVProgs->Edicts);
+	SVProgs->GlobalStruct->self = EDICT_TO_PROG(SVProgs->EdictPointers[0]);
+	SVProgs->GlobalStruct->other = EDICT_TO_PROG(SVProgs->EdictPointers[0]);
 	SVProgs->GlobalStruct->time = SV_TIME;
 	SVProgs->ExecuteProgram (SVProgs->GlobalStruct->StartFrame);
 
@@ -1596,7 +1633,7 @@ void SV_Physics (void)
 //
 // treat each object in turn
 //
-	ent = SVProgs->Edicts;
+	ent = SVProgs->EdictPointers[0];
 	for (i=0; i<SVProgs->NumEdicts; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
@@ -1646,7 +1683,7 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	save_frametime = host_frametime;
 	host_frametime = 0.05;
 
-	memcpy(&tempent, ent, sizeof(edict_t));
+	Q_MemCpy(&tempent, ent, sizeof(edict_t));
 	tent = &tempent;
 
 	while (1)

@@ -1,0 +1,40 @@
+DIRECTQ 1.8.4 UPDATE
+--------------------
+
+- Dropped command buffer to 64k (for ref, Aguirre's also uses 64k).
+- Implemented framerate-independent gravity on entities.
+- Removed limit of 256MB on cached objects.
+- Transitioned all rendering from FVF codes to Vertex Declarations.
+- Implemented FPS independent particle gravity.
+- Set 2D drawing filter to point when gl_conscale is 1.
+- Adjusted behaviour of gl_texturemode to optionally take a number from 0 to 5 specifying the mode (saves on typing).
+- Adjusted v_gunangle slightly downward to look more faithful.
+- Restored non-HLSL water warp and made gl_subdivide_size adjustable while the map is running.
+- Fixed possible memory exhaustion with > approx 38836 edicts in a map.
+- Removed old MHQuake hack for preventing progs heap corruption (no longer happens).
+- Fixed bug where keyboard input is seriously lagged when Alt-Tabbed away from a fullscreen window.
+- Bumped max unique sounds to unlimited.
+- Reworked cache system as a reusable object, and implemented on sounds.
+- Reworked MP3 player a little for better robustness and cleaner code.
+- Removed some huge ugliness in progs interpreter.
+- Implemented enhancements to PCX loader.
+- Implemented vertex cache optimization on alias models.
+- Fixed bug where a TGA may sometimes fail to load correctly.
+- Fixed bug where mouse cursor was visible when entering a map and not using DirectInput.
+- Fixed bug where you would be pointing at the sky and wildly spinning when not using DirectInput.
+- Fixed bug where key up events were not being sent for mouse buttons when not using DirectInput.
+- Fixed bug where MP3 music may occasionally loop after 1 or 2 seconds instead of playing the full track.
+- Added capability to stream media container files from the internet.
+- Fixed bug where a TGA texture may occasionally fail to load correctly (e.g. top skybox in 5 Rivers).
+- Replaced idiotic MDL texcoord calculation with something at least 25000 times more sensible.
+- Fixed stupid external texture limitation of 512 textures.
+- Fixed player skin translation bugs and weirdness.
+
+
+
+
+
+
+
+
+

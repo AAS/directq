@@ -27,12 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void R_InitSky (miptex_t *mt);
 void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles);
-void R_GenerateTurbSurface (model_t *mod, msurface_t *surf);
-
-model_t	*loadmodel;
-brushhdr_t *brushmodel;
-
-char	loadname[32];	// for hunk tags
 
 void Mod_LoadSpriteModel (model_t *mod, void *buffer);
 void Mod_LoadBrushModel (model_t *mod, void *buffer);
@@ -71,13 +65,13 @@ Mod_Init
 */
 void Mod_Init (void)
 {
-	mod_known = (model_t **) Pool_Permanent->Alloc (MAX_MOD_KNOWN * sizeof (model_t *));
-	memset (mod_known, 0, MAX_MOD_KNOWN * sizeof (model_t *));
+	mod_known = (model_t **) Zone_Alloc (MAX_MOD_KNOWN * sizeof (model_t *));
+	Q_MemSet (mod_known, 0, MAX_MOD_KNOWN * sizeof (model_t *));
 
-	mod_novis = (byte *) Pool_Permanent->Alloc ((MAX_MAP_LEAFS + 7) / 8);
-	memset (mod_novis, 0xff, (MAX_MAP_LEAFS + 7) / 8);
+	mod_novis = (byte *) Zone_Alloc ((MAX_MAP_LEAFS + 7) / 8);
+	Q_MemSet (mod_novis, 0xff, (MAX_MAP_LEAFS + 7) / 8);
 
-	decompressed = (byte *) Pool_Permanent->Alloc ((MAX_MAP_LEAFS + 7) / 8);
+	decompressed = (byte *) Zone_Alloc ((MAX_MAP_LEAFS + 7) / 8);
 }
 
 
@@ -220,9 +214,9 @@ byte *Mod_FatPVS (vec3_t org)
 	// it's expected that cl.worldmodel will be the same as sv.worldmodel. ;)
 	fatbytes = (cl.worldmodel->brushhdr->numleafs + 31) >> 3;
 
-	if (!fatpvs) fatpvs = (byte *) Pool_Map->Alloc (fatbytes);
+	if (!fatpvs) fatpvs = (byte *) MainHunk->Alloc (fatbytes);
 
-	memset (fatpvs, 0, fatbytes);
+	Q_MemSet (fatpvs, 0, fatbytes);
 	Mod_AddToFatPVS (org, cl.worldmodel->brushhdr->nodes);
 
 	return fatpvs;
@@ -276,7 +270,7 @@ model_t *Mod_FindName (char *name)
 
 		// allocate a model
 		// this is also done for cached models as the mod_known array is managed separately
-		mod_known[i] = (model_t *) Pool_Map->Alloc (sizeof (model_t));
+		mod_known[i] = (model_t *) MainHunk->Alloc (sizeof (model_t));
 
 		Q_strncpy (mod_known[i]->name, name, 63);
 		mod_known[i]->needload = true;
@@ -316,12 +310,12 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	if (!mod->needload) return mod;
 
 	// look for a cached copy
-	model_t *cachemod = (model_t *) Cache_Check (mod->name);
+	model_t *cachemod = (model_t *) MainCache->Check (mod->name);
 
 	if (cachemod)
 	{
 		// did we find it?
-		memcpy (mod, cachemod, sizeof (model_t));
+		Q_MemCpy (mod, cachemod, sizeof (model_t));
 
 		// don't need to load it
 		mod->needload = false;
@@ -330,20 +324,12 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 		return mod;
 	}
 
-	// make the full loading pool available for us again
-	Pool_FileLoad->Rewind ();
-
 	// load the file
-	if (!(buf = (unsigned *) COM_LoadTempFile (mod->name)))
+	if (!(buf = (unsigned *) COM_LoadFile (mod->name)))
 	{
 		if (crash) Host_Error ("Mod_LoadModel: %s not found", mod->name);
 		return NULL;
 	}
-
-	// allocate a new model
-	COM_FileBase (mod->name, loadname);
-
-	loadmodel = mod;
 
 	// call the apropriate loader
 	mod->needload = false;
@@ -372,6 +358,7 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	// eval the radius to get a bounding sphere
 	mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
 
+	Zone_Free (buf);
 	return mod;
 }
 
@@ -401,8 +388,6 @@ model_t *Mod_ForName (char *name, bool crash)
 ===============================================================================
 */
 
-byte	*mod_base;
-
 
 /*
 =================
@@ -411,7 +396,7 @@ Mod_LoadTextures
 */
 miptex_t *W_LoadTextureFromHLWAD (char *wadname, char *texname, miptex_t **mipdata);
 
-void Mod_LoadTextures (lump_t *l, lump_t *e)
+void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 {
 #define MAX_HL_WADS	64
 	int		i, j, num, max, altmax;
@@ -424,7 +409,7 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 
 	if (!l->filelen)
 	{
-		brushmodel->textures = NULL;
+		mod->brushhdr->textures = NULL;
 		return;
 	}
 
@@ -432,7 +417,7 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 	for (i = 0; i < MAX_HL_WADS; i++) hlWADs[i] = NULL;
 
 	// look for WADS in the entities lump
-	if (brushmodel->bspversion == HL_BSPVERSION && e->filelen)
+	if (mod->brushhdr->bspversion == HL_BSPVERSION && e->filelen)
 	{
 		// get a pointer to the start of the lump
 		char *data = (char *) mod_base + e->fileofs;
@@ -501,11 +486,11 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 
 	m->nummiptex = LittleLong (m->nummiptex);
 
-	brushmodel->numtextures = m->nummiptex;
-	brushmodel->textures = (texture_t **) Pool_Map->Alloc (brushmodel->numtextures * sizeof (texture_t *));
-	tx = (texture_t *) Pool_Map->Alloc (sizeof (texture_t) * brushmodel->numtextures);
+	mod->brushhdr->numtextures = m->nummiptex;
+	mod->brushhdr->textures = (texture_t **) MainHunk->Alloc (mod->brushhdr->numtextures * sizeof (texture_t *));
+	tx = (texture_t *) MainHunk->Alloc (sizeof (texture_t) * mod->brushhdr->numtextures);
 
-	for (i = 0; i < m->nummiptex; i++)
+	for (i = 0; i < m->nummiptex; i++, tx++)
 	{
 		miptex_t *hlmip = NULL;
 
@@ -514,7 +499,7 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 		if (m->dataofs[i] == -1)
 		{
 			// set correct notexture here
-			brushmodel->textures[i] = r_notexture_mip;
+			mod->brushhdr->textures[i] = r_notexture_mip;
 			continue;
 		}
 
@@ -526,16 +511,16 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 			mt->offsets[j] = LittleLong (mt->offsets[j]);
 
 		// store out
-		brushmodel->textures[i] = tx;
+		mod->brushhdr->textures[i] = tx;
 
 		// fix 16 char texture names
 		tx->name[16] = 0;
-		memcpy (tx->name, mt->name, sizeof (mt->name));
+		Q_MemCpy (tx->name, mt->name, sizeof (mt->name));
 
 		tx->width = mt->width;
 		tx->height = mt->height;
 
-		if (mt->offsets[0] == 0 && brushmodel->bspversion == HL_BSPVERSION)
+		if (mt->offsets[0] == 0 && mod->brushhdr->bspversion == HL_BSPVERSION)
 		{
 			// texture from a WAD
 			for (j = 0; j < MAX_HL_WADS; j++)
@@ -553,7 +538,7 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 		}
 
 		// switch water indicator for halflife
-		if (brushmodel->bspversion == HL_BSPVERSION && mt->name[0] == '!')
+		if (mod->brushhdr->bspversion == HL_BSPVERSION && mt->name[0] == '!')
 		{
 			mt->name[0] = '*';
 			tx->name[0] = '*';
@@ -597,7 +582,7 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 		}
 		else
 		{
-			if (brushmodel->bspversion == Q1_BSPVERSION)
+			if (mod->brushhdr->bspversion == Q1_BSPVERSION)
 			{
 				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP);
 				tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA);
@@ -611,23 +596,20 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 		}
 
 		if (hlmip) Zone_Free (hlmip);
-
-		// go to next texture
-		tx++;
 	}
 
 	// sequence the animations
 	// this was evil - it crashed to the console if there was an error.  Now it just removes the animation and devprints a message
 	for (i = 0; i < m->nummiptex; i++)
 	{
-		tx = brushmodel->textures[i];
+		tx = mod->brushhdr->textures[i];
 
 		if (!tx || tx->name[0] != '+') continue;
 		if (tx->anim_next) continue;
 
 		// find the number of frames in the animation
-		memset (anims, 0, sizeof (anims));
-		memset (altanims, 0, sizeof (altanims));
+		Q_MemSet (anims, 0, sizeof (anims));
+		Q_MemSet (altanims, 0, sizeof (altanims));
 
 		max = tx->name[1];
 		altmax = 0;
@@ -656,7 +638,7 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 
 		for (j = i + 1; j < m->nummiptex; j++)
 		{
-			tx2 = brushmodel->textures[j];
+			tx2 = mod->brushhdr->textures[j];
 
 			if (!tx2 || tx2->name[0] != '+') continue;
 			if (strcmp (tx2->name + 2, tx->name + 2)) continue;
@@ -748,16 +730,16 @@ Mod_LoadLighting
 */
 extern cvar_t r_coloredlight;
 
-bool Mod_LoadLITFile (lump_t *l)
+bool Mod_LoadLITFile (model_t *mod, lump_t *l)
 {
 	if (!r_coloredlight.value) return false;
-	if (loadmodel->brushhdr->bspversion != Q1_BSPVERSION) return false;
+	if (mod->brushhdr->bspversion != Q1_BSPVERSION) return false;
 
 	HANDLE lithandle = INVALID_HANDLE_VALUE;
 	char litname[128];
 
 	// take a copy to work on
-	Q_strncpy (litname, loadmodel->name, 127);
+	Q_strncpy (litname, mod->name, 127);
 
 	// fixme - we use this in a number of places so we should refactor it out
 	for (int i = strlen (litname) - 1; i; i--)
@@ -803,7 +785,7 @@ bool Mod_LoadLITFile (lump_t *l)
 	}
 
 	// read from the lit file
-	rlen = COM_FReadFile (lithandle, brushmodel->lightdata, l->filelen * 3);
+	rlen = COM_FReadFile (lithandle, mod->brushhdr->lightdata, l->filelen * 3);
 	COM_FCloseFile (&lithandle);
 
 	// return success or failure
@@ -811,7 +793,7 @@ bool Mod_LoadLITFile (lump_t *l)
 }
 
 
-void Mod_LoadLighting (lump_t *l)
+void Mod_LoadLighting (model_t *mod, byte *mod_base, lump_t *l)
 {
 	int i;
 	byte *src;
@@ -819,30 +801,30 @@ void Mod_LoadLighting (lump_t *l)
 
 	if (!l->filelen)
 	{
-		brushmodel->lightdata = NULL;
+		mod->brushhdr->lightdata = NULL;
 		return;
 	}
 
-	if (brushmodel->bspversion == HL_BSPVERSION)
+	if (mod->brushhdr->bspversion == HL_BSPVERSION)
 	{
 		// read direct with no LIT file or no expansion
-		brushmodel->lightdata = (byte *) Pool_Map->Alloc (l->filelen);
-		memcpy (brushmodel->lightdata, mod_base + l->fileofs, l->filelen);
+		mod->brushhdr->lightdata = (byte *) MainHunk->Alloc (l->filelen);
+		Q_MemCpy (mod->brushhdr->lightdata, mod_base + l->fileofs, l->filelen);
 		return;
 	}
 
 	// expand size to 3 component
-	brushmodel->lightdata = (byte *) Pool_Map->Alloc (l->filelen * 3);
+	mod->brushhdr->lightdata = (byte *) MainHunk->Alloc (l->filelen * 3);
 
 	// check for a lit file
-	if (Mod_LoadLITFile (l)) return;
+	if (Mod_LoadLITFile (mod, l)) return;
 
 	// copy to end of the buffer
-	memcpy (&brushmodel->lightdata[l->filelen * 2], mod_base + l->fileofs, l->filelen);
+	Q_MemCpy (&mod->brushhdr->lightdata[l->filelen * 2], mod_base + l->fileofs, l->filelen);
 
 	// set source and dest pointers
-	src = &brushmodel->lightdata[l->filelen * 2];
-	dst = brushmodel->lightdata;
+	src = &mod->brushhdr->lightdata[l->filelen * 2];
+	dst = mod->brushhdr->lightdata;
 
 	// fill in the rest
 	for (i = 0; i < l->filelen; i++)
@@ -859,17 +841,17 @@ void Mod_LoadLighting (lump_t *l)
 Mod_LoadEntities
 =================
 */
-void Mod_LoadEntities (lump_t *l)
+void Mod_LoadEntities (model_t *mod, byte *mod_base, lump_t *l)
 {
 	if (!l->filelen)
 	{
-		brushmodel->entities = NULL;
+		mod->brushhdr->entities = NULL;
 		return;
 	}
 
 	// resolve missing NULL term in entities lump; VPA will automatically 0 the memory so no need to do so ourselves.
-	brushmodel->entities = (char *) Pool_Map->Alloc (l->filelen + 1);
-	memcpy (brushmodel->entities, mod_base + l->fileofs, l->filelen);
+	mod->brushhdr->entities = (char *) MainHunk->Alloc (l->filelen + 1);
+	Q_MemCpy (mod->brushhdr->entities, mod_base + l->fileofs, l->filelen);
 }
 
 
@@ -878,7 +860,7 @@ void Mod_LoadEntities (lump_t *l)
 Mod_LoadVertexes
 =================
 */
-void Mod_LoadVertexes (lump_t *l)
+void Mod_LoadVertexes (model_t *mod, byte *mod_base, lump_t *l)
 {
 	dvertex_t	*in;
 	mvertex_t	*out;
@@ -887,13 +869,13 @@ void Mod_LoadVertexes (lump_t *l)
 	in = (dvertex_t *) (mod_base + l->fileofs);
 
 	if (l->filelen % sizeof(*in))
-		Host_Error ("MOD_LoadBmodel: LUMP_VERTEXES funny lump size in %s", loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_VERTEXES funny lump size in %s", mod->name);
 
 	count = l->filelen / sizeof (*in);
-	out = (mvertex_t *) Pool_Map->Alloc (count * sizeof (*out));	
+	out = (mvertex_t *) MainHunk->Alloc (count * sizeof (*out));	
 
-	brushmodel->vertexes = out;
-	brushmodel->numvertexes = count;
+	mod->brushhdr->vertexes = out;
+	mod->brushhdr->numvertexes = count;
 
 	for (i = 0; i < count; i++, in++, out++)
 	{
@@ -909,7 +891,7 @@ void Mod_LoadVertexes (lump_t *l)
 Mod_LoadSubmodels
 =================
 */
-void Mod_LoadSubmodels (lump_t *l)
+void Mod_LoadSubmodels (model_t *mod, byte *mod_base, lump_t *l)
 {
 	dmodel_t	*in;
 	dmodel_t	*out;
@@ -917,12 +899,12 @@ void Mod_LoadSubmodels (lump_t *l)
 
 	in = (dmodel_t *)(mod_base + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		Host_Error ("MOD_LoadBmodel: LUMP_SUBMODELS funny lump size in %s",loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_SUBMODELS funny lump size in %s",mod->name);
 	count = l->filelen / sizeof(*in);
-	out = (dmodel_t *) Pool_Map->Alloc (count*sizeof(*out));	
+	out = (dmodel_t *) MainHunk->Alloc (count*sizeof(*out));	
 
-	brushmodel->submodels = out;
-	brushmodel->numsubmodels = count;
+	mod->brushhdr->submodels = out;
+	mod->brushhdr->numsubmodels = count;
 
 	for ( i=0; i<count; i++, in++, out++)
 	{
@@ -945,7 +927,7 @@ void Mod_LoadSubmodels (lump_t *l)
 Mod_LoadEdges
 =================
 */
-void Mod_LoadEdges (lump_t *l)
+void Mod_LoadEdges (model_t *mod, byte *mod_base, lump_t *l)
 {
 	dedge_t *in;
 	medge_t *out;
@@ -954,13 +936,13 @@ void Mod_LoadEdges (lump_t *l)
 	in = (dedge_t *) (mod_base + l->fileofs);
 
 	if (l->filelen % sizeof (*in))
-		Host_Error ("MOD_LoadBmodel: LUMP_EDGES funny lump size in %s", loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_EDGES funny lump size in %s", mod->name);
 
 	count = l->filelen / sizeof (dedge_t);
-	out = (medge_t *) Pool_Map->Alloc ((count + 1) * sizeof (medge_t));	
+	out = (medge_t *) MainHunk->Alloc ((count + 1) * sizeof (medge_t));	
 
-	brushmodel->edges = out;
-	brushmodel->numedges = count;
+	mod->brushhdr->edges = out;
+	mod->brushhdr->numedges = count;
 
 	for (i = 0; i < count; i++, in++, out++)
 	{
@@ -975,7 +957,7 @@ void Mod_LoadEdges (lump_t *l)
 Mod_LoadTexinfo
 =================
 */
-void Mod_LoadTexinfo (lump_t *l)
+void Mod_LoadTexinfo (model_t *mod, byte *mod_base, lump_t *l)
 {
 	texinfo_t *in;
 	mtexinfo_t *out;
@@ -986,13 +968,13 @@ void Mod_LoadTexinfo (lump_t *l)
 	in = (texinfo_t *) (mod_base + l->fileofs);
 
 	if (l->filelen % sizeof (texinfo_t))
-		Host_Error ("MOD_LoadBmodel: LUMP_TEXINFO funny lump size in %s",loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_TEXINFO funny lump size in %s",mod->name);
 
 	count = l->filelen / sizeof (texinfo_t);
-	out = (mtexinfo_t *) Pool_Map->Alloc (count * sizeof (mtexinfo_t));
+	out = (mtexinfo_t *) MainHunk->Alloc (count * sizeof (mtexinfo_t));
 
-	brushmodel->texinfo = out;
-	brushmodel->numtexinfo = count;
+	mod->brushhdr->texinfo = out;
+	mod->brushhdr->numtexinfo = count;
 
 	for (i = 0; i < count; i++, in++, out++)
 	{
@@ -1016,16 +998,16 @@ void Mod_LoadTexinfo (lump_t *l)
 		miptex = LittleLong (in->miptex);
 		out->flags = LittleLong (in->flags);
 
-		if (!brushmodel->textures)
+		if (!mod->brushhdr->textures)
 		{
 			out->texture = r_notexture_mip;	// checkerboard texture
 			out->flags = 0;
 		}
 		else
 		{
-			if (miptex >= brushmodel->numtextures)
-				Host_Error ("miptex >= brushmodel->numtextures");
-			out->texture = brushmodel->textures[miptex];
+			if (miptex >= mod->brushhdr->numtextures)
+				Host_Error ("miptex >= mod->brushhdr->numtextures");
+			out->texture = mod->brushhdr->textures[miptex];
 
 			if (!out->texture)
 			{
@@ -1048,7 +1030,7 @@ mh - integrated surf extents and used precalced data
 */
 int MaxExtents[2] = {0, 0};
 
-void Mod_CalcSurfaceBoundsAndExtents (msurface_t *surf)
+void Mod_CalcSurfaceBoundsAndExtents (model_t *mod, msurface_t *surf)
 {
 	float mins[2] = {99999999, 99999999};
 	float maxs[2] = {-99999999, -99999999};
@@ -1056,21 +1038,28 @@ void Mod_CalcSurfaceBoundsAndExtents (msurface_t *surf)
 	surf->mins[0] = surf->mins[1] = surf->mins[2] = 99999999;
 	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -99999999;
 
-	polyvert_t *vert = surf->verts;
-
-	for (int i = 0; i < surf->numverts; i++, vert++)
+	for (int i = 0; i < surf->bspverts; i++)
 	{
+		// needs to regenerate the vert as it may not exist for turb surfaces
+		vec3_t basevert;
+		int lindex = mod->brushhdr->surfedges[surf->firstedge + i];
+
+		// no ; because of macro expansion!!!
+		if (lindex > 0)
+			VectorCopy (mod->brushhdr->vertexes[mod->brushhdr->edges[lindex].v[0]].position, basevert)
+		else VectorCopy (mod->brushhdr->vertexes[mod->brushhdr->edges[-lindex].v[1]].position, basevert)
+
 		float st[2];
 
-		if (surf->mins[0] > vert->basevert[0]) surf->mins[0] = vert->basevert[0];
-		if (surf->mins[1] > vert->basevert[1]) surf->mins[1] = vert->basevert[1];
-		if (surf->mins[2] > vert->basevert[2]) surf->mins[2] = vert->basevert[2];
-		if (surf->maxs[0] < vert->basevert[0]) surf->maxs[0] = vert->basevert[0];
-		if (surf->maxs[1] < vert->basevert[1]) surf->maxs[1] = vert->basevert[1];
-		if (surf->maxs[2] < vert->basevert[2]) surf->maxs[2] = vert->basevert[2];
+		if (surf->mins[0] > basevert[0]) surf->mins[0] = basevert[0];
+		if (surf->mins[1] > basevert[1]) surf->mins[1] = basevert[1];
+		if (surf->mins[2] > basevert[2]) surf->mins[2] = basevert[2];
+		if (surf->maxs[0] < basevert[0]) surf->maxs[0] = basevert[0];
+		if (surf->maxs[1] < basevert[1]) surf->maxs[1] = basevert[1];
+		if (surf->maxs[2] < basevert[2]) surf->maxs[2] = basevert[2];
 
-		st[0] = (DotProduct (vert->basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
-		st[1] = (DotProduct (vert->basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+		st[0] = (DotProduct (basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+		st[1] = (DotProduct (basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
 
 		if (st[0] > maxs[0]) maxs[0] = st[0]; if (st[0] < mins[0]) mins[0] = st[0];
 		if (st[1] > maxs[1]) maxs[1] = st[1]; if (st[1] < mins[1]) mins[1] = st[1];
@@ -1099,26 +1088,75 @@ void Mod_CalcSurfaceBoundsAndExtents (msurface_t *surf)
 }
 
 
+void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf)
+{
+	// just set these up for now, we generate them in the next step
+	surf->verts = (polyvert_t *) MainHunk->Alloc (surf->numverts * sizeof (polyvert_t));
+
+	// keep code cleaner looking
+	brushhdr_t *hdr = mod->brushhdr;
+	polyvert_t *verts = surf->verts;
+
+	VectorClear (surf->midpoint);
+
+	// removing colinear points does *nothing* for performance with this engine.  i know, i tested it.
+	for (int i = 0; i < surf->numverts; i++, verts++)
+	{
+		int lindex = hdr->surfedges[surf->firstedge + i];
+
+		// store a pointer to the base vert so as to cut down on memory usage
+		if (lindex > 0)
+			verts->basevert = hdr->vertexes[hdr->edges[lindex].v[0]].position;
+		else verts->basevert = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+
+		// accumulate into midpoint
+		VectorAdd (surf->midpoint, verts->basevert, surf->midpoint);
+
+		// texcoords
+		verts->st[0] = (DotProduct (verts->basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]) / (float) surf->texinfo->texture->width;
+		verts->st[1] = (DotProduct (verts->basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]) / (float) surf->texinfo->texture->height;
+	}
+
+	// get final mindpoint
+	VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
+
+	// now do the indexes
+	surf->indexes = (unsigned short *) MainHunk->Alloc (surf->numindexes * sizeof (unsigned short));
+	unsigned short *ndx = surf->indexes;
+
+	// index a triangle fan
+	for (int i = 2; i < surf->numverts; i++, ndx += 3)
+	{
+		ndx[0] = 0;
+		ndx[1] = i - 1;
+		ndx[2] = i;
+	}
+
+	// flag for the surf completing vertex allocation
+	surf->flags |= SURF_VERTCOMPLETE;
+}
+
+
 /*
 =================
 Mod_LoadSurfaces
 =================
 */
-void Mod_LoadSurfaces (lump_t *l)
+void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 {
 	dface_t *face = (dface_t *) (mod_base + l->fileofs);
 
 	if (l->filelen % sizeof (*face))
 	{
-		Host_Error ("Mod_LoadSurfaces: LUMP_FACES funny lump size face %s", loadmodel->name);
+		Host_Error ("Mod_LoadSurfaces: LUMP_FACES funny lump size face %s", mod->name);
 		return;
 	}
 
 	int count = l->filelen / sizeof (*face);
-	msurface_t *surf = (msurface_t *) Pool_Map->Alloc (count * sizeof (msurface_t));	
+	msurface_t *surf = (msurface_t *) MainHunk->Alloc (count * sizeof (msurface_t));	
 
-	brushmodel->surfaces = surf;
-	brushmodel->numsurfaces = count;
+	mod->brushhdr->surfaces = surf;
+	mod->brushhdr->numsurfaces = count;
 
 	for (int surfnum = 0; surfnum < count; surfnum++, face++, surf++)
 	{
@@ -1131,28 +1169,31 @@ void Mod_LoadSurfaces (lump_t *l)
 		surf->numindexes = (surf->numverts - 2) * 3;
 		surf->flags = 0;
 
+		// turb surfs need these so that they can recalculate the warp correctly
+		surf->bspverts = surf->numverts;
+
 		if (LittleShort (face->side)) surf->flags |= SURF_PLANEBACK;			
 
-		surf->plane = brushmodel->planes + (unsigned short) (LittleShort (face->planenum));
-		surf->texinfo = brushmodel->texinfo + (unsigned short) LittleShort (face->texinfo);
+		surf->plane = mod->brushhdr->planes + (unsigned short) (LittleShort (face->planenum));
+		surf->texinfo = mod->brushhdr->texinfo + (unsigned short) LittleShort (face->texinfo);
 
 		// lighting info
 		for (int i = 0; i < MAXLIGHTMAPS; i++)
 			surf->styles[i] = face->styles[i];
 
-		if (brushmodel->bspversion == Q1_BSPVERSION)
+		if (mod->brushhdr->bspversion == Q1_BSPVERSION)
 		{
 			// expand offsets for pre-expanded light
 			if (LittleLong (face->lightofs) < 0)
 				surf->samples = NULL;
-			else surf->samples = brushmodel->lightdata + (LittleLong (face->lightofs) * 3);
+			else surf->samples = mod->brushhdr->lightdata + (LittleLong (face->lightofs) * 3);
 		}
 		else
 		{
 			// already rgb
 			if (LittleLong (face->lightofs) < 0)
 				surf->samples = NULL;
-			else surf->samples = brushmodel->lightdata + LittleLong (face->lightofs);
+			else surf->samples = mod->brushhdr->lightdata + LittleLong (face->lightofs);
 		}
 
 		// set the drawing flags flag
@@ -1176,47 +1217,14 @@ void Mod_LoadSurfaces (lump_t *l)
 			// (never used?)
 			surf->extents[0] = surf->extents[1] = 16384;
 			surf->texturemins[0] = surf->texturemins[1] = -8192;
-
-			// subdivide for warps
-			R_GenerateTurbSurface (loadmodel, surf);
 		}
 		else
 		{
-			// just set these up for now, we generate them in the next step
-			surf->verts = (polyvert_t *) Pool_Map->Alloc (surf->numverts * sizeof (polyvert_t));
+			Mod_LoadSurfaceVertexes (mod, surf);
 
-			// keep code cleaner looking
-			brushhdr_t *hdr = loadmodel->brushhdr;
-			polyvert_t *verts = surf->verts;
-
-			VectorClear (surf->midpoint);
-
-			for (int i = 0; i < surf->numverts; i++, verts++)
-			{
-				int lindex = hdr->surfedges[surf->firstedge + i];
-
-				// store a pointer to the base vert so as to cut down on memory usage
-				if (lindex > 0)
-					verts->basevert = hdr->vertexes[hdr->edges[lindex].v[0]].position;
-				else verts->basevert = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
-
-				// accumulate into midpoint
-				VectorAdd (surf->midpoint, verts->basevert, surf->midpoint);
-
-				// texcoords
-				verts->st[0] = (DotProduct (verts->basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]) / (float) surf->texinfo->texture->width;
-				verts->st[1] = (DotProduct (verts->basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]) / (float) surf->texinfo->texture->height;
-			}
-
-			// flag for the surf completing vertex allocation
-			surf->flags |= SURF_VERTCOMPLETE;
-
-			// get final mindpoint
-			VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
+			// surface extents and bounds for frustum culling
+			Mod_CalcSurfaceBoundsAndExtents (mod, surf);
 		}
-
-		// surface extents and bounds for frustum culling
-		Mod_CalcSurfaceBoundsAndExtents (surf);
 
 		// no extents
 		if (surf->flags & SURF_DRAWTURB) continue;
@@ -1237,7 +1245,7 @@ handles visibility, leafs and nodes
 note: this is not really necessary anymore as we have contiguous memory again
 =================
 */
-void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
+void Mod_LoadVisLeafsNodes (model_t *mod, byte *mod_base, lump_t *v, lump_t *l, lump_t *n)
 {
 	dleaf_t 	*lin;
 	mleaf_t 	*lout;
@@ -1250,20 +1258,20 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 	lin = (dleaf_t *) (mod_base + l->fileofs);
 	nin = (dnode_t *) (mod_base + n->fileofs);
 
-	if (l->filelen % sizeof (dleaf_t)) Host_Error ("MOD_LoadBmodel: LUMP_LEAFS funny lump size in %s", loadmodel->name);
-	if (n->filelen % sizeof (dnode_t)) Host_Error ("MOD_LoadBmodel: LUMP_NODES funny lump size in %s", loadmodel->name);
+	if (l->filelen % sizeof (dleaf_t)) Host_Error ("MOD_LoadBmodel: LUMP_LEAFS funny lump size in %s", mod->name);
+	if (n->filelen % sizeof (dnode_t)) Host_Error ("MOD_LoadBmodel: LUMP_NODES funny lump size in %s", mod->name);
 
 	leafcount = l->filelen / sizeof (dleaf_t);
 	nodecount = n->filelen / sizeof (dnode_t);
 
-	brushmodel->numleafs = leafcount;
-	brushmodel->numnodes = nodecount;
+	mod->brushhdr->numleafs = leafcount;
+	mod->brushhdr->numnodes = nodecount;
 
 	// this will crash in-game, so better to take down as gracefully as possible before that
 	// note that this is a map format limitation owing to the use of signed shorts for leaf/node numbers
-	if (brushmodel->numleafs > MAX_MAP_LEAFS)
+	if (mod->brushhdr->numleafs > MAX_MAP_LEAFS)
 	{
-		Host_Error ("Mod_LoadLeafs: brushmodel->numleafs > MAX_MAP_LEAFS");
+		Host_Error ("Mod_LoadLeafs: mod->brushhdr->numleafs > MAX_MAP_LEAFS");
 		return;
 	}
 
@@ -1272,13 +1280,13 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 
 	if (v->filelen)
 	{
-		visdata = (byte *) Pool_Map->Alloc (v->filelen);
-		memcpy (visdata, mod_base + v->fileofs, v->filelen);
+		visdata = (byte *) MainHunk->Alloc (v->filelen);
+		Q_MemCpy (visdata, mod_base + v->fileofs, v->filelen);
 	}
 
 	// nodes and leafs need to be in consecutive memory - see comment in R_LeafVisibility
-	lout = (mleaf_t *) Pool_Map->Alloc ((leafcount * sizeof (mleaf_t)) + (nodecount * sizeof (mnode_t)));
-	brushmodel->leafs = lout;
+	lout = (mleaf_t *) MainHunk->Alloc ((leafcount * sizeof (mleaf_t)) + (nodecount * sizeof (mnode_t)));
+	mod->brushhdr->leafs = lout;
 
 	for (i = 0; i < leafcount; i++, lin++, lout++)
 	{
@@ -1296,7 +1304,7 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 		lout->contents = p;
 
 		// cast to unsigned short to conform to BSP file spec
-		lout->firstmarksurface = brushmodel->marksurfaces + (unsigned short) LittleShort (lin->firstmarksurface);
+		lout->firstmarksurface = mod->brushhdr->marksurfaces + (unsigned short) LittleShort (lin->firstmarksurface);
 		lout->nummarksurfaces = (unsigned short) LittleShort (lin->nummarksurfaces);
 
 		// no visibility yet
@@ -1352,7 +1360,7 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 	}
 
 	// set up nodes in contiguous memory - see comment in R_LeafVisibility
-	brushmodel->nodes = nout = (mnode_t *) lout;
+	mod->brushhdr->nodes = nout = (mnode_t *) lout;
 
 	// load the nodes
 	for (i = 0; i < nodecount; i++, nin++, nout++)
@@ -1368,7 +1376,7 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 		nout->radius = RadiusFromBounds (nout->minmaxs, nout->minmaxs + 3);
 
 		p = LittleLong (nin->planenum);
-		nout->plane = brushmodel->planes + p;
+		nout->plane = mod->brushhdr->planes + p;
 
 		nout->firstsurface = (unsigned short) LittleShort (nin->firstface);
 		nout->numsurfaces = (unsigned short) LittleShort (nin->numfaces);
@@ -1384,27 +1392,27 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 			p = LittleShort (nin->children[j]);
 
 			// hacky fix
-			if (p < -brushmodel->numleafs) p += 65536;
+			if (p < -mod->brushhdr->numleafs) p += 65536;
 
 			if (p >= 0)
 			{
-				if (p >= brushmodel->numnodes) p = brushmodel->numnodes - 1;
+				if (p >= mod->brushhdr->numnodes) p = mod->brushhdr->numnodes - 1;
 
-				nout->children[j] = brushmodel->nodes + p;
-				(brushmodel->nodes + p)->parent = nout;
+				nout->children[j] = mod->brushhdr->nodes + p;
+				(mod->brushhdr->nodes + p)->parent = nout;
 			}
 			else
 			{
-				if ((-1 - p) >= brushmodel->numleafs) p = -brushmodel->numleafs;
+				if ((-1 - p) >= mod->brushhdr->numleafs) p = -mod->brushhdr->numleafs;
 
-				nout->children[j] = (mnode_t *) (brushmodel->leafs + (-1 - p));
-				((mnode_t *) (brushmodel->leafs + (-1 - p)))->parent = nout;
+				nout->children[j] = (mnode_t *) (mod->brushhdr->leafs + (-1 - p));
+				((mnode_t *) (mod->brushhdr->leafs + (-1 - p)))->parent = nout;
 			}
 		}
 	}
 
 	// first node has no parent
-	brushmodel->nodes->parent = NULL;
+	mod->brushhdr->nodes->parent = NULL;
 }
 
 
@@ -1413,7 +1421,7 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 Mod_LoadClipnodes
 =================
 */
-void Mod_LoadClipnodes (lump_t *l)
+void Mod_LoadClipnodes (model_t *mod, byte *mod_base, lump_t *l)
 {
 	dclipnode_t *in, *out;
 	int			i, count;
@@ -1421,20 +1429,20 @@ void Mod_LoadClipnodes (lump_t *l)
 
 	in = (dclipnode_t *)(mod_base + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		Host_Error ("MOD_LoadBmodel: LUMP_CLIPNODES funny lump size in %s",loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_CLIPNODES funny lump size in %s",mod->name);
 	count = l->filelen / sizeof(*in);
-	out = (dclipnode_t *) Pool_Map->Alloc (count * sizeof (*out));	
+	out = (dclipnode_t *) MainHunk->Alloc (count * sizeof (*out));	
 
-	brushmodel->clipnodes = out;
-	brushmodel->numclipnodes = count;
+	mod->brushhdr->clipnodes = out;
+	mod->brushhdr->numclipnodes = count;
 
-	if (brushmodel->bspversion == Q1_BSPVERSION)
+	if (mod->brushhdr->bspversion == Q1_BSPVERSION)
 	{
-		hull = &brushmodel->hulls[1];
+		hull = &mod->brushhdr->hulls[1];
 		hull->clipnodes = out;
 		hull->firstclipnode = 0;
 		hull->lastclipnode = count - 1;
-		hull->planes = brushmodel->planes;
+		hull->planes = mod->brushhdr->planes;
 		hull->clip_mins[0] = -16;
 		hull->clip_mins[1] = -16;
 		hull->clip_mins[2] = -24;
@@ -1442,11 +1450,11 @@ void Mod_LoadClipnodes (lump_t *l)
 		hull->clip_maxs[1] = 16;
 		hull->clip_maxs[2] = 32;
 
-		hull = &brushmodel->hulls[2];
+		hull = &mod->brushhdr->hulls[2];
 		hull->clipnodes = out;
 		hull->firstclipnode = 0;
 		hull->lastclipnode = count - 1;
-		hull->planes = brushmodel->planes;
+		hull->planes = mod->brushhdr->planes;
 		hull->clip_mins[0] = -32;
 		hull->clip_mins[1] = -32;
 		hull->clip_mins[2] = -24;
@@ -1456,11 +1464,11 @@ void Mod_LoadClipnodes (lump_t *l)
 	}
 	else
 	{
-		hull = &brushmodel->hulls[1];
+		hull = &mod->brushhdr->hulls[1];
 		hull->clipnodes = out;
 		hull->firstclipnode = 0;
 		hull->lastclipnode = count - 1;
-		hull->planes = brushmodel->planes;
+		hull->planes = mod->brushhdr->planes;
 		hull->clip_mins[0] = -16;
 		hull->clip_mins[1] = -16;
 		hull->clip_mins[2] = -36;
@@ -1468,11 +1476,11 @@ void Mod_LoadClipnodes (lump_t *l)
 		hull->clip_maxs[1] = 16;
 		hull->clip_maxs[2] = 36;
 
-		hull = &brushmodel->hulls[2];
+		hull = &mod->brushhdr->hulls[2];
 		hull->clipnodes = out;
 		hull->firstclipnode = 0;
 		hull->lastclipnode = count - 1;
-		hull->planes = brushmodel->planes;
+		hull->planes = mod->brushhdr->planes;
 		hull->clip_mins[0] = -32;
 		hull->clip_mins[1] = -32;
 		hull->clip_mins[2] = -32;
@@ -1480,11 +1488,11 @@ void Mod_LoadClipnodes (lump_t *l)
 		hull->clip_maxs[1] = 32;
 		hull->clip_maxs[2] = 32;
 
-		hull = &brushmodel->hulls[3];
+		hull = &mod->brushhdr->hulls[3];
 		hull->clipnodes = out;
 		hull->firstclipnode = 0;
 		hull->lastclipnode = count - 1;
-		hull->planes = brushmodel->planes;
+		hull->planes = mod->brushhdr->planes;
 		hull->clip_mins[0] = -16;
 		hull->clip_mins[1] = -16;
 		hull->clip_mins[2] = -18;
@@ -1508,34 +1516,34 @@ Mod_MakeHull0
 Duplicate the drawing hull structure as a clipping hull
 =================
 */
-void Mod_MakeHull0 (void)
+void Mod_MakeHull0 (model_t *mod)
 {
 	mnode_t		*in, *child;
 	dclipnode_t *out;
 	int			i, j, count;
 	hull_t		*hull;
 	
-	hull = &brushmodel->hulls[0];	
+	hull = &mod->brushhdr->hulls[0];	
 	
-	in = brushmodel->nodes;
-	count = brushmodel->numnodes;
-	out = (dclipnode_t *) Pool_Map->Alloc (count*sizeof(*out));	
+	in = mod->brushhdr->nodes;
+	count = mod->brushhdr->numnodes;
+	out = (dclipnode_t *) MainHunk->Alloc (count*sizeof(*out));	
 
 	hull->clipnodes = out;
 	hull->firstclipnode = 0;
 	hull->lastclipnode = count-1;
-	hull->planes = brushmodel->planes;
+	hull->planes = mod->brushhdr->planes;
 
 	for (i=0; i<count; i++, out++, in++)
 	{
-		out->planenum = in->plane - brushmodel->planes;
+		out->planenum = in->plane - mod->brushhdr->planes;
 		for (j=0; j<2; j++)
 		{
 			child = in->children[j];
 			if (child->contents < 0)
 				out->children[j] = child->contents;
 			else
-				out->children[j] = child - brushmodel->nodes;
+				out->children[j] = child - mod->brushhdr->nodes;
 		}
 	}
 }
@@ -1545,7 +1553,7 @@ void Mod_MakeHull0 (void)
 Mod_LoadMarksurfaces
 =================
 */
-void Mod_LoadMarksurfaces (lump_t *l)
+void Mod_LoadMarksurfaces (model_t *mod, byte *mod_base, lump_t *l)
 {	
 	int		i, j, count;
 	short		*in;
@@ -1553,21 +1561,21 @@ void Mod_LoadMarksurfaces (lump_t *l)
 	
 	in = (short *)(mod_base + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		Host_Error ("MOD_LoadBmodel: LUMP_MARKSURFACES funny lump size in %s",loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_MARKSURFACES funny lump size in %s",mod->name);
 	count = l->filelen / sizeof(*in);
-	out = (msurface_t **) Pool_Map->Alloc (count*sizeof(*out));	
+	out = (msurface_t **) MainHunk->Alloc (count*sizeof(*out));	
 
-	brushmodel->marksurfaces = out;
-	brushmodel->nummarksurfaces = count;
+	mod->brushhdr->marksurfaces = out;
+	mod->brushhdr->nummarksurfaces = count;
 
 	for (i = 0; i < count; i++)
 	{
 		j = (unsigned short) LittleShort (in[i]);
 
-		if (j >= brushmodel->numsurfaces)
+		if (j >= mod->brushhdr->numsurfaces)
 			Host_Error ("Mod_ParseMarksurfaces: bad surface number");
 
-		out[i] = brushmodel->surfaces + j;
+		out[i] = mod->brushhdr->surfaces + j;
 	}
 }
 
@@ -1577,19 +1585,19 @@ void Mod_LoadMarksurfaces (lump_t *l)
 Mod_LoadSurfedges
 =================
 */
-void Mod_LoadSurfedges (lump_t *l)
+void Mod_LoadSurfedges (model_t *mod, byte *mod_base, lump_t *l)
 {	
 	int		i, count;
 	int		*in, *out;
 
 	in = (int *)(mod_base + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		Host_Error ("MOD_LoadBmodel: LUMP_SURFEDGES: funny lump size in %s",loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_SURFEDGES: funny lump size in %s",mod->name);
 	count = l->filelen / sizeof(*in);
-	out = (int *) Pool_Map->Alloc (count*sizeof(*out));	
+	out = (int *) MainHunk->Alloc (count*sizeof(*out));	
 
-	brushmodel->surfedges = out;
-	brushmodel->numsurfedges = count;
+	mod->brushhdr->surfedges = out;
+	mod->brushhdr->numsurfedges = count;
 
 	for ( i=0; i<count; i++)
 		out[i] = LittleLong (in[i]);
@@ -1601,7 +1609,7 @@ void Mod_LoadSurfedges (lump_t *l)
 Mod_LoadPlanes
 =================
 */
-void Mod_LoadPlanes (lump_t *l)
+void Mod_LoadPlanes (model_t *mod, byte *mod_base, lump_t *l)
 {
 	int			i, j;
 	mplane_t	*out;
@@ -1611,15 +1619,15 @@ void Mod_LoadPlanes (lump_t *l)
 	
 	in = (dplane_t *)(mod_base + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		Host_Error ("MOD_LoadBmodel: LUMP_PLANES funny lump size in %s",loadmodel->name);
+		Host_Error ("MOD_LoadBmodel: LUMP_PLANES funny lump size in %s",mod->name);
 
 	count = l->filelen / sizeof(*in);
 
 	// why double the number of planes???
-	out = (mplane_t *) Pool_Map->Alloc (count * 2 * sizeof (mplane_t));	
+	out = (mplane_t *) MainHunk->Alloc (count * 2 * sizeof (mplane_t));	
 	
-	brushmodel->planes = out;
-	brushmodel->numplanes = count;
+	mod->brushhdr->planes = out;
+	mod->brushhdr->numplanes = count;
 
 	for (i = 0; i < count; i++, in++, out++)
 	{
@@ -1646,7 +1654,7 @@ Mod_LoadBrushModel
 */
 void Mod_LoadBrushModel (model_t *mod, void *buffer)
 {
-	loadmodel->type = mod_brush;
+	mod->type = mod_brush;
 
 	dheader_t *header = (dheader_t *) buffer;
 
@@ -1660,34 +1668,33 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	}
 
 	// swap all the lumps
-	mod_base = (byte *) header;
+	byte *mod_base = (byte *) header;
 
 	for (i = 0; i < sizeof (dheader_t) / 4; i++)
 		((int *) header)[i] = LittleLong (((int *) header)[i]);
 
 	// alloc space for a brush header
-	mod->brushhdr = (brushhdr_t *) Pool_Map->Alloc (sizeof (brushhdr_t));
-	brushmodel = mod->brushhdr;
+	mod->brushhdr = (brushhdr_t *) MainHunk->Alloc (sizeof (brushhdr_t));
 
 	// store the version for correct hull checking
-	brushmodel->bspversion = LittleLong (header->version);
+	mod->brushhdr->bspversion = LittleLong (header->version);
 
 	// load into heap
-	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
-	Mod_LoadEdges (&header->lumps[LUMP_EDGES]);
-	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
-	Mod_LoadTextures (&header->lumps[LUMP_TEXTURES], &header->lumps[LUMP_ENTITIES]);
-	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
-	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
-	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
-	Mod_LoadSurfaces (&header->lumps[LUMP_FACES]);
-	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES]);
-	Mod_LoadVisLeafsNodes (&header->lumps[LUMP_VISIBILITY], &header->lumps[LUMP_LEAFS], &header->lumps[LUMP_NODES]);
-	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES]);
-	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
-	Mod_LoadSubmodels (&header->lumps[LUMP_MODELS]);
+	Mod_LoadVertexes (mod, mod_base, &header->lumps[LUMP_VERTEXES]);
+	Mod_LoadEdges (mod, mod_base, &header->lumps[LUMP_EDGES]);
+	Mod_LoadSurfedges (mod, mod_base, &header->lumps[LUMP_SURFEDGES]);
+	Mod_LoadTextures (mod, mod_base, &header->lumps[LUMP_TEXTURES], &header->lumps[LUMP_ENTITIES]);
+	Mod_LoadLighting (mod, mod_base, &header->lumps[LUMP_LIGHTING]);
+	Mod_LoadPlanes (mod, mod_base, &header->lumps[LUMP_PLANES]);
+	Mod_LoadTexinfo (mod, mod_base, &header->lumps[LUMP_TEXINFO]);
+	Mod_LoadSurfaces (mod, mod_base, &header->lumps[LUMP_FACES]);
+	Mod_LoadMarksurfaces (mod, mod_base, &header->lumps[LUMP_MARKSURFACES]);
+	Mod_LoadVisLeafsNodes (mod, mod_base, &header->lumps[LUMP_VISIBILITY], &header->lumps[LUMP_LEAFS], &header->lumps[LUMP_NODES]);
+	Mod_LoadClipnodes (mod, mod_base, &header->lumps[LUMP_CLIPNODES]);
+	Mod_LoadEntities (mod, mod_base, &header->lumps[LUMP_ENTITIES]);
+	Mod_LoadSubmodels (mod, mod_base, &header->lumps[LUMP_MODELS]);
 
-	Mod_MakeHull0 ();
+	Mod_MakeHull0 (mod);
 
 	// regular and alternate animation
 	mod->numframes = 2;
@@ -1700,7 +1707,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	// subsequent passes fill in the submodel slot grabbed at the end of the previous pass.
 	// the last pass doesn't need to grab a submodel slot as everything is already filled in
 	// fucking hell, he wasn't joking!
-	brushhdr_t *smheaders = (brushhdr_t *) Pool_Map->Alloc (sizeof (brushhdr_t) * mod->brushhdr->numsubmodels);
+	brushhdr_t *smheaders = (brushhdr_t *) MainHunk->Alloc (sizeof (brushhdr_t) * mod->brushhdr->numsubmodels);
 
 	for (i = 0; i < mod->brushhdr->numsubmodels; i++)
 	{
@@ -1744,14 +1751,14 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 			model_t *inlinemod = Mod_FindName (name);
 
 			// duplicate the data
-			memcpy (inlinemod, mod, sizeof (model_t));
+			Q_MemCpy (inlinemod, mod, sizeof (model_t));
 
 			// allocate a new header for the model
 			inlinemod->brushhdr = smheaders;
 			smheaders++;
 
 			// copy the header data from the original model
-			memcpy (inlinemod->brushhdr, mod->brushhdr, sizeof (brushhdr_t));
+			Q_MemCpy (inlinemod->brushhdr, mod->brushhdr, sizeof (brushhdr_t));
 
 			// write in the name
 			Q_strncpy (inlinemod->name, name, 63);
@@ -1785,7 +1792,7 @@ float aliasbboxmins[3], aliasbboxmaxs[3];
 
 void Mod_LoadFrameVerts (aliashdr_t *pheader, trivertx_t *verts)
 {
-	drawvertx_t *vertexes = (drawvertx_t *) Cache_Alloc (pheader->vertsperframe * sizeof (drawvertx_t));
+	drawvertx_t *vertexes = (drawvertx_t *) MainCache->Alloc (pheader->vertsperframe * sizeof (drawvertx_t));
 	pheader->vertexes[pheader->nummeshframes] = vertexes;
 
 	for (int i = 0; i < pheader->vertsperframe; i++, vertexes++, verts++)
@@ -1965,7 +1972,7 @@ void Mod_FloodFillSkin (byte *skin, int skinwidth, int skinheight)
 Mod_LoadAllSkins
 ===============
 */
-void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
+void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *pskintype)
 {
 	int		i, j, k;
 	char	name[32];
@@ -1979,10 +1986,11 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 
 	if (pheader->numskins < 1) Host_Error ("Mod_LoadAliasModel: Invalid # of skins: %d\n", pheader->numskins);
 
-	pheader->skins = (aliasskin_t *) Cache_Alloc (pheader->numskins * sizeof (aliasskin_t));
+	pheader->skins = (aliasskin_t *) MainCache->Alloc (pheader->numskins * sizeof (aliasskin_t));
 	s = pheader->skinwidth * pheader->skinheight;
 
 	// don't remove the extension here as Q1 has s_light.mdl and s_light.spr, so we need to differentiate them
+	// dropped skin padding because there are too many special cases
 	for (i = 0; i < pheader->numskins; i++)
 	{
 		// no saved texels
@@ -1990,18 +1998,19 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 
 		if (pskintype->type == ALIAS_SKIN_SINGLE)
 		{
+			// fixme - is this even needed any more (due to padding?)
 			Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
 
 			// save 8 bit texels for the player model to remap
 			// progs/player.mdl is already hardcoded in sv_main so it's ok here too
-			if (!stricmp (loadmodel->name, "progs/player.mdl"))
+			if (!stricmp (mod->name, "progs/player.mdl"))
 			{
-				pheader->skins[i].texels = (byte *) Cache_Alloc (s);
-				memcpy (pheader->skins[i].texels, (byte *) (pskintype + 1), s);
-				loadmodel->flags |= EF_PLAYER;
+				pheader->skins[i].texels = (byte *) MainCache->Alloc (s);
+				Q_MemCpy (pheader->skins[i].texels, (byte *) (pskintype + 1), s);
+				mod->flags |= EF_PLAYER;
 			}
 
-			_snprintf (name, 32, "%s_%i", loadmodel->name, i);
+			_snprintf (name, 32, "%s_%i", mod->name, i);
 
 			pheader->skins[i].texture[0] =
 			pheader->skins[i].texture[1] =
@@ -2012,7 +2021,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 				pheader->skinwidth, 
 				pheader->skinheight,
 				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_PADDABLE
+				IMAGE_MIPMAP | IMAGE_ALIAS
 			);
 
 			// load fullbright
@@ -2025,7 +2034,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 				pheader->skinwidth, 
 				pheader->skinheight,
 				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA | IMAGE_PADDABLE
+				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
 			);
 
 			pskintype = (daliasskintype_t *) ((byte *) (pskintype + 1) + s);
@@ -2044,16 +2053,16 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 			{
 				Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
 
-				if (j == 0 && !stricmp (loadmodel->name, "progs/player.mdl"))
+				if (j == 0 && !stricmp (mod->name, "progs/player.mdl"))
 				{
 					// saving this out doesn't really work as each skin in the group will
 					// overwrite the last.
-					pheader->skins[i].texels = (byte *) Cache_Alloc (s);
-					memcpy (pheader->skins[i].texels, (byte *) (pskintype), s);
-					loadmodel->flags |= EF_PLAYER;
+					pheader->skins[i].texels = (byte *) MainCache->Alloc (s);
+					Q_MemCpy (pheader->skins[i].texels, (byte *) (pskintype), s);
+					mod->flags |= EF_PLAYER;
 				}
 
-				_snprintf (name, 32, "%s_%i_%i", loadmodel->name, i, j);
+				_snprintf (name, 32, "%s_%i_%i", mod->name, i, j);
 
 				// this tries to catch models with > 4 group skins
 				pheader->skins[i].texture[j & 3] = D3D_LoadTexture 
@@ -2062,7 +2071,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 					pheader->skinwidth, 
 					pheader->skinheight,
 					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_PADDABLE
+					IMAGE_MIPMAP | IMAGE_ALIAS
 				);
 
 				// so does this
@@ -2072,7 +2081,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 					pheader->skinwidth, 
 					pheader->skinheight,
 					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA | IMAGE_PADDABLE
+					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
 				);
 
 				pskintype = (daliasskintype_t *) ((byte *) (pskintype) + s);
@@ -2107,7 +2116,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 		Host_Error ("%s has wrong version number (%i should be %i)", mod->name, LittleLong (pinmodel->version), ALIAS_VERSION);
 
 	// alloc the header in the cache
-	aliashdr_t *pheader = (aliashdr_t *) Cache_Alloc (sizeof (aliashdr_t));
+	aliashdr_t *pheader = (aliashdr_t *) MainCache->Alloc (sizeof (aliashdr_t));
 
 	mod->flags = LittleLong (pinmodel->flags);
 	mod->type = mod_alias;
@@ -2140,7 +2149,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 
 	// load the skins
 	daliasskintype_t *pskintype = (daliasskintype_t *) &pinmodel[1];
-	pskintype = (daliasskintype_t *) Mod_LoadAllSkins (pheader, pskintype);
+	pskintype = (daliasskintype_t *) Mod_LoadAllSkins (mod, pheader, pskintype);
 
 	// load base s and t vertices
 	stvert_t *pinstverts = (stvert_t *) pskintype;
@@ -2166,7 +2175,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 
 	// load the frames
 	daliasframetype_t *pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
-	pheader->frames = (maliasframedesc_t *) Cache_Alloc (pheader->numframes * sizeof (maliasframedesc_t));
+	pheader->frames = (maliasframedesc_t *) MainCache->Alloc (pheader->numframes * sizeof (maliasframedesc_t));
 
 	// initial bbox
 	aliasbboxmins[0] = aliasbboxmins[1] = aliasbboxmins[2] = 9999999;
@@ -2187,7 +2196,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	}
 
 	// copy framepointers from the scratch buffer to the final cached copy
-	pheader->vertexes = (drawvertx_t **) Cache_Alloc (pheader->vertexes, pheader->nummeshframes * sizeof (drawvertx_t *));
+	pheader->vertexes = (drawvertx_t **) MainCache->Alloc (pheader->vertexes, pheader->nummeshframes * sizeof (drawvertx_t *));
 
 	// set correct bbox
 	for (int i = 0; i < 3; i++)
@@ -2214,7 +2223,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	mod->aliashdr = pheader;
 
 	// copy it out to the cache
-	Cache_Alloc (mod->name, mod, sizeof (model_t));
+	MainCache->Alloc (mod->name, mod, sizeof (model_t));
 }
 
 
@@ -2225,7 +2234,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 Mod_LoadSpriteFrame
 =================
 */
-void *Mod_LoadSpriteFrame (msprite_t *thespr, void *pin, mspriteframe_t **ppframe, int framenum)
+void *Mod_LoadSpriteFrame (model_t *mod, msprite_t *thespr, void *pin, mspriteframe_t **ppframe, int framenum)
 {
 	dspriteframe_t		*pinframe;
 	mspriteframe_t		*pspriteframe;
@@ -2239,9 +2248,9 @@ void *Mod_LoadSpriteFrame (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	size = width * height * (thespr->version == SPR32_VERSION ? 4 : 1);
 
-	pspriteframe = (mspriteframe_t *) Pool_Cache->Alloc (sizeof (mspriteframe_t));
+	pspriteframe = (mspriteframe_t *) MainCache->Alloc (sizeof (mspriteframe_t));
 
-	memset (pspriteframe, 0, sizeof (mspriteframe_t));
+	Q_MemSet (pspriteframe, 0, sizeof (mspriteframe_t));
 
 	*ppframe = pspriteframe;
 
@@ -2255,7 +2264,7 @@ void *Mod_LoadSpriteFrame (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 	pspriteframe->left = origin[0];
 	pspriteframe->right = width + origin[0];
 
-	_snprintf (name, 64, "%s_%i", loadmodel->name, framenum);
+	_snprintf (name, 64, "%s_%i", mod->name, framenum);
 
 	if (thespr->version == SPR32_VERSION)
 	{
@@ -2276,23 +2285,11 @@ void *Mod_LoadSpriteFrame (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 		width,
 		height,
 		(byte *) (pinframe + 1),
-		IMAGE_MIPMAP | IMAGE_ALPHA | IMAGE_PADDABLE | (thespr->version == SPR32_VERSION ? (IMAGE_SPRITE | IMAGE_32BIT) : IMAGE_SPRITE)
+		IMAGE_MIPMAP | IMAGE_ALPHA | (thespr->version == SPR32_VERSION ? (IMAGE_SPRITE | IMAGE_32BIT) : IMAGE_SPRITE)
 	);
 
-	if (pspriteframe->texture->flags & IMAGE_PADDED)
-	{
-		// unpad texcoords
-		int scaled_width = D3D_PowerOf2Size (width);
-		int scaled_height = D3D_PowerOf2Size (height);
-
-		pspriteframe->s = (float) width / (float) scaled_width;
-		pspriteframe->t = (float) height / (float) scaled_height;
-	}
-	else
-	{
-		pspriteframe->s = 1;
-		pspriteframe->t = 1;
-	}
+	pspriteframe->s = 1;
+	pspriteframe->t = 1;
 
 	return (void *) ((byte *) pinframe + sizeof (dspriteframe_t) + size);
 }
@@ -2303,7 +2300,7 @@ void *Mod_LoadSpriteFrame (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 Mod_LoadSpriteGroup
 =================
 */
-void *Mod_LoadSpriteGroup (msprite_t *thespr, void *pin, mspriteframe_t **ppframe, int framenum)
+void *Mod_LoadSpriteGroup (model_t *mod, msprite_t *thespr, void *pin, mspriteframe_t **ppframe, int framenum)
 {
 	dspritegroup_t		*pingroup;
 	mspritegroup_t		*pspritegroup;
@@ -2316,7 +2313,7 @@ void *Mod_LoadSpriteGroup (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	numframes = LittleLong (pingroup->numframes);
 
-	pspritegroup = (mspritegroup_t *) Pool_Cache->Alloc (sizeof (mspritegroup_t) +
+	pspritegroup = (mspritegroup_t *) MainCache->Alloc (sizeof (mspritegroup_t) +
 				(numframes - 1) * sizeof (pspritegroup->frames[0]));
 
 	pspritegroup->numframes = numframes;
@@ -2325,7 +2322,7 @@ void *Mod_LoadSpriteGroup (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	pin_intervals = (dspriteinterval_t *)(pingroup + 1);
 
-	poutintervals = (float *) Pool_Cache->Alloc (numframes * sizeof (float));
+	poutintervals = (float *) MainCache->Alloc (numframes * sizeof (float));
 
 	pspritegroup->intervals = poutintervals;
 
@@ -2343,7 +2340,7 @@ void *Mod_LoadSpriteGroup (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	for (i = 0; i < numframes; i++)
 	{
-		ptemp = Mod_LoadSpriteFrame (thespr, ptemp, &pspritegroup->frames[i], framenum * 100 + i);
+		ptemp = Mod_LoadSpriteFrame (mod, thespr, ptemp, &pspritegroup->frames[i], framenum * 100 + i);
 	}
 
 	return ptemp;
@@ -2376,7 +2373,7 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer)
 
 	size = sizeof (msprite_t) +	(numframes - 1) * sizeof (psprite->frames);
 
-	psprite = (msprite_t *) Pool_Cache->Alloc (size);
+	psprite = (msprite_t *) MainCache->Alloc (size);
 
 	mod->spritehdr = psprite;
 
@@ -2419,8 +2416,8 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer)
 		psprite->frames[i].type = frametype;
 
 		if (frametype == SPR_SINGLE)
-			pframetype = (dspriteframetype_t *) Mod_LoadSpriteFrame (psprite, pframetype + 1, &psprite->frames[i].frameptr, i);
-		else pframetype = (dspriteframetype_t *) Mod_LoadSpriteGroup (psprite, pframetype + 1, &psprite->frames[i].frameptr, i);
+			pframetype = (dspriteframetype_t *) Mod_LoadSpriteFrame (mod, psprite, pframetype + 1, &psprite->frames[i].frameptr, i);
+		else pframetype = (dspriteframetype_t *) Mod_LoadSpriteGroup (mod, psprite, pframetype + 1, &psprite->frames[i].frameptr, i);
 	}
 
 	// restore the extension so that model reuse works
@@ -2429,7 +2426,7 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer)
 	mod->type = mod_sprite;
 
 	// copy it out to the cache
-	Cache_Alloc (mod->name, mod, sizeof (model_t));
+	MainCache->Alloc (mod->name, mod, sizeof (model_t));
 }
 
 //=============================================================================

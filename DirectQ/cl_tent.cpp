@@ -125,7 +125,7 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 	// find a free beam
 	if (!cl_free_beams)
 	{
-		cl_free_beams = (beam_t *) Pool_Map->Alloc (EXTRA_TEMPENTS * sizeof (beam_t));
+		cl_free_beams = (beam_t *) MainHunk->Alloc (EXTRA_TEMPENTS * sizeof (beam_t));
 
 		for (int i = 1; i < EXTRA_TEMPENTS; i++)
 		{
@@ -559,7 +559,7 @@ entity_t *CL_NewTempEntity (void)
 	if (!cl_free_tempents)
 	{
 		// alloc a new batch of free temp entities if required
-		cl_free_tempents = (tempent_t *) Pool_Map->Alloc (sizeof (tempent_t) * EXTRA_TEMPENTS);
+		cl_free_tempents = (tempent_t *) MainHunk->Alloc (sizeof (tempent_t) * EXTRA_TEMPENTS);
 
 		for (int i = 2; i < EXTRA_TEMPENTS - 1; i++)
 			cl_free_tempents[i - 2].next = &cl_free_tempents[i - 1];
@@ -576,8 +576,7 @@ entity_t *CL_NewTempEntity (void)
 	cl_temp_entities = ent;
 
 	// init the new entity
-	memset (&ent->ent, 0, sizeof (entity_t));
-	ent->ent.colormap = vid.colormap;
+	Q_MemSet (&ent->ent, 0, sizeof (entity_t));
 
 	// done
 	return &ent->ent;
@@ -638,6 +637,8 @@ void CL_UpdateTEnts (void)
 		break;
 	}
 
+	if (!cl_beams) return;
+
 	// update lightning
 	for (beam_t *b = cl_beams; b; b = b->next)
 	{
@@ -677,12 +678,12 @@ void CL_UpdateTEnts (void)
 		}
 		else
 		{
-			yaw = (int) (atan2 (dist[1], dist[0]) * 180 / M_PI);
+			yaw = (int) (atan2 (dist[1], dist[0]) * 180 / D3DX_PI);
 
 			if (yaw < 0) yaw += 360;
 	
 			forward = sqrt (dist[0] * dist[0] + dist[1] * dist[1]);
-			pitch = (int) (atan2 (dist[2], forward) * 180 / M_PI);
+			pitch = (int) (atan2 (dist[2], forward) * 180 / D3DX_PI);
 
 			if (pitch < 0) pitch += 360;
 		}
@@ -703,6 +704,7 @@ void CL_UpdateTEnts (void)
 			ent->angles[1] = yaw;
 			ent->angles[2] = rand () % 360;
 
+			// i is no longer on the outer loop
 			for (int i = 0; i < 3; i++)
 			{
 				org[i] += dist[i] * 30;

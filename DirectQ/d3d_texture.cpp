@@ -28,13 +28,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 cvar_t gl_compressedtextures ("gl_texture_compression", 1, CVAR_ARCHIVE);
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
 cvar_t r_lumatextures ("r_lumaintensity", "1", CVAR_ARCHIVE);
+cvar_alias_t gl_fullbrights ("gl_fullbrights", &r_lumatextures);
 extern cvar_t r_overbright;
 
 LPDIRECT3DTEXTURE9 d3d_CurrentTexture[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 
-// all textures are in their own contiguous memory block
-CSpaceBuffer *Pool_Textures = NULL;
-image_t *d3d_Textures = NULL;
+typedef struct d3d_texture_s
+{
+	image_t *texture;
+	struct d3d_texture_s *next;
+} d3d_texture_t;
+
+d3d_texture_t *d3d_TextureList = NULL;
 int d3d_NumTextures = 0;
 
 void D3D_Kill3DSceneTexture (void);
@@ -49,10 +54,6 @@ LPDIRECT3DTEXTURE9 yahtexture;
 // for palette hackery
 PALETTEENTRY *texturepal = NULL;
 extern PALETTEENTRY lumapal[];
-
-// external textures directory - note - this should be registered before any textures are loaded, otherwise we will attempt to load
-// them from /textures
-cvar_t gl_texturedir ("gl_texturedir", "textures", CVAR_ARCHIVE);
 
 int D3D_PowerOf2Size (int size)
 {
@@ -91,8 +92,6 @@ D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 
 	// disable compression
 	if (!gl_compressedtextures.value) flags |= IMAGE_NOCOMPRESS;
-
-	// visual degradation is unacceptable here
 	if (!(flags & IMAGE_MIPMAP)) flags |= IMAGE_NOCOMPRESS;
 
 	if (flags & IMAGE_ALPHA)
@@ -141,8 +140,6 @@ D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 	return TextureFormat;
 }
 
-
-bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags);
 bool d3d_ImagePadded = false;
 
 void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags)
@@ -155,6 +152,7 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	texture[0] = NULL;
 
 	// check scaling here first
+	// removed np2 support because it can scale textures weirdly on some (all?) drivers
 	scaled.width = D3D_PowerOf2Size (width);
 	scaled.height = D3D_PowerOf2Size (height);
 
@@ -228,7 +226,7 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	}
 	else
 	{
-		FilterFlags |= D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER;
+		FilterFlags |= D3DX_FILTER_LINEAR; //D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER;
 
 		// it's generally assumed that mipmapped textures should also wrap
 		if (flags & IMAGE_MIPMAP) FilterFlags |= (D3DX_FILTER_MIRROR_U | D3DX_FILTER_MIRROR_V);
@@ -246,7 +244,7 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 
 	if (!texturepal)
 	{
-		texturepal = (PALETTEENTRY *) Pool_Permanent->Alloc (256 * sizeof (PALETTEENTRY));
+		texturepal = (PALETTEENTRY *) Zone_Alloc (256 * sizeof (PALETTEENTRY));
 
 		for (int i = 0; i < 256; i++)
 		{
@@ -386,14 +384,6 @@ byte no_match_hash[] = {0x40, 0xB4, 0x54, 0x7D, 0x9D, 0xDA, 0x9D, 0x0B, 0xCF, 0x
 
 image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, int flags)
 {
-	// initialize if required
-	if (!Pool_Textures)
-	{
-		Pool_Textures = new CSpaceBuffer ("Textures", 4, POOL_PERMANENT);
-		d3d_Textures = (image_t *) Pool_Textures->Alloc (0);
-		d3d_NumTextures = 0;
-	}
-
 	// detect water textures
 	if (identifier[0] == '*')
 	{
@@ -427,29 +417,29 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	image_t *freetex = NULL;
 
 	// look for a match
-	for (int i = 0; i < d3d_NumTextures; i++)
+	for (d3d_texture_t *d3dtex = d3d_TextureList; d3dtex; d3dtex = d3dtex->next)
 	{
 		// look for a free slot
-		if (!d3d_Textures[i].d3d_Texture)
+		if (!d3dtex->texture->d3d_Texture)
 		{
 			// got one
-			freetex = &d3d_Textures[i];
+			freetex = d3dtex->texture;
 			continue;
 		}
 
 		// it's not beyond the bounds of possibility that we might have 2 textures with the same
 		// data but different usage, so here we check for it and accomodate it (this will happen with lumas
 		// where the hash will match, so it remains a valid check)
-		if (flags != d3d_Textures[i].flags) continue;
+		if (flags != d3dtex->texture->flags) continue;
 
 		// compare the hash and reuse if it matches
-		if (COM_CheckHash (texhash, d3d_Textures[i].hash))
+		if (COM_CheckHash (texhash, d3dtex->texture->hash))
 		{
 			// set last usage to 0
-			d3d_Textures[i].LastUsage = 0;
+			d3dtex->texture->LastUsage = 0;
 
 			// return it
-			return &d3d_Textures[i];
+			return d3dtex->texture;
 		}
 	}
 
@@ -459,8 +449,13 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	// we either allocate it fresh or we reuse a free slot
 	if (!freetex)
 	{
-		tex = (image_t *) Pool_Textures->Alloc (sizeof (image_t));
-		d3d_NumTextures++;
+		d3d_texture_t *newtex = (d3d_texture_t *) Zone_Alloc (sizeof (d3d_texture_t));
+
+		newtex->next = d3d_TextureList;
+		d3d_TextureList = newtex;
+
+		tex = (image_t *) Zone_Alloc (sizeof (image_t));
+		newtex->texture = tex;
 	}
 	else tex = freetex;
 
@@ -474,7 +469,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	tex->height = height;
 	tex->width = width;
 
-	memcpy (tex->hash, texhash, 16);
+	Q_MemCpy (tex->hash, texhash, 16);
 	strcpy (tex->identifier, identifier);
 
 	// change the identifier so that we can load an external texture properly
@@ -509,9 +504,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	// hack the colour for certain models
 	// fix white line at base of shotgun shells box
 	if (COM_CheckHash (texhash, ShotgunShells))
-		memcpy (tex->data, tex->data + 32 * 31, 32);
-
-	COM_CheckContentDirectory (&gl_texturedir, false);
+		Q_MemCpy (tex->data, tex->data + 32 * 31, 32);
 
 	// try to load an external texture
 	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, tex->identifier, flags);
@@ -524,7 +517,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 			// if we got neither a native nor an external luma we must cancel it and return NULL
 			tex->LastUsage = 666;
 			SAFE_RELEASE (tex->d3d_Texture);
-			memcpy (tex->hash, no_match_hash, 16);
+			Q_MemCpy (tex->hash, no_match_hash, 16);
 			return NULL;
 		}
 
@@ -547,7 +540,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 		{
 			tex->LastUsage = 666;
 			SAFE_RELEASE (tex->d3d_Texture);
-			memcpy (tex->hash, no_match_hash, 16);
+			Q_MemCpy (tex->hash, no_match_hash, 16);
 			return NULL;
 		}
 	}
@@ -600,13 +593,13 @@ void D3D_ReleaseTextures (void)
 	extern image_t d3d_PlayerSkins[];
 
 	// release cached textures
-	for (int i = 0; i < d3d_NumTextures; i++)
+	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
 	{
-		SAFE_RELEASE (d3d_Textures[i].d3d_Texture);
+		SAFE_RELEASE (tex->texture->d3d_Texture);
 
 		// set the hash value to ensure that it will never match
 		// (needed because game changing goes through this path too)
-		memcpy (d3d_Textures[i].hash, no_match_hash, 16);
+		Q_MemCpy (tex->texture->hash, no_match_hash, 16);
 	}
 
 	// release player textures
@@ -641,61 +634,44 @@ void D3D_ReleaseTextures (void)
 }
 
 
-void D3D_PreloadTextures (void)
-{
-	for (int i = 0; i < d3d_NumTextures; i++)
-	{
-		// pull it back to vram
-		if (d3d_Textures[i].d3d_Texture)
-		{
-			// keep the texture hot
-			d3d_Textures[i].d3d_Texture->SetPriority (512);
-			d3d_Textures[i].d3d_Texture->PreLoad ();
-		}
-	}
-}
-
-
 void D3D_FlushTextures (void)
 {
-	return;
-
 	int numflush = 0;
 
 	// sanity check
 	if (gl_maxtextureretention.value < 2) Cvar_Set (&gl_maxtextureretention, 2);
 
-	for (int i = 0; i < d3d_NumTextures; i++)
+	for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
 	{
 		// all textures just loaded in the cache will have lastusage set to 0
 		// incremenent lastusage for types we want to flush.
 		// alias and sprite models are cached between maps so don't ever free them
-		if (d3d_Textures[i].flags & IMAGE_BSP) d3d_Textures[i].LastUsage++;
+		if (tex->texture->flags & IMAGE_BSP) tex->texture->LastUsage++;
 
 		// always preserve these types irrespective
-		if (d3d_Textures[i].flags & IMAGE_PRESERVE) d3d_Textures[i].LastUsage = 0;
+		if (tex->texture->flags & IMAGE_PRESERVE) tex->texture->LastUsage = 0;
 
-		if (d3d_Textures[i].LastUsage < 2 && d3d_Textures[i].d3d_Texture)
+		if (tex->texture->LastUsage < 2 && tex->texture->d3d_Texture)
 		{
 			// assign a higher priority to the texture
-			d3d_Textures[i].d3d_Texture->SetPriority (256);
+			tex->texture->d3d_Texture->SetPriority (256);
 		}
-		else if (d3d_Textures[i].d3d_Texture)
+		else if (tex->texture->d3d_Texture)
 		{
 			// assign a lower priority so that recently loaded textures can be preferred to be kept in vram
-			d3d_Textures[i].d3d_Texture->SetPriority (0);
+			tex->texture->d3d_Texture->SetPriority (0);
 		}
 
-		if (d3d_Textures[i].LastUsage > gl_maxtextureretention.value && d3d_Textures[i].d3d_Texture)
+		if (tex->texture->LastUsage > gl_maxtextureretention.value && tex->texture->d3d_Texture)
 		{
 			// if the texture hasn't been used in 4 maps, we flush it
 			// this means that texture flushes will start happening about exm4
 			// (we might cvar-ize this as an option for players to influence the flushing
 			// policy, *VERY* handy if they have lots of *HUGE* textures.
-			SAFE_RELEASE (d3d_Textures[i].d3d_Texture);
+			SAFE_RELEASE (tex->texture->d3d_Texture);
 
 			// set the hash value to ensure that it will never match
-			memcpy (d3d_Textures[i].hash, no_match_hash, 16);
+			Q_MemCpy (tex->texture->hash, no_match_hash, 16);
 
 			// increment number flushed
 			numflush++;
@@ -703,11 +679,11 @@ void D3D_FlushTextures (void)
 		else
 		{
 			// pull it back to vram
-			if (d3d_Textures[i].d3d_Texture)
+			if (tex->texture->d3d_Texture)
 			{
 				// keep the texture hot
-				d3d_Textures[i].d3d_Texture->SetPriority (512);
-				d3d_Textures[i].d3d_Texture->PreLoad ();
+				tex->texture->d3d_Texture->SetPriority (512);
+				tex->texture->d3d_Texture->PreLoad ();
 			}
 		}
 	}
@@ -726,12 +702,12 @@ bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
 	// rather than using CheckDeviceFormat we actually try to create one and see what happens
 	hr = d3d_Device->CreateTexture
 	(
-		128,
-		128,
+		64,
+		64,
 		1,
 		0,
 		textureformat,
-		D3DPOOL_DEFAULT,
+		D3DPOOL_MANAGED,
 		&tex,
 		NULL
 	);
@@ -818,12 +794,12 @@ void D3D_RescaleLumas (void)
 		r_oldoverbright = r_overbright.integer;
 		r_oldlumatextures = (int) (r_lumatextures.value * 10);
 
-		for (int i = 0; i < d3d_NumTextures; i++)
+		for (d3d_texture_t *tex = d3d_TextureList; tex; tex = tex->next)
 		{
-			if (!d3d_Textures[i].d3d_Texture) continue;
-			if (!(d3d_Textures[i].flags & IMAGE_LUMA)) continue;
+			if (!tex->texture->d3d_Texture) continue;
+			if (!(tex->texture->flags & IMAGE_LUMA)) continue;
 
-			D3D_RescaleIndividualLuma (d3d_Textures[i].d3d_Texture);
+			D3D_RescaleIndividualLuma (tex->texture->d3d_Texture);
 		}
 	}
 }

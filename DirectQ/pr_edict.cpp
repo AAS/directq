@@ -99,8 +99,10 @@ Sets everything to NULL
 */
 void ED_ClearEdict (CProgsDat *Progs, edict_t *e)
 {
-	memset (&e->v, 0, Progs->QC.entityfields * 4);
+	Q_MemSet (&e->v, 0, SVProgs->QC->entityfields * 4);
 	e->tracetimer = -1;
+	e->gravframe = -1;
+	e->lastgrav = 0;
 	e->free = false;
 }
 
@@ -116,7 +118,7 @@ instead of being removed and recreated, which can cause interpolated
 angles and bad trails.
 =================
 */
-edict_t *SV_AllocEdicts (int numedicts);
+void SV_AllocEdicts (int numedicts);
 
 edict_t *ED_Alloc (CProgsDat *Progs)
 {
@@ -189,6 +191,8 @@ void ED_Free (edict_t *ed)
 	SV_UnlinkEdict (ed);		// unlink from world bsp
 
 	ed->free = true;
+	ed->gravframe = -1;
+	ed->lastgrav = 0;
 	ed->v.model = 0;
 	ed->v.takedamage = 0;
 	ed->v.modelindex = 0;
@@ -215,7 +219,7 @@ ddef_t *ED_GlobalAtOfs (int ofs)
 	ddef_t		*def;
 	int			i;
 
-	for (i = 0; i < SVProgs->QC.numglobaldefs; i++)
+	for (i = 0; i < SVProgs->QC->numglobaldefs; i++)
 	{
 		def = &SVProgs->GlobalDefs[i];
 		if (def->ofs == ofs)
@@ -234,7 +238,7 @@ ddef_t *ED_FieldAtOfs (int ofs)
 	ddef_t		*def;
 	int			i;
 
-	for (i = 0; i < SVProgs->QC.numfielddefs; i++)
+	for (i = 0; i < SVProgs->QC->numfielddefs; i++)
 	{
 		def = &SVProgs->FieldDefs[i];
 		if (def->ofs == ofs)
@@ -253,7 +257,7 @@ ddef_t *ED_FindField (char *name)
 	ddef_t		*def;
 	int			i;
 
-	for (i = 0; i < SVProgs->QC.numfielddefs; i++)
+	for (i = 0; i < SVProgs->QC->numfielddefs; i++)
 	{
 		def = &SVProgs->FieldDefs[i];
 		if (!strcmp(SVProgs->Strings + def->s_name,name))
@@ -273,7 +277,7 @@ ddef_t *ED_FindGlobal (char *name)
 	ddef_t		*def;
 	int			i;
 	
-	for (i = 0; i < SVProgs->QC.numglobaldefs; i++)
+	for (i = 0; i < SVProgs->QC->numglobaldefs; i++)
 	{
 		def = &SVProgs->GlobalDefs[i];
 		if (!strcmp(SVProgs->Strings + def->s_name,name))
@@ -293,7 +297,7 @@ dfunction_t *ED_FindFunction (char *name)
 	dfunction_t		*func;
 	int				i;
 
-	for (i = 0; i < SVProgs->QC.numfunctions; i++)
+	for (i = 0; i < SVProgs->QC->numfunctions; i++)
 	{
 		func = &SVProgs->Functions[i];
 		if (!strcmp(SVProgs->Strings + func->s_name,name))
@@ -520,7 +524,7 @@ void ED_Print (edict_t *ed)
 
 	Con_Printf ("\nEDICT %i:\n", GetNumberForEdict(ed));
 
-	for (i = 1; i < SVProgs->QC.numfielddefs; i++)
+	for (i = 1; i < SVProgs->QC->numfielddefs; i++)
 	{
 		d = &SVProgs->FieldDefs[i];
 		name = SVProgs->Strings + d->s_name;
@@ -570,7 +574,7 @@ void ED_Write (FILE *f, edict_t *ed)
 		return;
 	}
 	
-	for (i = 1; i < SVProgs->QC.numfielddefs; i++)
+	for (i = 1; i < SVProgs->QC->numfielddefs; i++)
 	{
 		d = &SVProgs->FieldDefs[i];
 		name = SVProgs->Strings + d->s_name;
@@ -695,7 +699,7 @@ void ED_WriteGlobals (FILE *f)
 
 	fprintf (f,"{\n");
 
-	for (i = 0; i < SVProgs->QC.numglobaldefs; i++)
+	for (i = 0; i < SVProgs->QC->numglobaldefs; i++)
 	{
 		def = &SVProgs->GlobalDefs[i];
 		type = def->type;
@@ -770,7 +774,7 @@ char *ED_NewString (char *string)
 	int		i,l;
 
 	l = strlen (string) + 1;
-	newstring = (char *) Pool_Map->Alloc (l);
+	newstring = (char *) MainHunk->Alloc (l);
 	new_p = newstring;
 
 	for (i=0; i< l; i++)
@@ -884,8 +888,8 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 	init = false;
 
 	// clear it
-	if (ent != SVProgs->Edicts)	// hack
-		memset (&ent->v, 0, SVProgs->QC.entityfields * 4);
+	if (ent != SVProgs->EdictPointers[0])	// hack
+		Q_MemSet (&ent->v, 0, SVProgs->QC->entityfields * 4);
 
 	// go through all the dictionary pairs
 	while (1)
@@ -1060,15 +1064,15 @@ void SV_AddEntityStat (edict_t *ed)
 
 	if (!es)
 	{
-		es = (entitystat_t *) Pool_Map->Alloc (sizeof (entitystat_t));
+		es = (entitystat_t *) MainHunk->Alloc (sizeof (entitystat_t));
 
 		es->next = sv_levelstats.entitystats;
 		sv_levelstats.entitystats = es;
 
-		es->name = (char *) Pool_Map->Alloc (strlen (classname) + 1);
+		es->name = (char *) MainHunk->Alloc (strlen (classname) + 1);
 		strcpy (es->name, classname);
 
-		es->firstword = (char *) Pool_Map->Alloc (strlen (classname) + 1);
+		es->firstword = (char *) MainHunk->Alloc (strlen (classname) + 1);
 		strcpy (es->firstword, classname);
 
 		for (int i = 0;; i++)
@@ -1142,7 +1146,7 @@ to call ED_CallSpawnFunctions () to let the objects initialize themselves.
 */
 void ED_LoadFromFile (char *data)
 {
-	memset (&sv_levelstats, 0, sizeof (levelstats_t));
+	Q_MemSet (&sv_levelstats, 0, sizeof (levelstats_t));
 
 	edict_t		*ent;
 	int			inhibit;
@@ -1235,7 +1239,7 @@ void ED_LoadFromFile (char *data)
 
 	Con_DPrintf ("%i entities with %i inhibited\n", ed_number, inhibit);
 
-	sv_levelstats.sorted = (entitystat_t **) Pool_Map->Alloc (sv_levelstats.numenttypes * sizeof (entitystat_t *));
+	sv_levelstats.sorted = (entitystat_t **) MainHunk->Alloc (sv_levelstats.numenttypes * sizeof (entitystat_t *));
 	int nument = 0;
 
 	for (entitystat_t *find = sv_levelstats.entitystats; find; find = find->next)
@@ -1259,14 +1263,6 @@ void ED_LoadFromFile (char *data)
 	}
 
 	sv_levelstats.entitystats = sv_levelstats.sorted[0];
-}
-
-
-void *PR_LoadProgsLump (byte *lumpbegin, int lumplen, int lumpitemsize)
-{
-	byte *lumpdata = (byte *) Pool_Map->Alloc (lumplen * lumpitemsize);
-	memcpy (lumpdata, lumpbegin, lumplen * lumpitemsize);
-	return lumpdata;
 }
 
 
@@ -1317,17 +1313,10 @@ edict_t *GetEdictForNumber (int n)
 	if (n < 0 || n >= SVProgs->MaxEdicts)
 		Host_Error ("GetEdictForNumber: bad number %i (max: %i)", n, SVProgs->MaxEdicts);
 
-	return (edict_t *) ((byte *) SVProgs->Edicts + (n) * SVProgs->EdictSize);
+	return SVProgs->EdictPointers[n];
 }
 
 int GetNumberForEdict (edict_t *e)
 {
-	int		b;
-	
-	b = (byte *)e - (byte *)SVProgs->Edicts;
-	b = b / SVProgs->EdictSize;
-	
-	if (b < 0 || b >= SVProgs->NumEdicts)
-		Sys_Error ("GetNumberForEdict: bad pointer");
-	return b;
+	return e->ednum;
 }

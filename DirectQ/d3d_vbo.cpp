@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-#define D3D_MAX_VBO_SIZE 65535
+#define D3D_MAX_VBO_SIZE 65534
 
 
 #define D3D_VBO_VERT_SIZE	32
@@ -42,14 +42,29 @@ typedef struct d3d_vbo_shader_texture_s
 	DWORD AlphaArg2;
 } d3d_vbo_shader_texture_t;
 
+typedef struct d3d_vbo_effect_s
+{
+	xcommand_t SetupCallback;
+	xcommand_t StateChangeCallback;
+	xcommand_t ShutdownCallback;
+} d3d_vbo_effect_t;
+
+#define SHADER_TYPE_FIXED	1
+#define SHADER_TYPE_HLSL	2
+
 typedef struct d3d_vbo_shader_s
 {
-	d3d_vbo_shader_texture_t Stages[3];
+	union
+	{
+		d3d_vbo_effect_t Effect;
+		d3d_vbo_shader_texture_t Stages[3];
+	};
 
 	int FirstVert;
 	int FirstIndex;
 	int NumVerts;
 	int NumIndexes;
+	int Type;
 } d3d_vbo_shader_t;
 
 
@@ -349,12 +364,35 @@ BOOL D3D_AreBuffersFull (int numverts, int numindexes)
 }
 
 
+void D3D_VBOAddShader (xcommand_t SetupCallback, xcommand_t StateChangeCallback, xcommand_t ShutdownCallback)
+{
+	assert (SetupCallback);
+	assert (StateChangeCallback);
+	assert (ShutdownCallback);
+
+	// always added
+	d3d_VBOState.CurrShader = &d3d_VBOState.Shaders[d3d_VBOState.NumShaders];
+	d3d_VBOState.NumShaders++;
+
+	d3d_VBOState.CurrShader->Type = SHADER_TYPE_HLSL;
+	d3d_VBOState.CurrShader->FirstIndex = d3d_VBOState.NumIndexes;
+	d3d_VBOState.CurrShader->FirstVert = d3d_VBOState.NumVerts;
+	d3d_VBOState.CurrShader->NumIndexes = 0;
+	d3d_VBOState.CurrShader->NumVerts = 0;
+
+	d3d_VBOState.CurrShader->Effect.SetupCallback = SetupCallback;
+	d3d_VBOState.CurrShader->Effect.StateChangeCallback = StateChangeCallback;
+	d3d_VBOState.CurrShader->Effect.ShutdownCallback = ShutdownCallback;
+}
+
+
 void D3D_VBOAddShader (d3d_shader_t *Shader, LPDIRECT3DTEXTURE9 Stage0Tex, LPDIRECT3DTEXTURE9 Stage1Tex, LPDIRECT3DTEXTURE9 Stage2Tex)
 {
 	// if there's no current shader we need to add one anyway
 	if (d3d_VBOState.CurrShader)
 	{
 		// only add the new shader if the textures change
+		if (d3d_VBOState.CurrShader->Type != SHADER_TYPE_FIXED) goto NewShader;
 		if (Stage0Tex != d3d_VBOState.CurrShader->Stages[0].Tex) goto NewShader;
 		if (Stage1Tex != d3d_VBOState.CurrShader->Stages[1].Tex) goto NewShader;
 		if (Stage2Tex != d3d_VBOState.CurrShader->Stages[2].Tex) goto NewShader;
@@ -367,6 +405,7 @@ NewShader:;
 	d3d_VBOState.CurrShader = &d3d_VBOState.Shaders[d3d_VBOState.NumShaders];
 	d3d_VBOState.NumShaders++;
 
+	d3d_VBOState.CurrShader->Type = SHADER_TYPE_FIXED;
 	d3d_VBOState.CurrShader->FirstIndex = d3d_VBOState.NumIndexes;
 	d3d_VBOState.CurrShader->FirstVert = d3d_VBOState.NumVerts;
 	d3d_VBOState.CurrShader->NumIndexes = 0;
@@ -389,151 +428,121 @@ NewShader:;
 }
 
 
-#define EMIT_SURF_VERT(d, s) \
-	dst[d].xyz[0] = src[s].basevert[0]; \
-	dst[d].xyz[1] = src[s].basevert[1]; \
-	dst[d].xyz[2] = src[s].basevert[2]; \
-	dst[d].st[0] = src[s].st[0]; \
-	dst[d].st[1] = src[s].st[1]; \
-	dst[d].lm[0] = src[s].lm[0]; \
-	dst[d].lm[1] = src[s].lm[1];
+#define D3D_EmitSingleSurfaceFullVert(d, s) \
+	D3D_EmitSingleSurfaceVert (src[s].basevert, dst[d].xyz, m); \
+	D3D_EmitSingleSurfaceTexCoord (src[s].st, dst[d].st); \
+	D3D_EmitSingleSurfaceTexCoord (src[s].lm, dst[d].lm);
 
-#define EMIT_SURF_TRANSFORMED_VERT(d, s) \
-	dst[d].xyz[0] = src[s].basevert[0] * m->_11 + src[s].basevert[1] * m->_21 + src[s].basevert[2] * m->_31 + m->_41; \
-	dst[d].xyz[1] = src[s].basevert[0] * m->_12 + src[s].basevert[1] * m->_22 + src[s].basevert[2] * m->_32 + m->_42; \
-	dst[d].xyz[2] = src[s].basevert[0] * m->_13 + src[s].basevert[1] * m->_23 + src[s].basevert[2] * m->_33 + m->_43; \
-	dst[d].st[0] = src[s].st[0]; \
-	dst[d].st[1] = src[s].st[1]; \
-	dst[d].lm[0] = src[s].lm[0]; \
-	dst[d].lm[1] = src[s].lm[1];
+void D3D_VBOEmitIndexes (unsigned short *src, unsigned short *dst, int num, int base)
+{
+	if (num == 3)
+	{
+		dst[0] = src[0] + base;
+		dst[1] = src[1] + base;
+		dst[2] = src[2] + base;
+	}
+	else if (num == 4)
+	{
+		dst[0] = src[0] + base;
+		dst[1] = src[1] + base;
+		dst[2] = src[2] + base;
+		dst[3] = src[3] + base;
+	}
+	else if (!(num & 7))
+	{
+		for (int i = 0; i < num; i += 8, src += 8, dst += 8)
+		{
+			dst[0] = src[0] + base;
+			dst[1] = src[1] + base;
+			dst[2] = src[2] + base;
+			dst[3] = src[3] + base;
+
+			dst[4] = src[4] + base;
+			dst[5] = src[5] + base;
+			dst[6] = src[6] + base;
+			dst[7] = src[7] + base;
+		}
+	}
+	else if (!(num & 3))
+	{
+		for (int i = 0; i < num; i += 4, src += 4, dst += 4)
+		{
+			dst[0] = src[0] + base;
+			dst[1] = src[1] + base;
+			dst[2] = src[2] + base;
+			dst[3] = src[3] + base;
+
+			dst[4] = src[4] + base;
+			dst[5] = src[5] + base;
+			dst[6] = src[6] + base;
+			dst[7] = src[7] + base;
+		}
+	}
+	else
+	{
+		for (int i = 0; i < num; i++)
+			dst[i] = src[i] + base;
+	}
+}
+
 
 void D3D_VBOAddSurfaceVerts (msurface_t *surf)
 {
 	if (!d3d_VBOState.CurrShader) return;
+	if (!surf->numverts) return;
 
 	polyvert_t *src = surf->verts;
 	brushpolyvert_t *dst = (brushpolyvert_t *) (d3d_VBOState.VBOData + d3d_VBOState.NumVerts * sizeof (brushpolyvert_t));
 	D3DMATRIX *m = surf->matrix;
 
-	if (m)
+	if (surf->numverts == 3)
 	{
-		if (surf->numverts == 3)
+		D3D_EmitSingleSurfaceFullVert (0, 0);
+		D3D_EmitSingleSurfaceFullVert (1, 1);
+		D3D_EmitSingleSurfaceFullVert (2, 2);
+	}
+	else if (surf->numverts == 4)
+	{
+		D3D_EmitSingleSurfaceFullVert (0, 0);
+		D3D_EmitSingleSurfaceFullVert (1, 1);
+		D3D_EmitSingleSurfaceFullVert (2, 2);
+		D3D_EmitSingleSurfaceFullVert (3, 3);
+	}
+	else if (!(surf->numverts & 7))
+	{
+		for (int v = 0; v < surf->numverts; v += 8, src += 8, dst += 8)
 		{
-			EMIT_SURF_TRANSFORMED_VERT (0, 0);
-			EMIT_SURF_TRANSFORMED_VERT (1, 1);
-			EMIT_SURF_TRANSFORMED_VERT (2, 2);
+			D3D_EmitSingleSurfaceFullVert (0, 0);
+			D3D_EmitSingleSurfaceFullVert (1, 1);
+			D3D_EmitSingleSurfaceFullVert (2, 2);
+			D3D_EmitSingleSurfaceFullVert (3, 3);
+			D3D_EmitSingleSurfaceFullVert (4, 4);
+			D3D_EmitSingleSurfaceFullVert (5, 5);
+			D3D_EmitSingleSurfaceFullVert (6, 6);
+			D3D_EmitSingleSurfaceFullVert (7, 7);
 		}
-		else if (surf->numverts == 4)
+	}
+	else if (!(surf->numverts & 3))
+	{
+		for (int v = 0; v < surf->numverts; v += 4, src += 4, dst += 4)
 		{
-			EMIT_SURF_TRANSFORMED_VERT (0, 0);
-			EMIT_SURF_TRANSFORMED_VERT (1, 1);
-			EMIT_SURF_TRANSFORMED_VERT (2, 2);
-			EMIT_SURF_TRANSFORMED_VERT (3, 3);
-		}
-		else if (!(surf->numverts & 7))
-		{
-			for (int v = 0; v < surf->numverts; v += 8, src += 8, dst += 8)
-			{
-				EMIT_SURF_TRANSFORMED_VERT (0, 0);
-				EMIT_SURF_TRANSFORMED_VERT (1, 1);
-				EMIT_SURF_TRANSFORMED_VERT (2, 2);
-				EMIT_SURF_TRANSFORMED_VERT (3, 3);
-				EMIT_SURF_TRANSFORMED_VERT (4, 4);
-				EMIT_SURF_TRANSFORMED_VERT (5, 5);
-				EMIT_SURF_TRANSFORMED_VERT (6, 6);
-				EMIT_SURF_TRANSFORMED_VERT (7, 7);
-			}
-		}
-		else if (!(surf->numverts & 3))
-		{
-			for (int v = 0; v < surf->numverts; v += 4, src += 4, dst += 4)
-			{
-				EMIT_SURF_TRANSFORMED_VERT (0, 0);
-				EMIT_SURF_TRANSFORMED_VERT (1, 1);
-				EMIT_SURF_TRANSFORMED_VERT (2, 2);
-				EMIT_SURF_TRANSFORMED_VERT (3, 3);
-			}
-		}
-		else
-		{
-			for (int v = 0; v < surf->numverts; v++, src++, dst++)
-			{
-				dst->xyz[0] = src->basevert[0] * m->_11 + src->basevert[1] * m->_21 + src->basevert[2] * m->_31 + m->_41;
-				dst->xyz[1] = src->basevert[0] * m->_12 + src->basevert[1] * m->_22 + src->basevert[2] * m->_32 + m->_42;
-				dst->xyz[2] = src->basevert[0] * m->_13 + src->basevert[1] * m->_23 + src->basevert[2] * m->_33 + m->_43;
-
-				dst->st[0] = src->st[0];
-				dst->st[1] = src->st[1];
-
-				dst->lm[0] = src->lm[0];
-				dst->lm[1] = src->lm[1];
-			}
+			D3D_EmitSingleSurfaceFullVert (0, 0);
+			D3D_EmitSingleSurfaceFullVert (1, 1);
+			D3D_EmitSingleSurfaceFullVert (2, 2);
+			D3D_EmitSingleSurfaceFullVert (3, 3);
 		}
 	}
 	else
 	{
-		if (surf->numverts == 3)
+		for (int v = 0; v < surf->numverts; v++, src++, dst++)
 		{
-			EMIT_SURF_VERT (0, 0);
-			EMIT_SURF_VERT (1, 1);
-			EMIT_SURF_VERT (2, 2);
-		}
-		else if (surf->numverts == 4)
-		{
-			EMIT_SURF_VERT (0, 0);
-			EMIT_SURF_VERT (1, 1);
-			EMIT_SURF_VERT (2, 2);
-			EMIT_SURF_VERT (3, 3);
-		}
-		else if (!(surf->numverts & 7))
-		{
-			for (int v = 0; v < surf->numverts; v += 8, src += 8, dst += 8)
-			{
-				EMIT_SURF_VERT (0, 0);
-				EMIT_SURF_VERT (1, 1);
-				EMIT_SURF_VERT (2, 2);
-				EMIT_SURF_VERT (3, 3);
-				EMIT_SURF_VERT (4, 4);
-				EMIT_SURF_VERT (5, 5);
-				EMIT_SURF_VERT (6, 6);
-				EMIT_SURF_VERT (7, 7);
-			}
-		}
-		else if (!(surf->numverts & 3))
-		{
-			for (int v = 0; v < surf->numverts; v += 4, src += 4, dst += 4)
-			{
-				EMIT_SURF_VERT (0, 0);
-				EMIT_SURF_VERT (1, 1);
-				EMIT_SURF_VERT (2, 2);
-				EMIT_SURF_VERT (3, 3);
-			}
-		}
-		else
-		{
-			for (int v = 0; v < surf->numverts; v++, src++, dst++)
-			{
-				dst->xyz[0] = src->basevert[0];
-				dst->xyz[1] = src->basevert[1];
-				dst->xyz[2] = src->basevert[2];
-
-				dst->st[0] = src->st[0];
-				dst->st[1] = src->st[1];
-
-				dst->lm[0] = src->lm[0];
-				dst->lm[1] = src->lm[1];
-			}
+			D3D_EmitSingleSurfaceVert (src->basevert, dst->xyz, m);
+			D3D_EmitSingleSurfaceTexCoord (src->st, dst->st);
+			D3D_EmitSingleSurfaceTexCoord (src->lm, dst->lm);
 		}
 	}
 
-	unsigned short *ndx = &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes];
-
-	for (int v = 2; v < surf->numverts; v++, ndx += 3)
-	{
-		ndx[0] = d3d_VBOState.NumVerts;
-		ndx[1] = d3d_VBOState.NumVerts + v - 1;
-		ndx[2] = d3d_VBOState.NumVerts + v;
-	}
+	D3D_VBOEmitIndexes (surf->indexes, &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes], surf->numindexes, d3d_VBOState.NumVerts);
 
 	d3d_VBOState.NumVerts += surf->numverts;
 	d3d_VBOState.NumIndexes += surf->numindexes;
@@ -646,39 +655,7 @@ void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, al
 			EMIT_ALIAS_VERT (dst, src);
 	}
 
-	unsigned short *ind = part->indexes;
-	unsigned short *ndx = &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes];
-
-	if (!(part->numindexes & 7))
-	{
-		for (int i = 0; i < part->numindexes; i += 8, ind += 8, ndx += 8)
-		{
-			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
-			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
-			ndx[2] = ind[2] + d3d_VBOState.NumVerts;
-			ndx[3] = ind[3] + d3d_VBOState.NumVerts;
-
-			ndx[4] = ind[4] + d3d_VBOState.NumVerts;
-			ndx[5] = ind[5] + d3d_VBOState.NumVerts;
-			ndx[6] = ind[6] + d3d_VBOState.NumVerts;
-			ndx[7] = ind[7] + d3d_VBOState.NumVerts;
-		}
-	}
-	else if (!(part->numindexes & 3))
-	{
-		for (int i = 0; i < part->numindexes; i += 4, ind += 4, ndx += 4)
-		{
-			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
-			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
-			ndx[2] = ind[2] + d3d_VBOState.NumVerts;
-			ndx[3] = ind[3] + d3d_VBOState.NumVerts;
-		}
-	}
-	else
-	{
-		for (int i = 0; i < part->numindexes; i++)
-			ndx[i] = part->indexes[i] + d3d_VBOState.NumVerts;
-	}
+	D3D_VBOEmitIndexes (part->indexes, &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes], part->numindexes, d3d_VBOState.NumVerts);
 
 	d3d_VBOState.NumVerts += part->nummesh;
 	d3d_VBOState.NumIndexes += part->numindexes;
@@ -731,39 +708,7 @@ void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliaspart_t *part, a
 			EMIT_SHADOW_VERT (dst, src);
 	}
 
-	unsigned short *ind = part->indexes;
-	unsigned short *ndx = &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes];
-
-	if (!(part->numindexes & 7))
-	{
-		for (int i = 0; i < part->numindexes; i += 8, ind += 8, ndx += 8)
-		{
-			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
-			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
-			ndx[2] = ind[2] + d3d_VBOState.NumVerts;
-			ndx[3] = ind[3] + d3d_VBOState.NumVerts;
-
-			ndx[4] = ind[4] + d3d_VBOState.NumVerts;
-			ndx[5] = ind[5] + d3d_VBOState.NumVerts;
-			ndx[6] = ind[6] + d3d_VBOState.NumVerts;
-			ndx[7] = ind[7] + d3d_VBOState.NumVerts;
-		}
-	}
-	else if (!(part->numindexes & 3))
-	{
-		for (int i = 0; i < part->numindexes; i += 4, ind += 4, ndx += 4)
-		{
-			ndx[0] = ind[0] + d3d_VBOState.NumVerts;
-			ndx[1] = ind[1] + d3d_VBOState.NumVerts;
-			ndx[2] = ind[2] + d3d_VBOState.NumVerts;
-			ndx[3] = ind[3] + d3d_VBOState.NumVerts;
-		}
-	}
-	else
-	{
-		for (int i = 0; i < part->numindexes; i++)
-			ndx[i] = part->indexes[i] + d3d_VBOState.NumVerts;
-	}
+	D3D_VBOEmitIndexes (part->indexes, &d3d_VBOState.IBOData[d3d_VBOState.NumIndexes], part->numindexes, d3d_VBOState.NumVerts);
 
 	d3d_VBOState.NumVerts += part->nummesh;
 	d3d_VBOState.NumIndexes += part->numindexes;
@@ -783,34 +728,63 @@ void D3D_VBORender (void)
 
 	D3D_VBOSetVBOStream (d3d_VBOState.VBO, d3d_VBOState.IBO, d3d_VBOState.Stride);
 	d3d_vbo_shader_t *CurrShader = d3d_VBOState.Shaders;
+	d3d_vbo_shader_t *PrevShader = NULL;
 
 	for (int i = 0; i < d3d_VBOState.NumShaders; i++, CurrShader++)
 	{
 		if (!CurrShader->NumVerts) continue;
 
-		for (int s = 0; s < 3; s++)
+		if (CurrShader->Type == SHADER_TYPE_FIXED)
 		{
-			D3D_SetTexture (s, CurrShader->Stages[s].Tex);
+			// shut down a previous HLSL shader if moving to fixed
+			if (PrevShader && PrevShader->Type == SHADER_TYPE_HLSL)
+				PrevShader->Effect.ShutdownCallback ();
 
-			D3D_SetTextureState (s, D3DTSS_COLOROP, CurrShader->Stages[s].ColorOp);
-			D3D_SetTextureState (s, D3DTSS_COLORARG1, CurrShader->Stages[s].ColorArg1);
-			D3D_SetTextureState (s, D3DTSS_COLORARG2, CurrShader->Stages[s].ColorArg2);
+			for (int s = 0; s < 3; s++)
+			{
+				D3D_SetTexture (s, CurrShader->Stages[s].Tex);
 
-			D3D_SetTextureState (s, D3DTSS_ALPHAOP, CurrShader->Stages[s].AlphaOp);
-			D3D_SetTextureState (s, D3DTSS_ALPHAARG1, CurrShader->Stages[s].AlphaArg1);
-			D3D_SetTextureState (s, D3DTSS_ALPHAARG2, CurrShader->Stages[s].AlphaArg2);
+				D3D_SetTextureState (s, D3DTSS_COLOROP, CurrShader->Stages[s].ColorOp);
+				D3D_SetTextureState (s, D3DTSS_COLORARG1, CurrShader->Stages[s].ColorArg1);
+				D3D_SetTextureState (s, D3DTSS_COLORARG2, CurrShader->Stages[s].ColorArg2);
+
+				D3D_SetTextureState (s, D3DTSS_ALPHAOP, CurrShader->Stages[s].AlphaOp);
+				D3D_SetTextureState (s, D3DTSS_ALPHAARG1, CurrShader->Stages[s].AlphaArg1);
+				D3D_SetTextureState (s, D3DTSS_ALPHAARG2, CurrShader->Stages[s].AlphaArg2);
+			}
+		}
+		else if (CurrShader->Type == SHADER_TYPE_HLSL)
+		{
+			// startup this shader if moving from fixed
+			if (PrevShader && PrevShader->Type != SHADER_TYPE_HLSL)
+				CurrShader->Effect.SetupCallback;
+
+			// change state for this shader
+			CurrShader->Effect.StateChangeCallback ();
+		}
+		else continue;
+
+		// to do - add vbo state here too
+		if (CurrShader->NumIndexes && CurrShader->NumVerts)
+		{
+			d3d_Device->DrawIndexedPrimitive
+			(
+				d3d_VBOState.PrimitiveType,
+				0,
+				CurrShader->FirstVert,
+				CurrShader->NumVerts,
+				CurrShader->FirstIndex,
+				CurrShader->NumIndexes / 3
+			);
 		}
 
-		d3d_Device->DrawIndexedPrimitive
-		(
-			d3d_VBOState.PrimitiveType,
-			0,
-			CurrShader->FirstVert,
-			CurrShader->NumVerts,
-			CurrShader->FirstIndex,
-			CurrShader->NumIndexes / 3
-		);
+		// track the previous shader so that we can switch it off
+		PrevShader = CurrShader;
 	}
+
+	// shut down the last shader if appropriate
+	if (PrevShader && PrevShader->Type == SHADER_TYPE_HLSL)
+		PrevShader->Effect.ShutdownCallback ();
 
 	d3d_VBOState.NumVerts = 0;
 	d3d_VBOState.NumIndexes = 0;
@@ -832,7 +806,7 @@ OverflowVBO:;
 	// render what we've currently got
 	D3D_VBORender ();
 
-	// begin again
+	// begin again (fixme - do we need to add the most recent shader....)
 	D3D_VBOBegin (d3d_VBOState.PrimitiveType, d3d_VBOState.Stride);
 }
 

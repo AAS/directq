@@ -173,7 +173,7 @@ void Host_FindMaxClients (void)
 		svs.maxclientslimit = 4;
 
 	// allocate space for the max clients
-	svs.clients = (client_s *) Pool_Permanent->Alloc (svs.maxclientslimit * sizeof (client_t));
+	svs.clients = (client_s *) Zone_Alloc (svs.maxclientslimit * sizeof (client_t));
 
 	// if we request more than 1 client we set the appropriate game mode
 	if (svs.maxclients > 1)
@@ -204,9 +204,6 @@ Host_WriteConfiguration
 Writes key bindings and archived cvars
 ===============
 */
-extern cvar_t hud_defaulthud;
-extern cvar_t hud_autosave;
-
 void Host_WriteConfiguration (void)
 {
 	FILE	*f;
@@ -253,13 +250,6 @@ void Host_WriteConfiguration (void)
 #else
 		Con_SafePrintf ("Wrote config.cfg\n");
 #endif
-	}
-
-	if (hud_autosave.value)
-	{
-		// save out the user's HUD cfg as well
-		Cbuf_InsertText (va ("savehud %s\n", hud_defaulthud.string));
-		Cbuf_Execute ();
 	}
 }
 
@@ -459,8 +449,8 @@ void Host_ShutdownServer(bool crash)
 			SV_DropClient(crash);
 
 	// clear structures
-	memset (&sv, 0, sizeof(sv));
-	memset (svs.clients, 0, svs.maxclientslimit*sizeof(client_t));
+	Q_MemSet (&sv, 0, sizeof(sv));
+	Q_MemSet (svs.clients, 0, svs.maxclientslimit*sizeof(client_t));
 }
 
 
@@ -503,7 +493,7 @@ void Host_ClearMemory (void)
 	if (signal_cacheclear)
 	{
 		// clear the cache if signalled
-		Pool_Cache->Free ();
+		MainCache->Flush ();
 		signal_cacheclear = false;
 	}
 
@@ -511,12 +501,16 @@ void Host_ClearMemory (void)
 	// queries contain pointers to entities which must be valid
 	D3D_ClearOcclusionQueries ();
 
-	// clear virtual memory pools for the map and any scratch allocations
-	FreeSpaceBuffers (POOL_MAP | POOL_FILELOAD | POOL_TEMP);
+	// clear virtual memory pools for the map
+	MainHunk->Free ();
+
+	// this is not used in the current code but we'll keep it around in case we ever need it
+	SAFE_DELETE (MapZone);
+	MapZone = new CQuakeZone ();
 
 	// wipe the client and server structs
-	memset (&sv, 0, sizeof (sv));
-	memset (&cl, 0, sizeof (cl));
+	Q_MemSet (&sv, 0, sizeof (sv));
+	Q_MemSet (&cl, 0, sizeof (cl));
 }
 
 
@@ -564,7 +558,10 @@ bool Host_FilterTime (DWORD dwTime)
 	dwOldRealTime = dwRealTime;
 
 	if (host_framerate.value > 0)
+	{
+		dwHostFrameTime = host_framerate.value * 1000.0f;
 		host_frametime = host_framerate.value;
+	}
 	else
 	{
 		// don't allow really long or short frames
@@ -649,6 +646,9 @@ void Host_Frame (DWORD time)
 	// process console commands
 	Cbuf_Execute ();
 
+	// check for changes in the sound state
+	S_FrameCheck ();
+
 	NET_Poll ();
 
 	// if running the server locally, make intentions now
@@ -674,10 +674,7 @@ void Host_Frame (DWORD time)
 	// update display
 	SCR_UpdateScreen ();
 
-	// check for changes in the sound state
-	S_FrameCheck ();
-
-	// update dlights (should this move to the end of SCR_UpdateScreen?)
+	// update dlights (should this move to the end of SCR_UpdateScreen?) and sound
 	if (cls.signon == SIGNONS)
 	{
 		CL_DecayLights ();
@@ -686,6 +683,7 @@ void Host_Frame (DWORD time)
 	else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 
 	CDAudio_Update ();
+	MediaPlayer_Update ();
 
 	host_framecount++;
 }
@@ -705,7 +703,6 @@ Host_Init
 */
 void D3D_VidInit (byte *palette);
 bool full_initialized = false;
-extern cvar_t hud_defaulthud;
 void Menu_CommonInit (void);
 void PR_InitBuiltIns (void);
 void Menu_MapsPopulate (void);
@@ -721,7 +718,7 @@ void Host_Init (quakeparms_t *parms)
 	// hold back some things until we're fully up
 	full_initialized = false;
 
-	memcpy (&host_parms, parms, sizeof (quakeparms_t));
+	Q_MemCpy (&host_parms, parms, sizeof (quakeparms_t));
 	// host_parms = *parms;
 
 	com_argc = parms->argc;
@@ -759,14 +756,11 @@ void Host_Init (quakeparms_t *parms)
 	NET_Init ();
 	SV_Init ();
 
-	Con_Printf ("Exe: "__TIME__" "__DATE__"\n");
+	Con_SafePrintf ("Exe: "__TIME__" "__DATE__"\n");
 
 	R_InitTextures ();
- 
-	host_basepal = (byte *) COM_LoadHunkFile ("gfx/palette.lmp");
-	if (!host_basepal) Sys_Error ("Couldn't load gfx/palette.lmp");
-	host_colormap = (byte *) COM_LoadHunkFile ("gfx/colormap.lmp");
-	if (!host_colormap) Sys_Error ("Couldn't load gfx/colormap.lmp");
+
+	if (!W_LoadPalette ()) Sys_Error ("Could not locate Quake on your computer");
 
 	D3D_VidInit (host_basepal);
 
@@ -774,7 +768,7 @@ void Host_Init (quakeparms_t *parms)
 	SCR_Init (); SCR_QuakeIsLoading (2, 9);
 	R_Init (); SCR_QuakeIsLoading (3, 9);
 	S_Init (); SCR_QuakeIsLoading (4, 9);
-	DS_Init (); SCR_QuakeIsLoading (5, 9);
+	MediaPlayer_Init (); SCR_QuakeIsLoading (5, 9);
 	CDAudio_Init (); SCR_QuakeIsLoading (6, 9);
 	HUD_Init (); SCR_QuakeIsLoading (7, 9);
 	CL_Init (); SCR_QuakeIsLoading (8, 9);
@@ -808,7 +802,7 @@ void Host_ShutdownGame (void)
 	Host_WriteConfiguration ();
 
 	CDAudio_Shutdown ();
-	DS_Shutdown ();
+	MediaPlayer_Shutdown ();
 	NET_Shutdown ();
 	S_Shutdown();
 	IN_Shutdown ();

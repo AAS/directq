@@ -271,7 +271,7 @@ void SV_ClearWorld (void)
 {
 	SV_InitBoxHull ();
 	
-	memset (sv_areanodes, 0, sizeof(sv_areanodes));
+	Q_MemSet (sv_areanodes, 0, sizeof(sv_areanodes));
 	sv_numareanodes = 0;
 	SV_CreateAreaNode (0, sv.worldmodel->mins, sv.worldmodel->maxs);
 }
@@ -305,13 +305,7 @@ void SV_TouchLinks (edict_t *ent, areanode_t *node)
 	int	       old_self, old_other, touched = 0, i;
 
 	// Static due to recursive function
-	static edict_t **list = NULL;
-
-	if (!list)
-	{
-		// alloc first time (to keep it off the stack - 256K - ouch!)
-		list = (edict_t **) Pool_Permanent->Alloc (MAX_EDICTS * sizeof (edict_t *));
-	}
+	edict_t **list = (edict_t **) scratchbuf;
 
 loc0:;
 	// ensure
@@ -396,14 +390,14 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 	if (ent->area.prev)
 		SV_UnlinkEdict (ent);	// unlink from old position
 
-	if (ent == SVProgs->Edicts)
+	if (ent == SVProgs->EdictPointers[0])
 		return;		// don't add the world
 
 	if (ent->free)
 		return;
 
 	// set the abs box (omit the world from this...!)
-	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->Edicts)
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
 	{
 		// expand for rotation
 		float		max, v;
@@ -578,7 +572,7 @@ edict_t	*SV_TestEntityPosition (edict_t *ent)
 	trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, ent->v.origin, 0, ent);
 	
 	if (trace.startsolid)
-		return SVProgs->Edicts;
+		return SVProgs->EdictPointers[0];
 		
 	return NULL;
 }
@@ -730,7 +724,7 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	hull_t		*hull;
 
 	// fill in a default trace
-	memset (&trace, 0, sizeof(trace_t));
+	Q_MemSet (&trace, 0, sizeof(trace_t));
 	trace.fraction = 1;
 	trace.allsolid = true;
 	VectorCopy (end, trace.endpos);
@@ -743,7 +737,7 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 
 	// rotate start and end into the models frame of reference - e3m3 has angles[1] == 180 so
 	// don't assume that the world will always have angles 0
-	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->Edicts)
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
 	{
 		vec3_t	a;
 		vec3_t	forward, right, up;
@@ -767,7 +761,7 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 		SV_RecursiveHullCheck (hull, hull->firstclipnode, 0, 1, start_l, end_l, &trace);
 
 	// rotate endpos back to world frame of reference - e3m3 has angles[1] == 180
-	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->Edicts)
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->EdictPointers[0])
 	{
 		vec3_t	a;
 		vec3_t	forward, right, up;
@@ -942,10 +936,10 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 	moveclip_t	clip;
 	int			i;
 
-	memset ( &clip, 0, sizeof ( moveclip_t ) );
+	Q_MemSet ( &clip, 0, sizeof ( moveclip_t ) );
 
 // clip to world
-	clip.trace = SV_ClipMoveToEntity ( SVProgs->Edicts, start, mins, maxs, end );
+	clip.trace = SV_ClipMoveToEntity ( SVProgs->EdictPointers[0], start, mins, maxs, end );
 
 	clip.start = start;
 	clip.end = end;

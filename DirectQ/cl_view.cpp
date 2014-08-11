@@ -65,7 +65,8 @@ cvar_alias_t	crosshaircolor ("crosshaircolor", &scr_crosshaircolor);
 
 cvar_t	gl_cshiftpercent ("gl_cshiftpercent", "100");
 
-cvar_t	r_gunangle ("r_gunangle", 2, CVAR_ARCHIVE);
+cvar_t	v_gunangle ("v_gunangle", 2, CVAR_ARCHIVE);
+cvar_alias_t r_gunangle ("r_gunangle", &v_gunangle);
 
 float	v_dmg_time, v_dmg_roll, v_dmg_pitch;
 
@@ -128,8 +129,8 @@ float V_CalcBob (void)
 	cycle /= cl_bobcycle.value;
 
 	if (cycle < cl_bobup.value)
-		cycle = M_PI * cycle / cl_bobup.value;
-	else cycle = M_PI + M_PI * (cycle - cl_bobup.value) / (1.0 - cl_bobup.value);
+		cycle = D3DX_PI * cycle / cl_bobup.value;
+	else cycle = D3DX_PI + D3DX_PI * (cycle - cl_bobup.value) / (1.0 - cl_bobup.value);
 
 	// bob is proportional to velocity in the xy plane
 	// (don't count Z, or jumping messes it up)
@@ -783,11 +784,10 @@ void V_CalcRefdef (void)
 	// note - default equates to glquakes "viewsize 100" position.
 	// fudging was only needed in software...
 	// set to 0 to replicate darkplaces/fitzquake style
-	view->origin[2] += r_gunangle.integer;
+	view->origin[2] += v_gunangle.integer * 0.75f;
 
 	view->model = cl.model_precache[cl.stats[STAT_WEAPON]];
 	view->frame = cl.stats[STAT_WEAPONFRAME];
-	view->colormap = vid.colormap;
 
 	// set up the refresh position
 	vec3_t kickangle;

@@ -24,11 +24,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // direct show player interface
 #define WM_GRAPHEVENT	WM_USER
 
-void DS_Init (void);
-void DS_Shutdown (void);
-bool DS_Play (int track, bool looping);
-void DS_Stop (void);
-void DS_Pause (void);
-void DS_Resume (void);
-void DS_ChangeVolume (void);
-void DS_Event (void);
+void MediaPlayer_Init (void);
+void MediaPlayer_Shutdown (void);
+bool MediaPlayer_Play (int track, bool looping);
+void MediaPlayer_Stop (void);
+void MediaPlayer_Pause (void);
+void MediaPlayer_Resume (void);
+void MediaPlayer_ChangeVolume (void);
+void MediaPlayer_Update (void);

@@ -26,7 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // particles
 typedef struct partverts_s
 {
-	float x, y, z;
+	float xyz[3];
 	DWORD color;
 	float s, t;
 } partverts_t;
@@ -77,15 +77,6 @@ cvar_t cl_maxparticles ("cl_maxparticles", "65536", CVAR_ARCHIVE);
 
 // default particle texture
 LPDIRECT3DTEXTURE9 particledottexture = NULL;
-
-// QMB particle textures
-LPDIRECT3DTEXTURE9 qmbparticleblood = NULL;
-LPDIRECT3DTEXTURE9 qmbparticlebubble = NULL;
-LPDIRECT3DTEXTURE9 qmbparticlelightning = NULL;
-LPDIRECT3DTEXTURE9 qmbparticlelightningold = NULL;
-LPDIRECT3DTEXTURE9 particlesmoketexture = NULL;
-LPDIRECT3DTEXTURE9 qmbparticlespark = NULL;
-LPDIRECT3DTEXTURE9 qmbparticletrail = NULL;
 
 // initially allocated batch - demo1 requires this number of particles,
 // demo2 requires 2048, demo3 requires 3072 (rounding up to the nearest 1024 in each case)
@@ -169,7 +160,7 @@ void R_ClearParticles (void)
 	int i;
 
 	// particles
-	free_particles = (particle_t *) Pool_Map->Alloc (PARTICLE_BATCH_SIZE * sizeof (particle_t));
+	free_particles = (particle_t *) MainHunk->Alloc (PARTICLE_BATCH_SIZE * sizeof (particle_t));
 
 	for (i = 1; i < PARTICLE_BATCH_SIZE; i++)
 	{
@@ -178,7 +169,7 @@ void R_ClearParticles (void)
 	}
 
 	// particle type chains
-	free_particle_types = (particle_type_t *) Pool_Map->Alloc (PARTICLE_TYPE_BATCH_SIZE * sizeof (particle_type_t));
+	free_particle_types = (particle_type_t *) MainHunk->Alloc (PARTICLE_TYPE_BATCH_SIZE * sizeof (particle_type_t));
 	active_particle_types = NULL;
 
 	for (i = 1; i < PARTICLE_TYPE_BATCH_SIZE; i++)
@@ -224,7 +215,7 @@ particle_type_t *R_NewParticleType (vec3_t spawnorg)
 	}
 
 	// alloc some more free particles
-	free_particle_types = (particle_type_t *) Pool_Map->Alloc (PARTICLE_TYPE_EXTRA_SIZE * sizeof (particle_type_t));
+	free_particle_types = (particle_type_t *) MainHunk->Alloc (PARTICLE_TYPE_EXTRA_SIZE * sizeof (particle_type_t));
 
 	// link them up
 	for (i = 0; i < PARTICLE_TYPE_EXTRA_SIZE; i++)
@@ -253,7 +244,7 @@ particle_t *R_NewParticle (particle_type_t *pt)
 		free_particles = p->next;
 
 		// set default drawing parms (may be overwritten as desired)
-		memcpy (p, &r_defaultparticle, sizeof (particle_t));
+		Q_MemCpy (p, &r_defaultparticle, sizeof (particle_t));
 
 		// link it in
 		p->next = pt->particles;
@@ -267,7 +258,7 @@ particle_t *R_NewParticle (particle_type_t *pt)
 	}
 
 	// alloc some more free particles
-	free_particles = (particle_t *) Pool_Map->Alloc (PARTICLE_EXTRA_SIZE * sizeof (particle_t));
+	free_particles = (particle_t *) MainHunk->Alloc (PARTICLE_EXTRA_SIZE * sizeof (particle_t));
 
 	// link them up
 	for (i = 0; i < PARTICLE_EXTRA_SIZE; i++)
@@ -1070,10 +1061,25 @@ void D3D_AddParticesToAlphaList (void)
 
 
 // update particles after drawing
+// update particles after drawing
 void R_UpdateParticles (void)
 {
-	int i;
-	float grav = d3d_RenderDef.frametime * sv_gravity.value * 0.05;
+	Cvar_Get (sv_fpsgrav, "sv_gameplayfix_gravityunaffectedbyticrate");
+
+	// fps independent particle gravity
+	static float lastgrav = d3d_RenderDef.frametime * sv_gravity.value * 0.025;
+	float grav;
+	
+	if (sv_fpsgrav->integer)
+	{
+		grav = d3d_RenderDef.frametime * sv_gravity.value * 0.025 + lastgrav;
+		lastgrav = d3d_RenderDef.frametime * sv_gravity.value * 0.025;
+	}
+	else
+	{
+		grav = d3d_RenderDef.frametime * sv_gravity.value * 0.05;
+		lastgrav = d3d_RenderDef.frametime * sv_gravity.value * 0.025;
+	}
 
 	for (particle_type_t *pt = active_particle_types; pt; pt = pt->next)
 	{
@@ -1131,7 +1137,7 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 	if (!r_drawparticles.value) return;
 
 	// state setup
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetVertexDeclaration (d3d_VDXyzDiffuseTex1);
 
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
@@ -1151,8 +1157,10 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 	int numverts = 0;
 
 	// set up particle vertex pointer
-	Pool_PolyVerts->Rewind ();
-	partverts_t *partverts = (partverts_t *) Pool_PolyVerts->Alloc (1);
+	// (the scratch buffer is inactive here because we're finished with visedicts)
+	partverts_t *partverts = (partverts_t *) scratchbuf;
+	partverts_t *verts = partverts;
+	int maxparticleverts = (SCRATCHBUF_SIZE / sizeof (partverts_t)) - 3;
 
 	// walk the list starting at the first active particle
 	for (particle_t *p = pt->particles; p; p = p->next)
@@ -1160,20 +1168,17 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		// final sanity check on colour to avoid array bounds errors
 		if (p->color < 0 || p->color > 255) continue;
 
-		if ((int) p->tex != cachedtexture)
+		if ((int) p->tex != cachedtexture || numverts >= maxparticleverts)
 		{
-			// submit everything in the current batch (in there was one)
+			// submit everything in the current batch (if there was one)
 			if (numverts)
 			{
-				Pool_PolyVerts->Rewind ();
 				D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, numverts / 3, partverts, sizeof (partverts_t));
+				verts = partverts;
 				numverts = 0;
 			}
 
-			// if the texture changes we need to submit this batch
 			D3D_SetTexture (0, p->tex);
-
-			// store back
 			cachedtexture = (int) p->tex;
 		}
 
@@ -1202,35 +1207,20 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		VectorScale (vup, p->scale, up);
 		VectorScale (vright, p->scale, right);
 
-		// ensure space
-		Pool_PolyVerts->Alloc (sizeof (partverts_t) * 3);
-		partverts_t *verts = &partverts[numverts];
-
 		// may the good lord one day have mercy on our suffering and grant unto us geometry shaders in d3d9.
 		// until then we have to put up with this crap.  could we avoid the nonsense with a software VBO?
-		verts[0].x = p->org[0];
-		verts[0].y = p->org[1];
-		verts[0].z = p->org[2];
-		verts[0].color = pc;
-		verts[0].s = 0;
-		verts[0].t = 0;
+		verts[0].color = verts[1].color = verts[2].color = pc;
 
-		verts[1].x = p->org[0] + up[0] * scale;
-		verts[1].y = p->org[1] + up[1] * scale;
-		verts[1].z = p->org[2] + up[2] * scale;
-		verts[1].color = pc;
-		verts[1].s = 1;
-		verts[1].t = 0;
+		verts[0].s = verts[0].t = verts[1].t = verts[2].s = 0;
+		verts[1].s = verts[2].t = 1;
 
-		verts[2].x = p->org[0] + right[0] * scale;
-		verts[2].y = p->org[1] + right[1] * scale;
-		verts[2].z = p->org[2] + right[2] * scale;
-		verts[2].color = pc;
-		verts[2].s = 0;
-		verts[2].t = 1;
+		VectorCopy (p->org, verts[0].xyz);
+		VectorMA (p->org, scale, up, verts[1].xyz);
+		VectorMA (p->org, scale, right, verts[2].xyz);
 
 		// more verts
 		numverts += 3;
+		verts += 3;
 	}
 
 	// draw anything left over

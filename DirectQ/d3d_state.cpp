@@ -145,20 +145,19 @@ void D3D_SetTexture (DWORD Sampler, LPDIRECT3DBASETEXTURE9 pTexture)
 	}
 }
 
-// init to an impossible FVF to ensure a change is triggered on first use
-DWORD d3d_FVF = D3DFVF_XYZ | D3DFVF_XYZRHW;
+LPDIRECT3DVERTEXDECLARATION9 d3d_VD = NULL;
 
-void D3D_SetFVF (DWORD FVF)
+void D3D_SetVertexDeclaration (LPDIRECT3DVERTEXDECLARATION9 vd)
 {
-	if (d3d_FVF == FVF)
+	if (d3d_VD == vd)
 	{
 		// filter out rendundant changes before they go to the API
 		return;
 	}
 	else
 	{
-		d3d_Device->SetFVF (FVF);
-		d3d_FVF = FVF;
+		d3d_Device->SetVertexDeclaration (vd);
+		d3d_VD = vd;
 	}
 }
 
@@ -306,8 +305,6 @@ void D3D_SetAllStates (void)
 
 		d3d_StageTextures[s] = NULL;
 	}
-
-	d3d_FVF = D3DFVF_XYZ | D3DFVF_XYZRHW;
 }
 
 
@@ -453,8 +450,6 @@ void D3D_GetAllStates (void)
 
 		d3d_StageTextures[s] = NULL;
 	}
-
-	d3d_FVF = D3DFVF_XYZ | D3DFVF_XYZRHW;
 }
 
 

@@ -83,18 +83,18 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 
 	if (loadsize[0] < sizeof (pcx) + 768)
 	{
-		Zone_Free (f);
+		MainZone->Free (f);
 		return NULL;
 	}
 
 	fin = f;
 
-	memcpy (&pcx, fin, sizeof (pcx));
+	Q_MemCpy (&pcx, fin, sizeof (pcx));
 	fin += sizeof (pcx);
 
 	if (pcx.manufacturer != 0x0a || pcx.version != 5 || pcx.encoding != 1 || pcx.bits_per_pixel != 8 || pcx.xmax > 320 || pcx.ymax > 256)
 	{
-		Zone_Free (f);
+		MainZone->Free (f);
 		return NULL;
 	}
 
@@ -103,11 +103,11 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 
 	palette = f + loadsize[0] - 768;
 
-	image_rgba = (byte *) Zone_Alloc (image_width * image_height * 4 + 18);
+	image_rgba = (byte *) MainZone->Alloc (image_width * image_height * 4 + 18);
 
 	if (!image_rgba)
 	{
-		Zone_Free (f);
+		MainZone->Free (f);
 		return NULL;
 	}
 
@@ -154,7 +154,7 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 	}
 
 	// now fill in our fake tga header
-	memset (image_rgba, 0, 18);
+	Q_MemSet (image_rgba, 0, 18);
 	image_rgba[2] = 2;
 	image_rgba[12] = image_width & 255;
 	image_rgba[13] = image_width >> 8;
@@ -166,7 +166,7 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 	// need to modify the len also
 	loadsize[0] = image_width * image_height * 4 + 18;
 
-	Zone_Free (f);
+	MainZone->Free (f);
 	return image_rgba;
 }
 
@@ -190,11 +190,11 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 
 	if (loadsize[0] < 18 + 3)
 	{
-		Zone_Free (f);
+		MainZone->Free (f);
 		return NULL;
 	}
 
-	memset (&targa_header, 0, sizeof (TargaHeader));
+	Q_MemSet (&targa_header, 0, sizeof (TargaHeader));
 
 	targa_header.id_length = f[0];
 	targa_header.colormap_type = f[1];
@@ -213,13 +213,13 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 
 	if (targa_header.image_type != 2 && targa_header.image_type != 10)
 	{
-		Zone_Free (f);
+		MainZone->Free (f);
 		return NULL;
 	}
 
 	if (targa_header.colormap_type != 0	|| (targa_header.pixel_size != 32 && targa_header.pixel_size != 24))
 	{
-		Zone_Free (f);
+		MainZone->Free (f);
 		return NULL;
 	}
 
@@ -228,12 +228,12 @@ byte *D3D_LoadTGA (byte *f, int *loadsize)
 	columns = targa_header.width;
 	rows = targa_header.height;
 
-	image_rgba = (byte *) Zone_Alloc (columns * rows * 4 + 18);
+	image_rgba = (byte *) MainZone->Alloc (columns * rows * 4 + 18);
 
 	if (!image_rgba)
 	{
 		Con_Printf ("LoadTGA: not enough memory for %i by %i image\n", columns, rows);
-		Zone_Free (f);
+		MainZone->Free (f);
 		return NULL;
 	}
 
@@ -394,7 +394,7 @@ outofdata:;
 	image_height = rows;
 
 	// now fill in our fake tga header
-	memset (image_rgba, 0, 18);
+	Q_MemSet (image_rgba, 0, 18);
 	image_rgba[2] = 2;
 	image_rgba[12] = image_width & 255;
 	image_rgba[13] = image_width >> 8;
@@ -406,7 +406,7 @@ outofdata:;
 	// need to modify the len also
 	loadsize[0] = image_width * image_height * 4 + 18;
 
-	Zone_Free (f);
+	MainZone->Free (f);
 	return image_rgba;
 }
 
@@ -423,7 +423,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 	// initial copy
 	Q_strncpy (texname, filename, 255);
 
-	if (!(flags & IMAGE_MAPSHOT))
+	if (!(flags & IMAGE_KEEPPATH))
 	{
 		// remove path
 		for (int i = strlen (filename); i; i--)

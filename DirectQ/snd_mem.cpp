@@ -20,103 +20,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-
-typedef struct soundcache_s
-{
-	char name[128];
-	sfxcache_t *data;
-	struct soundcache_s *next;
-} soundcache_t;
-
-
-soundcache_t *soundcache = NULL;
-
-
-sfxcache_t *Sound_CacheAlloc (char *name, int len)
-{
-	soundcache_t *sc = NULL;
-
-	for (soundcache_t *find = soundcache; find; find = find->next)
-	{
-		if (!find->data || !find->name[0])
-		{
-			if (find->data)
-			{
-				Zone_Free (find->data);
-				find->data = NULL;
-			}
-
-			find->name[0] = 0;
-
-			sc = find;
-			break;
-		}
-	}
-
-	if (!sc)
-	{
-		sc = (soundcache_t *) Zone_Alloc (sizeof (soundcache_t));
-
-		sc->next = soundcache;
-		soundcache = sc;
-	}
-
-	Q_strncpy (sc->name, name, 127);
-
-	sc->data = (sfxcache_t *) Zone_Alloc (len);
-
-	return sc->data;
-}
-
-
-sfxcache_t *Sound_CacheCheck (char *name)
-{
-	for (soundcache_t *find = soundcache; find; find = find->next)
-	{
-		if (!find->data || !find->name[0]) continue;
-
-		if (!stricmp (name, find->name)) return find->data;
-	}
-
-	return NULL;
-}
-
-
-void Sound_CacheFree (void)
-{
-	for (soundcache_t *find = soundcache; find; find = find->next)
-	{
-		if (find->data)
-		{
-			Zone_Free (find->data);
-			find->data = NULL;
-		}
-
-		find->name[0] = 0;
-	}
-}
-
-
-void Sound_CacheFree (char *name)
-{
-	for (soundcache_t *find = soundcache; find; find = find->next)
-	{
-		if (!find->data || !find->name[0]) continue;
-
-		if (!stricmp (name, find->name))
-		{
-			if (find->data)
-			{
-				Zone_Free (find->data);
-				find->data = NULL;
-			}
-
-			find->name[0] = 0;
-			return;
-		}
-	}
-}
-
+// this is our new cache object for sounds
+CQuakeCache *SoundCache = NULL;
+CQuakeZone *SoundHeap = NULL;
 
 /*
 ================
@@ -153,8 +59,7 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 
 	if (loadas8bit.integer)
 		sc->width = 1;
-	else
-		sc->width = inwidth;
+	else sc->width = inwidth;
 
 	sc->stereo = 0;
 
@@ -207,7 +112,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	if (s->sndcache) return s->sndcache;
 
 	// look for a cached copy
-	sc = (sfxcache_t *) Sound_CacheCheck (s->name);
+	sc = (sfxcache_t *) SoundCache->Check (s->name);
 
 	if (sc)
 	{
@@ -221,7 +126,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
     strcat (namebuffer, s->name);
 
 	// don't load as a stack file!!!  no way!!!  never!!!
-	data = COM_LoadTempFile (namebuffer);
+	data = COM_LoadFile (namebuffer);
 
 	if (!data)
 	{
@@ -235,6 +140,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	{
 		// we'll fix this later by converting it to mono
 		Con_DPrintf ("%s is a stereo sample\n", s->name);
+		Zone_Free (data);
 		return NULL;
 	}
 
@@ -243,11 +149,15 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 	len = len * info.width * info.channels;
 
-	// alloc in the cache using s->name so that Cache_Invalidate is valid
-	sc = (sfxcache_t *) Sound_CacheAlloc (s->name, len + sizeof (sfxcache_t));
+	// alloc in the cache using s->name
+	sc = (sfxcache_t *) SoundCache->Alloc (s->name, NULL, len + sizeof (sfxcache_t));
 	s->sndcache = sc;
 
-	if (!sc) return NULL;
+	if (!sc)
+	{
+		Zone_Free (data);
+		return NULL;
+	}
 
 	sc->length = info.samples;
 	sc->loopstart = info.loopstart;
@@ -257,6 +167,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 	ResampleSfx (s, sc->speed, sc->width, data + info.dataofs);
 
+	Zone_Free (data);
 	return sc;
 }
 
@@ -341,7 +252,7 @@ void DumpChunks(void)
 	data_p=iff_data;
 	do
 	{
-		memcpy (str, data_p, 4);
+		Q_MemCpy (str, data_p, 4);
 		data_p += 4;
 		iff_chunk_len = GetLittleLong();
 		Con_Printf ("0x%x : %s (%d)\n", (int)(data_p - 4), str, iff_chunk_len);
@@ -361,7 +272,7 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 	int     format;
 	int		samples;
 
-	memset (&info, 0, sizeof(info));
+	Q_MemSet (&info, 0, sizeof(info));
 
 	if (!wav)
 		return info;

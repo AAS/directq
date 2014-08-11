@@ -109,7 +109,7 @@ void CDAudio_Play(byte track, bool looping)
 	if (!enabled)
 	{
 		// try directshow
-		using_directshow = DS_Play (track, looping);
+		using_directshow = MediaPlayer_Play (track, looping);
 		return;
 	}
 
@@ -122,7 +122,7 @@ void CDAudio_Play(byte track, bool looping)
 		if (!cdValid)
 		{
 			// play with directshow instead
-			using_directshow = DS_Play (track, looping);
+			using_directshow = MediaPlayer_Play (track, looping);
 			return;
 		}
 	}
@@ -192,7 +192,7 @@ void CDAudio_Stop (void)
 
 	if (using_directshow)
 	{
-		DS_Stop ();
+		MediaPlayer_Stop ();
 		return;
 	}
 
@@ -214,7 +214,7 @@ void CDAudio_Pause(void)
 {
 	if (using_directshow)
 	{
-		DS_Pause ();
+		MediaPlayer_Pause ();
 		return;
 	}
 
@@ -240,7 +240,7 @@ void CDAudio_Resume(void)
 {
 	if (using_directshow)
 	{
-		DS_Resume ();
+		MediaPlayer_Resume ();
 		return;
 	}
 
@@ -435,7 +435,7 @@ void CDAudio_Update(void)
 	{
 		if (using_directshow)
 		{
-			DS_ChangeVolume ();
+			MediaPlayer_ChangeVolume ();
 			cdvolume = bgmvolume.value;
 			return;
 		}

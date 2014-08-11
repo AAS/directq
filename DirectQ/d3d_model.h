@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -66,7 +63,7 @@ typedef struct d3d_registeredtexture_s
 	d3d_modelsurf_t *surfchain;
 } d3d_registeredtexture_t;
 
-extern d3d_registeredtexture_t *d3d_RegisteredTextures;
+extern d3d_registeredtexture_t **d3d_RegisteredTextures;
 extern int d3d_NumRegisteredTextures;
 
 #define	SIDE_FRONT	0
@@ -111,7 +108,6 @@ typedef struct texture_s
 
 	// chains for rendering
 	struct msurface_s *texturechain;
-	struct msurface_s *chaintail;
 
 	// registered texture used by this texture
 	d3d_registeredtexture_t *registration;
@@ -201,10 +197,13 @@ typedef struct msurface_s
 	int			alphaval;
 
 	int			firstedge;
+	int			bspverts;	// turb surfs need these so that they can recalculate the warp correctly
 	int			numverts;
 	int			numindexes;
 
+	// subdivision just uses the regular verts and indexes
 	polyvert_t	*verts;
+	unsigned short *indexes;
 
 	// for bmodel transforms
 	D3DMATRIX	*matrix;
@@ -252,6 +251,14 @@ typedef struct msurface_s
 } msurface_t;
 
 
+#define INSIDE_FRUSTUM		1
+#define OUTSIDE_FRUSTUM		2
+#define INTERSECT_FRUSTUM	3
+
+#define FULLY_INSIDE_FRUSTUM		0x01010101
+#define FULLY_OUTSIDE_FRUSTUM		0x10101010
+#define FULLY_INTERSECT_FRUSTUM		0x11111111
+
 typedef struct mnode_s
 {
 	// common with leaf
@@ -263,12 +270,18 @@ typedef struct mnode_s
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
-	bool		intersect;
+
+	union
+	{
+		int			bops;
+		byte		sides[4];
+	};
 
 	// node specific
+	float		dot;
+	int			side;
 	mplane_t	*plane;
 	struct mnode_s	*children[2];
-
 	unsigned short		firstsurface;
 	unsigned short		numsurfaces;
 } mnode_t;
@@ -286,19 +299,20 @@ typedef struct mleaf_s
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
-	bool		intersect;
+
+	union
+	{
+		int			bops;
+		byte		sides[4];
+	};
 
 	// leaf specific
 	byte		*compressed_vis;
-
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
-
 	struct efrag_s	*efrags;
-
 	int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
-
 	// contents colour for cshifts
 	int *contentscolor;
 } mleaf_t;

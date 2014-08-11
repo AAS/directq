@@ -33,19 +33,64 @@ server_static_t	svs;
 char	localmodels[MAX_MODELS][6];
 
 
-CSpaceBuffer *Pool_Edicts = NULL;
+CQuakeHunk *Pool_Edicts = NULL;
 
-edict_t *SV_AllocEdicts (int numedicts)
+void SV_AllocEdicts (int numedicts)
 {
+#if 0
 	// alloc the edicts pool on first use
-	if (!Pool_Edicts) Pool_Edicts = new CSpaceBuffer ("Edicts", 32, POOL_MAP);
+	if (!Pool_Edicts)
+	{
+		// init to correct max edict size
+		int edictsize = SVProgs->EdictSize * MAX_EDICTS + 0xfffff;
+		edictsize /= 0x100000;
+
+		// some day i'll change this to an edict_t ** and be able to get rid of this nonsense...
+		Pool_Edicts = new CQuakeHunk (edictsize);
+	}
+#endif
+
+	// edictpointers MUST be alloced first so that edicts are a linear array...!
+	if (!SVProgs->EdictPointers) SVProgs->EdictPointers = (edict_t **) MainHunk->Alloc (MAX_EDICTS * sizeof (edict_t *));
+
+#if 0
+	edict_t *edbuf = (edict_t *) Pool_Edicts->Alloc (numedicts * SVProgs->EdictSize);
+	edict_t *ed = edbuf;
+
+	if (!SVProgs->Edicts) SVProgs->Edicts = edbuf;
+
+	// link 'em in and set up the numbering for EDICT_TO_PROG and PROG_TO_EDICT
+	// can't do ed++ because the size of an edict_t differs.  lovely, isn't it?
+	// can't use edictpointers yet because they have not been set up
+	for (int i = 0; i < numedicts; i++, ed = ((edict_t *) ((byte *) ed + SVProgs->EdictSize)))
+	{
+		SVProgs->EdictPointers[SVProgs->MaxEdicts + i] = ed;
+
+		ed->ednum = SVProgs->MaxEdicts + i;
+		ed->Prog = ed->ednum * SVProgs->EdictSize;
+	}
+#else
+	// edicts are variable sized
+	byte *edbuf = (byte *) MainHunk->Alloc (numedicts * SVProgs->EdictSize);
+
+	// can't use edictpointers yet because they have not been set up
+	for (int i = 0; i < numedicts; i++, edbuf += SVProgs->EdictSize)
+	{
+		edict_t *ed = (edict_t *) edbuf;
+		SVProgs->EdictPointers[SVProgs->MaxEdicts + i] = ed;
+
+		ed->ednum = SVProgs->MaxEdicts + i;
+		ed->Prog = ed->ednum * SVProgs->EdictSize;
+
+		// this is just test code to ensure that the allocation is valid and that
+		// there is no remaining code assuming that the edicts are in consecutive memory
+		// MainHunk->Alloc ((rand () & 255) + 1);
+	}
+#endif
 
 	SVProgs->MaxEdicts += numedicts;
-	edict_t *edbuf = (edict_t *) Pool_Edicts->Alloc (numedicts * SVProgs->EdictSize);
 
 	Con_DPrintf ("%i edicts\n", SVProgs->MaxEdicts);
-
-	return edbuf;
 }
 
 
@@ -142,7 +187,7 @@ void SV_Init (void)
 {
 	for (int i = 0; i < MAX_MODELS; i++) _snprintf (localmodels[i], 6, "*%i", i);
 
-	memset (&sv, 0, sizeof (server_t));
+	Q_MemSet (&sv, 0, sizeof (server_t));
 }
 
 
@@ -328,7 +373,7 @@ void SV_SendServerinfo (client_t *client)
 	else
 		MSG_WriteByte (&client->message, GAME_COOP);
 
-	_snprintf (message, 2048, SVProgs->Strings + SVProgs->Edicts->v.message);
+	_snprintf (message, 2048, SVProgs->Strings + SVProgs->EdictPointers[0]->v.message);
 
 	MSG_WriteString (&client->message, message);
 
@@ -358,8 +403,8 @@ void SV_SendServerinfo (client_t *client)
 
 	// send music
 	MSG_WriteByte (&client->message, svc_cdtrack);
-	MSG_WriteByte (&client->message, SVProgs->Edicts->v.sounds);
-	MSG_WriteByte (&client->message, SVProgs->Edicts->v.sounds);
+	MSG_WriteByte (&client->message, SVProgs->EdictPointers[0]->v.sounds);
+	MSG_WriteByte (&client->message, SVProgs->EdictPointers[0]->v.sounds);
 
 	// set view	
 	MSG_WriteByte (&client->message, svc_setview);
@@ -401,8 +446,8 @@ void SV_ConnectClient (int clientnum)
 	netconnection = client->netconnection;
 	
 	if (sv.loadgame)
-		memcpy (spawn_parms, client->spawn_parms, sizeof(spawn_parms));
-	memset (client, 0, sizeof(*client));
+		Q_MemCpy (spawn_parms, client->spawn_parms, sizeof(spawn_parms));
+	Q_MemSet (client, 0, sizeof(*client));
 	client->netconnection = netconnection;
 
 	strcpy (client->name, "unconnected");
@@ -420,7 +465,7 @@ void SV_ConnectClient (int clientnum)
 #endif
 
 	if (sv.loadgame)
-		memcpy (client->spawn_parms, spawn_parms, sizeof(spawn_parms));
+		Q_MemCpy (client->spawn_parms, spawn_parms, sizeof(spawn_parms));
 	else
 	{
 	// call the progs to get default spawn parms for the new client
@@ -557,9 +602,9 @@ byte *SV_FatPVS (vec3_t org)
 {
 	fatbytes = (sv.worldmodel->brushhdr->numleafs + 31) >> 3;
 
-	if (!fatpvs) fatpvs = (byte *) Pool_Map->Alloc (fatbytes);
+	if (!fatpvs) fatpvs = (byte *) MainHunk->Alloc (fatbytes);
 
-	memset (fatpvs, 0, fatbytes);
+	Q_MemSet (fatpvs, 0, fatbytes);
 	SV_AddToFatPVS (org, sv.worldmodel->brushhdr->nodes);
 
 	return fatpvs;
@@ -656,7 +701,7 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 	pvs = SV_FatPVS (org);
 
 	// send over all entities (excpet the client) that touch the pvs
-	ent = NEXT_EDICT (SVProgs->Edicts);
+	ent = NEXT_EDICT (SVProgs->EdictPointers[0]);
 
 	int NumCulledEnts = 0;
 
@@ -802,7 +847,7 @@ void SV_CleanupEnts (void)
 	int		e;
 	edict_t	*ent;
 	
-	ent = NEXT_EDICT(SVProgs->Edicts);
+	ent = NEXT_EDICT(SVProgs->EdictPointers[0]);
 	for (e=1; e<SVProgs->NumEdicts; e++, ent = NEXT_EDICT(ent))
 	{
 		ent->v.effects = (int)ent->v.effects & ~EF_MUZZLEFLASH;
@@ -1354,7 +1399,7 @@ void SV_SpawnServer (char *server)
 	// set up the new server
 	Host_ClearMemory ();
 
-	memset (&sv, 0, sizeof (sv));
+	Q_MemSet (&sv, 0, sizeof (sv));
 
 	strcpy (sv.name, server);
 
@@ -1381,8 +1426,13 @@ void SV_SpawnServer (char *server)
 	SVProgs->NumEdicts = 0;
 	SVProgs->MaxEdicts = 0;
 
+	// clear down in case the edict size has changed (e.g. if the game changed)
+	SAFE_DELETE (Pool_Edicts);
+
 	// alloc an initial batch of 128 edicts
-	SVProgs->Edicts = SV_AllocEdicts (128);
+	// SVProgs->Edicts = NULL;
+	SVProgs->EdictPointers = NULL;
+	SV_AllocEdicts (128);
 
 	sv.Protocol = sv_protocol;
 	sv_max_datagram = (sv.Protocol == PROTOCOL_VERSION ? 1024 : MAX_DATAGRAM); // Limit packet size if old protocol
@@ -1435,7 +1485,7 @@ void SV_SpawnServer (char *server)
 
 	// load the rest of the entities
 	ent = GetEdictForNumber (0);
-	memset (&ent->v, 0, SVProgs->QC.entityfields * 4);
+	Q_MemSet (&ent->v, 0, SVProgs->QC->entityfields * 4);
 	ent->free = false;
 	ent->v.model = sv.worldmodel->name - SVProgs->Strings;
 	ent->v.modelindex = 1;		// world model

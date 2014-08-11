@@ -127,7 +127,7 @@ bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
 		{
 			VectorAdd (ent->v.origin, move, neworg);
 			enemy = PROG_TO_EDICT(ent->v.enemy);
-			if (i == 0 && enemy != SVProgs->Edicts)
+			if (i == 0 && enemy != SVProgs->EdictPointers[0])
 			{
 				dz = ent->v.origin[2] - PROG_TO_EDICT(ent->v.enemy)->v.origin[2];
 				if (dz > 40)
@@ -148,7 +148,7 @@ bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
 				return true;
 			}
 			
-			if (enemy == SVProgs->Edicts)
+			if (enemy == SVProgs->EdictPointers[0])
 				break;
 		}
 		
@@ -238,7 +238,7 @@ bool SV_StepDirection (edict_t *ent, float yaw, float dist)
 	ent->v.ideal_yaw = yaw;
 	PF_changeyaw();
 
-	yaw = yaw*M_PI*2 / 360;
+	yaw = yaw*D3DX_PI*2 / 360;
 	move[0] = cos(yaw)*dist;
 	move[1] = sin(yaw)*dist;
 	move[2] = 0;
@@ -411,9 +411,9 @@ void SV_MoveToGoal (void)
 // if the next step hits the enemy, return immediately
 #ifdef QUAKE2
 	enemy = PROG_TO_EDICT(ent->v.enemy);
-	if (enemy != SVProgs->Edicts &&  SV_CloseEnough (ent, enemy, dist) )
+	if (enemy != SVProgs->EdictPointers[0] &&  SV_CloseEnough (ent, enemy, dist) )
 #else
-	if ( PROG_TO_EDICT(ent->v.enemy) != SVProgs->Edicts &&  SV_CloseEnough (ent, goal, dist) )
+	if ( PROG_TO_EDICT(ent->v.enemy) != SVProgs->EdictPointers[0] &&  SV_CloseEnough (ent, goal, dist) )
 #endif
 		return;
 

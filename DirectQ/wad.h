@@ -76,3 +76,4 @@ void	*W_GetLumpNum (int num);
 void W_DumpWADLumps (void);
 
 void SwapPic (qpic_t *pic);
+bool W_LoadPalette (void);

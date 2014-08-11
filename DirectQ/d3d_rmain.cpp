@@ -193,7 +193,7 @@ cvar_t	r_speeds ("r_speeds","0");
 cvar_t	r_fullbright ("r_fullbright","0");
 cvar_t	r_lightmap ("r_lightmap","0");
 cvar_t	r_shadows ("r_shadows", "0", CVAR_ARCHIVE);
-cvar_t	r_wateralpha ("r_wateralpha", 1.0f, CVAR_ARCHIVE);
+cvar_t	r_wateralpha ("r_wateralpha", 1.0f);
 cvar_t	r_dynamic ("r_dynamic","1");
 cvar_t	r_novis ("r_novis","0");
 
@@ -253,6 +253,9 @@ bool R_AutomapCull (vec3_t emins, vec3_t emaxs)
 
 void D3D_BeginVisedicts (void)
 {
+	// these can't go into the scratchbuf because of SCR_UpdateScreen calls in places like SCR_BeginLoadingPlaque
+	if (!d3d_RenderDef.visedicts) d3d_RenderDef.visedicts = (entity_t **) MainZone->Alloc (MAX_VISEDICTS * sizeof (entity_t *));
+
 	d3d_RenderDef.numvisedicts = 0;
 }
 
@@ -302,17 +305,52 @@ bool R_CullBox (mnode_t *node)
 	// different culling for the automap
 	if (d3d_RenderDef.automap) return R_AutomapCull (node->minmaxs, node->minmaxs + 3);
 
-	// will be true if the node intersects the frustum
-	node->intersect = false;
-
-	for (int i = 0; i < 4; i++)
+#if 0
+	// this is just a sanity check and never happens (yes, i tested it)
+	if (node->parent && node->parent->bops == FULLY_OUTSIDE_FRUSTUM)
 	{
-		int bops = BoxOnPlaneSide (node->minmaxs, node->minmaxs + 3, frustum + i);
+		node->bops = FULLY_OUTSIDE_FRUSTUM;
+		return true;
+	}
+#endif
 
-		if (bops == 2) return true;
-		if (bops == 3) node->intersect = true;
+	// if the node's parent was fully inside the frustum then the node is also fully inside the frustum
+	if (node->parent && node->parent->bops == FULLY_INSIDE_FRUSTUM)
+	{
+		node->bops = FULLY_INSIDE_FRUSTUM;
+		return false;
 	}
 
+	// BoxOnPlaneSide result flags are unknown
+	node->bops = 0;
+
+	// need to check all 4 sides
+	for (int i = 0; i < 4; i++)
+	{
+		// if the parent is inside the frustum on this side then so is this node
+		if (node->parent && node->parent->sides[i] == INSIDE_FRUSTUM) continue;
+
+		// need to check
+		node->sides[i] |= BoxOnPlaneSide (node->minmaxs, node->minmaxs + 3, frustum + i);
+
+		// if the node is outside the frustum on any side then the entire node is rejected
+		if (node->sides[i] == OUTSIDE_FRUSTUM)
+		{
+			node->bops = FULLY_OUTSIDE_FRUSTUM;
+			return true;
+		}
+
+		if (node->sides[i] == INTERSECT_FRUSTUM)
+		{
+			// if any side intersects the frustum we mark it all as intersecting so that we can do comparisons more cleanly
+			node->bops = FULLY_INTERSECT_FRUSTUM;
+			return false;
+		}
+	}
+
+	// the node will be fully inside the frustum here because none of the sides evaluated to outside or intersecting
+	// set the bops flag correctly as it may have been skipped above
+	node->bops = FULLY_INSIDE_FRUSTUM;
 	return false;
 }
 
@@ -369,14 +407,12 @@ assumes side and forward are perpendicular, and normalized
 to turn away from side, use a negative angle
 ===============
 */
-#define DEG2RAD(a) ((a) * (M_PI / 180.0f))
-
 void TurnVector (vec3_t out, const vec3_t forward, const vec3_t side, float angle)
 {
 	float scale_forward, scale_side;
 
-	scale_forward = cos (DEG2RAD (angle));
-	scale_side = sin (DEG2RAD (angle));
+	scale_forward = cos (D3DXToRadian (angle));
+	scale_side = sin (D3DXToRadian (angle));
 
 	out[0] = scale_forward * forward[0] + scale_side * side[0];
 	out[1] = scale_forward * forward[1] + scale_side * side[1];
@@ -460,8 +496,8 @@ void R_SetupFrame (void)
 			float warpspeed = cl.time * (r_waterwarptime.value / 2.0f);
 
 			// warp the fov
-			d3d_RenderDef.fov_x = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (warpspeed) * 0.03)) * 2 / (M_PI / 180.0);
-			d3d_RenderDef.fov_y = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (warpspeed) * 0.03)) * 2 / (M_PI / 180.0);
+			d3d_RenderDef.fov_x = atan (tan (D3DXToRadian (r_refdef.fov_x) / 2) * (0.97 + sin (warpspeed) * 0.03)) * 2 / (D3DX_PI / 180.0);
+			d3d_RenderDef.fov_y = atan (tan (D3DXToRadian (r_refdef.fov_y) / 2) * (1.03 - sin (warpspeed) * 0.03)) * 2 / (D3DX_PI / 180.0);
 		}
 	}
 
@@ -560,7 +596,7 @@ void R_SetupD3D (void)
 	// keep an identity view matrix at all times; this simplifies the setup and also lets us
 	// skip a matrix multiplication per vertex in our vertex shaders. ;)
 	D3DXMATRIX vm;
-	D3DXMatrixIdentity (&vm);
+	D3D_LoadIdentity (&vm);
 	d3d_Device->SetTransform (D3DTS_VIEW, &vm);
 
 	D3D_LoadIdentity (&d3d_WorldMatrix);
@@ -640,8 +676,8 @@ void R_SetupD3D (void)
 		D3D_TranslateMatrix (&d3d_WorldMatrix, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 
 		// set projection frustum (infinite projection; the value of r_clipdist is now only used for positioning the sky)
-		float xmax = 4.0f * tan ((d3d_RenderDef.fov_x * M_PI) / 360.0);
-		float ymax = 4.0f * tan ((d3d_RenderDef.fov_y * M_PI) / 360.0);
+		float xmax = 4.0f * tan ((d3d_RenderDef.fov_x * D3DX_PI) / 360.0);
+		float ymax = 4.0f * tan ((d3d_RenderDef.fov_y * D3DX_PI) / 360.0);
 
 		QD3DXMatrixPerspectiveOffCenterRH
 		(
@@ -1074,4 +1110,5 @@ void R_RenderView (void)
 	}
 	else r_speedstime = -1;
 }
+
 

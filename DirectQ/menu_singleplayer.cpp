@@ -128,7 +128,7 @@ typedef struct save_game_info_s
 void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 {
 	// blank the save info
-	memset (si, 0, sizeof (save_game_info_t));
+	Q_MemSet (si, 0, sizeof (save_game_info_t));
 
 	// copy the file name
 	strcpy (si->filename, filename);

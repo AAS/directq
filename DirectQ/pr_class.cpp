@@ -44,32 +44,40 @@ char *PR_GlobalStringNoContents (int ofs);
 void FindEdictFieldOffsets (void);
 
 
-void *CProgsDat::LoadProgsLump (byte *lumpbegin, int lumplen, int lumpitemsize)
+CProgsDat::~CProgsDat (void)
 {
-	byte *lumpdata = (byte *) Pool_Map->Alloc (lumplen * lumpitemsize);
-	memcpy (lumpdata, lumpbegin, lumplen * lumpitemsize);
-	return lumpdata;
+	this->QC = NULL;
 }
 
 
 CProgsDat::CProgsDat (void)
 {
 	// set up the stack
-	this->Stack = (prstack_t *) Pool_Map->Alloc ((MAX_STACK_DEPTH + 1) * sizeof (prstack_t));
+	this->Stack = (prstack_t *) MainHunk->Alloc ((MAX_STACK_DEPTH + 1) * sizeof (prstack_t));
 	this->StackDepth = 0;
 
-	this->LocalStack = (int *) Pool_Map->Alloc (LOCALSTACK_SIZE * sizeof (int));
+	this->LocalStack = (int *) MainHunk->Alloc (LOCALSTACK_SIZE * sizeof (int));
 	this->LocalStackUsed = 0;
+
+	// ExecuteProgram explicitly checks for this->QC non-NULL now so here we set it to NULL
+	this->QC = NULL;
+	this->Functions = NULL;
+	this->Strings = NULL;
+	this->GlobalDefs = NULL;
+	this->FieldDefs = NULL;
+	this->Statements = NULL;
+	this->Globals = NULL;
+	this->GlobalStruct = NULL;
 }
 
 
 void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 {
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 	int 	j;
 	int		funcno;
 	char	*funcname;
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
+	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	// this can't be in a constructor yet because we need the instance already created in order to do
 	// FindEdictFieldOffsets without crashing.  When we get everything on the server gone to OOP we'll
@@ -79,71 +87,36 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 
 	CRC_Init (&this->CRC);
 
-	// attempt to load it from sv_progs cvar first
-	int progslen;
-	HANDLE progshandle = INVALID_HANDLE_VALUE;
-
-	if (overridecvar) progslen = COM_FOpenFile (overridecvar->string, &progshandle);
-
-	if (progshandle == INVALID_HANDLE_VALUE)
-	{
-		// fall back on regular progs.dat
-		progslen = COM_FOpenFile (progsname, &progshandle);
-
-		if (progshandle == INVALID_HANDLE_VALUE)
-		{
-			Host_Error ("CProgsDat::CProgsDat: couldn't load progs.dat");
-			return;
-		}
-	}
-
-	Con_DPrintf ("Programs occupy %iK.\n", progslen / 1024);
-
-	// because progs seems prone to heap corruption errors (fixme - why?) we load the header
-	// into a non-pointer struct and the lumps into their own individual buffers to make it more robust
-	// this fixes the crash bug with game changing followed by map load
-	Pool_Temp->Rewind ();
-	dprograms_t *progs = (dprograms_t *) Pool_Temp->Alloc (progslen);
-
-	// read it all in
-	int rlen = COM_FReadFile (progshandle, progs, progslen);
-
-	// done with the file
-	COM_FCloseFile (&progshandle);
-
-	if (rlen != progslen) Host_Error ("CProgsDat::CProgsDat: not enough data read");
+	// the old heap corruption errors are now gone.  yayyyy!
+	if (overridecvar) this->QC = (dprograms_t *) COM_LoadFile (overridecvar->string, MainHunk);
+	if (!this->QC) this->QC = (dprograms_t *) COM_LoadFile ("progs.dat", MainHunk);
+	if (!this->QC) Host_Error ("CProgsDat::CProgsDat: couldn't load progs.dat");
 
 	// CRC the progs
-	for (int i = 0; i < progslen; i++)
-		CRC_ProcessByte (&this->CRC, ((byte *) progs)[i]);
+	for (int i = 0; i < com_filesize; i++)
+		CRC_ProcessByte (&this->CRC, ((byte *) this->QC)[i]);
 
 	// byte swap the header
 	for (int i = 0; i < sizeof (dprograms_t) / 4; i++)
-		((int *) progs)[i] = LittleLong (((int *) progs)[i]);
+		((int *) this->QC)[i] = LittleLong (((int *) this->QC)[i]);
 
-	if (progs->version != PROG_VERSION) Host_Error ("progs.dat has wrong version number (%i should be %i)", progs->version, PROG_VERSION);
-	if (progs->crc != PROGHEADER_CRC) Host_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
+	if (this->QC->version != PROG_VERSION) Host_Error ("progs.dat has wrong version number (%i should be %i)", this->QC->version, PROG_VERSION);
+	if (this->QC->crc != PROGHEADER_CRC) Host_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
 
-	// copy out to the global progs header structure and set up a byte * pointer so that we can
-	// more cleanly reference the loaded progs
-	memcpy (&this->QC, progs, sizeof (dprograms_t));
-	byte *progsdata = (byte *) progs;
-
-	// load all the progs lumps into thir own separate memory locations rather than keeping them in the single
-	// contiguous lump
-	this->Functions = (dfunction_t *) this->LoadProgsLump (progsdata + this->QC.ofs_functions, this->QC.numfunctions, sizeof (dfunction_t));
-	this->Strings = (char *) this->LoadProgsLump (progsdata + this->QC.ofs_strings, this->QC.numstrings, 1);
-	this->GlobalDefs = (ddef_t *) this->LoadProgsLump (progsdata + this->QC.ofs_globaldefs, this->QC.numglobaldefs, sizeof (ddef_t));
-	this->FieldDefs = (ddef_t *) this->LoadProgsLump (progsdata + this->QC.ofs_fielddefs, this->QC.numfielddefs, sizeof (ddef_t));
-	this->Statements = (dstatement_t *) this->LoadProgsLump (progsdata + this->QC.ofs_statements, this->QC.numstatements, sizeof (dstatement_t));
-	this->Globals = (float *) this->LoadProgsLump (progsdata + this->QC.ofs_globals, this->QC.numglobals, sizeof (float));
+	// the old heap corruption errors are now gone.  whee.
+	this->Functions = (dfunction_t *) ((byte *) this->QC + this->QC->ofs_functions);
+	this->Strings = (char *) ((byte *) this->QC + this->QC->ofs_strings);
+	this->GlobalDefs = (ddef_t *) ((byte *) this->QC + this->QC->ofs_globaldefs);
+	this->FieldDefs = (ddef_t *) ((byte *) this->QC + this->QC->ofs_fielddefs);
+	this->Statements = (dstatement_t *) ((byte *) this->QC + this->QC->ofs_statements);
+	this->Globals = (float *) ((byte *) this->QC + this->QC->ofs_globals);
 
 	// this just points at this->Globals (per comment above on it's declaration)
 	this->GlobalStruct = (globalvars_t *) this->Globals;
-	this->EdictSize = this->QC.entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
+	this->EdictSize = this->QC->entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
 
 	// byte swap the lumps
-	for (int i = 0; i < this->QC.numstatements; i++)
+	for (int i = 0; i < this->QC->numstatements; i++)
 	{
 		this->Statements[i].op = LittleShort (this->Statements[i].op);
 		this->Statements[i].a = LittleShort (this->Statements[i].a);
@@ -151,7 +124,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 		this->Statements[i].c = LittleShort (this->Statements[i].c);
 	}
 
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 	// initialize function numbers for PROGS.DAT
 	pr_numbuiltins = 0;
 	pr_builtins = NULL;
@@ -160,9 +133,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	{
 		// remove all previous assigned function numbers
 		for (j = 1; j < pr_ebfs_numbuiltins; j++)
-		{
 			pr_ebfs_builtins[j].funcno = 0;
-		}
 	}
 	else
 	{
@@ -172,15 +143,12 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 			pr_ebfs_builtins[j].funcno = pr_ebfs_builtins[j].default_funcno;
 
 			// determine highest builtin number (when NOT remapped)
-			if (pr_ebfs_builtins[j].funcno > pr_numbuiltins)
-			{
-				pr_numbuiltins = pr_ebfs_builtins[j].funcno;
-			}
+			if (pr_ebfs_builtins[j].funcno > pr_numbuiltins) pr_numbuiltins = pr_ebfs_builtins[j].funcno;
 		}
 	}
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
+	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
-	for (int i = 0; i < this->QC.numfunctions; i++)
+	for (int i = 0; i < this->QC->numfunctions; i++)
 	{
 		this->Functions[i].first_statement = LittleLong (this->Functions[i].first_statement);
 		this->Functions[i].parm_start = LittleLong (this->Functions[i].parm_start);
@@ -189,7 +157,7 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 		this->Functions[i].numparms = LittleLong (this->Functions[i].numparms);
 		this->Functions[i].locals = LittleLong (this->Functions[i].locals);
 
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+		// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 		if (pr_builtin_remap.value)
 		{
 			if (this->Functions[i].first_statement < 0)	// builtin function
@@ -199,27 +167,18 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 
 				// search function name
 				for (j = 1; j < pr_ebfs_numbuiltins; j++)
-				{
 					if (!(stricmp (funcname, pr_ebfs_builtins[j].funcname)))
-					{
 						break;	// found
-					}
-				}
 
 				if (j < pr_ebfs_numbuiltins)	// found
-				{
 					pr_ebfs_builtins[j].funcno = funcno;
-				}
-				else
-				{
-					Con_DPrintf ("Can not assign builtin number #%i to %s - function unknown\n", funcno, funcname);
-				}
+				else Con_DPrintf ("Can not assign builtin number #%i to %s - function unknown\n", funcno, funcname);
 			}
 		}
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
+		// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 	}
 
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 	if (pr_builtin_remap.value)
 	{
 		// check for unassigned functions and try to assign their default function number
@@ -229,12 +188,8 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 			{
 				// check if default number is already assigned to another function
 				for (j = 1; j < pr_ebfs_numbuiltins; j++)
-				{
 					if (pr_ebfs_builtins[j].funcno == pr_ebfs_builtins[i].default_funcno)
-					{
 						break;	// number already assigned to another builtin function
-					}
-				}
 
 				if (j < pr_ebfs_numbuiltins)	// already assigned
 				{
@@ -244,29 +199,21 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 						pr_ebfs_builtins[i].default_funcno, pr_ebfs_builtins[i].funcname, pr_ebfs_builtins[j].funcname
 					);
 				}
-				else
-				{
-					pr_ebfs_builtins[i].funcno = pr_ebfs_builtins[i].default_funcno;
-				}
+				else pr_ebfs_builtins[i].funcno = pr_ebfs_builtins[i].default_funcno;
 			}
 
 			// determine highest builtin number (when remapped)
-			if (pr_ebfs_builtins[i].funcno > pr_numbuiltins)
-			{
-				pr_numbuiltins = pr_ebfs_builtins[i].funcno;
-			}
+			if (pr_ebfs_builtins[i].funcno > pr_numbuiltins) pr_numbuiltins = pr_ebfs_builtins[i].funcno;
 		}
 	}
 
 	pr_numbuiltins++;
 
 	// allocate and initialize builtin list for execution time
-	pr_builtins = (builtin_t *) Pool_Map->Alloc (pr_numbuiltins * sizeof (builtin_t));
+	pr_builtins = (builtin_t *) MainHunk->Alloc (pr_numbuiltins * sizeof (builtin_t));
 
 	for (int i = 0; i < pr_numbuiltins; i++)
-	{
 		pr_builtins[i] = pr_ebfs_builtins[0].function;
-	}
 
 	// create builtin list for execution time and set cvars accordingly
 	Cvar_Set ("pr_builtin_find", "0");
@@ -275,32 +222,26 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	for (j = 1; j < pr_ebfs_numbuiltins; j++)
 	{
 		if (pr_ebfs_builtins[j].funcno)	// only put assigned functions into builtin list
-		{
 			pr_builtins[pr_ebfs_builtins[j].funcno] = pr_ebfs_builtins[j].function;
-		}
 
 		if (pr_ebfs_builtins[j].default_funcno == PR_DEFAULT_FUNCNO_BUILTIN_FIND)
-		{
 			Cvar_Set ("pr_builtin_find", pr_ebfs_builtins[j].funcno);
-		}
 
-// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  start
+		// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  start
 		if (pr_ebfs_builtins[j].default_funcno == PR_DEFAULT_FUNCNO_EXTENSION_FIND)
-		{
 			Cvar_Set ("pr_checkextension", pr_ebfs_builtins[j].funcno);
-		}
-// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  end
+		// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  end
 	}
-// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
+	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
-	for (int i = 0; i < this->QC.numglobaldefs; i++)
+	for (int i = 0; i < this->QC->numglobaldefs; i++)
 	{
 		this->GlobalDefs[i].type = LittleShort (this->GlobalDefs[i].type);
 		this->GlobalDefs[i].ofs = LittleShort (this->GlobalDefs[i].ofs);
 		this->GlobalDefs[i].s_name = LittleLong (this->GlobalDefs[i].s_name);
 	}
 
-	for (int i = 0; i < this->QC.numfielddefs; i++)
+	for (int i = 0; i < this->QC->numfielddefs; i++)
 	{
 		this->FieldDefs[i].type = LittleShort (this->FieldDefs[i].type);
 
@@ -311,20 +252,18 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 		this->FieldDefs[i].s_name = LittleLong (this->FieldDefs[i].s_name);
 	}
 
-	for (int i = 0; i < this->QC.numglobals; i++)
+	for (int i = 0; i < this->QC->numglobals; i++)
 		((int *) this->Globals)[i] = LittleLong (((int *) this->Globals)[i]);
 
 	FindEdictFieldOffsets ();
 }
 
 
-CProgsDat::~CProgsDat (void)
-{
-}
-
-
 void CProgsDat::ExecuteProgram (func_t fnum)
 {
+	// ha!
+	if (!this->QC) return;
+
 	eval_t		*a, *b, *c;
 	int		s;
 	dstatement_t	*st;
@@ -335,7 +274,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 	int		exitdepth;
 	eval_t		*ptr;
 
-	if (!fnum || fnum < 0 || fnum >= this->QC.numfunctions)
+	if (!fnum || fnum < 0 || fnum >= this->QC->numfunctions)
 	{
 		if (this->GlobalStruct->self)
 			ED_Print (PROG_TO_EDICT (this->GlobalStruct->self));
@@ -344,7 +283,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			Host_Error ("CProgsDat::ExecuteProgram: NULL function");
 		else if (fnum < 0)
 			Host_Error ("CProgsDat::ExecuteProgram: fnum < 0");
-		else Host_Error ("CProgsDat::ExecuteProgram: fnum >= this->QC.numfunctions");
+		else Host_Error ("CProgsDat::ExecuteProgram: fnum >= this->QC->numfunctions");
 	}
 
 	f = &this->Functions[fnum];
@@ -363,7 +302,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 	{
 		s++;	// next statement
 
-		if (s >= this->QC.numstatements) Host_Error ("CProgsDat::ExecuteProgram: s >= this->QC.numstatements");
+		if (s >= this->QC->numstatements) Host_Error ("CProgsDat::ExecuteProgram: s >= this->QC->numstatements");
 
 		this->XStatement = s;
 		this->XFunction->profile++;
@@ -454,7 +393,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			c->_float = !a->function;
 			break;
 		case OP_NOT_ENT:
-			c->_float = (PROG_TO_EDICT(a->edict) == this->Edicts);
+			c->_float = (PROG_TO_EDICT(a->edict) == this->EdictPointers[0]);
 			break;
 		case OP_EQ_F:
 			c->_float = a->_float == b->_float;
@@ -510,11 +449,13 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 		case OP_STOREP_FLD:		// integers
 		case OP_STOREP_S:
 		case OP_STOREP_FNC:		// pointers
-			ptr = (eval_t *)((byte *)this->Edicts + b->_int);
+			//ptr = (eval_t *)((byte *)this->Edicts + b->_int);
+			ptr = (eval_t *) ((byte *) this->EdictPointers[b->_int / this->EdictSize] + (b->_int % this->EdictSize));
 			ptr->_int = a->_int;
 			break;
 		case OP_STOREP_V:
-			ptr = (eval_t *)((byte *)this->Edicts + b->_int);
+			//ptr = (eval_t *)((byte *)this->Edicts + b->_int);
+			ptr = (eval_t *) ((byte *) this->EdictPointers[b->_int / this->EdictSize] + (b->_int % this->EdictSize));
 			ptr->vector[0] = a->vector[0];
 			ptr->vector[1] = a->vector[1];
 			ptr->vector[2] = a->vector[2];
@@ -523,10 +464,13 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 		case OP_ADDRESS:
 			ed = PROG_TO_EDICT(a->edict);
 
-			if (ed == (edict_t *)this->Edicts && sv.state == ss_active)
+			if (ed == (edict_t *) this->EdictPointers[0] && sv.state == ss_active)
 				this->RunError ("CProgsDat::ExecuteProgram: assignment to world entity");
 
-			c->_int = (byte *)((int *)&ed->v + b->_int) - (byte *)this->Edicts;
+			// c->_int = (byte *)((int *)&ed->v + b->_int) - (byte *)this->Edicts;
+			// beautiful, isn't it?  i much check the QCC source and see if the number here actually matters
+			// or can i just store the edict number and the offset in a short[2] member of the eval_t instead.
+			c->_int = (int) ((int *) ((byte *) &ed->v - (byte *) ed) + b->_int) + ed->Prog;
 			break;
 
 		case OP_LOAD_F:
@@ -759,7 +703,7 @@ void CProgsDat::Profile (void)
 		max = 0;
 		best = NULL;
 
-		for (i = 0; i < this->QC.numfunctions; i++)
+		for (i = 0; i < this->QC->numfunctions; i++)
 		{
 			f = &this->Functions[i];
 			if (f->profile > max)

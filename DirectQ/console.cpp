@@ -80,7 +80,7 @@ void Con_RemoveConsole (void)
 	key_linepos = 1;
 	
 	SCR_EndLoadingPlaque ();
-	memset (con_times, 0, sizeof(con_times));
+	Q_MemSet (con_times, 0, sizeof(con_times));
 }
 
 
@@ -103,7 +103,7 @@ void Con_ToggleConsole_f (void)
 		key_dest = key_console;
 	
 	SCR_EndLoadingPlaque ();
-	memset (con_times, 0, sizeof(con_times));
+	Q_MemSet (con_times, 0, sizeof(con_times));
 }
 
 /*
@@ -114,7 +114,7 @@ Con_Clear_f
 void Con_Clear_f (void)
 {
 	if (con_text)
-		memset (con_text, ' ', CON_TEXTSIZE);
+		Q_MemSet (con_text, ' ', CON_TEXTSIZE);
 }
 
 						
@@ -179,7 +179,7 @@ void Con_CheckResize (void)
 		width = 78;	// 640 width
 		con_linewidth = width;
 		con_totallines = CON_TEXTSIZE / con_linewidth;
-		memset (con_text, ' ', CON_TEXTSIZE);
+		Q_MemSet (con_text, ' ', CON_TEXTSIZE);
 	}
 	else
 	{
@@ -199,8 +199,8 @@ void Con_CheckResize (void)
 
 		char *tbuf = (char *) Zone_Alloc (CON_TEXTSIZE);
 
-		memcpy (tbuf, con_text, CON_TEXTSIZE);
-		memset (con_text, ' ', CON_TEXTSIZE);
+		Q_MemCpy (tbuf, con_text, CON_TEXTSIZE);
+		Q_MemSet (con_text, ' ', CON_TEXTSIZE);
 
 		for (i=0; i<numlines; i++)
 		{
@@ -249,8 +249,8 @@ void Con_Init (void)
 		}
 	}
 
-	con_text = (char *) Pool_Permanent->Alloc (CON_TEXTSIZE);
-	memset (con_text, ' ', CON_TEXTSIZE);
+	con_text = (char *) Zone_Alloc (CON_TEXTSIZE);
+	Q_MemSet (con_text, ' ', CON_TEXTSIZE);
 	con_linewidth = -1;
 	Con_CheckResize ();
 	
@@ -269,7 +269,7 @@ void Con_Linefeed (void)
 {
 	con_x = 0;
 	con_current++;
-	memset (&con_text[(con_current%con_totallines)*con_linewidth]
+	Q_MemSet (&con_text[(con_current%con_totallines)*con_linewidth]
 	, ' ', con_linewidth);
 }
 
@@ -398,7 +398,7 @@ void Con_DebugLog (char *file, char *fmt)
 	if (!ConDebugBuffer)
 	{
 		// alloc at MAXPRINTMSG so it won't ever need to be expanded
-		ConDebugBuffer = (char *) Pool_Permanent->Alloc (MAXPRINTMSG);
+		ConDebugBuffer = (char *) Zone_Alloc (MAXPRINTMSG);
 		ConDebugBuffer[0] = 0;
 		ConDebugBufferLen = 0;
 	}

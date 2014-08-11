@@ -61,8 +61,8 @@ bool DS_LoadProcs (void)
 #define	WAV_MASK				0x3F
 #define	WAV_BUFFER_SIZE			0x0400
 
-// 1 second at 16-bit stereo 44100hz
-#define SECONDARY_BUFFER_SIZE	0x100000
+// 1/16 second at 16-bit stereo 44100hz
+#define SECONDARY_BUFFER_SIZE	0x10000
 
 bool dsound_init = false;
 static int	sample16;
@@ -201,7 +201,7 @@ BOOL CALLBACK DSEnumCallback (LPGUID lpGuid, LPCSTR lpcstrDescription, LPCSTR lp
 			// if both buffers and sample rate are better than anything we've got so far, it's no contest
 			Q_strncpy (ds_BestDescription, lpcstrDescription, 127);
 			Q_strncpy (ds_BestModule, lpcstrModule, 63);
-			memcpy (&ds_BestGuid, lpGuid, sizeof (GUID));
+			Q_MemCpy (&ds_BestGuid, lpGuid, sizeof (GUID));
 			ds_BestSampleRate = ds_FakeCaps.dwMaxSecondarySampleRate;
 			ds_BestBuffers = ds_FakeCaps.dwMaxHwMixingAllBuffers;
 		}
@@ -240,7 +240,7 @@ sndinitstat SNDDMA_InitDirect (void)
 		return SIS_FAILURE;
 	}
 
-	memset ((void *) &sn, 0, sizeof (sn));
+	Q_MemSet ((void *) &sn, 0, sizeof (sn));
 
 	shm = &sn;
 
@@ -294,7 +294,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	// set back to cvar
 	Cvar_Set (&s_khz, shm->speed);
 
-	memset (&format, 0, sizeof (format));
+	Q_MemSet (&format, 0, sizeof (format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
     format.nChannels = shm->channels;
     format.wBitsPerSample = shm->samplebits;
@@ -307,7 +307,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	// as it is a case of "get the description"
 	ds_BestDescription[0] = 0;
 	ds_BestModule[0] = 0;
-	memcpy (&ds_BestGuid, &DSDEVID_DefaultPlayback, sizeof (GUID));
+	Q_MemCpy (&ds_BestGuid, (void *) &DSDEVID_DefaultPlayback, sizeof (GUID));
 	ds_BestBuffers = 0;
 	ds_BestSampleRate = 0;
 
@@ -320,7 +320,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	{
 		// ensure we're set up correctly
 		strcpy (ds_BestDescription, "Primary Sound Driver");
-		memcpy (&ds_BestGuid, &DSDEVID_DefaultPlayback, sizeof (GUID));
+		Q_MemCpy (&ds_BestGuid, (void *) &DSDEVID_DefaultPlayback, sizeof (GUID));
 	}
 
 	while (1)
@@ -387,13 +387,13 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	// no need to create a primary buffer; directsound will do it automatically for us
 	// create the secondary buffer we'll actually work with
-	memset (&ds_BufferDesc, 0, sizeof (ds_BufferDesc));
+	Q_MemSet (&ds_BufferDesc, 0, sizeof (ds_BufferDesc));
 	ds_BufferDesc.dwSize = sizeof (DSBUFFERDESC);
-	ds_BufferDesc.dwFlags = DSBCAPS_CTRLFREQUENCY | DSBCAPS_LOCSOFTWARE;
+	ds_BufferDesc.dwFlags = DSBCAPS_LOCSOFTWARE;
 	ds_BufferDesc.dwBufferBytes = SECONDARY_BUFFER_SIZE;
 	ds_BufferDesc.lpwfxFormat = &format;
 
-	memset (&ds_BufferCaps, 0, sizeof (ds_BufferCaps));
+	Q_MemSet (&ds_BufferCaps, 0, sizeof (ds_BufferCaps));
 	ds_BufferCaps.dwSize = sizeof (ds_BufferCaps);
 
 	// we need to create a legacy buffer first so that we can obtain the LPDIRECTSOUNDBUFFER8 interface from it
@@ -453,7 +453,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	}
 
 	// DirectSound doesn't guarantee that a new buffer will be silent, so we make it silent
-	memset (lpData, 0, dwSize);
+	Q_MemSet (lpData, 0, dwSize);
 
 	ds_SecondaryBuffer8->Unlock (lpData, dwSize, NULL, 0);
 
@@ -570,25 +570,17 @@ void SNDDMA_Shutdown(void)
 }
 
 
-void Sound_CacheFree (char *name);
-
 void Snd_Restart_f (void)
 {
-	extern sfx_t *known_sfx;
-
 	// flush all sounds from the buffer
 	S_ClearBuffer ();
 	S_BlockSound (true);
 
 	// clear loaded sounds
-	for (int i = 0; i < MAX_SFX; i++)
-	{
-		// clear the name and set the pointer to null
-		Sound_CacheFree (known_sfx[i].name);
+	SoundCache->Flush ();
 
-		// clear down cached data
-		known_sfx[i].sndcache = NULL;
-	}
+	for (sfx_t *sfx = active_sfx; sfx; sfx = sfx->next)
+		sfx->sndcache = NULL;
 
 	// now restart the sound system
 	S_Shutdown ();
@@ -609,6 +601,8 @@ void S_FrameCheck (void)
 	bool restart_sound = false;
 
 	// check for changed state
+	// FIIIIIX MEEEEEEE!
+	// these cvars change while data may still be in the buffer that utilises the old values!!!
 	if (s_khz.integer != oldkhz) restart_sound = true;
 	if (loadas8bit.integer != oldbits) restart_sound = true;
 

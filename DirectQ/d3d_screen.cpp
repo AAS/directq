@@ -88,6 +88,7 @@ cvar_t		scr_showcoords ("scr_showcoords", "0");
 float		scr_timeout;
 
 float		oldscreensize, oldfov, oldconscale, oldhudbgfill, oldsbaralpha;
+bool		oldautomap = false;
 extern cvar_t		gl_conscale;
 cvar_t		scr_viewsize ("viewsize", 100, CVAR_ARCHIVE);
 cvar_t		scr_fov ("fov", 90);	// 10 - 170
@@ -313,11 +314,11 @@ float SCR_CalcFovX (float fov_y, float width, float height)
 	if (fov_y < 1) fov_y = 1;
 	if (fov_y > 179) fov_y = 179;
 
-	y = height / tan (fov_y / 360 * M_PI);
+	y = height / tan (fov_y / 360 * D3DX_PI);
 
 	a = atan (width / y);
 
-    a = a * 360 / M_PI;
+    a = a * 360 / D3DX_PI;
 
     return a;
 }
@@ -332,11 +333,11 @@ float SCR_CalcFovY (float fov_x, float width, float height)
 	if (fov_x < 1) fov_x = 1;
 	if (fov_x > 179) fov_x = 179;
 
-	x = width / tan (fov_x / 360 * M_PI);
+	x = width / tan (fov_x / 360 * D3DX_PI);
 
 	a = atan (height / x);
 
-    a = a * 360 / M_PI;
+    a = a * 360 / D3DX_PI;
 
     return a;
 }
@@ -350,58 +351,37 @@ Must be called whenever vid changes
 Internal use only
 =================
 */
-extern cvar_t hud_overlay;
-extern cvar_t hud_sbaralpha;
+extern cvar_t scr_sbaralpha;
 
 static void SCR_CalcRefdef (void)
 {
-	int h;
-	float size;
-	bool full = false;
+	Cvar_Get (conscale, "gl_conscale");
 
 	vid.recalc_refdef = 0;
 
 	// bound viewsize
-	if (scr_viewsize.value < 30) Cvar_Set ("viewsize","30");
-	if (scr_viewsize.value > 120) Cvar_Set ("viewsize","120");
+	if (scr_viewsize.value < 100) Cvar_Set ("viewsize", "100");
+	if (scr_viewsize.value > 120) Cvar_Set ("viewsize", "120");
 
 	// bound field of view
-	if (scr_fov.value < 10) Cvar_Set ("fov","10");
-	if (scr_fov.value > 170) Cvar_Set ("fov","170");
+	if (scr_fov.value < 10) Cvar_Set ("fov", "10");
+	if (scr_fov.value > 170) Cvar_Set ("fov", "170");
 
-	// intermission is always full screen
-	if (cl.intermission)
-		size = 120;
-	else size = scr_viewsize.value;
-
-	if (size >= 120)
-		sb_lines = 0;		// no status bar at all
-	else if (size >= 110)
-		sb_lines = 24;		// no inventory
-	else sb_lines = 24 + 16 + 8;
-
-	if (scr_viewsize.value >= 100.0)
-	{
-		full = true;
-		size = 100.0;
-	}
-	else size = scr_viewsize.value;
-
-	if (cl.intermission)
-	{
-		full = true;
-		size = 100;
+	// conditions for switching off the HUD - viewsize 120 always switches it off, period
+	if (cl.intermission || d3d_RenderDef.automap || scr_viewsize.value > 110)
 		sb_lines = 0;
-	}
+	else if (scr_viewsize.value > 100)
+		sb_lines = 24;
+	else sb_lines = 48;
 
-	// draw HUD as an overlay rather than as a separate component
-	if (hud_overlay.value || hud_sbaralpha.value < 1) sb_lines = 0;
+	Cvar_Get (hudstyle, "cl_sbar");
 
-	size /= 100.0;
+	// only the classic hud uses lines
+	if (hudstyle->integer) sb_lines = 0;
 
 	// bound console scale
-	if (gl_conscale.value < 0) Cvar_Set ("gl_conscale", "0");
-	if (gl_conscale.value > 1) Cvar_Set ("gl_conscale", "1");
+	if (conscale->value < 0) Cvar_Set ("r_conscale", "0");
+	if (conscale->value > 1) Cvar_Set ("r_conscale", "1");
 
 	// adjust a conwidth and conheight to match the mode aspect
 	// they should be the same aspect as the mode, with width never less than 640 and height never less than 480
@@ -416,29 +396,14 @@ static void SCR_CalcRefdef (void)
 	}
 
 	// set width and height
-	vid.width = (d3d_CurrentMode.Width - conwidth) * gl_conscale.value + conwidth;
-	vid.height = (d3d_CurrentMode.Height - conheight) * gl_conscale.value + conheight;
-
-	h = vid.height - sb_lines;
-
-	r_refdef.vrect.width = vid.width * size;
-
-	if (r_refdef.vrect.width < 96)
-	{
-		size = 96.0 / r_refdef.vrect.width;
-		r_refdef.vrect.width = 96;	// min for icons
-	}
-
-	r_refdef.vrect.height = vid.height * size;
+	r_refdef.vrect.width = vid.width = (d3d_CurrentMode.Width - conwidth) * conscale->value + conwidth;
+	r_refdef.vrect.height = vid.height = (d3d_CurrentMode.Height - conheight) * conscale->value + conheight;
 
 	if (r_refdef.vrect.height > vid.height - sb_lines) r_refdef.vrect.height = vid.height - sb_lines;
 	if (r_refdef.vrect.height > vid.height) r_refdef.vrect.height = vid.height;
 
-	r_refdef.vrect.x = (vid.width - r_refdef.vrect.width) / 2;
-
-	if (full)
-		r_refdef.vrect.y = 0;
-	else r_refdef.vrect.y = (h - r_refdef.vrect.height) / 2;
+	// always
+	r_refdef.vrect.x = r_refdef.vrect.y = 0;
 
 	// x fov is initially the selected value
 	r_refdef.fov_x = scr_fov.value;
@@ -447,7 +412,6 @@ static void SCR_CalcRefdef (void)
 	{
 		// calculate y fov as if the screen was 640 x 432; this ensures that the top and bottom
 		// doesn't get clipped off if we have a widescreen display (also keeps the same amount of the viewmodel visible)
-		// use 640 x 432 to keep fov_y constant for different values of scr_viewsize too. ;)
 		r_refdef.fov_y = SCR_CalcFovY (r_refdef.fov_x, 640, 432);
 
 		// now recalculate fov_x so that it's correctly proportioned for fov_y
@@ -461,6 +425,23 @@ static void SCR_CalcRefdef (void)
 	}
 
 	scr_vrect = r_refdef.vrect;
+}
+
+
+void SCR_CheckSBarRefdef (void)
+{
+	bool modified = false;
+
+	static int old_clsbar = -1;
+
+	Cvar_Get (hudstyle, "cl_sbar");
+
+	if (hudstyle->integer != old_clsbar) modified = true;
+
+	old_clsbar = hudstyle->integer;
+
+	// toggle refdef recalc
+	vid.recalc_refdef = (vid.recalc_refdef || modified);
 }
 
 
@@ -535,7 +516,7 @@ void SCR_DrawTurtle (void)
 	if (count < 3)
 		return;
 
-	Draw_Pic (scr_vrect.x, scr_vrect.y, scr_turtle);
+	Draw_Pic (vid.width - 132, 4, scr_turtle);
 }
 
 /*
@@ -550,7 +531,7 @@ void SCR_DrawNet (void)
 	if (cls.demoplayback)
 		return;
 
-	Draw_Pic (scr_vrect.x + 64, scr_vrect.y, scr_net);
+	Draw_Pic (vid.width - 168, 4, scr_net);
 }
 
 /*
@@ -665,7 +646,7 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 
 	// allocate space for the header
 	byte buffer[18];
-	memset (buffer, 0, 18);
+	Q_MemSet (buffer, 0, 18);
 
 	// compose the header
 	buffer[2] = 2;
@@ -758,7 +739,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 
 	// allocate space for the header
 	byte buffer[18];
-	memset (buffer, 0, 18);
+	Q_MemSet (buffer, 0, 18);
 
 	// compose the header
 	buffer[2] = 2;
@@ -1398,7 +1379,7 @@ void SCR_DrawAutomapStats (void)
 		int yahy = (((r_automap_y - r_refdef.vieworg[1]) * 1) / r_automap_scale) + (vid.height / 2);
 
 		// draw it
-		Draw_Pic (yahx - 5, yahy - 10, 36, 36, yahtexture);
+		Draw_Pic (yahx - 5, yahy - 10, 64, 64, yahtexture);
 	}
 
 	if (scr_automapinfo.integer & 1)
@@ -1528,24 +1509,22 @@ void SCR_UpdateScreen (void)
 		vid.recalc_refdef = true;
 	}
 
-	if (oldhudbgfill != hud_overlay.value)
+	// check for automap
+	d3d_RenderDef.automap = D3D_DrawAutomap ();
+
+	if (oldautomap != d3d_RenderDef.automap)
 	{
-		oldhudbgfill = hud_overlay.value;
+		oldautomap = d3d_RenderDef.automap;
 		vid.recalc_refdef = true;
 	}
 
-	if (oldsbaralpha != hud_sbaralpha.value)
-	{
-		oldsbaralpha = hud_sbaralpha.value;
-		vid.recalc_refdef = true;
-	}
+	// check for status bar modifications
+	SCR_CheckSBarRefdef ();
 
 	if (vid.recalc_refdef) SCR_CalcRefdef ();
 
 	// do 3D refresh drawing, and then update the screen
 	SCR_SetUpToDrawConsole ();
-
-	d3d_RenderDef.automap = D3D_DrawAutomap ();
 
 	V_RenderView ();
 
@@ -1568,13 +1547,19 @@ void SCR_UpdateScreen (void)
 	{
 		if (!d3d_RenderDef.automap)
 		{
-			if (!scr_drawloading) SCR_DrawNet ();
-			if (!scr_drawloading) SCR_DrawTurtle ();
-			if (!scr_drawloading) SCR_DrawPause ();
-			if (!scr_drawloading) SCR_CheckDrawCenterString ();
+			if (!scr_drawloading)
+			{
+				SCR_DrawNet ();
+				SCR_DrawTurtle ();
+				SCR_DrawPause ();
+				SCR_CheckDrawCenterString ();
+			}
+
 			HUD_DrawHUD ();
 			SCR_DrawConsole ();
-			if (!scr_drawloading) SHOWLMP_drawall ();
+
+			if (!scr_drawloading)
+				SHOWLMP_drawall ();
 
 			extern int r_speedstime;
 

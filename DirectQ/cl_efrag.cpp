@@ -52,7 +52,7 @@ efrag_t *R_GetEFrag (void)
 		return ef;
 	}
 
-	free_efrags = (efrag_t *) Pool_Map->Alloc (EXTRA_EFRAGS * sizeof (efrag_t));
+	free_efrags = (efrag_t *) MainHunk->Alloc (EXTRA_EFRAGS * sizeof (efrag_t));
 
 	for (i = 0; i < EXTRA_EFRAGS - 1; i++)
 		free_efrags[i].entnext = &free_efrags[i + 1];

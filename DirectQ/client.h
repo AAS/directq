@@ -45,7 +45,6 @@ typedef struct
 	int		colors;			// two 4 bit fields
 	int		ping;			// JPG - added this
 	int		addr;			// JPG - added this
-	byte	translations[VID_GRADES * 256];
 } scoreboard_t;
 
 // JPG - added this for teamscore status bar
@@ -364,7 +363,6 @@ void CL_TimeDemo_f (void);
 // cl_parse.c
 //
 void CL_ParseServerMessage (void);
-void CL_NewTranslation (int slot);
 
 //
 // view

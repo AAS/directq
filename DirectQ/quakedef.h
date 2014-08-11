@@ -30,6 +30,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <assert.h>
 
 #include <windows.h>
+
+// these are handy for every source file as they contain useful #defines and similar
 #include <d3d9.h>
 #include <d3dx9.h>
 
@@ -44,6 +46,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma warning (disable: 4996)
 #pragma warning (disable: 4995)
 #pragma warning (disable: 4312)
+
 
 WCHAR *QASCIIToUnicode (char *strasc);
 char *QUnicodeToASCII (WCHAR *struni);
