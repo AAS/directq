@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "d3d_hlsl.h"
 
+cvar_t r_newparticles ("r_newparticles", "0", CVAR_ARCHIVE);
+
 // allows us to combine different behaviour types
 // (largely obsolete, replaced by individual particle parameters, retained for noclip type only)
 #define PT_STATIC			0
@@ -102,11 +104,12 @@ typedef struct partverts_s
 	float x, y, z;
 	DWORD color;
 	float s, t;
+	byte pad[8];
 } partverts_t;
 
 // size of the particle batch - about 1000 verts per primitive call per d3d documentation
 // this ensures that we satisfy the "divide by 6" rule
-#define R_PARTICLE_RENDER_BATCH_SIZE	1020
+#define R_PARTICLE_RENDER_BATCH_SIZE	300
 
 // draw in batches
 partverts_t partverts[R_PARTICLE_RENDER_BATCH_SIZE];
@@ -684,6 +687,7 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 	VectorSubtract (end, start, vec);
 	len = VectorNormalize (vec);
+
 	if (type < 128)
 		dec = 3;
 	else
@@ -720,6 +724,18 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 			for (j = 0; j < 3; j++)
 				p->org[j] = start[j] + ((rand () % 6) - 3);
 
+			/*
+			if (r_newparticles.integer)
+			{
+				p->tex = particlesmoketexture;
+				p->scale = 2;
+				p->alpha = 128;
+				p->growth = 6;
+				p->fade = 128;
+				len -= 24;
+			}
+			*/
+
 			break;
 
 		case 2:
@@ -733,6 +749,14 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 			// slight blood
 			if (type == 4) len -= 3;
+
+			/*
+			if (r_newparticles.integer)
+			{
+				p->tex = particleblood[0];
+				p->scale = 3;
+			}
+			*/
 
 			break;
 
@@ -791,8 +815,8 @@ inline DWORD FloatToDW (float f)
 }
 
 
-float partst[6][2] = {{0, 1}, {1, 1}, {0, 0}, {1, 1}, {1, 0}, {0, 0}};
-float partv[6][2] = {{-1, -1}, {-1, 1}, {1, -1}, {-1, 1}, {1, 1}, {1, -1}};
+float partst[6][2] = {{1, 0}, {1, 1}, {0, 1}, {0, 1}, {0, 0}, {1, 0}};
+float partv[6][2] = {{1, 1}, {-1, 1}, {-1, -1}, {-1, -1}, {1, -1}, {1, 1}};
 
 
 void R_KillParticles (void)
@@ -889,15 +913,11 @@ void R_RenderParticles (void)
 	d3d_ParticleFX.SwitchToPass (0);
 
 	// disable z buffer writing and enable blending
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-
-	// don't cull these as they should never backface
-	// might give a small speedup as the runtime doesn't have to check it...
-	D3D_BackfaceCull (D3DCULL_NONE);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
 	// for rendering
 	int v = 0;
@@ -936,10 +956,10 @@ void R_RenderParticles (void)
 
 		DWORD pc = D3DCOLOR_ARGB
 		(
-			D3D_TransformColourSpaceByte (BYTE_CLAMP (p->alpha)),
-			D3D_TransformColourSpaceByte (color[2]),
-			D3D_TransformColourSpaceByte (color[1]),
-			D3D_TransformColourSpaceByte (color[0])
+			BYTE_CLAMP (p->alpha),
+			color[2],
+			color[1],
+			color[0]
 		);
 
 		if (p->scalemod)
@@ -980,9 +1000,6 @@ void R_RenderParticles (void)
 
 	// revert state
 	d3d_ParticleFX.EndRender ();
-	D3D_BackfaceCull (D3DCULL_CCW);
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
 

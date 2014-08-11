@@ -20,15 +20,52 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+// QuakeC debugger
+cvar_t qc_debug ("qc_debug", "0");
+
+void QC_DebugOutput (char *debugtext, ...)
+{
+	if (!qc_debug.integer) return;
+	if (!sv.active) return;
+
+	va_list argptr;
+	char string[1024];
+
+	va_start (argptr, debugtext);
+	vsprintf (string, debugtext, argptr);
+	va_end (argptr);
+
+	static int qc_olddebug = 0;
+
+	if (qc_debug.integer & 1)
+		Con_Printf ("QC Debug: %s\n", string);
+
+	if (qc_debug.integer & 2)
+	{
+		FILE *f;
+		char *modes[] = {"a", "w"};
+		int modenum = 0;
+
+		if (qc_debug.integer != qc_olddebug)
+		{
+			qc_olddebug = qc_debug.integer;
+			modenum = 1;
+		}
+
+		if (!(f = fopen ("qcdebuglog.txt", modes[modenum]))) return;
+		fprintf (f, "%s\n", string);
+		fclose (f);
+	}
+}
+
+
 #define	RETURN_EDICT(e) (((int *)pr_globals)[OFS_RETURN] = EDICT_TO_PROG(e))
 
-cvar_t qc_snoop ("qc_snoop", "0");
 cvar_t pr_checkextension ("pr_checkextension", "1", CVAR_READONLY);
 
 char *pr_extensions = NULL;
 
 char pr_string_temp[128];
-
 
 /*
 ===============================================================================
@@ -78,14 +115,16 @@ void PF_error (void)
 {
 	char	*s;
 	edict_t	*ed;
-	
+
 	s = PF_VarString(0);
-	Con_Printf ("======SERVER ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name,s);
-	ed = PROG_TO_EDICT(pr_global_struct->self);
+	Con_Printf ("======SERVER ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name, s);
+	ed = PROG_TO_EDICT (pr_global_struct->self);
 	ED_Print (ed);
 
+	QC_DebugOutput ("======SERVER ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name, s);
 	Host_Error ("Program error");
 }
+
 
 /*
 =================
@@ -103,11 +142,12 @@ void PF_objerror (void)
 	edict_t	*ed;
 	
 	s = PF_VarString(0);
-	Con_Printf ("======OBJECT ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name,s);
+	Con_Printf ("======OBJECT ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name, s);
 	ed = PROG_TO_EDICT(pr_global_struct->self);
 	ED_Print (ed);
 	ED_Free (ed);
-	
+
+	QC_DebugOutput ("======OBJECT ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name, s);
 	Host_Error ("Program error");
 }
 
@@ -130,7 +170,9 @@ void PF_makevectors (void)
 =================
 PF_setorigin
 
-This is the only valid way to move an object without using the physics of the world (setting velocity and waiting).  Directly changing origin will not set internal links correctly, so clipping would be messed up.  This should be called when an object is spawned, and then only if it is teleported.
+This is the only valid way to move an object without using the physics of the world (setting velocity and waiting).
+Directly changing origin will not set internal links correctly, so clipping would be messed up.  This should be called
+when an object is spawned, and then only if it is teleported.
 
 setorigin (entity, origin)
 =================
@@ -847,9 +889,7 @@ void PF_localcmd (void)
 	char	*str;
 
 	str = G_STRING(OFS_PARM0);
-
-	if (qc_snoop.value) Con_Printf ("QC Snoop: Execing cmd \"%s\"\n", str);
-
+	QC_DebugOutput ("Execing cmd \"%s\"", str);
 	Cbuf_AddText (str);
 }
 
@@ -884,8 +924,7 @@ void PF_cvar_set (void)
 	var = G_STRING(OFS_PARM0);
 	val = G_STRING(OFS_PARM1);
 
-	if (qc_snoop.value) Con_Printf ("QC Snoop: Setting cvar \"%s\" to \"%s\"\n", var, val);
-
+	QC_DebugOutput ("Setting cvar \"%s\" to \"%s\"", var, val);
 	Cvar_Set (var, val);
 }
 

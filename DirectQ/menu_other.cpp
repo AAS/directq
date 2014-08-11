@@ -88,6 +88,7 @@ extern cvar_t r_defaultshaderprecision;
 extern cvar_t r_warpshaderprecision;
 extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
+extern cvar_t r_lightscale;
 
 CQMenu menu_Main (NULL, m_main);
 CQMenu menu_Singleplayer (&menu_Main, m_other);
@@ -926,6 +927,7 @@ void Menu_InitOptionsMenu (void)
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Extra DLights", &r_extradlight, 0, 1));
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Rapid Fire Effect", &r_rapidfire, 0, 1));
 	menu_Effects.AddOption (new CQMenuTitle ("Other Effects"));
+	menu_Effects.AddOption (new CQMenuCvarSlider ("Light Scale Factor", &r_lightscale, 0, 2, 0.05f));
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Z-Fighting Hack", &r_zhack, 0, 1));
 
 	// this is to give users some control over where content items go as they're not standardised per engine
@@ -1395,6 +1397,13 @@ void Menu_MapsPopulate (void)
 	// release the vector
 	MapList.clear ();
 
+	if (!maplistlen)
+	{
+		// OK, we had a crash with no demos installed, so let's also catch no maps installed
+		Sys_Error ("Menu_MapsPopulate: No Maps Installed!\n(Are you crazy?)");
+		return;
+	}
+
 	// set up the scrollbox
 	MapListScrollBox = new CScrollBoxProvider (maplistlen, 22, 22);
 	MapListScrollBox->SetDrawItemCallback (Menu_MapsOnDraw);
@@ -1481,27 +1490,32 @@ void Menu_DemoPopulate (void)
 
 	// by now it should be obvious what we're doing here...
 	int numdemos = demovector.size ();
+
 	demolist = (char **) malloc ((numdemos + 1) * sizeof (char *));
 
-	for (int i = 0; i < numdemos; i++)
+	if (numdemos)
 	{
-		int thisdemolen = strlen (demovector[i]);
-
-		demolist[i] = (char *) malloc (thisdemolen + 1);
-		strcpy (demolist[i], demovector[i]);
-
-		for (int j = thisdemolen; j; j--)
+		for (int i = 0; i < numdemos; i++)
 		{
-			if (demolist[i][j] == '.')
-			{
-				demolist[i][j] = 0;
-				break;
-			}
-		}
+			int thisdemolen = strlen (demovector[i]);
 
-		demolist[i + 1] = NULL;
-		free (demovector[i]);
+			demolist[i] = (char *) malloc (thisdemolen + 1);
+			strcpy (demolist[i], demovector[i]);
+
+			for (int j = thisdemolen; j; j--)
+			{
+				if (demolist[i][j] == '.')
+				{
+					demolist[i][j] = 0;
+					break;
+				}
+			}
+
+			demolist[i + 1] = NULL;
+			free (demovector[i]);
+		}
 	}
+	else demolist[0] = NULL;
 
 	// set defaults
 	demonum = 0;
@@ -1517,9 +1531,19 @@ void Menu_DemoPopulate (void)
 #define TAG_RECORDCMD	3
 #define TAG_PLAYONLY	4
 #define TAG_TIMEONLY	5
+#define TAG_SELECTMODE	6
 
 int Menu_DemoCustomDraw1 (int y)
 {
+	// go direct to record mode if there are no demos
+	if (!demolist[0])
+	{
+		// also disable the mode selection so that we don't inadvertently trigger invalid modes
+		menu_Demo.DisableOptions (TAG_SELECTMODE);
+		democmd_num = 2;
+	}
+	else menu_Demo.EnableOptions (TAG_SELECTMODE);
+
 	// fix up control visibility
 	if (democmd_num == 2)
 	{
@@ -1838,7 +1862,7 @@ void Menu_InitContentMenu (void)
 	menu_Demo.AddOption (TAG_PLAYONLY, new CQMenuTitle ("Run an Existing Demo"));
 	menu_Demo.AddOption (TAG_TIMEONLY, new CQMenuTitle ("Benchmark an Existing Demo"));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuTitle ("Record a New Demo"));
-	menu_Demo.AddOption (new CQMenuSpinControl ("Command Mode", &democmd_num, democmds));
+	menu_Demo.AddOption (TAG_SELECTMODE, new CQMenuSpinControl ("Command Mode", &democmd_num, democmds));
 	menu_Demo.AddOption (TAG_PLAYTIME, new CQMenuSpinControl ("Demo File Name", &demonum, &demolist));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuCvarTextbox ("New Demo File Name", &dummy_demoname, TBFLAGS_FILENAMEFLAGS));
 	menu_Demo.AddOption (TAG_RECORD, new CQMenuSpacer (DIVIDER_LINE));

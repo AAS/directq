@@ -905,6 +905,7 @@ Should NOT be called during an interrupt!
 */
 void Menu_ToggleMenu (void);
 void M_Keydown (int key);
+void HUD_ShowDemoScores (void);
 
 void Key_Event (int key, bool down)
 {
@@ -918,20 +919,23 @@ void Key_Event (int key, bool down)
 
 	key_lastpress = key;
 	key_count++;
+
 	if (key_count <= 0)
 	{
 		return;		// just catching keys for Con_NotifyBox
 	}
 
-// update auto-repeat status
+	// update auto-repeat status
 	if (down)
 	{
 		key_repeats[key]++;
+
 		if (key != K_BACKSPACE && key != K_PAUSE && key_repeats[key] > 1)
 		{
-			return;	// ignore most autorepeats
+			// ignore most autorepeats
+			return;
 		}
-			
+
 		if (key >= 200 && !keybindings[key])
 			Con_Printf ("%s is unbound, hit F4 to set.\n", Key_KeynumToString (key) );
 	}
@@ -939,9 +943,7 @@ void Key_Event (int key, bool down)
 	if (key == K_SHIFT)
 		shift_down = down;
 
-//
-// handle escape specialy, so the user can never unbind it
-//
+	// handle escape specialy, so the user can never unbind it
 	if (key == K_ESCAPE)
 	{
 		if (!down)
@@ -996,7 +998,10 @@ void Key_Event (int key, bool down)
 //
 	if (cls.demoplayback && down && consolekeys[key] && key_dest == key_game)
 	{
-		Menu_ToggleMenu ();
+		if (key == K_TAB)
+			HUD_ShowDemoScores ();
+		else Menu_ToggleMenu ();
+
 		return;
 	}
 

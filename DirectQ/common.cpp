@@ -1221,7 +1221,7 @@ char *va (char *format, ...)
 	if (bufnum > 15) bufnum = 0;
 
 	va_start (argptr, format);
-	vsprintf (string[bufnum], format,argptr);
+	vsprintf (string[bufnum], format, argptr);
 	va_end (argptr);
 
 	return string[bufnum];
@@ -1817,7 +1817,6 @@ void D3D_InitUnderwaterTexture (void);
 void Draw_InvalidateMapshot (void);
 void Menu_SaveLoadInvalidate (void);
 void S_StopAllSounds (bool clear);
-void D_FlushCaches (void);
 void Mod_ClearAll (void);
 void S_ClearSounds (void);
 void Menu_MapsPopulate (void);
@@ -1862,7 +1861,6 @@ void COM_UnloadAllStuff (void)
 
 	// clear everything else
 	S_StopAllSounds (true);
-	D_FlushCaches ();
 	Mod_ClearAll ();
 	S_ClearSounds ();
 
@@ -2022,8 +2020,20 @@ void COM_LoadGame (char *gamename)
 
 	Con_Printf ("\n");
 
+	/*
+	not quite working...
+	// restart the demo loop
+	cls.demoplayback = false;
+	cls.demonum = 0;
+
+	// hack to force the console to toggle off
+	key_dest = key_game;
+	Con_ToggleConsole_f ();
+	*/
+
 	// reload the configs as they may have changed
 	Cbuf_InsertText ("exec quake.rc\n");
+	Cbuf_Execute ();
 }
 
 

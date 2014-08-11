@@ -115,18 +115,20 @@ void Host_Error (char *error, ...)
 	va_list		argptr;
 	char		string[1024];
 	static	bool inerror = false;
-	
+
 	if (inerror)
 		Sys_Error ("Host_Error: recursively entered");
 	inerror = true;
-	
+
 	SCR_EndLoadingPlaque ();		// reenable screen updates
 
 	va_start (argptr,error);
 	vsprintf (string,error,argptr);
 	va_end (argptr);
-	Con_Printf ("Host_Error: %s\n",string);
-	
+
+	Con_Printf ("Host_Error: %s\n", string);
+	QC_DebugOutput ("Host_Error: %s\n", string);
+
 	if (sv.active)
 		Host_ShutdownServer (false);
 
@@ -458,7 +460,6 @@ void Host_ClearMemory (void)
 {
 	// clear anything that needs to be cleared specifically
 	S_StopAllSounds (true);
-	D_FlushCaches ();
 	Mod_ClearAll ();
 	S_ClearSounds ();
 
@@ -488,8 +489,8 @@ bool Host_FilterTime (float time)
 {
 	realtime += time;
 
-	// fixme - lock this to refresh rate
-	if (!cls.timedemo && realtime - oldrealtime < 1.0/72.0)
+	// fixme - lock this to refresh rate?
+	if (!cls.timedemo && realtime - oldrealtime < 1.0 / 72.0)
 		return false;		// framerate is too high
 
 	host_frametime = realtime - oldrealtime;

@@ -99,8 +99,8 @@ typedef struct
 
 
 #define	MAX_MAPSTRING	2048
-#define	MAX_DEMOS		8
-#define	MAX_DEMONAME	16
+#define	MAX_DEMOS		64
+#define	MAX_DEMONAME	64
 
 typedef enum
 {

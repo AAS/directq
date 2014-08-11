@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+cvar_t sv_antiwallhack ("sv_antiwallhack", "0", CVAR_ARCHIVE | CVAR_SERVER);
+
 int		sv_max_datagram = MAX_DATAGRAM; // Must be set so client will work without server
 
 server_t		sv;
@@ -440,7 +442,10 @@ crosses a waterline.
 */
 
 int		fatbytes;
-byte	fatpvs[(MAX_MAP_LEAFS + 7) / 8];
+byte	*fatpvs = NULL;
+
+// control how fat the fatpvs is
+cvar_t sv_pvsfat ("sv_pvsfat", "8", CVAR_ARCHIVE);
 
 void SV_AddToFatPVS (vec3_t org, mnode_t *node)
 {
@@ -456,18 +461,20 @@ void SV_AddToFatPVS (vec3_t org, mnode_t *node)
 		{
 			if (node->contents != CONTENTS_SOLID)
 			{
-				pvs = Mod_LeafPVS ( (mleaf_t *)node, sv.worldmodel);
-				for (i=0 ; i<fatbytes ; i++)
-					fatpvs[i] |= pvs[i];
+				pvs = Mod_LeafPVS ((mleaf_t *) node, sv.worldmodel);
+				for (i = 0; i < fatbytes ; i++) fatpvs[i] |= pvs[i];
 			}
+
 			return;
 		}
 
 		plane = node->plane;
+
 		d = DotProduct (org, plane->normal) - plane->dist;
-		if (d > 8)
+
+		if (d > sv_pvsfat.integer)
 			node = node->children[0];
-		else if (d < -8)
+		else if (d < -sv_pvsfat.integer)
 			node = node->children[1];
 		else
 		{
@@ -489,9 +496,13 @@ given point.
 */
 byte *SV_FatPVS (vec3_t org)
 {
-	fatbytes = (sv.worldmodel->bh->numleafs+31)>>3;
+	fatbytes = (sv.worldmodel->bh->numleafs + 31) >> 3;
+
+	if (!fatpvs) fatpvs = (byte *) malloc (fatbytes);
+
 	Q_memset (fatpvs, 0, fatbytes);
 	SV_AddToFatPVS (org, sv.worldmodel->bh->nodes);
+
 	return fatpvs;
 }
 
@@ -501,16 +512,65 @@ bool TestEntityVolumePoints (float *view, float *pt, float *mins, float *maxs);
 
 bool SV_VisibleToClient (edict_t *viewer, edict_t *seen)
 {
-	vec3_t start;
+	// allow anti-wallhack to be switched off
+	if (!sv_antiwallhack.integer) return true;
 
 	// dont cull doors and plats :(
 	if (seen->v.movetype == MOVETYPE_PUSH) return true;
 
-	start[0] = viewer->v.origin[0];
-	start[1] = viewer->v.origin[1];
-	start[2] = viewer->v.origin[2] + viewer->v.view_ofs[2];
+	vec3_t start =
+	{
+		viewer->v.origin[0],
+		viewer->v.origin[1],
+		viewer->v.origin[2] + viewer->v.view_ofs[2]
+	};
 
+	// this uses the trace functions from the light exe
 	return TestEntityVolumePoints (start, seen->v.origin, seen->v.mins, seen->v.maxs);
+}
+
+
+/*
+===============
+SV_FindTouchedLeafs
+
+moved to here, deferred find until we hit actual sending to client, and
+added test vs client pvs in finding.
+
+note - if directq is being used as a server, this may increase the server processing
+===============
+*/
+void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node, byte *pvs)
+{
+	mplane_t	*splitplane;
+	int			sides;
+	int			leafnum;
+
+	// ent already touches a leaf
+	if (ent->touchleaf) return;
+
+	// hit solid
+	if (node->contents == CONTENTS_SOLID) return;
+
+	// add an efrag if the node is a leaf
+	// this is used for sending ents to the client so it needs to stay
+	if (node->contents < 0)
+	{
+		leafnum = ((mleaf_t *) node) - sv.worldmodel->bh->leafs - 1;
+
+		if (pvs[leafnum >> 3] & (1 << (leafnum & 7)))
+			ent->touchleaf = true;
+
+		return;
+	}
+
+	// NODE_MIXED
+	splitplane = node->plane;
+	sides = BOX_ON_PLANE_SIDE (ent->v.absmin, ent->v.absmax, splitplane);
+
+	// recurse down the contacted sides, start dropping out if we hit anything
+	if ((sides & 1) && !ent->touchleaf) SV_FindTouchedLeafs (ent, node->children[0], pvs);
+	if ((sides & 2) && !ent->touchleaf) SV_FindTouchedLeafs (ent, node->children[1], pvs);
 }
 
 
@@ -534,7 +594,9 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 	pvs = SV_FatPVS (org);
 
 	// send over all entities (excpet the client) that touch the pvs
-	ent = NEXT_EDICT(sv.edicts);
+	ent = NEXT_EDICT (sv.edicts);
+
+	int NumCulledEnts = 0;
 
 	for (e = 1; e < sv.num_edicts; e++, ent = NEXT_EDICT (ent))
 	{
@@ -544,20 +606,29 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 			// ignore ents without visible models
 			if (!ent->v.modelindex || !pr_strings[ent->v.model]) continue;
 
-			// check for an occupied leaf being visible
-			for (i = 0; i < ent->num_leafs; i++)
-				if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i] & 7)))
-					break;
+			// link to PVS leafs - deferred to here so that we can compare leafs that are touched to the PVS.
+			// this is less optimal on one hand as it now needs to be done separately for each client, rather than once
+			// only (covering all clients), but more optimal on the other as it only needs to hit one leaf and will
+			// start dropping out of the recursion as soon as it does so.  on balance it should be more optimal overall.
+			ent->touchleaf = false;
+			SV_FindTouchedLeafs (ent, sv.worldmodel->bh->nodes, pvs);
 
-			// not visible
-			// (note - in SP we can probably short-circuit the protocol and check the view frustum too - it would be previous frame though)
-			if (i == ent->num_leafs) continue;
+			// if the entity didn't touch any leafs in the pvs don't send it to the client
+			if (!ent->touchleaf)
+			{
+				NumCulledEnts++;
+				continue;
+			}
 
 			// server side occlusion check
 			// NOTE - this gives wallhack protection too, but this engine is not really intended for use as a server.
 			// Problems with it: it doesn't check against brush models, and it doesn't check static entities.
 			// this is included primarily because it seems the correct thing to do. :)
-			//if (!SV_VisibleToClient (clent, ent)) continue;
+			if (!SV_VisibleToClient (clent, ent))
+			{
+				NumCulledEnts++;
+				continue;
+			}
 		}
 
 		// send an update
@@ -641,6 +712,8 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 			MSG_WriteFloat (msg, fullbright);
 		}
 	}
+
+	// if (NumCulledEnts) Con_Printf ("Culled %i entities\n", NumCulledEnts);
 }
 
 
@@ -1180,6 +1253,13 @@ void SV_SpawnServer (char *server)
 		Con_Printf ("Couldn't spawn server %s\n", sv.modelname);
 		sv.active = false;
 		return;
+	}
+
+	// clear the fat pvs
+	if (fatpvs)
+	{
+		free (fatpvs);
+		fatpvs = NULL;
 	}
 
 	// now count our edicts - every { in the entities lump signifies a potential edict

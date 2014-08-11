@@ -29,6 +29,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define	D3DQUAKE_VERSION		0.01
 
+PALETTEENTRY texturepal[256];
+
 cvar_t		gl_nobind ("gl_nobind", "0");
 cvar_t		gl_conscale ("gl_conscale", "0", CVAR_ARCHIVE);
 
@@ -69,6 +71,7 @@ typedef struct vert_2d_s
 {
 	float xyz[3];
 	float st[2];
+	byte pad[12];
 } vert_2d_t;
 
 
@@ -324,6 +327,17 @@ void Draw_Init (void)
 	int		start;
 	byte	*ncdata;
 
+	// copy out palette
+	for (int i = 0; i < 256; i++)
+	{
+		byte *bgra = (byte *) &d_8to24table[i];
+
+		texturepal[i].peRed = bgra[2];
+		texturepal[i].peGreen = bgra[1];
+		texturepal[i].peBlue = bgra[0];
+		texturepal[i].peFlags = bgra[3];
+	}
+
 	// free cache pics
 	for (cachepic_t *pic = menu_cachepics; pic; pic = pic->next)
 		pic->name[0] = 0;
@@ -574,7 +588,7 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	float AlphaColour[] = {1, 1, 1, D3D_TransformColourSpace (alpha)};
+	float AlphaColour[] = {1, 1, 1, alpha};
 
 	d3d_Flat2DFX.SwitchToPass (2);
 	d3d_Flat2DFX.SetColor4f (AlphaColour);
@@ -952,10 +966,10 @@ void Draw_Fill (int x, int y, int w, int h, int c, int alpha)
 
 	float FillColour[4] =
 	{
-		D3D_TransformColourSpace (bgra[2] / 255.0f), 
-		D3D_TransformColourSpace (bgra[1] / 255.0f), 
-		D3D_TransformColourSpace (bgra[0] / 255.0f), 
-		D3D_TransformColourSpace (alpha / 255.0f)
+		bgra[2] / 255.0f, 
+		bgra[1] / 255.0f, 
+		bgra[0] / 255.0f, 
+		alpha / 255.0f
 	};
 
 	d3d_Flat2DFX.SwitchToPass (1);
@@ -984,7 +998,7 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (void)
 {
-	float FadeColour[4] = {0, 0, 0, r_sRGBgamma.integer ? 0.9f : 0.8f};
+	float FadeColour[4] = {0, 0, 0, 0.8f};
 
 	d3d_Flat2DFX.SwitchToPass (1);
 	d3d_Flat2DFX.SetColor4f (FadeColour);
@@ -1016,10 +1030,10 @@ void Draw_PolyBlend (void)
 
 	float BlendColor[4] =
 	{
-		D3D_TransformColourSpace (v_blend[0] / 255.0f),
-		D3D_TransformColourSpace (v_blend[1] / 255.0f),
-		D3D_TransformColourSpace (v_blend[2] / 255.0f),
-		D3D_TransformColourSpace (v_blend[3] / 255.0f)
+		v_blend[0] / 255.0f,
+		v_blend[1] / 255.0f,
+		v_blend[2] / 255.0f,
+		v_blend[3] / 255.0f
 	};
 
 	d3d_Flat2DFX.SwitchToPass (1);
@@ -1027,10 +1041,11 @@ void Draw_PolyBlend (void)
 
 	vert_2d_t verts[] =
 	{
+		// don't go down into the status bar area
 		{0, 0, 0},
 		{vid.width, 0, 0},
-		{vid.width, vid.height, 0},
-		{0, vid.height, 0}
+		{vid.width, vid.height - sb_lines, 0},
+		{0, vid.height - sb_lines, 0}
 	};
 
 	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -1047,9 +1062,6 @@ void D3D_Set2DShade (float shadecolor)
 	}
 	else
 	{
-		// transform
-		shadecolor = D3D_TransformColourSpace (shadecolor);
-
 		// set color
 		float ShadeColor[4] = {shadecolor, shadecolor, shadecolor, shadecolor};
 
@@ -1063,6 +1075,7 @@ void D3D_Set2DShade (float shadecolor)
 // we'll store this out too in case we ever want to do anything with it
 D3DVIEWPORT9 d3d_2DViewport;
 void D3D_DrawUnderwaterWarp (void);
+void SCR_SetupToDrawHUD (void);
 
 void D3D_Set2D (void)
 {
@@ -1075,16 +1088,14 @@ void D3D_Set2D (void)
 	d3d_2DViewport.MaxZ = 1.0f;
 
 	// because the underwater warp needs it's own beginscene/endscene pair, we need a beginscene here too...
-	d3d_Device->BeginScene ();
 	d3d_Device->SetViewport (&d3d_2DViewport);
 
 	// world matrix
 	d3d_WorldMatrixStack->LoadIdentity ();
-	d3d_Device->SetTransform (D3DTS_WORLD, d3d_WorldMatrixStack->GetTop ());
 
 	// disable depth testing and writing
-	d3d_Device->SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
 	// no backface culling
 	D3D_BackfaceCull (D3DCULL_NONE);
@@ -1098,18 +1109,25 @@ void D3D_Set2D (void)
 	// projection matrix
 	D3DXMatrixIdentity (&d3d_OrthoMatrix);
 	D3DXMatrixOrthoOffCenterRH (&d3d_OrthoMatrix, 0, vid.width, vid.height, 0, 0, 1);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_OrthoMatrix);
-
-	// enable alpha blending
-	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
 	// note - texture clamping is done per element rather than globally as the Draw_TileClear requires wrapping
 	// set up our shader
 	d3d_Flat2DFX.BeginRender ();
 	d3d_Flat2DFX.SetWPMatrix (&((*d3d_WorldMatrixStack->GetTop ()) * d3d_OrthoMatrix));
+
+	// note - SwitchToPass doesn't take effect until we actually come to DRAW something, so we can safely issue
+	// as many of these as we want with no impact on perf
+	d3d_Flat2DFX.SwitchToPass (0);
+
+	// do this before enabling alpha blending so that we're not alpha-blending a large part of the screen
+	// with a texture that has an alpha of 1!!!
+	SCR_SetupToDrawHUD ();
+
+	// enable alpha blending
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
 	// do the polyblend here for simplicity
 	Draw_PolyBlend ();

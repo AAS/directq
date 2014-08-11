@@ -24,6 +24,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "d3d_hlsl.h"
 
+extern bool r_automap;
+bool D3D_DrawAutomap (void);
+extern bool d3d_AutomapDraw;
+
+void Menu_PrintCenterWhite (int cy, char *str);
+void Menu_PrintWhite (int cx, int cy, char *str);
+
 /*
 
 background clear
@@ -127,26 +134,6 @@ void SCR_ScreenShot_f (void);
 void HUD_DrawHUD (void);
 
 
-float D3D_TransformColourSpace (float in)
-{
-	if (in <= 0.0f)
-		return 0.0f;
-	else if (in >= 1.0f)
-		return 1.0f;
-	else return r_activetransform[(int) (in * 255.0f)];
-}
-
-
-byte D3D_TransformColourSpaceByte (byte in)
-{
-	if (in <= 0)
-		return 0;
-	else if (in >= 255)
-		return 255;
-	else return (byte) (r_activetransform[in] * 255.0f);
-}
-
-
 /*
 ===============================================================================
 
@@ -179,7 +166,8 @@ void SCR_CenterPrint (char *str)
 	if (!str[0]) return;
 
 	// cheesy centerprint logging - need to do this right sometime!!!
-	if (scr_centerlog.integer)
+	// only log if the previous centerprint has already been cleared
+	if (scr_centerlog.integer && !cl.intermission && scr_centertime_off < 0.01)
 	{
 		Con_SilentPrintf ("\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");
 		Con_SilentPrintf ("%s\n", str);
@@ -274,16 +262,24 @@ void SCR_CheckDrawCenterString (void)
 	scr_centertime_off -= host_frametime;
 
 	if (scr_centertime_off <= 0 && !cl.intermission) return;
-	if (key_dest != key_game) return;
 
-	// intermission 2 prints an extended message which we don't want to fade
-	if (scr_centertime_off < 1.0f && cl.intermission != 2)
-		D3D_Set2DShade (scr_centertime_off);
-	else D3D_Set2DShade (1.0f);
+	if (key_dest != key_game)
+	{
+		// ensure it's off
+		scr_centertime_off = -1;
+		return;
+	}
+
+	// intermission prints an extended message which we don't want to fade
+//	if (scr_centertime_off < 1.0f && !cl.intermission)
+//		D3D_Set2DShade (scr_centertime_off);
+	// else D3D_Set2DShade (1.0f);
 
 	SCR_DrawCenterString ();
 
-	if (scr_centertime_off < 1.0f) D3D_Set2DShade (1.0f);
+//	if (scr_centertime_off < 1.0f) D3D_Set2DShade (1.0f);
+
+//	Menu_PrintWhite (20, 20, va ("%0.2f", scr_centertime_off));
 }
 
 //=============================================================================
@@ -581,10 +577,9 @@ void SCR_DrawLoading (void)
 
 	if (!scr_drawloading)
 		return;
-		
+
 	pic = Draw_CachePic ("gfx/loading.lmp");
-	Draw_Pic ( (vid.width - pic->width)/2, 
-		(vid.height - 48 - pic->height)/2, pic);
+	Draw_Pic ((vid.width - pic->width) / 2, (vid.height - 48 - pic->height) / 2, pic);
 }
 
 
@@ -1242,15 +1237,6 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 }
 
 
-void SCR_SyncRender (bool syncbegin)
-{
-	d3d_Device->EndScene ();
-	d3d_Device->Present (NULL, NULL, NULL, NULL);
-
-	if (syncbegin) d3d_Device->BeginScene ();
-}
-
-
 //=============================================================================
 
 /*
@@ -1284,20 +1270,8 @@ void SCR_SetupToDrawHUD (void)
 	{
 		undoclear = true;
 
-		extern cvar_t hud_drawsbar;
-		extern cvar_t hud_drawibar;
-
-		if (hud_drawsbar.integer && hud_drawibar.integer)
-		{
-			// if we're drawing both sbar and ibar we only need to clear to the left and right of them
-			Draw_TileClear (0, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
-			Draw_TileClear ((vid.width - 320) / 2 + 320, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
-		}
-		else
-		{
-			// clear the whole sbar area
-			Draw_TileClear (0, vid.height - sb_lines, vid.width, sb_lines);
-		}
+		// just clear the whole sbar area
+		Draw_TileClear (0, vid.height - sb_lines, vid.width, sb_lines);
 	}
 
 	if (r_refdef.vrect.y > 0)
@@ -1351,6 +1325,59 @@ void SCR_SetupToDrawHUD (void)
 }
 
 
+bool in_SCR_UpdateScreen = false;
+
+
+void SCR_DoLoading (char *maintext, char *itemtext, int curritem, int totalitems)
+{
+	// this murders the poor wee stack, so we don't bother....
+	return;
+
+	extern bool d3d_DeviceLost;
+	extern qpic_t *conback;
+
+	// prevent calls from SCR_UpdateScreen
+	if (in_SCR_UpdateScreen) return;
+
+	// prevent calls when explicitly blocked or when we're not fully initialized yet
+	if (block_drawing) return;
+	if (!scr_initialized || !con_initialized || !d3d_Device) return;
+
+	// begin rendering; get the size of the refresh window and set up for the render
+	// this is also used for lost device recovery mode
+	D3D_BeginRendering (&glx, &gly, &glwidth, &glheight);
+
+	// if we've just lost the device we're going into recovery mode, so don't draw anything
+	if (d3d_DeviceLost) return;
+
+	// go into 2D rendering mode
+	D3D_Set2D ();
+
+	if (key_dest != key_game || cls.demoplayback || con_forcedup)
+	{
+		// console background
+		// ensure these are always valid
+		conback->width = vid.width;
+		conback->height = vid.height;
+		Draw_Pic (0, 0, conback);
+	}
+
+	// loading plaque
+	qpic_t *pic = Draw_CachePic ("gfx/loading.lmp");
+	Draw_Pic ((vid.width - pic->width) / 2, (vid.height - pic->height) / 2 - pic->height - 50, pic);
+
+	//Draw_TextBox (vid.width / 2 - 160, (vid.height - pic->height) / 2 - 35, 320, 60);
+
+	// info text
+	Menu_PrintCenterWhite (55, DIVIDER_LINE);
+	Menu_PrintCenterWhite (70, maintext);
+	Menu_PrintCenterWhite (80, itemtext);
+
+	d3d_Flat2DFX.EndRender ();
+	D3D_EndRendering ();
+}
+
+
 /*
 ==================
 SCR_UpdateScreen
@@ -1365,6 +1392,7 @@ needs almost the entire 256k of stack space!
 void M_Draw (void);
 void HUD_IntermissionOverlay (void);
 void HUD_FinaleOverlay (void);
+
 
 void SCR_UpdateScreen (void)
 {
@@ -1404,6 +1432,9 @@ void SCR_UpdateScreen (void)
 	// if we've just lost the device we're going into recovery mode, so don't draw anything
 	if (d3d_DeviceLost) return;
 
+	// flag that we're in SCR_UpdateScreen to prevent the loading console from showing
+	in_SCR_UpdateScreen = true;
+
 	// determine size of refresh window
 	if (oldfov != scr_fov.value)
 	{
@@ -1433,19 +1464,16 @@ void SCR_UpdateScreen (void)
 
 	// do 3D refresh drawing, and then update the screen
 	SCR_SetUpToDrawConsole ();
-	
-	V_RenderView ();
+
+	d3d_AutomapDraw = D3D_DrawAutomap ();
+
+	if (!d3d_AutomapDraw) V_RenderView ();
 
 	D3D_Set2D ();
-
-	// draw any areas not covered by the refresh
-	SCR_SetupToDrawHUD ();
 
 	if (scr_drawloading)
 	{
 		SCR_DrawLoading ();
-		// removed because it looks WRONG
-		// HUD_DrawHUD ();
 	}
 	else if (cl.intermission == 1 && key_dest == key_game)
 	{
@@ -1458,20 +1486,22 @@ void SCR_UpdateScreen (void)
 	}
 	else if (!scr_drawmapshot)
 	{
-		SCR_DrawRam ();
-		SCR_DrawNet ();
-		SCR_DrawTurtle ();
-		SCR_DrawPause ();
-		SCR_CheckDrawCenterString ();
-		HUD_DrawHUD ();
+		if (!d3d_AutomapDraw)
+		{
+			SCR_DrawRam ();
+			SCR_DrawNet ();
+			SCR_DrawTurtle ();
+			SCR_DrawPause ();
+			SCR_CheckDrawCenterString ();
+			HUD_DrawHUD ();
+		}
+
 		SCR_DrawConsole ();	
 		M_Draw ();
 	}
 
 	// this should always be drawn as an overlay to what's currently on screen
 	if (scr_drawdialog) SCR_DrawNotifyString (scr_notifytext, scr_notifycaption, scr_notifyflags);
-
-	V_UpdatePalette ();
 
 	d3d_Flat2DFX.EndRender ();
 	D3D_EndRendering ();
@@ -1486,5 +1516,10 @@ void SCR_UpdateScreen (void)
 		// now take the mapshot; don't overwrite if one is already there
 		SCR_Mapshot_f (va ("%s/%s", com_gamedir, cl.worldmodel->name), false, false);
 	}
+
+	V_UpdatePalette ();
+
+	// we're not in_ SCR_UpdateScreen any more
+	in_SCR_UpdateScreen = false;
 }
 

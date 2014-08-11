@@ -24,16 +24,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "winquake.h"
 #include "resource.h"
 
+
 // filtering of redundant shader state changes
 // let's give ourselves a bit more control over what's happening in our effects
 class CFXManager : ID3DXEffectStateManager
 {
 private:
-	LPDIRECT3DBASETEXTURE9 CurrentTexture[4];
 	LPDIRECT3DVERTEXSHADER9 CurrentVertexShader;
 	LPDIRECT3DPIXELSHADER9 CurrentPixelShader;
-	DWORD CurrentAddressU[4];
-	DWORD CurrentAddressV[4];
 	DWORD CurrentFVF;
 	int RefCount;
 
@@ -44,11 +42,8 @@ public:
 		this->RefCount = 1;
 
 		// initial states
-		this->CurrentTexture[0] = this->CurrentTexture[1] = this->CurrentTexture[2] = this->CurrentTexture[3] = NULL;
 		this->CurrentPixelShader = NULL;
 		this->CurrentVertexShader = NULL;
-		this->CurrentAddressU[0] = this->CurrentAddressU[1] = this->CurrentAddressU[2] = this->CurrentAddressU[3] = (DWORD) -1;
-		this->CurrentAddressV[0] = this->CurrentAddressV[1] = this->CurrentAddressV[2] = this->CurrentAddressV[3] = (DWORD) -1;
 		this->CurrentFVF = (DWORD) -1;
 	}
 
@@ -119,6 +114,7 @@ public:
 
 	HRESULT CALLBACK SetPixelShader (LPDIRECT3DPIXELSHADER9 pShader)
 	{
+		if (!r_hlsl.integer) return S_OK;
 		if (pShader == this->CurrentPixelShader) return S_OK;
 
 		d3d_Device->SetPixelShader (pShader);
@@ -128,73 +124,56 @@ public:
 
 	HRESULT CALLBACK SetPixelShaderConstantB (UINT StartRegister, CONST BOOL *pConstantData, UINT RegisterCount)
 	{
+		if (!r_hlsl.integer) return S_OK;
 		d3d_Device->SetPixelShaderConstantB (StartRegister, pConstantData, RegisterCount);
 		return S_OK;
 	}
 
 	HRESULT CALLBACK SetPixelShaderConstantF (UINT StartRegister, CONST FLOAT *pConstantData, UINT RegisterCount)
 	{
+		if (!r_hlsl.integer) return S_OK;
 		d3d_Device->SetPixelShaderConstantF (StartRegister, pConstantData, RegisterCount);
 		return S_OK;
 	}
 
 	HRESULT CALLBACK SetPixelShaderConstantI (UINT StartRegister, CONST INT *pConstantData, UINT RegisterCount)
 	{
+		if (!r_hlsl.integer) return S_OK;
 		d3d_Device->SetPixelShaderConstantI (StartRegister, pConstantData, RegisterCount);
 		return S_OK;
 	}
 
 	HRESULT CALLBACK SetRenderState (D3DRENDERSTATETYPE State, DWORD Value)
 	{
-		d3d_Device->SetRenderState (State, Value);
+		D3D_SetRenderState (State, Value);
 		return S_OK;
 	}
 
 	HRESULT CALLBACK SetSamplerState (DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD Value)
 	{
-		// these are the only sampler states i use in my shaders;
-		// this can be added to if i ever decide to use any more...
-		if (Type == D3DSAMP_ADDRESSU)
-		{
-			if (this->CurrentAddressU[Sampler] == Value)
-				return S_OK;
-
-			this->CurrentAddressU[Sampler] = Value;
-		}
-		else if (Type == D3DSAMP_ADDRESSV)
-		{
-			if (this->CurrentAddressV[Sampler] == Value)
-				return S_OK;
-
-			this->CurrentAddressV[Sampler] = Value;
-		}
-
-		d3d_Device->SetSamplerState (Sampler, Type, Value);
+		D3D_SetSamplerState (Sampler, Type, Value);
 		return S_OK;
 	}
 
 	HRESULT CALLBACK SetTexture (DWORD Stage, LPDIRECT3DBASETEXTURE9 pTexture)
 	{
-		if (Stage > 3) return S_OK;
-
-		// in *theory* this should never happen as the effect classes manage texture switching too,
-		// but in practice it does.
-		if (this->CurrentTexture[Stage] == pTexture)
-			return S_OK;
-
-		d3d_Device->SetTexture (Stage, pTexture);
-		this->CurrentTexture[Stage] = pTexture;
+		D3D_SetTexture (Stage, (LPDIRECT3DTEXTURE9) pTexture);
 		return S_OK;
 	}
 
 	HRESULT CALLBACK SetTextureStageState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)
 	{
-		d3d_Device->SetTextureStageState (Stage, Type, Value);
+		// in a HLSL setup we don't use these
+		if (r_hlsl.integer) return S_OK;
+
+		D3D_SetTextureStageState (Stage, Type, Value);
 		return S_OK;
 	}
 
 	HRESULT CALLBACK SetTransform (D3DTRANSFORMSTATETYPE State, CONST D3DMATRIX *pMatrix)
 	{
+		// this one is left in to support vertex shader instructions
+		// i don't use it, but someone else might!!!
 		d3d_Device->SetTransform (State, pMatrix);
 		return S_OK;
 	}
@@ -477,13 +456,17 @@ void D3D_InitHLSL (void)
 	if (ps_version)
 	{
 		if (!SilentLoad) Con_Printf ("Pixel Shader Version: %s\n", ps_version);
+		d3d_GlobalCaps.supportPixelShaders = true;
 	}
 	else
 	{
-		// note - we expect this to never happen as D3D will create vertex shaders in software
-		// for devices that don't support them in hardware.
-		Sys_Error ("Pixel Shaders Not Available\n");
-		return;
+		// note - don't sys_error here as we will implement a software fallback
+		// don't return either as we want to load the vertex shader and set up our effects and vert decls
+		if (!SilentLoad) Con_Printf ("Pixel Shaders Not Available\n");
+		d3d_GlobalCaps.supportPixelShaders = false;
+
+		// Sys_Error ("Pixel Shaders Not Available\n");
+		// return;
 	}
 
 	if (!SilentLoad) Con_Printf ("\n");
@@ -600,6 +583,8 @@ void CD3DEffect::LoadEffect (char *name, int resourceid, bool iswarpeffect)
 	this->ValidFX = true;
 	strncpy (this->Name, name, 254);
 
+	// the effect state manager mostly just calls into our own state management functions in vidnt.
+	// this lets us use the same state management routines for both fixed and programmable paths
 	this->TheEffect->SetStateManager ((LPD3DXEFFECTSTATEMANAGER) &FXManager);
 
 	// main technique
@@ -775,6 +760,7 @@ void CD3DEffect::BeginRender (void)
 
 	this->TheEffect->SetTechnique (this->MainTechnique);
 	this->TheEffect->Begin ((UINT *) &this->NumPasses, D3DXFX_DONOTSAVESTATE);
+	this->PreviousPass = -1;
 	this->CurrentPass = -1;
 	this->RenderActive = true;
 	this->CurrentTexture[0] = this->CurrentTexture[1] = this->CurrentTexture[2] = this->CurrentTexture[3] = NULL;
@@ -782,38 +768,55 @@ void CD3DEffect::BeginRender (void)
 }
 
 
-void CD3DEffect::Draw (D3DPRIMITIVETYPE Type, INT BaseVertexIndex, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount)
+void CD3DEffect::BeforeDraw (void)
 {
-	if (this->CommitPending)
+	if (this->CurrentPass != this->PreviousPass)
 	{
+		// if there was no valid previous pass we don't need to end it
+		if (this->PreviousPass != -1) this->TheEffect->EndPass ();
+
+		// begin the new pass
+		this->TheEffect->BeginPass (this->CurrentPass);
+
+		// store back
+		this->PreviousPass = this->CurrentPass;
+
+		// cancel any commits that may be pending as a new pass doesn't require them
+		this->CommitPending = false;
+	}
+	else if (this->CommitPending)
+	{
+		// something else has changed that we need to commit
 		this->TheEffect->CommitChanges ();
 		this->CommitPending = false;
 	}
+}
 
+
+void CD3DEffect::Draw (D3DPRIMITIVETYPE Type, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, const void *pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
+{
+	this->BeforeDraw ();
+	d3d_Device->DrawIndexedPrimitiveUP (Type, MinVertexIndex, NumVertices, PrimitiveCount, pIndexData, IndexDataFormat, pVertexStreamZeroData, VertexStreamZeroStride);
+}
+
+
+void CD3DEffect::Draw (D3DPRIMITIVETYPE Type, INT BaseVertexIndex, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount)
+{
+	this->BeforeDraw ();
 	d3d_Device->DrawIndexedPrimitive (Type, BaseVertexIndex, MinIndex, NumVertices, StartIndex, PrimitiveCount);
 }
 
 
 void CD3DEffect::Draw (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride)
 {
-	if (this->CommitPending)
-	{
-		this->TheEffect->CommitChanges ();
-		this->CommitPending = false;
-	}
-
+	this->BeforeDraw ();
 	d3d_Device->DrawPrimitiveUP (PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
 }
 
 
 void CD3DEffect::Draw (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
 {
-	if (this->CommitPending)
-	{
-		this->TheEffect->CommitChanges ();
-		this->CommitPending = false;
-	}
-
+	this->BeforeDraw ();
 	d3d_Device->DrawPrimitive (PrimitiveType, StartVertex, PrimitiveCount);
 }
 
@@ -825,27 +828,8 @@ void CD3DEffect::SwitchToPass (int passnum)
 	if (!this->RenderActive)
 		this->BeginRender ();
 
-	if (passnum < 0 || passnum >= this->NumPasses)
-	{
-		if (this->CurrentPass != -1)
-			this->TheEffect->EndPass ();
-
-		this->CurrentPass = -1;
-	}
-	else if (this->CurrentPass == -1)
-	{
-		this->TheEffect->BeginPass (passnum);
-		this->CurrentPass = passnum;
-		this->CommitPending = false;
-	}
-	else if (this->CurrentPass != passnum)
-	{
-		this->TheEffect->EndPass ();
-		this->CurrentPass = passnum;
-
-		this->TheEffect->BeginPass (passnum);
-		this->CommitPending = false;
-	}
+	// just store out the pass number, the actual switch doesn't happen until we come to draw something
+	this->CurrentPass = passnum;
 }
 
 

@@ -348,7 +348,9 @@ void CQMenuSpinControl::Draw (int y)
 	}
 	else if (this->StringBuf)
 	{
-		strcpy (this->OutputText, this->StringBuf[*(this->MenuVal)]);
+		if (!this->StringBuf[*(this->MenuVal)])
+			this->OutputText[0] = 0;
+		else strcpy (this->OutputText, this->StringBuf[*(this->MenuVal)]);
 	}
 
 	if (!this->CommandText[0])

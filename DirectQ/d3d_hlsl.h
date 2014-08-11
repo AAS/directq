@@ -58,6 +58,7 @@ public:
 	void Draw (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 	void Draw (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount);
 	void Draw (D3DPRIMITIVETYPE Type, INT BaseVertexIndex, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount);
+	void Draw (D3DPRIMITIVETYPE Type, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, const void *pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 
 
 private:
@@ -83,9 +84,12 @@ private:
 	// rendering and state control
 	int NumPasses;
 	int CurrentPass;
+	int PreviousPass;
 	bool RenderActive;
 	LPDIRECT3DTEXTURE9 CurrentTexture[4];
 	bool CommitPending;
+
+	void BeforeDraw (void);
 };
 
 

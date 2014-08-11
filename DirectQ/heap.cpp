@@ -44,6 +44,7 @@ typedef struct heapblock_s
 {
 	void *data;
 	int tag;
+	int lowmark;
 	int size;
 	struct heapblock_s *next;
 } heapblock_t;
@@ -55,6 +56,8 @@ HANDLE hHeap = NULL;
 HANDLE QGlobalHeap = NULL;
 
 heapblock_t *heapblocks = NULL;
+
+#define HEAP_MIN_BLOCK_SIZE		0x100000
 
 
 void Heap_Report_f (void)
@@ -184,10 +187,37 @@ static void *Heap_PerformTagAlloc (int tag, int size)
 	// allocate on DWORD boundaries
 	size = ((size + 3) & ~3);
 
+	if (tag > 100 && tag < 1000)
+	{
+		// attempt to stuff multiple allocations into a single block
+		for (hb = heapblocks; hb; hb = hb->next)
+		{
+			// ensure that the block has data
+			if (!hb->data) continue;
+
+			// look for a matching tag
+			if (hb->tag != tag) continue;
+
+			// look for a block with sufficient free space
+			if ((hb->size - hb->lowmark) < size) continue;
+
+			// reuse space in this block
+			byte *found = &(((byte *) hb->data)[hb->lowmark]);
+			memset (found, 0, size);
+			hb->lowmark += size;
+			return found;
+		}
+	}
+
 	// look for an available block
 	for (hb = heapblocks; hb; hb = hb->next)
+	{
 		if (!hb->data)
+		{
+			hb->lowmark = 0;
 			break;
+		}
+	}
 
 	// didn't get one
 	if (!hb)
@@ -197,10 +227,17 @@ static void *Heap_PerformTagAlloc (int tag, int size)
 
 		// link it in
 		hb->next = heapblocks;
+		hb->lowmark = 0;
 		heapblocks = hb;
 	}
 
 	// fill it in
+	hb->lowmark = size;
+
+	// never take < HEAP_MIN_BLOCK_SIZE to help optimize allocation speeds
+	if (size < HEAP_MIN_BLOCK_SIZE && tag > 100 && tag < 1000)
+		size = HEAP_MIN_BLOCK_SIZE;
+
 	hb->size = size;
 	hb->tag = tag;
 
@@ -257,6 +294,7 @@ void Heap_Free101Plus (void)
 			HeapFree (hHeap, 0, hb->data);
 			hb->data = NULL;
 			hb->size = 0;
+			hb->lowmark = 0;
 		}
 	}
 
@@ -287,6 +325,7 @@ void Heap_TagFree (int tag)
 			HeapFree (hHeap, 0, hb->data);
 			hb->data = NULL;
 			hb->size = 0;
+			hb->lowmark = 0;
 		}
 	}
 

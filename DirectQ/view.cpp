@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+
 /*
 
 The view is allowed to move slightly from it's true position for bobbing,
@@ -484,32 +485,38 @@ void V_UpdatePalette (void)
 	int		ir, ig, ib;
 	bool force;
 
+	// use this instead of host_frametime here
+	extern float r_frametime;
+
 	V_CalcPowerupCshift ();
-	
+
 	newp = false;
-	
-	for (i=0 ; i<NUM_CSHIFTS ; i++)
+
+	for (i = 0; i < NUM_CSHIFTS; i++)
 	{
 		if (cl.cshifts[i].percent != cl.prev_cshifts[i].percent)
 		{
 			newp = true;
 			cl.prev_cshifts[i].percent = cl.cshifts[i].percent;
 		}
-		for (j=0 ; j<3 ; j++)
+
+		for (j = 0; j < 3; j++)
+		{
 			if (cl.cshifts[i].destcolor[j] != cl.prev_cshifts[i].destcolor[j])
 			{
 				newp = true;
 				cl.prev_cshifts[i].destcolor[j] = cl.cshifts[i].destcolor[j];
 			}
+		}
 	}
 
 	// drop the damage value
-	cl.cshifts[CSHIFT_DAMAGE].percent -= host_frametime*150;
+	cl.cshifts[CSHIFT_DAMAGE].percent -= host_frametime * 150;
 	if (cl.cshifts[CSHIFT_DAMAGE].percent <= 0)
 		cl.cshifts[CSHIFT_DAMAGE].percent = 0;
 
 	// drop the bonus value
-	cl.cshifts[CSHIFT_BONUS].percent -= host_frametime*100;
+	cl.cshifts[CSHIFT_BONUS].percent -= host_frametime * 100;
 	if (cl.cshifts[CSHIFT_BONUS].percent <= 0)
 		cl.cshifts[CSHIFT_BONUS].percent = 0;
 
@@ -693,6 +700,7 @@ void V_CalcIntermissionRefdef (void)
 	v_idlescale.value = old;
 }
 
+
 /*
 ==================
 V_CalcRefdef
@@ -785,30 +793,32 @@ void V_CalcRefdef (void)
 // set up the refresh position
 	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
 
-// smooth out stair step ups
-if (cl.onground && ent->origin[2] - oldz > 0)
-{
-	float steptime;
-	
-	steptime = cl.time - cl.oldtime;
-	if (steptime < 0)
-//FIXME		I_Error ("steptime < 0");
-		steptime = 0;
+	static float old_steptime = 0;
 
-	oldz += steptime * 80;
-	if (oldz > ent->origin[2])
-		oldz = ent->origin[2];
-	if (ent->origin[2] - oldz > 12)
-		oldz = ent->origin[2] - 12;
-	r_refdef.vieworg[2] += oldz - ent->origin[2];
-	view->origin[2] += oldz - ent->origin[2];
-}
-else
-	oldz = ent->origin[2];
+	// smooth out stair step ups
+	if (cl.onground && ent->origin[2] - oldz > 0)
+	{
+		float steptime;
 
-	if (chase_active.value)
-		Chase_Update ();
+		steptime = cl.time - old_steptime;
+
+		if (steptime < 0) steptime = 0;
+
+		oldz += steptime * 80;
+		if (oldz > ent->origin[2])
+			oldz = ent->origin[2];
+		if (ent->origin[2] - oldz > 12)
+			oldz = ent->origin[2] - 12;
+		r_refdef.vieworg[2] += oldz - ent->origin[2];
+		view->origin[2] += oldz - ent->origin[2];
+	}
+	else oldz = ent->origin[2];
+
+	old_steptime = cl.time;
+
+	if (chase_active.value) Chase_Update ();
 }
+
 
 /*
 ==================
@@ -823,6 +833,7 @@ extern vrect_t	scr_vrect;
 void V_RenderView (void)
 {
 	if (con_forcedup) return;
+	if (cls.state != ca_connected) return;
 
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1)

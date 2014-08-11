@@ -273,7 +273,7 @@ void CL_ParseServerInfo (void)
 
 	// parse signon message
 	str = MSG_ReadString ();
-	strncpy (cl.levelname, str, sizeof(cl.levelname)-1);
+	strncpy (cl.levelname, str, sizeof (cl.levelname) - 1);
 
 	// seperate the printfs so the server message can have a color
 	Con_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
@@ -697,7 +697,7 @@ void CL_NewTranslation (int slot)
 	int		i, j;
 	int		top, bottom;
 	byte	*dest, *source;
-	
+
 	if (slot > cl.maxclients)
 		Sys_Error ("CL_NewTranslation: slot > cl.maxclients");
 	dest = cl.scores[slot].translations;
@@ -771,6 +771,12 @@ CL_ParseStatic
 */
 void CL_ParseStatic (void)
 {
+	if (!cl.worldbrush)
+	{
+		Host_Error ("CL_ParseStatic: spawn static without a world\n(are you missing a mod directory?)");
+		return;
+	}
+
 	entity_t *ent;
 
 	ent = (entity_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, sizeof (entity_t));
@@ -963,7 +969,7 @@ void CL_ParseServerMessage (void)
 			if (i >= cl.maxclients)
 				Host_Error ("CL_ParseServerMessage: svc_updatecolors > MAX_SCOREBOARD");
 			cl.scores[i].colors = MSG_ReadByte ();
-			CL_NewTranslation (i);
+			// CL_NewTranslation (i);
 			break;
 
 		case svc_particle:

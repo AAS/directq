@@ -244,6 +244,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\d3d_automap.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\d3d_brush.cpp"
 				>
 			</File>

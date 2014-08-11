@@ -70,6 +70,7 @@ int         hipweapons[4] = {HIT_LASER_CANNON_BIT,HIT_MJOLNIR_BIT,4,HIT_PROXIMIT
 qpic_t      *hsb_items[2];
 
 bool	hud_showscores = false;
+bool	hud_showdemoscores = false;
 
 void HUD_Init (void)
 {
@@ -220,6 +221,13 @@ void HUD_ShowScores (void)
 	hud_showscores = !hud_showscores;
 }
 
+
+void HUD_ShowDemoScores (void)
+{
+	hud_showdemoscores = !hud_showdemoscores;
+}
+
+
 /*
 ===============
 HUD_DontShowScores
@@ -254,7 +262,8 @@ cvar_t scr_clock ("scr_clock", 0.0f, CVAR_ARCHIVE);
 // allow a custom HUD layout
 // positive = from left (or from top, for y)
 // negative = from right (or from bottom)
-cvar_t hud_overlay ("hud_overlay", "0", CVAR_HUD);
+// some of these have moved to archive cvars as there is a significant perf boost to be had from using them
+cvar_t hud_overlay ("hud_overlay", "0", CVAR_HUD | CVAR_ARCHIVE);
 
 cvar_t hud_dmoverlay_x ("hud_dmoverlay_x", 8, CVAR_HUD);
 cvar_t hud_dmoverlay_y ("hud_dmoverlay_y", -44, CVAR_HUD);
@@ -265,15 +274,15 @@ cvar_t hud_fps_y ("hud_fps_y", -64, CVAR_HUD);
 cvar_t hud_clock_x ("hud_clock_x", -52, CVAR_HUD);
 cvar_t hud_clock_y ("hud_clock_y", -76, CVAR_HUD);
 
-cvar_t hud_sbaralpha ("hud_sbaralpha", 1, CVAR_HUD);
+cvar_t hud_sbaralpha ("hud_sbaralpha", 1, CVAR_HUD | CVAR_ARCHIVE);
 
-cvar_t hud_drawsbar ("hud_drawsbar", 1, CVAR_HUD);
+cvar_t hud_drawsbar ("hud_drawsbar", 1, CVAR_HUD | CVAR_ARCHIVE);
 cvar_t hud_sbar_x ("hud_sbar_x", -160, CVAR_HUD);
 cvar_t hud_sbar_y ("hud_sbar_y", -24, CVAR_HUD);
 cvar_t hud_sbar_cx ("hud_sbar_cx", 1, CVAR_HUD);
 cvar_t hud_sbar_cy ("hud_sbar_cy", 0.0f, CVAR_HUD);
 
-cvar_t hud_drawibar ("hud_drawibar", 1, CVAR_HUD);
+cvar_t hud_drawibar ("hud_drawibar", 1, CVAR_HUD | CVAR_ARCHIVE);
 cvar_t hud_ibar_x ("hud_ibar_x", -160, CVAR_HUD);
 cvar_t hud_ibar_y ("hud_ibar_y", -48, CVAR_HUD);
 cvar_t hud_ibar_cx ("hud_ibar_cx", 1, CVAR_HUD);
@@ -1425,7 +1434,7 @@ void HUD_MiniDeathmatchOverlay (void)
 	if (cl.gametype != GAME_DEATHMATCH) return;
 
 	// don't need the mini overlay if the full is showing
-	if (hud_showscores) return;
+	if ((hud_showscores && !cls.demoplayback) || (hud_showdemoscores && cls.demoplayback)) return;
 
 	int				i, k, l;
 	int				top, bottom;
@@ -1502,9 +1511,20 @@ void HUD_DrawFPS (bool force)
 
 	if (realtime - last_realtime > 0.25)
 	{
-		fps = (host_framecount - last_framecount) / (realtime - last_realtime) + 0.5;
-		last_framecount = host_framecount;
-		last_realtime = realtime;
+		if (cls.state == ca_connected && 0)
+		{
+			extern float r_frametime;
+
+			if (r_frametime < 0.0015015f)
+				fps = 666;
+			else fps = (int) (1.0f / r_frametime);
+		}
+		else
+		{
+			fps = (host_framecount - last_framecount) / (realtime - last_realtime) + 0.5;
+			last_framecount = host_framecount;
+			last_realtime = realtime;
+		}
 	}
 
 	if (scr_showfps.value || force)
@@ -1575,7 +1595,7 @@ void HUD_DrawHUD (void)
 	// no HUD
 	if (scr_viewsize.value > 111) return;
 
-	if (hud_showscores || cl.stats[STAT_HEALTH] <= 0)
+	if ((hud_showscores && !cls.demoplayback) || (hud_showdemoscores && cls.demoplayback) || cl.stats[STAT_HEALTH] <= 0)
 	{
 		// scoreboard
 		if (cl.gametype == GAME_DEATHMATCH)

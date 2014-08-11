@@ -181,7 +181,7 @@ extern cvar_t r_lerplightstyle;
 extern cvar_t r_lightupdatefrequency;
 void D3D_InitTextures (void);
 
-cmd_t R_TimeRefresh_f_Cmd ("timerefresh", R_TimeRefresh_f);
+
 cmd_t R_ReadPointFile_f_Cmd ("pointfile", R_ReadPointFile_f);
 
 void R_Init (void)
@@ -345,8 +345,6 @@ void R_ParseWorldSpawn (void)
 }
 
 
-void R_CheckTransWater (void);
-
 void R_NewMap (void)
 {
 	int		i;
@@ -368,59 +366,11 @@ void R_NewMap (void)
 	// parse worldspawn from the entities lump to determine any map-specific fields in there
 	R_ParseWorldSpawn ();
 
-	// check for translucent water in the map
-	R_CheckTransWater ();
-
 	// as sounds are now cleared between maps these sounds also need to be
 	// reloaded otherwise the known_sfx will go out of sequence for them
 	CL_InitTEnts ();
 	S_InitAmbients ();
 }
 
-
-/*
-====================
-R_TimeRefresh_f
-
-For program optimization
-====================
-*/
-void R_TimeRefresh_f (void)
-{
-	int			i;
-	float		start, stop, time;
-
-	if (cls.state != ca_connected)
-	{
-		Con_Printf ("You cannot timerefresh when not connected.\n");
-		return;
-	}
-
-	start = Sys_FloatTime ();
-	float oldvang = r_refdef.viewangles[1];
-
-	d3d_Device->EndScene ();
-	d3d_Device->Present (NULL, NULL, NULL, NULL);
-
-	for (i = 0; i < 128; i++)
-	{
-		r_refdef.viewangles[1] = i / 128.0 * 360.0;
-
-		d3d_Device->BeginScene ();
-		R_RenderView ();
-		d3d_Device->EndScene ();
-		d3d_Device->Present (NULL, NULL, NULL, NULL);
-	}
-
-	r_refdef.viewangles[1] = oldvang;
-	stop = Sys_FloatTime ();
-	time = stop - start;
-
-	Con_Printf ("%f seconds (%f fps)\n", time, 128 / time);
-}
-
-void D_FlushCaches (void)
-{
-}
 
 

@@ -137,13 +137,40 @@ void Cvar_Set (cvar_t *var, char *value)
 
 void Cvar_Set (cvar_t *var, float value)
 {
-	Cvar_Set (var, va ("%g", value));
+	bool changed;
+
+	if (!var)
+	{
+		// there is an error in C code if this happens
+		Con_Printf ("Cvar_Set: variable %s not found\n", var->name);
+		return;
+	}
+
+	// reject set attempt
+	if (var->usage & CVAR_READONLY)
+	{
+		Con_Printf ("Cvar_Set: var->usage & CVAR_READONLY\n");
+		return;
+	}
+
+	changed = (var->value == value);
+
+	// store back to the cvar
+	var->value = value;
+	var->integer = (int) var->value;
+	sprintf (var->string, "%g", var->value);
+
+	if ((var->usage & CVAR_SERVER) && changed)
+	{
+		if (sv.active)
+			SV_BroadcastPrintf ("\"%s\" changed to \"%s\"\n", var->name, var->string);
+	}
 }
 
 
 void Cvar_Set (char *var_name, float value)
 {
-	Cvar_Set (Cvar_FindVar (var_name), va ("%g", value));
+	Cvar_Set (Cvar_FindVar (var_name), value);
 }
 
 

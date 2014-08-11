@@ -26,9 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // number of verts
 int d3d_VertexBufferVerts = 0;
 
-// draw in 2 streams
 LPDIRECT3DVERTEXBUFFER9 d3d_BrushModelVerts = NULL;
-LPDIRECT3DINDEXBUFFER9 d3d_BrushModelIndexes = NULL;
 D3DFORMAT d3d_BrushIndexFormat = D3DFMT_INDEX16;
 
 int r_renderflags = 0;
@@ -255,146 +253,6 @@ void R_RecursiveWorldNode (mnode_t *node)
 }
 
 
-
-// used for translucency testing - no cullbox and no visframe dependency in nodes and leafs
-void R_RecursiveTransTest (mnode_t *node)
-{
-	int			side;
-	mplane_t	*plane;
-	msurface_t	*surf;
-	double		dot;
-
-	if (node->contents == CONTENTS_SOLID) return;
-
-	// if a leaf node, draw stuff
-	if (node->contents < 0)
-	{
-		// check node contents to determine water translucency
-		if (node->contents == CONTENTS_EMPTY)
-			r_renderflags |= R_RENDERABOVEWATER;
-		else if (node->contents == CONTENTS_WATER)
-			r_renderflags |= R_RENDERUNDERWATER;
-		else if (node->contents == CONTENTS_LAVA)
-			r_renderflags |= R_RENDERUNDERWATER;
-		else if (node->contents == CONTENTS_SLIME)
-			r_renderflags |= R_RENDERUNDERWATER;
-
-		// not doing anything with the surfs here so no need to mark them
-		return;
-	}
-
-	// node is just a decision point, so go down the apropriate sides
-	// find which side of the node we are on
-	R_PlaneSide (node->plane, &dot, &side);
-
-	// recurse down the children, front side first
-	R_RecursiveTransTest (node->children[side]);
-
-	// recurse down the back side
-	R_RecursiveTransTest (node->children[!side]);
-}
-
-
-void R_CheckTransWater (void)
-{
-	entity_t	ent;
-
-	memset (&ent, 0, sizeof (ent));
-	ent.model = cl.worldmodel;
-
-	VectorCopy (r_refdef.vieworg, modelorg);
-
-	currententity = &ent;
-	r_renderflags = 0;
-
-	// build the world (this is a recursiveworldnode with all leafs/nodes visible and no frustum culling)
-	R_RecursiveTransTest (cl.worldbrush->nodes);
-
-	// no translucent water
-	cl.worldbrush->transwater = false;
-
-	if ((r_renderflags & R_RENDERUNDERWATER) && (r_renderflags & R_RENDERABOVEWATER))
-	{
-		Con_DPrintf ("Map %s has potential for translucent water\n", cl.worldmodel->name);
-
-		// at this stage we know we have the possibility of translucent water but we don't know whether or not
-		// we actually do have it yet.
-		for (int i = 0; i < cl.worldbrush->numleafs; i++)
-		{
-			// get the current leaf
-			mleaf_t *leaf = &(i[cl.worldbrush->leafs]);
-
-			// only interested in empty leafs here
-			if (leaf->contents != CONTENTS_EMPTY) continue;
-
-			// see has it any turb surfs in it
-			msurface_t **mark = leaf->firstmarksurface;
-			int c = leaf->nummarksurfaces;
-
-			// this will store the leaf back if it does
-			mleaf_t *goodleaf = NULL;
-
-			// now check it
-			if (c)
-			{
-				do
-				{
-					if ((*mark)->flags & SURF_DRAWTURB)
-					{
-						// one is enough
-						goodleaf = leaf;
-						break;
-					}
-
-					mark++;
-				} while (--c);
-			}
-
-			// not valid for vis testing
-			if (!goodleaf) continue;
-
-			// now we have (1) a map with both above water and underwater in it, and (2) a leaf that
-			// contains a water surf. so we need to run a standard vis test on this leaf to determine if
-			// we can see through the water...
-			byte *vis = Mod_LeafPVS (goodleaf, cl.worldmodel);
-			mnode_t *node;
-
-			for (int j = 0; j < cl.worldbrush->numleafs; j++)
-			{
-				// standard vis test
-				if (!vis || (vis[j >> 3] & (1 << (j & 7))))
-				{
-					// true if we hit translucency
-					bool transhit = false;
-
-					// check for a leaf in the PVS that has the correct contents (the goodleaf we used was empty)
-					if (cl.worldbrush->leafs[j + 1].contents == CONTENTS_WATER) transhit = true;
-					if (cl.worldbrush->leafs[j + 1].contents == CONTENTS_LAVA) transhit = true;
-					if (cl.worldbrush->leafs[j + 1].contents == CONTENTS_SLIME) transhit = true;
-
-					// did we get one?
-					if (transhit)
-					{
-						// one is enough
-						Con_DPrintf ("Map %s has translucent water\n", cl.worldmodel->name);
-						r_renderflags = 0;
-						cl.worldbrush->transwater = true;
-						return;
-					}
-				}
-			}
-
-			// the goodleaf doesn't have the correct contents in it's PVS
-			break;
-		}
-	}
-
-	Con_DPrintf ("Map %s doesn't have translucent water\n", cl.worldmodel->name);
-
-	r_renderflags = 0;
-}
-
-
 /*
 =============
 R_DrawWorld
@@ -452,7 +310,7 @@ void R_LeafVisibility (byte *vis)
 
 				// add it
 				node->visframe = r_visframecount;
-				node->previousvisframe = true;
+				node->seen = true;
 				node = node->parent;
 			} while (node);
 		}
@@ -484,22 +342,6 @@ void R_MarkLeaves (void)
 
 	// add viewleaf to visible lists
 	R_LeafVisibility (Mod_LeafPVS (r_viewleaf, cl.worldmodel));
-
-	// (1) doesn't play nice with translucency handling code
-	// (2) doesn't include entities
-	// REMOVED.
-#if 0
-	// start of map
-	if (!r_oldviewleaf) return;
-
-	// add old viewleaf on a contents transition
-	if (r_viewleaf->contents != r_oldviewleaf->contents)
-	{
-		// just making sure this gets called when it should (and doesn't when it shouldn't)
-		Con_DPrintf ("Adding r_oldviewleaf for contents transition\n");
-		R_LeafVisibility (Mod_LeafPVS (r_oldviewleaf, cl.worldmodel));
-	}
-#endif
 }
 
 
@@ -594,10 +436,13 @@ void D3D_BuildSurfaceVertexBuffer (msurface_t *surf, model_t *mod, worldvert_t *
 void D3D_PutSurfacesInVertexBuffer (void)
 {
 	// release it if it already exists
+	// do this even if rendering in software
 	SAFE_RELEASE (d3d_BrushModelVerts);
 
 	// create our new vertex buffer
-	HRESULT hr = d3d_Device->CreateVertexBuffer
+	HRESULT hr;
+
+	hr = d3d_Device->CreateVertexBuffer
 	(
 		d3d_VertexBufferVerts * sizeof (worldvert_t),
 		D3DUSAGE_WRITEONLY | d3d_VertexBufferUsage,
@@ -643,22 +488,6 @@ void D3D_PutSurfacesInVertexBuffer (void)
 			// set offset
 			surf->vboffset = vboffset;
 
-			// set up indexes - we'll store these as ints always even if using 16 bit indexes for simplicity sake
-			surf->numindexes = (surf->numedges - 2) * 3;
-			surf->indexes = (int *) Heap_TagAlloc (TAG_BRUSHMODELS, surf->numindexes * sizeof (int));
-
-			if (surf->indexes)
-			{
-				// if the alloc fails we can just draw directly using the non-indexed vb
-				// set up the indexes for this surf, trifan pattern always
-				for (int n = 2, ni = 0; n < surf->numedges; n++)
-				{
-					surf->indexes[ni++] = surf->vboffset;
-					surf->indexes[ni++] = surf->vboffset + n - 1;
-					surf->indexes[ni++] = surf->vboffset + n;
-				}
-			}
-
 			// advance pointers
 			verts += surf->numedges;
 
@@ -670,48 +499,6 @@ void D3D_PutSurfacesInVertexBuffer (void)
 	// unlock and preload, baby!
 	d3d_BrushModelVerts->Unlock ();
 	d3d_BrushModelVerts->PreLoad ();
-}
-
-
-void D3D_CreateWorldIndexBuffer (void)
-{
-	SAFE_RELEASE (d3d_BrushModelIndexes);
-
-	// see if need to use 32 bit indexes
-	if (d3d_VertexBufferVerts > d3d_DeviceCaps.MaxVertexIndex)
-	{
-		// no indexing allowed at all
-		return;
-	}
-
-	// assume 16 bit initially
-	d3d_BrushIndexFormat = D3DFMT_INDEX16;
-	int d3d_IndexSize = sizeof (unsigned short);
-
-	if (d3d_VertexBufferVerts > 65535)
-	{
-		// use 32 bit indexes
-		d3d_BrushIndexFormat = D3DFMT_INDEX32;
-		d3d_IndexSize = sizeof (unsigned int);
-	}
-
-	HRESULT hr = d3d_Device->CreateIndexBuffer
-	(
-		1024 * d3d_IndexSize,
-		D3DUSAGE_WRITEONLY | D3DUSAGE_DYNAMIC,
-		d3d_BrushIndexFormat,
-		D3DPOOL_DEFAULT,
-		&d3d_BrushModelIndexes,
-		NULL
-	);
-
-	if (FAILED (hr))
-	{
-		// no need to crash if we fail to create the index buffer; we can just fall back to rendering without it
-		Con_Printf ("D3D_PutSurfacesInVertexBuffer: d3d_Device->CreateIndexBuffer failed\n");
-		SAFE_RELEASE (d3d_BrushModelIndexes);
-		return;
-	}
 }
 
 
@@ -791,7 +578,7 @@ void GL_BuildLightmaps (void)
 			{
 				// create the lightmap
 				D3D_CreateSurfaceLightmap (surf);
-		
+
 				// no polys on these surfs
 				surf->polys = NULL;
 			}

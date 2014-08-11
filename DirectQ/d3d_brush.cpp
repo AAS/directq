@@ -27,6 +27,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // software, which is a bigger argument for 1.  So 1 it is.
 cvar_t r_zhack ("r_zfighthack", "1", CVAR_ARCHIVE);
 extern cvar_t r_warpspeed;
+extern cvar_t r_lightscale;
+extern bool d3d_AutomapDraw;
 
 // r_lightmap 1 uses the grey texture on account of 2 x overbrighting
 extern LPDIRECT3DTEXTURE9 r_greytexture;
@@ -71,9 +73,16 @@ bool R_SetupBrushEntity (entity_t *e)
 	}
 
 	// static entities already have the leafs they are in bbox culled
-	if (!e->nocullbox)
-		if (R_CullBox (mins, maxs))
-			return true;
+	if (!d3d_AutomapDraw)
+	{
+		if (!e->nocullbox)
+			if (R_CullBox (mins, maxs))
+				return true;
+	}
+	else
+	{
+		if (mins[2] > r_refdef.vieworg[2]) return true;
+	}
 
 	// set up modelorg and matrix
 	VectorSubtract (r_refdef.vieworg, e->origin, modelorg);
@@ -154,7 +163,7 @@ void D3D_DrawInstancedBrushModels (void)
 	d3d_InstancedBrushFX.BeginRender ();
 	d3d_InstancedBrushFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
 	d3d_InstancedBrushFX.SetTime ((cl.time * r_warpspeed.value));
-	d3d_InstancedBrushFX.SetScale (r_sRGBgamma.integer ? 2.0f : 1.0f);
+	d3d_InstancedBrushFX.SetScale (r_lightscale.value);
 
 	for (int i = 0; i < cl_numvisedicts; i++)
 	{
@@ -172,12 +181,6 @@ void D3D_DrawInstancedBrushModels (void)
 
 		// get lighting information
 		R_LightPoint (currententity, bsplight);
-
-		// transform to colour space
-		bsplight[0] = D3D_TransformColourSpace (bsplight[0]);
-		bsplight[1] = D3D_TransformColourSpace (bsplight[1]);
-		bsplight[2] = D3D_TransformColourSpace (bsplight[2]);
-		bsplight[3] = D3D_TransformColourSpace (bsplight[3]);
 
 		// set origin in the vertex shader
 		d3d_InstancedBrushFX.SetEntMatrix ((D3DXMATRIX *) currententity->model->matrix);
@@ -215,7 +218,7 @@ void D3D_DrawInstancedBrushModels (void)
 
 			c_brush_polys++;
 
-			// draw the surface
+			// draw the surface directly from the vertex buffer
 			d3d_InstancedBrushFX.Draw (D3DPT_TRIANGLEFAN, surf->vboffset, surf->numedges - 2);
 		}
 	}
@@ -228,178 +231,87 @@ void D3D_DrawInstancedBrushModels (void)
 D3DXMATRIX *CachedMatrix = NULL;
 int NumMatrixSwaps = 0;
 
-unsigned short *d3d_16BitIndexes = NULL;
-unsigned int *d3d_32BitIndexes = NULL;
-int d3d_CurrentIndex = 0;
-int d3d_MaxBatchVerts = 0;
-int d3d_MinBatchVerts = 2147483647;
-int d3d_AvgBatchVerts = 0;
-
-int d3d_MinIndex = 2147483647;
-int d3d_MaxIndex = 0;
-
-// stat reporting
-int d3d_NumPrimitiveBatches = 0;
-
-void D3D_RenderBrushIndexPass (void)
-{
-	d3d_BrushModelIndexes->Unlock ();
-
-	if (d3d_MaxIndex > d3d_MinIndex)
-		d3d_BrushFX.Draw (D3DPT_TRIANGLELIST, 0, d3d_MinIndex, (d3d_MaxIndex - d3d_MinIndex), 0, d3d_CurrentIndex / 3);
-
-	if (d3d_BrushIndexFormat == D3DFMT_INDEX16)
-		d3d_BrushModelIndexes->Lock (0, 0, (void **) &d3d_16BitIndexes, D3DLOCK_DISCARD | D3DLOCK_NOSYSLOCK);
-	else d3d_BrushModelIndexes->Lock (0, 0, (void **) &d3d_32BitIndexes, D3DLOCK_DISCARD | D3DLOCK_NOSYSLOCK);
-
-	if (d3d_CurrentIndex < d3d_MinBatchVerts) d3d_MinBatchVerts = d3d_CurrentIndex;
-	if (d3d_CurrentIndex > d3d_MaxBatchVerts) d3d_MaxBatchVerts = d3d_CurrentIndex;
-	d3d_AvgBatchVerts += d3d_CurrentIndex;
-
-	d3d_MaxIndex = 0;
-	d3d_MinIndex = 2147483647;
-
-	d3d_CurrentIndex = 0;
-	d3d_NumPrimitiveBatches++;
-}
 
 void D3D_RunBrushPass (int PassNum)
 {
-	msurface_t *s;
-	texture_t *t;
+	msurface_t *surf;
+	texture_t *tex;
 
 	d3d_BrushFX.SwitchToPass (PassNum);
 
 	for (int i = 0; i < cl.worldbrush->numtextures; i++)
 	{
 		// no texture (e2m3 gets this)
-		if (!(t = cl.worldbrush->textures[i])) continue;
+		if (!(tex = cl.worldbrush->textures[i])) continue;
 
 		// skip over passes
-		if (PassNum == PASS_NOTRANSNOLUMA && t->d3d_Fullbright) continue;
-		if (PassNum == PASS_NOTRANSLUMA && !t->d3d_Fullbright) continue;
+		if (PassNum == PASS_NOTRANSNOLUMA && tex->d3d_Fullbright) continue;
+		if (PassNum == PASS_NOTRANSLUMA && !tex->d3d_Fullbright) continue;
 
 		// nothing to draw for this texture
-		if (!(s = t->texturechain)) continue;
+		if (!(surf = tex->texturechain)) continue;
 
 		// skip over
-		if (s->flags & SURF_DRAWTURB) continue;
-		if (s->flags & SURF_DRAWSKY) continue;
+		if (surf->flags & SURF_DRAWSKY) continue;
+		if (surf->flags & SURF_DRAWTURB) continue;
 
 		// bind regular texture
 		if (r_lightmap.integer)
 			d3d_BrushFX.SetTexture (0, r_greytexture);
-		else d3d_BrushFX.SetTexture (0, (LPDIRECT3DTEXTURE9) t->d3d_Texture);
+		else d3d_BrushFX.SetTexture (0, (LPDIRECT3DTEXTURE9) tex->d3d_Texture);
 
 		// bind luma texture
-		if (t->d3d_Fullbright) d3d_BrushFX.SetTexture (2, (LPDIRECT3DTEXTURE9) t->d3d_Fullbright);
+		if (tex->d3d_Fullbright) d3d_BrushFX.SetTexture (2, (LPDIRECT3DTEXTURE9) tex->d3d_Fullbright);
 
 		// we need to track the currently cached lightmap in order to know when to render a primitive batch
 		// primitive batches are rendered when any of (1) main texture, (2) lightmap or (3) matrix changes
 		LPDIRECT3DTEXTURE9 CachedLightmap = NULL;
 
-		for (; s; s = s->texturechain)
+		for (; surf; surf = surf->texturechain)
 		{
 			c_brush_polys++;
 
 			// bind the lightmap
-			LPDIRECT3DTEXTURE9 CurrentLightmap = D3D_GetLightmap (s->d3d_Lightmap);
-
-			if ((CurrentLightmap != CachedLightmap) || ((D3DXMATRIX *) s->model->matrix != CachedMatrix))
-			{
-				// if either of these change we need to flush whatever is in our index buffer
-				// because otherwise the Draw command will include mixed states with is not valid
-				if (d3d_BrushModelIndexes && s->indexes && d3d_CurrentIndex) D3D_RenderBrushIndexPass ();
-			}
+			// we need to send this through a getter as only d3d_rlight knows about the lightmap data type
+			LPDIRECT3DTEXTURE9 CurrentLightmap = D3D_GetLightmap (surf->d3d_Lightmap);
 
 			if (CurrentLightmap != CachedLightmap)
 			{
-				// we need to send this through a getter as only d3d_rlight knows about the lightmap data type
-				d3d_BrushFX.SetTexture (1, D3D_GetLightmap (s->d3d_Lightmap));
+				d3d_BrushFX.SetTexture (1, CurrentLightmap);
 				CachedLightmap = CurrentLightmap;
 			}
 
-			if ((D3DXMATRIX *) s->model->matrix != CachedMatrix)
+			if ((D3DXMATRIX *) surf->model->matrix != CachedMatrix)
 			{
-				d3d_BrushFX.SetEntMatrix ((D3DXMATRIX *) s->model->matrix);
-				CachedMatrix = (D3DXMATRIX *) s->model->matrix;
+				d3d_BrushFX.SetEntMatrix ((D3DXMATRIX *) surf->model->matrix);
+				CachedMatrix = (D3DXMATRIX *) surf->model->matrix;
 
 				NumMatrixSwaps++;
 			}
 
-			if (d3d_BrushModelIndexes && s->indexes)
+			if (d3d_BrushModelVerts)
 			{
-				// render currently batched indexes
-				if (d3d_CurrentIndex >= (1000 - s->numindexes)) D3D_RenderBrushIndexPass ();
-
-				// put the surfaces verts into the index buffer
-				for (int n = 0; n < s->numindexes; n++)
-				{
-					if (d3d_BrushIndexFormat == D3DFMT_INDEX16)
-						d3d_16BitIndexes[d3d_CurrentIndex++] = (unsigned short) s->indexes[n];
-					else d3d_32BitIndexes[d3d_CurrentIndex++] = (unsigned int) s->indexes[n];
-				}
-
-				// get vb sizes
-				if (s->vboffset < d3d_MinIndex) d3d_MinIndex = s->vboffset;
-				if ((s->vboffset + s->numedges) > d3d_MaxIndex) d3d_MaxIndex = s->vboffset + s->numedges;
+				// draw the surface directly from the vertex buffer
+				d3d_BrushFX.Draw (D3DPT_TRIANGLEFAN, surf->vboffset, surf->numedges - 2);
 			}
 			else
 			{
-				// draw the surface directly from the vertex buffer
-				d3d_BrushFX.Draw (D3DPT_TRIANGLEFAN, s->vboffset, s->numedges - 2);
-
-				// each surf is a primitive batch here
-				d3d_NumPrimitiveBatches++;
+				// draw from surf->polys
 			}
 		}
-
-		// render any indexes left over for this texture
-		if (d3d_CurrentIndex && d3d_BrushModelIndexes) D3D_RenderBrushIndexPass ();
 	}
 }
 
 
 void D3D_DrawWorld (void)
 {
-	// set the vertex buffer stream
-	// NOTE - we can't properly use an index buffer here as some drivers only support 16-bit indices,
-	// and we might have more than 65536 unique verts in the worldmodel.
-	d3d_Device->SetStreamSource (0, d3d_BrushModelVerts, 0, sizeof (worldvert_t));
-
-	if (d3d_BrushModelIndexes)
-	{
-		// set up for indexing if we're using it
-		d3d_Device->SetIndices (d3d_BrushModelIndexes);
-
-		if (d3d_BrushIndexFormat == D3DFMT_INDEX16)
-			d3d_BrushModelIndexes->Lock (0, 0, (void **) &d3d_16BitIndexes, D3DLOCK_DISCARD | D3DLOCK_NOSYSLOCK);
-		else d3d_BrushModelIndexes->Lock (0, 0, (void **) &d3d_32BitIndexes, D3DLOCK_DISCARD | D3DLOCK_NOSYSLOCK);
-
-		d3d_CurrentIndex = 0;
-		d3d_MinIndex = 2147483647;
-		d3d_MaxIndex = 0;
-	}
-
-	// rendering stats
-	d3d_NumPrimitiveBatches = 0;
-	d3d_MinBatchVerts = 2147483647;
-	d3d_MaxBatchVerts = 0;
-	d3d_AvgBatchVerts = 0;
-
 	// set up shaders
+	d3d_Device->SetStreamSource (0, d3d_BrushModelVerts, 0, sizeof (worldvert_t));
 	d3d_Device->SetVertexDeclaration (d3d_V3ST4Declaration);
 
 	d3d_BrushFX.BeginRender ();
 	d3d_BrushFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
-
-	// note: because we're modulating lightmaps with textures, if we're using sRGB we need to double it again
-	// note2: sRGB does not work with 64 bit textures (although it might in the future if cards become more advanced)
-	d3d_BrushFX.SetScale
-	(
-		(d3d_GlobalCaps.AllowA16B16G16R16 && r_64bitlightmaps.integer) ? 
-		4.0f : (r_sRGBgamma.integer ? 4.0f : 2.0f)
-	);
+	d3d_BrushFX.SetScale ((d3d_GlobalCaps.AllowA16B16G16R16 && r_64bitlightmaps.integer) ? 4.0f * r_lightscale.value : 2.0f * r_lightscale.value);
 
 	CachedMatrix = NULL;
 	NumMatrixSwaps = 0;
@@ -409,22 +321,6 @@ void D3D_DrawWorld (void)
 	if (r_renderflags & R_RENDERLUMA) D3D_RunBrushPass (PASS_NOTRANSLUMA);
 
 	d3d_BrushFX.EndRender ();
-
-	// always locked coming out to here
-	if (d3d_BrushModelIndexes) d3d_BrushModelIndexes->Unlock ();
-
-#if 0
-	// output rendering stats
-	Con_Printf
-	(
-		"Rendered %i primitive batches (min: %i  max: %i  avg: %i)\n",
-		d3d_NumPrimitiveBatches,
-		d3d_MinBatchVerts / 3, d3d_MaxBatchVerts / 3,
-		d3d_AvgBatchVerts / d3d_NumPrimitiveBatches
-	);
-
-	// Con_Printf ("Issued %i Matrix Swaps\n", NumMatrixSwaps);
-#endif
 }
 
 
@@ -455,8 +351,13 @@ void D3D_AddInlineBModelsToTextureChains (void)
 		// R_TextureAnimation needs this
 		currententity = e;
 
-		// calculate dynamic lighting for bmodel
-		R_PushDlights (clmodel->bh->nodes + clmodel->bh->hulls[0].firstclipnode);
+		if (d3d_AutomapDraw)
+			;
+		else
+		{
+			// calculate dynamic lighting for bmodel
+			R_PushDlights (clmodel->bh->nodes + clmodel->bh->hulls[0].firstclipnode);
+		}
 
 		int i;
 		msurface_t *surf;
@@ -494,14 +395,17 @@ void D3D_AddInlineBModelsToTextureChains (void)
 				}
 				else if (surf->flags & SURF_DRAWSKY)
 				{
-					// add to the appropriate chain (back to front)
-					surf->texturechain = skychain;
-					skychain = surf;
+					if (!d3d_AutomapDraw)
+					{
+						// add to the appropriate chain (back to front)
+						surf->texturechain = skychain;
+						skychain = surf;
+					}
 				}
 				else
 				{
 					// check for lightmap modifications
-					D3D_CheckLightmapModification (surf);
+					if (!d3d_AutomapDraw) D3D_CheckLightmapModification (surf);
 
 					// link it in (add to the end of the surf texture chains so that they can be depth-clipped)
 					if (!tex->chaintail)

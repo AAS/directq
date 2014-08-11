@@ -37,6 +37,8 @@ void D3D_DrawSpriteModels (void);
 void D3D_BeginUnderwaterWarp (void);
 void D3D_EndUnderwaterWarp (void);
 
+extern DWORD d3d_ZbufferEnableFunction;
+
 entity_t	r_worldentity;
 float r_frametime;
 
@@ -48,7 +50,7 @@ entity_t	*currententity;
 int			r_visframecount;	// bumped when going to a new PVS
 int			r_framecount;		// used for dlight push checking (and surf visibility)
 
-mplane_t	frustum[4];
+mplane_t	frustum[5];
 
 int			c_brush_polys, c_alias_polys;
 
@@ -94,21 +96,74 @@ cvar_t	gl_polyblend ("gl_polyblend","1");
 cvar_t	gl_nocolors ("gl_nocolors","0");
 cvar_t	gl_doubleeyes ("gl_doubleeys", "1");
 
+cvar_t	r_hlsl ("r_hlsl", "1", CVAR_ARCHIVE);
+cvar_t	r_lightscale ("r_lightscale", "1", CVAR_ARCHIVE);
 
 /*
 =================
 R_CullBox
 
-Returns true if the box is completely outside the frustom
+Returns true if the box is completely outside the frustum
+Only checks the sides; meaning that there is optimization scope (check behind)
 =================
 */
-bool R_CullBox (vec3_t mins, vec3_t maxs)
+bool R_CullBox (vec3_t emins, vec3_t emaxs)
 {
-	int		i;
+	int i;
+	mplane_t *p;
 
-	for (i=0 ; i<4 ; i++)
-		if (BoxOnPlaneSide (mins, maxs, &frustum[i]) == 2)
-			return true;
+	// test order is left/right/front/bottom/top
+	for (i = 0; i < 5; i++)
+	{
+		p = frustum + i;
+
+		switch (p->signbits)
+		{
+			// signbits signify which corner of the bbox is nearer the plane
+			// note - as only one point/dist test is done per bbox, there is NO advantage to using a bounding sphere
+		default:
+		case 0:
+			if (p->normal[0] * emaxs[0] + p->normal[1] * emaxs[1] + p->normal[2] * emaxs[2] < p->dist)
+				return true;
+			break;
+
+		case 1:
+			if (p->normal[0] * emins[0] + p->normal[1] * emaxs[1] + p->normal[2] * emaxs[2] < p->dist)
+				return true;
+			break;
+
+		case 2:
+			if (p->normal[0] * emaxs[0] + p->normal[1] * emins[1] + p->normal[2] * emaxs[2] < p->dist)
+				return true;
+			break;
+
+		case 3:
+			if (p->normal[0] * emins[0] + p->normal[1] * emins[1] + p->normal[2] * emaxs[2] < p->dist)
+				return true;
+			break;
+
+		case 4:
+			if (p->normal[0] * emaxs[0] + p->normal[1] * emaxs[1] + p->normal[2] * emins[2] < p->dist)
+				return true;
+			break;
+
+		case 5:
+			if (p->normal[0] * emins[0] + p->normal[1] * emaxs[1] + p->normal[2] * emins[2] < p->dist)
+				return true;
+			break;
+
+		case 6:
+			if (p->normal[0] * emaxs[0] + p->normal[1] * emins[1] + p->normal[2] * emins[2] < p->dist)
+				return true;
+			break;
+
+		case 7:
+			if (p->normal[0] * emins[0] + p->normal[1] * emins[1] + p->normal[2] * emins[2] < p->dist)
+				return true;
+			break;
+		}
+	}
+
 	return false;
 }
 
@@ -135,14 +190,40 @@ int SignbitsForPlane (mplane_t *out)
 	int	bits, j;
 
 	// for fast box on planeside test
-
 	bits = 0;
-	for (j=0 ; j<3 ; j++)
+
+	for (j = 0; j < 3; j++)
 	{
 		if (out->normal[j] < 0)
-			bits |= 1<<j;
+			bits |= 1 << j;
 	}
+
 	return bits;
+}
+
+
+/*
+===============
+TurnVector -- johnfitz
+
+turn forward towards side on the plane defined by forward and side
+if angle = 90, the result will be equal to side
+assumes side and forward are perpendicular, and normalized
+to turn away from side, use a negative angle
+===============
+*/
+#define DEG2RAD(a) ((a) * (M_PI / 180.0f))
+
+void TurnVector (vec3_t out, const vec3_t forward, const vec3_t side, float angle)
+{
+	float scale_forward, scale_side;
+
+	scale_forward = cos (DEG2RAD (angle));
+	scale_side = sin (DEG2RAD (angle));
+
+	out[0] = scale_forward * forward[0] + scale_side * side[0];
+	out[1] = scale_forward * forward[1] + scale_side * side[1];
+	out[2] = scale_forward * forward[2] + scale_side * side[2];
 }
 
 
@@ -150,32 +231,24 @@ void R_SetFrustum (void)
 {
 	int		i;
 
-	if (r_refdef.fov_x == 90) 
+	// frustum cull check order is left/right/front/bottom/top
+	TurnVector (frustum[0].normal, vpn, vright, r_refdef.fov_x / 2 - 90);  // left plane
+	TurnVector (frustum[1].normal, vpn, vright, 90 - r_refdef.fov_x / 2);  // right plane
+	TurnVector (frustum[3].normal, vpn, vup, 90 - r_refdef.fov_y / 2);  // bottom plane
+	TurnVector (frustum[4].normal, vpn, vup, r_refdef.fov_y / 2 - 90);  // top plane
+
+	// also build a front clipping plane to cull objects behind the view
+	// this won't be much as the other 4 planes will intersect a little bit behind, but it is effective in some
+	// situations and does provide a minor boost
+	frustum[2].normal[0] = (frustum[0].normal[0] + frustum[1].normal[0] + frustum[3].normal[0] + frustum[4].normal[0]) / 4.0f;
+	frustum[2].normal[1] = (frustum[0].normal[1] + frustum[1].normal[1] + frustum[3].normal[1] + frustum[4].normal[1]) / 4.0f;
+	frustum[2].normal[2] = (frustum[0].normal[2] + frustum[1].normal[2] + frustum[3].normal[2] + frustum[4].normal[2]) / 4.0f;
+
+	for (i = 0; i < 5; i++)
 	{
-		// front side is visible
-		VectorAdd (vpn, vright, frustum[0].normal);
-		VectorSubtract (vpn, vright, frustum[1].normal);
+		// is this necessary???
+		VectorNormalize (frustum[i].normal);
 
-		VectorAdd (vpn, vup, frustum[2].normal);
-		VectorSubtract (vpn, vup, frustum[3].normal);
-	}
-	else
-	{
-		// rotate VPN right by FOV_X/2 degrees
-		RotatePointAroundVector (frustum[0].normal, vup, vpn, -(90 - r_refdef.fov_x / 2));
-
-		// rotate VPN left by FOV_X/2 degrees
-		RotatePointAroundVector (frustum[1].normal, vup, vpn, 90 - r_refdef.fov_x / 2);
-
-		// rotate VPN up by FOV_X/2 degrees
-		RotatePointAroundVector (frustum[2].normal, vright, vpn, 90 - r_refdef.fov_y / 2);
-
-		// rotate VPN down by FOV_X/2 degrees
-		RotatePointAroundVector (frustum[3].normal, vright, vpn, -(90 - r_refdef.fov_y / 2));
-	}
-
-	for (i = 0; i < 4; i++)
-	{
 		frustum[i].type = PLANE_ANYZ;
 		frustum[i].dist = DotProduct (r_origin, frustum[i].normal);
 		frustum[i].signbits = SignbitsForPlane (&frustum[i]);
@@ -218,8 +291,11 @@ void R_SetupFrame (void)
 
 void D3D_InfiniteProjectionRH (D3DMATRIX *mi)
 {
-	mi->_33 = -1;
-	mi->_43 = -1;
+	float e = 0.000001f;
+
+	mi->_33 = -1 + e;
+	mi->_34 = -1;
+	//mi->_43 = -1;
 }
 
 
@@ -234,10 +310,53 @@ float FovYRadians = 0;
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE)
 {
+	// culling passes through here instead of direct so that we can test the gl_cull cvar
 	if (!gl_cull.value)
-		d3d_Device->SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
-	else d3d_Device->SetRenderState (D3DRS_CULLMODE, D3D_CULLTYPE);
+		D3D_SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
+	else D3D_SetRenderState (D3DRS_CULLMODE, D3D_CULLTYPE);
 }
+
+
+// this is not intended to be set directly
+cvar_t d3d_ClearColor ("_gl_clearcolor", "0");
+
+
+void D3D_ClearColor_f (void)
+{
+	unsigned int cc;
+	byte *clearrgba;
+
+	if (Cmd_Argc () == 2)
+	{
+		int palindex = atoi (Cmd_Argv (1)) & 255;
+		cc = d_8to24table[palindex];
+		clearrgba = (byte *) &cc;
+	}
+	else if (Cmd_Argc () == 4)
+	{
+		clearrgba = (byte *) &cc;
+
+		// bgra to keep in same format as d_8to24table
+		clearrgba[2] = atoi (Cmd_Argv (1)) & 255;
+		clearrgba[1] = atoi (Cmd_Argv (2)) & 255;
+		clearrgba[0] = atoi (Cmd_Argv (3)) & 255;
+	}
+	else
+	{
+		Con_Printf ("gl_clearcolor <color | r g b> : sets the background clear color\n");
+
+		clearrgba = (byte *) &d3d_ClearColor.value;
+
+		Con_Printf ("Current clear color is %i %i %i\n", clearrgba[0], clearrgba[1], clearrgba[2]);
+		return;
+	}
+
+	d3d_ClearColor.integer = (int) D3DCOLOR_ARGB (0, clearrgba[2], clearrgba[1], clearrgba[0]);
+	Cvar_Set (&d3d_ClearColor, ((float *) &d3d_ClearColor.integer)[0]);
+}
+
+
+cmd_t gl_clearcolor ("gl_clearcolor", D3D_ClearColor_f);
 
 
 void R_SetupD3D (void)
@@ -275,18 +394,11 @@ void R_SetupD3D (void)
 	ClearRect.y2 = d3d_3DViewport.Y + d3d_3DViewport.Height;
 
 	// we only need to clear if we're rendering 3D
-	d3d_Device->Clear (1, &ClearRect, d3d_ClearFlags, 0x00000000, 1.0f, 0);
+	d3d_Device->Clear (1, &ClearRect, d3d_ClearFlags, ((D3DCOLOR *) &d3d_ClearColor.value)[0], 1.0f, 0);
 #else
 	// we only need to clear if we're rendering 3D
-	d3d_Device->Clear (0, NULL, d3d_ClearFlags, 0x00000000, 1.0f, 0);
+	d3d_Device->Clear (0, NULL, d3d_ClearFlags, ((D3DCOLOR *) &d3d_ClearColor.value)[0], 1.0f, 0);
 #endif
-
-	d3d_Device->BeginScene ();
-
-	// load identity onto the view matrix (it seems as though some cards don't like it being set one time only)
-	// we can get rid of this when we complete the transition from FVF to shaders
-	D3DXMatrixIdentity (&d3d_ViewMatrix);
-	d3d_Device->SetTransform (D3DTS_VIEW, &d3d_ViewMatrix);
 
 	// set z range
 	d3d_3DViewport.MinZ = 0.0f;
@@ -302,7 +414,6 @@ void R_SetupD3D (void)
 	D3DXMatrixIdentity (&d3d_PerspectiveMatrix);
 	D3DXMatrixPerspectiveFovRH (&d3d_PerspectiveMatrix, FovYRadians, (float) r_refdef.vrect.width / (float) r_refdef.vrect.height, 4, 4096);
 	D3D_InfiniteProjectionRH (&d3d_PerspectiveMatrix);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_PerspectiveMatrix);
 
 	// world matrix
 	d3d_WorldMatrixStack->LoadIdentity ();
@@ -319,26 +430,23 @@ void R_SetupD3D (void)
 	// translate by origin
 	d3d_WorldMatrixStack->TranslateLocal (-r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 
-	// set the transform
-	d3d_Device->SetTransform (D3DTS_WORLD, d3d_WorldMatrixStack->GetTop ());
-
 	// save the current world matrix
 	memcpy (&d3d_WorldMatrix, d3d_WorldMatrixStack->GetTop (), sizeof (D3DXMATRIX));
 
 	// depth testing and writing
-	d3d_Device->SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	d3d_Device->SetRenderState (D3DRS_ZENABLE, D3DZB_TRUE);
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	D3D_SetRenderState (D3DRS_ZENABLE, d3d_ZbufferEnableFunction);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 
 	// turn off smooth shading
-	d3d_Device->SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
+	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
 
 	// backface culling
 	D3D_BackfaceCull (D3DCULL_CCW);
 
 	// disable all alpha ops
-	d3d_Device->SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
-	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
 
@@ -389,7 +497,8 @@ void R_SetupRenderState (void)
 
 	// now check the entities and merge into r_renderflags
 	// so that we know in advance what we need to render
-	for (i = 0; i < cl_numvisedicts; i++) R_MergeEntityToRenderFlags (cl_visedicts[i]);
+	for (i = 0; i < cl_numvisedicts; i++)
+		R_MergeEntityToRenderFlags (cl_visedicts[i]);
 }
 
 
@@ -434,27 +543,20 @@ void R_RenderScene (void)
 	R_SetupD3D ();
 	R_SetupRenderState ();
 
-	// adds the world and any static entities to the list
+	// adds the world and any static entities to the list, then draws the world
+	// the world is done first so that we have a full valid depth buffer for clipping everything else against
 	R_DrawWorld ();
 
 	// don't let sound get messed up if going slow
 	S_ExtraUpdate ();
 
-	// draw entities
-	// note - sprites need to be drawn the same time as particles
-	D3D_DrawInstancedBrushModels ();
-
 	// draw everything else
-	R_DrawWaterSurfaces ();
+	// sprites are deferred to same time as particles as they have similar properties & characteristics
+	D3D_DrawInstancedBrushModels ();
 	D3D_DrawAliasModels ();
+	R_DrawWaterSurfaces ();
 	R_DrawParticles ();
-
-	// sprites deferred to same time as particles as they have similar properties & characteristics
 	D3D_DrawSpriteModels ();
-
-	// required by render to texture...
-	d3d_Device->EndScene ();
-
 	D3D_EndUnderwaterWarp ();
 }
 
@@ -468,9 +570,6 @@ r_refdef must be set before the first call
 */
 void R_RenderView (void)
 {
-	// get frametime
-	r_frametime = cl.time - cl.oldtime;
-
 	double	time1, time2;
 
 	if (r_norefresh.value)
@@ -478,6 +577,17 @@ void R_RenderView (void)
 
 	if (!r_worldentity.model || !cl.worldmodel)
 		Sys_Error ("R_RenderView: NULL worldmodel");
+
+	static float old_frametime = 0;
+
+	// get frametime - this was cl.oldtime, creating a framerate dependency
+	r_frametime = cl.time - old_frametime;
+	old_frametime = cl.time;
+
+	// if we don't support pixel shaders we always force use of hlsl to 0,
+	// otherwise we can leave it optional
+	if (!d3d_GlobalCaps.supportPixelShaders)
+		Cvar_Set (&r_hlsl, "0");
 
 	if (r_speeds.value)
 	{

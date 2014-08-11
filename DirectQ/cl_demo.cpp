@@ -91,12 +91,13 @@ bool CL_WriteDemoMessage (void)
 
 	len = LittleLong (net_message.cursize);
 	Success = fwrite (&len, 4, 1, cls.demofile) == 1;
+
 	for (i=0 ; i<3 && Success ; i++)
 	{
 		f = LittleFloat (cl.viewangles[i]);
 		Success = fwrite (&f, 4, 1, cls.demofile) == 1;
 	}
-	
+
 	if (Success)
 		Success = fwrite (net_message.data, net_message.cursize, 1, cls.demofile) == 1;
 
@@ -385,15 +386,17 @@ void CL_FinishTimeDemo (void)
 {
 	int		frames;
 	float	time;
-	
+
 	cls.timedemo = false;
-	
-// the first frame didn't count
+
+	// the first frame didn't count
 	frames = (host_framecount - cls.td_startframe) - 1;
 	time = realtime - cls.td_starttime;
-	if (!time)
-		time = 1;
-	Con_Printf ("%i frames %5.1f seconds %5.1f fps\n", frames, time, frames/time);
+
+	if (!time) time = 1;
+	float fps = (float) frames / time;
+
+	Con_Printf ("%i frames %5.1f seconds %5.1f fps\n", frames, time, fps);
 }
 
 /*

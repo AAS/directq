@@ -25,9 +25,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void D3D_SetFVFStateManaged (DWORD NewFVF);
 
+// generic world surface with verts and two sets of texcoords
+typedef struct worldvert_s
+{
+	float xyz[3];
+	float st[2];
+	float lm[2];
+
+	// force the vertex buffer to compile to a 32-byte size multiple
+	DWORD dummy;
+} worldvert_t;
+
 extern LPDIRECT3DVERTEXBUFFER9 d3d_BrushModelVerts;
-extern LPDIRECT3DINDEXBUFFER9 d3d_BrushModelIndexes;
 extern int d3d_VertexBufferVerts;
+
 extern DWORD d3d_VertexBufferUsage;
 extern D3DFORMAT d3d_BrushIndexFormat;
 
@@ -56,15 +67,16 @@ extern D3DVIEWPORT9 d3d_2DViewport;
 #define D3D_TEXTURE6	6
 #define D3D_TEXTURE7	7
 
-#define IMAGE_MIPMAP	1
-#define IMAGE_ALPHA		2
-#define IMAGE_32BIT		4
-#define IMAGE_PRESERVE	8
-#define IMAGE_LIQUID	16
-#define IMAGE_BSP		32
-#define IMAGE_ALIAS		64
-#define IMAGE_SPRITE	128
-#define IMAGE_LUMA		256
+#define IMAGE_MIPMAP		1
+#define IMAGE_ALPHA			2
+#define IMAGE_32BIT			4
+#define IMAGE_PRESERVE		8
+#define IMAGE_LIQUID		16
+#define IMAGE_BSP			32
+#define IMAGE_ALIAS			64
+#define IMAGE_SPRITE		128
+#define IMAGE_LUMA			256
+#define IMAGE_NOCOMPRESS	512
 
 typedef struct image_s
 {
@@ -141,7 +153,10 @@ typedef struct d3d_global_caps_s
 	bool AllowA16B16G16R16;
 	D3DFORMAT DepthStencilFormat;
 	bool isNvidia;
-	bool supportSRGB;
+	bool supportPixelShaders;
+	bool supportDXT1;
+	bool supportDXT3;
+	bool supportDXT5;
 } d3d_global_caps_t;
 
 extern d3d_global_caps_t d3d_GlobalCaps;
@@ -166,23 +181,19 @@ extern float r_frametime;
 
 extern int r_renderflags;
 
-// generic world surface with verts and two sets of texcoords
-typedef struct worldvert_s
-{
-	float xyz[3];
-	float st[2];
-	float lm[2];
-
-	// force the vertex buffer to compile to a 32-byte size multiple
-	DWORD dummy;
-} worldvert_t;
-
 extern cvar_t r_64bitlightmaps;
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
-// colour space transform
-extern float *r_activetransform;
-float D3D_TransformColourSpace (float in);
-byte D3D_TransformColourSpaceByte (byte in);
-extern cvar_t r_sRGBgamma;
+extern cvar_t	r_hlsl;
+
+// state management functions
+// these are wrappers around the real call that check the previous value for a change before issuing the API call
+void D3D_SetRenderState (D3DRENDERSTATETYPE State, DWORD Value);
+void D3D_SetRenderStatef (D3DRENDERSTATETYPE State, float Value);
+void D3D_SetSamplerState (DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value);
+void D3D_SetSamplerStatef (DWORD Stage, D3DSAMPLERSTATETYPE Type, float Value);
+void D3D_SetTextureStageState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value);
+void D3D_SetTextureStageStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Value);
+void D3D_SetTexture (DWORD Sampler, LPDIRECT3DTEXTURE9 pTexture);
+

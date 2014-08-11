@@ -87,6 +87,9 @@ void D3D_InitUnderwaterTexture (void)
 	SAFE_RELEASE (underwatertexture);
 	SAFE_RELEASE (d3d_WarpVerts);
 
+	// assume that it's invalid until we prove otherwise
+	UnderwaterValid = false;
+
 	// create the update texture as a rendertarget at half screen resolution
 	// rendertargets seem to relax power of 2 requirements, best of luck finding THAT in the documentation
 	HRESULT hr = d3d_Device->CreateTexture
@@ -185,6 +188,9 @@ void D3D_EndUnderwaterWarp (void)
 	// no warps
 	if (!d3d_UpdateWarp) return;
 
+	d3d_Device->EndScene ();
+	d3d_Device->BeginScene ();
+
 	SAFE_RELEASE (underwatersurface);
 
 	extern LPDIRECT3DSURFACE9 d3d_BackBuffer;
@@ -211,7 +217,6 @@ void D3D_DrawUnderwaterWarp (void)
 	// projection matrix
 	D3DXMatrixIdentity (&d3d_OrthoMatrix);
 	D3DXMatrixOrthoOffCenterRH (&d3d_OrthoMatrix, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_OrthoMatrix);
 
 	d3d_Device->SetStreamSource (0, d3d_WarpVerts, 0, sizeof (warpverts_t));
 	d3d_UnderwaterFX.BeginRender ();
@@ -367,32 +372,26 @@ void R_DrawWaterSurfaces (void)
 	float slimealpha;
 	float telealpha;
 	bool transon = false;
-	bool allowtrans = false;
-
-	// check if translucency is allowed on this map/scene
-	if (!cl.worldbrush->transwater) allowtrans = true;
-	if (!r_novis.value) allowtrans = true;
-	if (!(r_renderflags & R_RENDERUNDERWATER) || !(r_renderflags & R_RENDERABOVEWATER)) allowtrans = false;
 
 	// check for turning translucency on
-	if ((r_wateralpha.value < 1.0f || r_lavaalpha.value < 1.0f || r_slimealpha.value < 1.0f || r_telealpha.value < 1.0f) && allowtrans)
+	if (r_wateralpha.value < 1.0f || r_lavaalpha.value < 1.0f || r_slimealpha.value < 1.0f || r_telealpha.value < 1.0f)
 	{
 		// store alpha values
 		if (r_lockalpha.value)
 		{
 			// locked sliders
-			wateralpha = D3D_TransformColourSpace (r_wateralpha.value);
-			lavaalpha = D3D_TransformColourSpace (r_wateralpha.value);
-			slimealpha = D3D_TransformColourSpace (r_wateralpha.value);
-			telealpha = D3D_TransformColourSpace (r_wateralpha.value);
+			wateralpha = r_wateralpha.value;
+			lavaalpha = r_wateralpha.value;
+			slimealpha = r_wateralpha.value;
+			telealpha = r_wateralpha.value;
 		}
 		else
 		{
 			// independent sliders
-			wateralpha = D3D_TransformColourSpace (r_wateralpha.value);
-			lavaalpha = D3D_TransformColourSpace (r_lavaalpha.value);
-			slimealpha = D3D_TransformColourSpace (r_slimealpha.value);
-			telealpha = D3D_TransformColourSpace (r_telealpha.value);
+			wateralpha = r_wateralpha.value;
+			lavaalpha = r_lavaalpha.value;
+			slimealpha = r_slimealpha.value;
+			telealpha = r_telealpha.value;
 		}
 
 		// don't go < 0
@@ -402,17 +401,16 @@ void R_DrawWaterSurfaces (void)
 		if (telealpha < 0) telealpha = 0;
 
 		// enable translucency
-		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-		d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-		d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
 		// flag we're going translucent
 		transon = true;
 	}
-	else
-		wateralpha = lavaalpha = slimealpha = telealpha = 1.0f;
+	else wateralpha = lavaalpha = slimealpha = telealpha = 1.0f;
 
 	// bound speed
 	if (r_warpspeed.value < 1) Cvar_Set (&r_warpspeed, 1);
@@ -468,6 +466,7 @@ void R_DrawWaterSurfaces (void)
 				NumMatrixSwaps++;
 			}
 
+			// draw the surface directly from the vertex buffer
 			d3d_LiquidFX.Draw (D3DPT_TRIANGLEFAN, surf->vboffset, surf->numedges - 2);
 		}
 	}
@@ -478,8 +477,8 @@ void R_DrawWaterSurfaces (void)
 	// (save me having to do that if test again here...)
 	if (transon)
 	{
-		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-		d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 	}
 }
 
@@ -524,7 +523,7 @@ void R_ClipSky (msurface_t *skychain)
 {
 	// disable textureing and writes to the color buffer
 	d3d_Device->SetVertexDeclaration (d3d_V3NoSTDeclaration);
-	d3d_Device->SetRenderState (D3DRS_COLORWRITEENABLE, 0);
+	D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0);
 	d3d_SkyFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
 	d3d_SkyFX.SwitchToPass (0);
 
@@ -540,7 +539,7 @@ void R_ClipSky (msurface_t *skychain)
 	}
 
 	// revert state
-	d3d_Device->SetRenderState (D3DRS_COLORWRITEENABLE, 0x0000000F);
+	D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0x0000000F);
 }
 
 
@@ -728,8 +727,8 @@ void R_DrawSkyChain (msurface_t *skychain)
 
 	// flip the depth func so that the regular polys will prevent sphere polys outside their area reaching the framebuffer
 	// also disable writing to Z
-	d3d_Device->SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
 	if (SkyboxValid)
 	{
@@ -762,23 +761,22 @@ void R_DrawSkyChain (msurface_t *skychain)
 		R_DrawSkySphere (rotateBack, 10, solidskytexture);
 
 		// draw front layer
-		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-		d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 		d3d_SkyFX.SetAlpha (r_skyalpha.value);
 		R_DrawSkySphere (rotateFore, 8, alphaskytexture);
-		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 	}
 
 	// restore the depth func
-	d3d_Device->SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 
 	// go back to the world matrix
 	d3d_WorldMatrixStack->Pop ();
 	d3d_WorldMatrixStack->LoadMatrix (&d3d_WorldMatrix);
-	d3d_Device->SetTransform (D3DTS_WORLD, d3d_WorldMatrixStack->GetTop ());
 
 	// now write the regular polys one more time to clip world geometry
 	// not certain if this is actually necessary...!
@@ -1092,8 +1090,9 @@ void R_LoadSkyBox (char *basename, bool feedback)
 		for (int sb = 0; sb < 6; sb++)
 		{
 			// attempt to load it (sometimes an underscore is expected)
-			if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s/%s%s", sbdir[i], basename, suf[sb]), 0))
-				if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s/%s_%s", sbdir[i], basename, suf[sb]), 0)) continue;
+			if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s/%s%s", sbdir[i], basename, suf[sb]), IMAGE_32BIT | IMAGE_NOCOMPRESS))
+				if (!D3D_LoadExternalTexture (&skyboxtextures[sb], va ("%s/%s_%s", sbdir[i], basename, suf[sb]), IMAGE_32BIT | IMAGE_NOCOMPRESS))
+					continue;
 
 			// loaded OK
 			numloaded++;

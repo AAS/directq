@@ -67,9 +67,6 @@ public:
 
 #define	GAMENAME	"id1"
 
-// used on both client and server
-#define	MAX_ENT_LEAFS	16
-
 #include <math.h>
 #include <string.h>
 #include <stdarg.h>

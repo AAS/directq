@@ -22,9 +22,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_quake.h"
 
-// 256 might be more efficient for rendering, but it will mean that most lightmaps are hit in any given frame
-// we might yet take it down to 64, but right now 128 seems a good balance...
-#define LIGHTMAP_SIZE	128
+// quake's default was 128 but 64 is more efficient, as it gives better dynamic upload throughput
+// going to 32 would be better again, but that's at a stage where the number of texture changes required
+// balances it out and we stop gaining.
+#define LIGHTMAP_SIZE	64
 
 cvar_t r_lerplightstyle ("r_lerplightstyle", "1", CVAR_ARCHIVE);
 cvar_t r_monolight ("r_monolight", "1", CVAR_ARCHIVE);
@@ -412,6 +413,7 @@ store:;
 	{
 		// 32 bit lightmap texture
 		byte *dest = ((byte *) lm->data) + dataofs;
+		byte maxlight;
 
 		for (i = 0; i < surf->tmax; i++, dest += stride)
 		{
@@ -528,6 +530,9 @@ void D3D_ModifySurfaceLightmap (msurface_t *surf)
 {
 	// retrieve the lightmap
 	d3d_lightmap_t *lm = (d3d_lightmap_t *) surf->d3d_Lightmap;
+
+	// more of that weird, warped and wired e2m3 wackiness!!!
+	if (!lm) return;
 
 	if (!lm->modified)
 	{

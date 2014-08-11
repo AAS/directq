@@ -254,6 +254,7 @@ void CL_NextDemo (void)
 	cls.demonum++;
 }
 
+
 /*
 ==============
 CL_PrintEntities_f
@@ -406,19 +407,27 @@ void CL_DecayLights (void)
 	int			i;
 	dlight_t	*dl;
 	float		time;
-	
-	time = cl.time - cl.oldtime;
+	static float old_decaytime = 0;
+
+	time = cl.time - old_decaytime;
 
 	dl = cl_dlights;
-	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
+
+	for (i = 0; i < MAX_DLIGHTS; i++, dl++)
 	{
 		if (dl->die < cl.time || !dl->radius)
 			continue;
-		
-		dl->radius -= time*dl->decay;
+
+		dl->radius -= time * dl->decay;
+
 		if (dl->radius < 0)
+		{
 			dl->radius = 0;
+			dl->die = -1;
+		}
 	}
+
+	old_decaytime = cl.time;
 }
 
 

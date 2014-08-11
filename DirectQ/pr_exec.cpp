@@ -271,9 +271,10 @@ void PR_RunError (char *error, ...)
 	PR_PrintStatement (pr_statements + pr_xstatement);
 	PR_StackTrace ();
 	Con_Printf ("%s\n", string);
-	
+
 	pr_depth = 0;		// dump the stack so host_error can shutdown functions
 
+	QC_DebugOutput ("PR_RunError: %s", string);
 	Host_Error ("Program error");
 }
 
@@ -395,6 +396,8 @@ void PR_ExecuteProgram (func_t fnum)
 	exitdepth = pr_depth;
 
 	s = PR_EnterFunction (f);
+
+	QC_DebugOutput ("PR_ExecuteProgram: %s", pr_strings + f->s_name);
 
 	while (1)
 	{
@@ -630,10 +633,13 @@ void PR_ExecuteProgram (func_t fnum)
 			newf = &pr_functions[a->function];
 
 			if (newf->first_statement < 0)
-			{	// negative statements are built in functions
+			{
+				// negative statements are built in functions
 				i = -newf->first_statement;
 				if (i >= pr_numbuiltins)
 					PR_RunError ("Bad builtin call number");
+
+				QC_DebugOutput ("PR_ExecuteProgram: Calling into Builtin %i", i);
 				pr_builtins[i] ();
 				break;
 			}

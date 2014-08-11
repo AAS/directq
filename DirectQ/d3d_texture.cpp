@@ -40,6 +40,9 @@ extern LPDIRECT3DTEXTURE9 char_texture;
 extern LPDIRECT3DTEXTURE9 solidskytexture;
 extern LPDIRECT3DTEXTURE9 alphaskytexture;
 
+// for palette hackery
+extern PALETTEENTRY texturepal[];
+
 // external textures directory - note - this should be registered before any textures are loaded, otherwise we will attempt to load
 // them from /textures
 cvar_t gl_texturedir ("gl_texturedir", "textures", CVAR_ARCHIVE);
@@ -117,71 +120,52 @@ void D3D_HashTexture (image_t *image)
 }
 
 
-void D3D_ResampleTexture (image_t *src, image_t *dst)
+D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 {
-	int w, h;
-	byte *nwpx, *nepx, *swpx, *sepx, *dest;
-	unsigned xfrac, yfrac, x, y, modx, mody, imodx, imody, injump, outjump;
-	unsigned *outdata = (unsigned *) dst->data;
+	D3DFORMAT TextureFormat = D3DFMT_X8R8G8B8;
 
-	xfrac = ((src->width - 1) << 16) / (dst->width - 1);
-	yfrac = ((src->height - 1) << 16) / (dst->height - 1);
-
-	y = outjump = 0;
-
-	for (h = 0; h < dst->height; h++)
+	if (flags & IMAGE_ALPHA)
 	{
-		mody = (y >> 8) & 0xFF;
-		imody = 256 - mody;
-		injump = (y >> 16) * src->width;
-		x = 0;
+		if (flags & IMAGE_NOCOMPRESS)
+			return D3DFMT_A8R8G8B8;
 
-		for (w = 0; w < dst->width; w++)
+		if (flags & IMAGE_32BIT)
 		{
-			modx = (x >> 8) & 0xFF;
-			imodx = 256 - modx;
-
-			// set up the data points
-			if (src->flags & IMAGE_32BIT)
-			{
-				// just resample
-				nwpx = src->data + (((x >> 16) + injump) << 2);
-				nepx = nwpx + 4;
-				swpx = nwpx + (src->width << 2);
-				sepx = swpx + 4;
-			}
-			else if (src->palette)
-			{
-				// get base offset
-				byte *base = src->data + (x >> 16) + injump;
-
-				// in-place upsampling and resampling
-				nwpx = (byte *) &src->palette[*base];
-				nepx = (byte *) &src->palette[*(base + 1)];
-				swpx = (byte *) &src->palette[*(base + src->width)];
-				sepx = (byte *) &src->palette[*(base + src->width + 1)];
-			}
-			else
-			{
-				// it's my fault if this ever happens
-				Sys_Error ("D3D_ResampleTexture: !(src->flags & IMAGE_32BIT) without src->palette");
-				return;
-			}
-
-			// get a pointer to the outdata destination
-			dest = (byte *) (outdata + outjump + w);
-
-			dest[0] = (nwpx[0] * imodx * imody + nepx[0] * modx * imody + swpx[0] * imodx * mody + sepx[0] * modx * mody) >> 16;
-			dest[1] = (nwpx[1] * imodx * imody + nepx[1] * modx * imody + swpx[1] * imodx * mody + sepx[1] * modx * mody) >> 16;
-			dest[2] = (nwpx[2] * imodx * imody + nepx[2] * modx * imody + swpx[2] * imodx * mody + sepx[2] * modx * mody) >> 16;
-			dest[3] = (nwpx[3] * imodx * imody + nepx[3] * modx * imody + swpx[3] * imodx * mody + sepx[3] * modx * mody) >> 16;
-
-			x += xfrac;
+			// 32 bit textures should never use dxt1
+			if (d3d_GlobalCaps.supportDXT3)
+				TextureFormat = D3DFMT_DXT3;
+			else if (d3d_GlobalCaps.supportDXT5)
+				TextureFormat = D3DFMT_DXT5;
+			else TextureFormat = D3DFMT_A8R8G8B8;
 		}
-
-		outjump += dst->width;
-		y += yfrac;
+		else
+		{
+			// 8 bit textures can use dxt1 as they only need one bit of alpha
+			if (d3d_GlobalCaps.supportDXT1)
+				TextureFormat = D3DFMT_DXT1;
+			else if (d3d_GlobalCaps.supportDXT3)
+				TextureFormat = D3DFMT_DXT3;
+			else if (d3d_GlobalCaps.supportDXT5)
+				TextureFormat = D3DFMT_DXT5;
+			else TextureFormat = D3DFMT_A8R8G8B8;
+		}
 	}
+	else
+	{
+		if (flags & IMAGE_NOCOMPRESS)
+			return D3DFMT_X8R8G8B8;
+
+		// prefer dxt1 but allow other compression formats if available
+		if (d3d_GlobalCaps.supportDXT1)
+			TextureFormat = D3DFMT_DXT1;
+		else if (d3d_GlobalCaps.supportDXT3)
+			TextureFormat = D3DFMT_DXT3;
+		else if (d3d_GlobalCaps.supportDXT5)
+			TextureFormat = D3DFMT_DXT5;
+		else TextureFormat = D3DFMT_X8R8G8B8;
+	}
+
+	return TextureFormat;
 }
 
 
@@ -197,9 +181,9 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		D3DX_DEFAULT,
 		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
 		0,
-		D3DFMT_A8R8G8B8,
+		D3D_GetTextureFormatForFlags (flags | IMAGE_ALPHA | IMAGE_32BIT),
 		D3DPOOL_MANAGED,
-		D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER,
+		D3DX_FILTER_LINEAR,
 		D3DX_FILTER_BOX,
 		0,
 		NULL,
@@ -302,6 +286,8 @@ bool D3D_LoadPCX (FILE *f, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 	pcx_rgb[16] = 32;
 	pcx_rgb[17] = 0x20;
 
+	if (((pcx.xmax + 1) % 4) || ((pcx.ymax + 1) % 4)) flags |= IMAGE_NOCOMPRESS;
+
 	// attempt to load it (this will generate miplevels for us too)
 	HRESULT hr = D3D_CreateExternalTexture (tex, (pcx.xmax + 1) * (pcx.ymax + 1) * 4 + 18, pcx_rgb, flags);
 
@@ -313,6 +299,7 @@ bool D3D_LoadPCX (FILE *f, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 	fclose (f);
 	return true;
 }
+
 
 bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags)
 {
@@ -392,13 +379,21 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 		// attempt to load it (this will generate miplevels for us too)
 		HRESULT hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
 
-		// ensure that the buffer is released before checking for success, as otherwise we'll leak it
-		Heap_QFree (filebuf);
+		if (FAILED (hr))
+		{
+			// the reason for failure may be because the compressed format was unsupported for the texture dimensions,
+			// so try it again without compression before giving up
+			hr = D3D_CreateExternalTexture (tex, filelen, filebuf, (flags | IMAGE_NOCOMPRESS));
 
-		// failed to load
-		if (FAILED (hr)) continue;
+			if (FAILED (hr))
+			{
+				Heap_QFree (filebuf);
+				continue;
+			}
+		}
 
 		// load succeeded
+		Heap_QFree (filebuf);
 		return true;
 	}
 
@@ -418,9 +413,9 @@ void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags
 		D3DX_DEFAULT,
 		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
 		0,
-		D3DFMT_UNKNOWN,
+		D3D_GetTextureFormatForFlags (flags | IMAGE_ALPHA | IMAGE_32BIT),
 		D3DPOOL_MANAGED,
-		D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER,
+		D3DX_FILTER_LINEAR,
 		D3DX_FILTER_BOX,
 		0,
 		NULL,
@@ -430,9 +425,32 @@ void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags
 
 	if (FAILED (hr))
 	{
-		// a resource texture failing is a program crash bug
-		Sys_Error ("D3D_LoadResourceTexture: Failed to create texture");
-		return;
+		// the first failure might happen if we're compressing a texture that we can't compress
+		hr = D3DXCreateTextureFromResourceEx
+		(
+			d3d_Device,
+			NULL,
+			MAKEINTRESOURCE (ResourceID),
+			D3DX_DEFAULT,
+			D3DX_DEFAULT,
+			(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+			0,
+			D3D_GetTextureFormatForFlags (flags | IMAGE_ALPHA | IMAGE_32BIT | IMAGE_NOCOMPRESS),
+			D3DPOOL_MANAGED,
+			D3DX_FILTER_LINEAR,
+			D3DX_FILTER_BOX,
+			0,
+			NULL,
+			NULL,
+			tex
+		);
+
+		if (FAILED (hr))
+		{
+			// a resource texture failing is a program crash bug
+			Sys_Error ("D3D_LoadResourceTexture: Failed to create texture");
+			return;
+		}
 	}
 
 	// not much more we need to do here...
@@ -452,12 +470,12 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 	if (scaled.width > d3d_DeviceCaps.MaxTextureWidth) scaled.width = d3d_DeviceCaps.MaxTextureWidth;
 	if (scaled.height > d3d_DeviceCaps.MaxTextureHeight) scaled.height = d3d_DeviceCaps.MaxTextureHeight;
 
-	if (image->flags & IMAGE_LIQUID)
-	{
-		// ensure liquid textures are square
-		if (scaled.width > scaled.height) scaled.height = scaled.width;
-		if (scaled.height > scaled.width) scaled.width = scaled.height;
-	}
+	// d3d specifies that compressed formats should be a multiple of 4
+	// would you believe marcher has a 1x1 texture in it?
+	if ((scaled.width % 4) || (scaled.height % 4)) image->flags |= IMAGE_NOCOMPRESS;
+
+	// sky can have large flat spaces of the same colour, meaning it doesn't compress so good
+	if (!strnicmp (image->identifier, "sky", 3)) image->flags |= IMAGE_NOCOMPRESS;
 
 	// create the texture at the scaled size
 	HRESULT hr = d3d_Device->CreateTexture
@@ -466,16 +484,11 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 		scaled.height,
 		(image->flags & IMAGE_MIPMAP) ? 0 : 1,
 		0,
-		(image->flags & IMAGE_ALPHA) ? D3DFMT_A8R8G8B8 : D3DFMT_X8R8G8B8,
+		D3D_GetTextureFormatForFlags (image->flags),
 		D3DPOOL_MANAGED,
 		tex,
 		NULL
 	);
-
-	if (image->flags & IMAGE_MIPMAP)
-	{
-		int xxxx = 32;
-	}
 
 	if (FAILED (hr))
 	{
@@ -483,46 +496,52 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 		return;
 	}
 
-	// the rectangle to lock
-	D3DLOCKED_RECT LockRect;
+	LPDIRECT3DSURFACE9 texsurf = NULL;
+	(*tex)->GetSurfaceLevel (0, &texsurf);
 
-	// lock the texture rectangle
-	(*tex)->LockRect (0, &LockRect, NULL, 0);
+	RECT SrcRect;
+	SrcRect.top = 0;
+	SrcRect.left = 0;
+	SrcRect.bottom = image->height;
+	SrcRect.right = image->width;
 
-	// fill it in - how we do it depends on the scaling
+	DWORD FilterFlags = 0;
+
 	if (scaled.width == image->width && scaled.height == image->height)
 	{
-		// no scaling
-		for (int i = 0; i < (scaled.width * scaled.height); i++)
-		{
-			unsigned int p;
-
-			// retrieve the correct texel - this will either be direct or a palette lookup
-			if (image->flags & IMAGE_32BIT)
-				p = ((unsigned *) image->data)[i];
-			else if (image->palette)
-				p = image->palette[image->data[i]];
-			else Sys_Error ("D3D_LoadTexture: !(flags & IMAGE_32BIT) without palette set");
-
-			// store it back
-			((unsigned *) LockRect.pBits)[i] = p;
-		}
+		// no need
+		FilterFlags |= D3DX_FILTER_NONE;
 	}
 	else
 	{
-		// save out lockbits in scaled data pointer
-		scaled.data = (byte *) LockRect.pBits;
+		// higher quality filters blur and fade excessively
+		FilterFlags |= D3DX_FILTER_LINEAR;
 
-		// resample data into the texture
-		D3D_ResampleTexture
-		(
-			image,
-			&scaled
-		);
+		// it's generally assumed that mipmapped textures should also wrap
+		if (image->flags & IMAGE_MIPMAP) FilterFlags |= (D3DX_FILTER_MIRROR_U | D3DX_FILTER_MIRROR_V);
 	}
 
-	// unlock it
-	(*tex)->UnlockRect (0);
+	hr = D3DXLoadSurfaceFromMemory
+	(
+		texsurf,
+		NULL,
+		NULL,
+		image->data,
+		(image->flags & IMAGE_32BIT) ? D3DFMT_A8R8G8B8 : D3DFMT_P8,
+		(image->flags & IMAGE_32BIT) ? image->width * 4 : image->width,
+		(image->flags & IMAGE_32BIT) ? NULL : texturepal,
+		&SrcRect,
+		FilterFlags,
+		0
+	);
+
+	if (FAILED (hr))
+	{
+		Sys_Error ("D3D_LoadTexture: D3DXLoadSurfaceFromMemory failed");
+		return;
+	}
+
+	texsurf->Release ();
 
 	// good old box filter - triangle is way too slow, linear doesn't work well for mipmapping
 	if (image->flags & IMAGE_MIPMAP) D3DXFilterTexture (*tex, NULL, 0, D3DX_FILTER_BOX);
@@ -557,8 +576,17 @@ void D3D_MakeLumaTexture (LPDIRECT3DTEXTURE9 tex)
 	D3DSURFACE_DESC Level0Desc;
 	D3DLOCKED_RECT Level0Rect;
 
+	LPDIRECT3DSURFACE9 LumaSurf;
+
 	tex->GetLevelDesc (0, &Level0Desc);
-	tex->LockRect (0, &Level0Rect, NULL, 0);
+	tex->GetSurfaceLevel (0, &LumaSurf);
+
+	// copy it out to an ARGB surface
+	LPDIRECT3DSURFACE9 CopySurf;
+
+	d3d_Device->CreateOffscreenPlainSurface (Level0Desc.Width, Level0Desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &CopySurf, NULL);
+	D3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, LumaSurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+	CopySurf->LockRect (&Level0Rect, NULL, 0);
 
 	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
 	{
@@ -571,7 +599,11 @@ void D3D_MakeLumaTexture (LPDIRECT3DTEXTURE9 tex)
 		rgba[1] = rgba[2] = rgba[3] = rgba[0];
 	}
 
-	tex->UnlockRect (0);
+	CopySurf->UnlockRect ();
+	D3DXLoadSurfaceFromSurface (LumaSurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+	CopySurf->Release ();
+	LumaSurf->Release ();
 
 	// re-filter the mipmaps
 	D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX);
@@ -583,25 +615,33 @@ void D3D_TranslateAlphaTexture (int r, int g, int b, LPDIRECT3DTEXTURE9 tex)
 	D3DSURFACE_DESC Level0Desc;
 	D3DLOCKED_RECT Level0Rect;
 
-	tex->GetLevelDesc (0, &Level0Desc);
-	tex->LockRect (0, &Level0Rect, NULL, 0);
+	LPDIRECT3DSURFACE9 LumaSurf;
 
-	extern cvar_t r_sRGBgamma;
+	tex->GetLevelDesc (0, &Level0Desc);
+	tex->GetSurfaceLevel (0, &LumaSurf);
+
+	// copy it out to an ARGB surface
+	LPDIRECT3DSURFACE9 CopySurf;
+
+	d3d_Device->CreateOffscreenPlainSurface (Level0Desc.Width, Level0Desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &CopySurf, NULL);
+	D3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, LumaSurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+	CopySurf->LockRect (&Level0Rect, NULL, 0);
 
 	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
 	{
 		byte *rgba = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
 
-		// direct3d doesn't specify sRGB transforms for the alpha channel, but it turns out we need it anyway
-		// we can't write directly into rgba[3] as we might want to restore it if switching between colour spaces,
-		// so instead we hack it in a "good enough" fashion....
 		// strict correctness says we should divide by 255, but that makes it too dark, so instead we divide by 128
-		rgba[0] = BYTE_CLAMP (D3D_TransformColourSpaceByte (BYTE_CLAMP (b)) * D3D_TransformColourSpaceByte (rgba[3]) / 128);
-		rgba[1] = BYTE_CLAMP (D3D_TransformColourSpaceByte (BYTE_CLAMP (g)) * D3D_TransformColourSpaceByte (rgba[3]) / 128);
-		rgba[2] = BYTE_CLAMP (D3D_TransformColourSpaceByte (BYTE_CLAMP (r)) * D3D_TransformColourSpaceByte (rgba[3]) / 128);
+		rgba[0] = BYTE_CLAMP (BYTE_CLAMP (b) * rgba[3] / 128);
+		rgba[1] = BYTE_CLAMP (BYTE_CLAMP (g) * rgba[3] / 128);
+		rgba[2] = BYTE_CLAMP (BYTE_CLAMP (r) * rgba[3] / 128);
 	}
 
-	tex->UnlockRect (0);
+	CopySurf->UnlockRect ();
+	D3DXLoadSurfaceFromSurface (LumaSurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+	CopySurf->Release ();
+	LumaSurf->Release ();
 }
 
 

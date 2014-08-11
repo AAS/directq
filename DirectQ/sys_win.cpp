@@ -425,6 +425,8 @@ void Sys_Error (char *error, ...)
 	vsprintf (text, error, argptr);
 	va_end (argptr);
 
+	QC_DebugOutput ("Sys_Error: %s", text);
+
 	// switch to windowed so the message box is visible, unless we already
 	// tried that and failed
 	if (!in_sys_error0)

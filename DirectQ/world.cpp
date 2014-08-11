@@ -324,49 +324,6 @@ void SV_TouchLinks (edict_t *ent, areanode_t *node)
 
 /*
 ===============
-SV_FindTouchedLeafs
-
-===============
-*/
-void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node)
-{
-	mplane_t	*splitplane;
-	mleaf_t		*leaf;
-	int			sides;
-	int			leafnum;
-
-	if (node->contents == CONTENTS_SOLID)
-		return;
-
-	// add an efrag if the node is a leaf
-	// this is used for sending ents to the client so it needs to stay
-	if (node->contents < 0)
-	{
-		if (ent->num_leafs == MAX_ENT_LEAFS)
-			return;
-
-		leaf = (mleaf_t *) node;
-		leafnum = leaf - sv.worldmodel->bh->leafs - 1;
-
-		ent->leafnums[ent->num_leafs] = leafnum;
-		ent->num_leafs++;			
-		return;
-	}
-
-	// NODE_MIXED
-	splitplane = node->plane;
-	sides = BOX_ON_PLANE_SIDE(ent->v.absmin, ent->v.absmax, splitplane);
-
-	// recurse down the contacted sides
-	if (sides & 1)
-		SV_FindTouchedLeafs (ent, node->children[0]);
-		
-	if (sides & 2)
-		SV_FindTouchedLeafs (ent, node->children[1]);
-}
-
-/*
-===============
 SV_LinkEdict
 
 ===============
@@ -426,7 +383,8 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 		ent->v.absmax[1] += 15;
 	}
 	else
-	{	// because movement is clipped an epsilon away from an actual edge,
+	{
+		// because movement is clipped an epsilon away from an actual edge,
 		// we must fully check even when bounding boxes don't quite touch
 		ent->v.absmin[0] -= 1;
 		ent->v.absmin[1] -= 1;
@@ -435,17 +393,13 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 		ent->v.absmax[1] += 1;
 		ent->v.absmax[2] += 1;
 	}
-	
-// link to PVS leafs
-	ent->num_leafs = 0;
-	if (ent->v.modelindex)
-		SV_FindTouchedLeafs (ent, sv.worldmodel->bh->nodes);
 
 	if (ent->v.solid == SOLID_NOT)
 		return;
 
-// find the first node that the ent's box crosses
+	// find the first node that the ent's box crosses
 	node = sv_areanodes;
+
 	while (1)
 	{
 		if (node->axis == -1)
@@ -457,15 +411,14 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 		else
 			break;		// crosses the node
 	}
-	
-// link it in	
 
+	// link it in
 	if (ent->v.solid == SOLID_TRIGGER)
 		InsertLinkBefore (&ent->area, &node->trigger_edicts);
 	else
 		InsertLinkBefore (&ent->area, &node->solid_edicts);
-	
-// if touch_triggers, touch all entities at this node and decend for more
+
+	// if touch_triggers, touch all entities at this node and decend for more
 	if (touch_triggers)
 		SV_TouchLinks ( ent, sv_areanodes );
 }

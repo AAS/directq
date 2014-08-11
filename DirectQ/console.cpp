@@ -407,10 +407,11 @@ void Con_Printf (char *fmt, ...)
 	char		msg[MAXPRINTMSG];
 	static bool	inupdate = false;
 
-	va_start (argptr,fmt);
-	vsprintf (msg,fmt,argptr);
+	va_start (argptr, fmt);
+	vsprintf (msg, fmt, argptr);
 	va_end (argptr);
 
+	QC_DebugOutput (msg);
 	Con_PrintfCommon (msg, false);
 
 	// take a copy for the menus
@@ -552,7 +553,7 @@ void Con_DrawNotify (void)
 
 		if (time > con_notifytime.value) continue;
 
-		if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (con_notifytime.value - time);
+		// if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (con_notifytime.value - time);
 
 		text = con_text + (i % con_totallines) * con_linewidth;
 
@@ -561,7 +562,7 @@ void Con_DrawNotify (void)
 		for (x = 0 ; x < con_linewidth ; x++)
 			Draw_Character ((x + 1) << 3, v, text[x]);
 
-		if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (1.0f);
+		// if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (1.0f);
 		v += con_lineheight.value;
 	}
 

@@ -154,10 +154,6 @@ typedef struct msurface_s
 	// offset to first vert in the vertex buffer
 	int			vboffset;
 
-	// index buffer stuff
-	int			numindexes;
-	int			*indexes;
-
 	// the model to which this surf belongs
 	struct model_s *model;
 
@@ -176,10 +172,8 @@ typedef struct mnode_s
 	// common with leaf
 	int			contents;		// 0, to differentiate from leafs
 	int			visframe;		// node needs to be traversed if current
-	bool		previousvisframe;
-	
+	bool		seen;
 	float		minmaxs[6];		// for bounding box culling
-
 	struct mnode_s	*parent;
 
 	// node specific
@@ -197,14 +191,12 @@ typedef struct mleaf_s
 	// common with node
 	int			contents;		// wil be a negative contents number
 	int			visframe;		// node needs to be traversed if current
-	bool		previousvisframe;
-
+	bool		seen;
 	float		minmaxs[6];		// for bounding box culling
-
 	struct mnode_s	*parent;
 
 	// leaf specific
-	byte		*compressed_vis;
+	byte		*decompressed_vis;
 
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
@@ -336,7 +328,7 @@ typedef struct aliashdr_s
 	bool		nolerp;
 
 	int					numposes;
-	int					poseverts;
+	int					numorder;
 	void *posedata;	// numposes*poseverts trivert_t
 	int	 *commands;	// gl command list with embedded s/t
 	void				*texture[MAX_SKINS][4];
@@ -409,11 +401,8 @@ typedef struct brushheader_s
 	int			numtextures;
 	texture_t	**textures;
 
-	byte		*visdata;
 	byte		*lightdata;
 	char		*entities;
-
-	bool		transwater;
 } brushhdr_t;
 
 

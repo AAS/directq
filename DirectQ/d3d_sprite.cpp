@@ -220,11 +220,11 @@ void D3D_DrawSpriteModels (void)
 	d3d_SpriteFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
 	d3d_SpriteFX.SwitchToPass (0);
 
-	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
 	for (int i = 0; i < cl_numvisedicts; i++)
 	{
@@ -238,8 +238,5 @@ void D3D_DrawSpriteModels (void)
 	}
 
 	d3d_SpriteFX.EndRender ();
-
-	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 }
 

@@ -1,0 +1,478 @@
+DIRECTQ 1.6.2 UPDATES
+=====================
+
+* Fixed r_64bitlightmaps 0 on a device that supports 64 bit textures gives 4 x brightness.
+* Fixed crash in timedemo demo3 (also potential crash in a number of other scenarios).
+* Added sRGB Color Space option (default off) (r_sRGBgamma cvar).
+* Removed case sensitivity from cvar tab autocompletion.
+* Restored alias models to correct place in draw order.
+* Added sRGB support to linear colour operations.
+* Added skyalpha support (r_skyalpha).
+* Removed loading disc code.
+* Switched world surface rendering to front-to-back.
+* Resolved various bugs with render states being lost following a device reset.
+* Resolved MAJOR cause of slowdown on cards that support hardware T&L.
+* Fixed hipnotic particle field was missing.
+* Reverted alias model interpolation back to the vertex shader.
+* Removed state blocks.
+* Added index buffer for world surfs (r_useindexbuffer, default 0), may be faster on some cards.
+* Tightened up on video startup by adding a check for fullscreen mode support and texture creation to each format type.
+
+
+Release 1.6 updates.
+====================
+
+* Added XInput code for XBox 360 Controller.
+* Added FX loading from file (in gamedir/shaders, built-in shaders are available in source code folder).
+* Removed messy "Apply" stuff from menu code.
+* Added ability to show/hide/enable/disable menu options.
+* Changed video mode selection from instant to requiring an "Apply".
+* Added loaders for several "enhanced" particle types ("enhanced" system not implemented yet).
+* Further updates of particle system, replaced types with individual particle parameters.
+* Made new Multiplayer game config menu more tolerant of run-time game changes.
+* Removed dependency on ID1 naming convention from viewmodel muzzleflash frame interpolation hack.
+* Removed frame interpolation from bolt models.
+* Fixed crash on changelevel where you give yourself the lightning gun before changing level.
+* Fixed r_lightmap cvar.
+* Removed efrags system (replaced with similar - but more efficient - system).
+* Ported trace system from light.exe source code.
+* Fixed rotating va buffers disappeared somewhere around 1.2
+* Added proper bilinear resampling for texture upsizing.
+* Made Heap_TempAlloc more robust against recursive calls.
+* Worked around occasional weird crash in Draw_CachePic.
+* Removed dedicated server functionality.
+* Fixed memory leak in S_LocalSound.
+* Fixed shader loading from resources (badly broken).
+* Moved project to Visual C++ 2008 Express.
+* Added centerprint logging (scr_centerlog - need to change this to a standard cvar name - default on).
+* Cleared out gl_triplebuffer and vid.numpages.
+* Adding fading to centerprints and console notifications.
+* Fixed bug where brush and sprite static ents were not rendered unless a regular brush or sprite ent was also rendered.
+* Tightened up on textbox input for content names and locations menu.
+* Added customisation of base save and screenshot names.
+* Exposed screenshot format cvar via content menu (TGA/BMP/PNG/DDS/JPG support).
+* Moved alias model interpolation back to CPU (lighter vertex submission).
+* Fixed "dying throes" interpolation bug.
+* Added Maps menu.
+* Restored offset centerprinting from "lost version" somewhere around 1.2 or 1.3 (...long story...)
+* Removed limit on number of menu cachepics.
+* Removed limit on number of alias verts (fixed vert loader so it only allocs the number of verts needed too).
+* Fixed crash bug with game changing followed by map load; made progs loader significantly more robust in the process.
+* Added optional (on by default) "classic" sky warp (ripped from darkplaces) - use r_skywarp 0 to revert to sky sphere warp.
+* Added r_skybackscroll and r_skyfrontscroll cvars to control sky scroll speed.
+* Split out warp surfaces to a new options submenu and added sky warp control options.
+* Moved skies from fixed functionality to HLSL (there is no fixed functionality left in the engine now).
+* Added 8 new custom crosshairs (some good, some rubbish).
+* Added skybox loading to menu.
+* Fixed multiplayer map selection so that it works off the same map list as the maps menu.
+* Added TAB autocompletion to "map" command.
+* Added TAB autocompletion to "loadsky" command.
+* Added TAB autocompletion to "playdemo" and "timedemo" commands.
+* Added demos menu allowing playdemo, timedemo or record commands.
+* Fixed Timerefresh command.
+* Added more configurability to underwater warp.
+* Cleaned up water "lock alpha sliders" option a little.
+* Made SCR_ModalMessage look less "1996".
+* Removed all remaining hard limits from alias model mesh system.
+* Added ability to switch between full and partial precision when loading shaders.
+* Added r_64bitlightmaps cvar for switching 64 bit lightmaps off (on platforms that support it).
+* Removed automap code.
+* Restored menu highlight colour selection option from "lost" version.
+* Fixed long-standing "Center Align X" appearing where it should be "Y" typo in HUD menu.
+* Added custom name generator.
+* Moved more state info to HLSL backend and implemented state manager.
+
+
+Release 1.5 updates.
+====================
+
+* Removed -cachedir command-line option.
+* Removed registered restriction on file loading.
+* Removed registered restriction on modified games.
+* Removed Sys_Error on invalid pop.lmp
+* Adjusted file opening so that directory paths will override pak file contents.
+* Removed name restrictions on pak files.
+* Removed restriction on number of files in a pak.
+* Added "game" command and game changing.
+* Increased SECONDARY_BUFFER_SIZE to 0x100000 (more efficient use).
+* Fixed bug in texture loader where free slots weren't being reused.
+* Added games menu.
+* Added r_rapidfire cvar to control "rapid fire muzzleflash" dynamic lights (default 0).
+* Fixed quoth mods not getting hipnotic hud layout.
+* Reworked particle system to allow for multiple textures and adjustable render params (still classic system though).
+* Increased progs stack depth and size.
+* Fixed occasional lockup in SV_TouchLinks (credit Tyrann for fix, Spirit for publicising the bug).
+* Added "gamedir" command (same behaviour as "game").
+* Added ability for "game" and "gamedir" to take multiple args.
+* Added (buggy) automap - use "toggleautomap" command.
+* Implemented several QIP bugfixes.
+* Removed limit on number of file handles.
+* Implemented basic DP extensions framework (don't get excited - no extensions implemented yet!)
+* Added sv_oldvelocity cvar (default 1) to revert velocity bounding to original (fixed method changes gameplay).
+* Made all cvars in sv_phys.cpp server cvars (broadcast if changed) - (seems the right thing to do).
+* Reworked translucency handling again, added independent water/lava/slime/tele sliders and "lock alpha sliders" cvar (r_lockalpha, default 1).
+* Removed gl_flashblend 1 mode (it was nice to have it for completeness sake, but when PS 2.0 is needed is this really necessary?)
+* Fixed static entities not frame interpolated.
+* Added cl_crossx and cl_crossy functionality.
+* Added scr_crosshairscale (consistency with fitzquake) and scr_crosshaircolor (0-13, palette lookup based, default 0).
+* Added crosshair options to HUD menu (ugly but functional).
+* Removed #ifdef PARANOID code.
+* Demoted several Sys_Error events to either Host_Error or Con_DPrintf with fixup.
+* Finished resolution changing (...I hope...)
+* Cleaned out some of the inherited global variables mess in vidnt.
+* Fixed bottom edge of underwater warp screen.
+* Added GPL header to all files.
+
+
+Release 1.4 updates.
+====================
+
+Gratitude to everyone who provided bug reports and/or feedback on the last release.  Your contribution has definitely helped make this one better.
+
+* Fixed r_novis 1 crash.
+* Removed contents transition code from R_MarkLeaves - doesn't play nice with translucency and doesn't handle entities.
+* Fixed lockups in OpenQuartz and other mods where inline bmodels seem to share surfaces.
+* Renamed r_anisotropicfilter to gl_texture_anisotropy (consistency with other engines).
+* Added FOV to video/view menu.
+* Changed widescreen fix so that it's only effective at FOV 90 (consistency with other engines).
+* Added fov_compatible cvar to allow player to override this.
+* Removed HUD when loading plaque is visible (looks wrong).
+* Fixed instanced brush model R_LightPoint start position.
+* Added missing sprite types from WinQuake.
+* Switched viewsize to 120 when loading plaque is up (still not sure, looks right at intermissions though).
+* Increased Alias Model vertex limits.
+* Fixed display of savegame date and time (mental note to self: ".sav.sav" is not a valid extension here...)
+* Switched mapshots to 128*128 PNG format (TGAs unstable & old size was too large); reverted display to 128*128.
+* Removed MAX_EDICTS print out from SV_SpawnServer (should have never made it to release).
+* Fixed problem with rotating weapon models being clipped when they shouldn't.
+* Removed limit on surface extents.
+* Restored limit on surface extents (lightmap size of 128 * 128 enforces a max of 2032).
+* Fixed lightmap corruption on Quark ETP maps (grrrrrrrrr).
+* Fully removed old zone.cpp/zone.h code.
+* Cleaned out remainder of old sbar code.
+* Updated window title and splash screen to new version number.
+* Fixed viewmodel with FOV > 90 and made compatible with zoom mode (i.e. retained classic behaviour with FOV < 90).
+* Added 8 custom crosshairs (in addition to 2 standard - white '+' and orange '+').
+* Fixed (I hope!!!) "reliving their dying throes" interpolation bug.
+* Removed video modes where width is < height from the available modes list.
+* Added FPS counter to HUD display (scr_showfps) - in HUD menu.
+* Added Clock to HUD display (scr_clock) - in HUD menu.
+* Removed anti-wallhack from server pending fix of blinky problems (use a different engine as a server...)
+* Added "sound/cdtracks" as an alternative for MP3 source folder (grrrr Darkplaces grrrr).
+* Switched mapshots back to TGA.
+* Cleared out more legacy crap (currenttexture, cnttextures, skytexturenum, stuff like that).
+* Added (hopefully) more robust translucent water detection.
+* Switched Heap memory allocation from CRT to Windows API (different behavior between debug and release builds with CRT).
+
+
+WHAT DIDN'T MAKE IT
+-------------------
+Addition of crosshairs to the menu.
+In-game resolution changing (STILL!)
+Fixing gl_flashblend 1 mode.
+More info on OSD stuff (pings, time remaining, etc).
+
+WHAT MIGHT BE STILL BROKEN
+--------------------------
+Water translucency (works so far but you never know till it goes to the wild...)
+
+
+Release 1.3 updates.
+====================
+
+* Various changes to the cvar system for better reliability; protection from QC abuse for certain cvars (disabled by default).
+* Changed number of console notify lines to 5.
+* Protected several cvars from QC abuse.
+* Cvar-ized sound_nominal_clip_dist (default 1500).
+* Added sound options menu.
+* Moved "Customize Controls" to Input menu.
+* Fixed mapshots (broke during viewport cleanup).
+* Added "mapshot" command for user to take a mapshot wherever they wish.
+* Added "r_automapshot" cvar (default 0) to take a mapshot automatically on entering a new level (in maps directory).
+* Added mapshot drawing to serverlist menu.
+* Moved sound to DirectSound 8.
+* Removed parts of old "crappy Windows multimedia base".
+* Modified somewhat weird sound startup to be more standardised.
+* Removed sounds from cache memory system.
+* Got rid of COM_LoadCacheFile (never used).
+* Removed entire Cache system.
+* Fixed "items/damage2.wav is not precached" bug on maps where you do impulse 255 with no quad in the map as standard.
+* Removed Zone and Hunk memory systems; replaced with simplified Heap system.
+* Fixed bug where larger player skins would crash R_TranslatePlayerTexture.
+* Implemented texture flushing; those unused after 4 maps get flushed.
+* Added LIT file support.
+* Added -quoth support.
+* Removed hard limit on number of warp update textures.
+* Adjusted r_wateralpha so it's only effective if scene has translucent water or if r_novis is 1; made it an archive cvar.
+* Bumped MAX_DLIGHTS to 128.
+* Added r_monolight cvar to set coloured light off (default 1), requires map reload for static light.
+* Changed rendering order for entities under translucent water.
+* Added extra dynamic lights on many ents and tents, controlled by r_extradlight cvar (default 0).
+* Fixed bug where lightning bolts weren't visible.
+* Fixed model allocation memory leak (unlikely to be hit, but dangerous all the same!)
+* Moved client-side entity lists to dynamic allocation (still fixed size with hard limits though...)
+* Tightened up client side entity allocation memory overhead, 512 initial allocation, over 512 (up to 8192) allocated on-demand.
+* Fixed bug where beams could persist after a changelevel has issued.
+* Added cmd_allowqc cvar (default 1) to protect clients from unwanted command execution by rogue QC.
+* Begun fully customizable alternate new HUD layout.
+* More work on HUD layout; replicating classic HUD in new scriptable system.
+* Added console autocompletion.
+* Changed default r_wateralpha to 0.5 (new behaviour makes the safe).
+* Changed lightmaps back to lock/unlock per frame (suspicion of the other method).
+* Added console enhancements: left arrow, right arrow, insert, delete, copy and paste support.
+* Removed limit on number of efrags.
+* Various usability and performance improvements in the save/load menu.
+* Several memory usage improvements.
+* Modified warp update to allow user-settable detail (r_warptess, default 32) and better code efficiency.
+* Fixed menu toggle options.
+* Added anisotropic filtering (r_anisotropicfilter).
+* Removed render to texture water warp update.
+* Moved alias model interpolation to a vertex shader.
+* Moved water warp update to a pixel shader.
+* Rewrote instanced BSP model render (still messy and ugly).
+* Added skybox loading (via "loadsky" and "sky" key in worldspawn).
+* Changed sv.entities to dynamic.
+* Replaced Hunk_ system.
+* Fixed interpolation bug on entity model change.
+* Changed mouse movement so it doesn't update if in the menu or console.
+* Added mouse acceleration to both software and DirectInput.
+* Added toggling between software and DirectInput mouse.
+* Made a lot of entity loading console spam developer 1 only and printed simplified warning for developer 0.
+* Completed move to fully dynamic memory allocation - no more -heapsize.
+* Protocol optimization - comparison of origin and angles is based on what will actually be transmitted rather than what is stored (non-breaking).
+* Definitively fixed CL_UpdateTEnts bug (thanks metlslime!)
+* Added BJP protocols.  We can load Warpspasm maps now. :D
+* Moved model loading to dynamic and bumped MAX_MOD_KNOWN to 8192.
+* Fixed bug where not enough PVS bytes were allocated, only apparent where loadmodel->leafs == MAX_MAP_LEAFS, but would cause overflow/data stomping.  Bumped MAX_MAP_LEAFS to 32767.
+* Added fullbrights to world surfs, moved them to shaders, removed old code.
+* Enabled liquid textures on instanced brush models.
+* Completed fullbright texture support on all world and alias surfaces/models.
+* Moved more rendering to HLSL.
+* Defaulted gl_clear to 1 as it seems faster on some hardware (i.e. mine!)
+* Added server-side anti wallhack.  Don't know why you'd use this engine as a server, but it's there anyway...
+* Fixed bug where an entity initially spawned on a frame other than 0 might have an invalid frame if it changes model (happens in some mods, not in ID1).
+* Fixed infinite loop on server takedown in Warpspasm (still there on demo switching).
+
+
+Release 1.2 updates.
+====================
+
+* Incorporated changes from 1.1 Emergency Releases.
+* Fixed bug where a spawned backpack could sometimes inherit the angles of the dead player/monster.
+* Added positional interpolation (r_lerporient, default 1).
+* Added frame interpolation (r_lerpframe, default 1).
+* Ported menu framework code.
+* Moved Options menu to framework.
+* Moved Main menu to framework.
+* Changed clear colour to black now that I no longer need to check for clearing.
+* Moved Single Player menu to framework.
+* Fixed centerprints so that positioning is consistent.
+* Fixed SCR_CenterPrint empty string bug.
+* Moved Help menu to framework.
+* Changed help menu so that it starts at page 1 if playing the registered version.
+* Reworked Quit menu as a SCR_ModalMessage.
+* Added last line of console output at bottom of screen for when menus are active (user feedback).
+* Fixed occasional bug where Windows keeps a file open lock on config.cfg even after it's been closed.
+* Fixed chase camera so it can never go inside (or through) a solid leaf.
+* Adjusted number of save games to infinite; removed name restrictions.
+* Moved save/load menus to framework.
+* Fixed all remaining chasecam clipping/noclipping problems.
+* Changed default m_boost value to 1.
+* Changed appearance of SCR_ModalMessage messages slightly (added "Confirm" header and "[Y/N]" prompt).
+* Fixed occasional DirectInput lockups/stalls.
+* Removed "no multi-threaded" restrictions from Direct3D startup.
+* Changed alias model bounding box cull and chasecam clip tests to per-frame bounding boxes.
+* Removed old sky warp and r_oldsky cvar.
+* Added Q2/etc style noclipping (was this in 1.1?)
+* Changed speed and direction of new sky warp to more accurately mimic old sky warp.
+* Removed surface subdivision from sky.
+* Removed brush model specific stuff from model_t struct.
+* Added struct header pointers for each model type to model_t struct.
+* Massive cleanup, restructuring and explanations in submodel setup.
+* Added fading of chase model when chasecam gets near it owing to geometry clipping.
+* Added translucent viewmodel when one has the ring.
+* Added translucent chase model when viewed from nearby.
+* Switched mipmap chain generation to manual as automatic doesn't work too well on some cards.
+* Restored HARDWARE_VERTEX_PROCESSING (need to test for lockups on NVIDIA).
+* Changed default scr_conspeed to 3000 and scr_printspeed to 20 (from 300 and 8).
+* Restored lightmap texture rectchange system (easier in D3D as top is 0 and it uses r and b, not w and h).
+* Left lightmap textures locked for the entire map (to save locking/unlocking per frame).
+* Removed glpoly_t from gl_model.h to gl_warp.cpp as that's the only place it's used any more.
+* Gave water and sky their own custom vertex structs.
+* Moved Multiplayer menu to framework.
+* Commenced moving Setup menu to framework.
+* Wrote a *real* textbox for "Hostname" and "Your Name".
+* Removed display of Help page 0 ("Ordering") from the registered version.
+* Fixed bug where the save menu would crash if there were no save games but was otherwise valid.
+* Removed IPX Code.
+* Restored r_wateralpha functionality (mimics stock GLQuake, no fancy changes).
+* Cvar-ized light animation interpolation (r_lerplightstyle, default 1).
+* Restored gl_flashblend 1 mode and made gl_flashbend an archive cvar (retained 0 as new default).
+* Added r_lightupdatefrequency cvar to control how many times per second lightmaps update (default 0 = always).
+* Added CDAudio_Stop to S_StopAllSounds.
+* Added DirectShow code for media playback for when no CD is present.
+* Added render to texture code for water warp updates.
+* Removed surface subdivision from water surfaces.
+* Replaced gl_warp_sin.h with internally generated sin table.
+* Finished render to texture for water surfs (we lose a few frames here but the improvement is worth it).
+* Expanded BSP light data to 3 component.
+* Removed interpolation from muzzleflashes on viewmodels.
+* Moved keybindings menu to framework.
+* Fixed FPS loss with render to texture.
+* Finished Multiplayer Setup Menu.
+* Switched cvars to static storage of name and string (code simplification).
+* Added more generally usable "Draw_TextBox" routine.
+* Fixed bug in Save/Load menu where this->CurrentOption == NULL would crash on an unhandled key.
+* Added sound/cdtracks as an optional music directory (first preference, fallback on music if not present).
+* Allowed spaces or non-alphanumeric characters in save/load names.
+* Added detection of invalid windows filename chars in save/load names.
+* Added con_lineheight cvar to control height of console lines (default 8, same as classic Quake).
+* Added external texture loader (not linked in to internal loader yet).
+* Added mapshot drawing system.
+* Added external BSP texture support: link, dds, tga, bmp, png and jpg formats supported.
+* Adjusted default vid_gamma to 1.0 (consistency between external and native textures).
+* Added scr_screenshotformat cvar (default tga), supports tga, bmp, png, jpg and dds.
+* Finished mapshot writing.
+* Cvar-ized screenshot directory (scr_screenshotdir, default "screenshot") - not as robust as it could be, don't try anything fancy!
+* Cvar-ized external textures directory (gl_texturedir, default "textures") - see comment above.
+* Cvar-ized save directory (host_savedir, default "save") - see comment above.
+* Added hardware gamma control - uses old v_gamma cvar, works with -gamma cmdline (which is still retained).
+* Moved TCP/IP - new game menu to framework.
+* Fixed bug where the game would crash if a menu with no options at all was entered.
+* Moved TCP/IP - join game menu to framework.
+* Fixed bug where the game would crash on a key other than ESC in a menu with no options.
+* Reverted alias models to whole model bbox cull tests (reliability).
+* Moved game options menu to framework.
+* Added deathmatch 0, coop 0 and teamplay 0 to load command.
+* Added Input Options menu.
+* Added Effects Options menu.
+* Added Chase Camera Options menu.
+* Added Content Directories menu.
+* Made cvars self-registering and cmds self-adding.
+* Added initial load of configs (setting cvars only) to get correct values in before anything else comes up.
+* Increased several internal limits to match those of FitzQuake.
+* Tested Marcher Fortress; ensured load and correct appearance.
+* Fixed textbox startup when the length of the initial string was > 16.
+* Fixed bug in textbox where holding down shift to type a capital letter would trigger the "deny" sound.
+* Removed limit on number of static entities.
+* Verified we can at least *load* cavetest2. ;D
+* Removed software gamma calculations (WinQuake legacy).
+* Added independent control of red/green/blue gamma (in addition to master control): r_gamma/g_gamma/b_gamma, defaults 1.
+* Removed scr_copytop, scr_copyeverything, scr_fullupdate, sb_updates, Sbar_Changed (software legacy).
+* Removed limit on number of particles; initial 4096, extra 2048 as required, cleared between maps.
+* Fixed unsigned short to short translations in BSP loading.
+* Fixed bug where a desktop resolution with 800 height would give a mode with 768 height as a valid windowed mode.
+* Fixed bug where the vid_mode cvar was not being set correctly (at all, actually!) on startup.
+* Fixed bug where dlights shine on backfacing surfs.
+* Added smoother transitions between r_viewleafs with dfferent contents types.
+* Moved "Search for Local Games" to framework.
+* Added support for reading vid_mode from the configs and setting the correct mode according to that.
+* Added r_lockpvs cvar for locking PVS to the current viewleaf; map development aid, default 0.
+* Fixed bug where Alt-Tabbing back to a fullscreen mode would leave the screen garbled (viewport code needs a huge cleanup!)
+* Finished porting of menus to framework.
+* Fully removed gl_ztrick; it was *not* a happy bunny.
+* Cleaned up the mess I had made of viewports.
+* Fixed loss of LOD with warp update render to texture (more FPS loss as a result).
+* Restored r_speeds 1 wpoly counter, left broken epoly counter (consistency with previous versions & other engines).
+
+
+DirectQ 1.1 Point Release
+=========================
+
+Advance Warning: This release doesn't contain *any* of the new stuff I've been working on recently.  Instead, this has a few critical bug fixes and restoration of basic GLQuake functionality.  I've felt that the release was necessary as the initial version proved to be quite popular, but also had some right showstoppers in it.
+
+Here's what's been done:
+
+* Renamed to "DirectQ" to avoid confusion over the name.
+* Reverted to Visual C++ 2003 to (hopefully) prevent PF_VarString crash on changelevel.
+* Fixed crash in video menu when more than 27 modes are available.
+* Removed all "ChangeDisplaySettings" calls to fix crash when Alt-Tabbing.
+* Added splash screen so that you know which version you have.
+* Fixed crash on dedicated server startup.
+* Made DirectInput the default, use -nodinput to disable.
+* Rewrote DirectInput code to use C++ style.
+* Rewrote mouse code to use immediate mode rather than buffered mode.
+* Added mousewheel support to DirectInput.
+* Added 8-button mouse support to DirectInput.
+* Added m_look cvar to give mouse looking.
+* Changed m_forward default to 0.
+* Added m_boost cvar to give additional boost to DirectInput without affecting sensitivity value.
+* Renamed K_AUX buttons to K_JOY (it's what they are, after all).
+* Added 4 K_POV buttons to keep POV hats separate from the joystick buttons.
+* Added previous weapon option to keys menu.
+* Removed _windowed_mouse cvar.
+* Added "colour" command (same as "color").
+* Fixed team colours are greyscale.
+* Adjusted all projections to the correct aspect for the selected resolution.
+* Added scalable 2D widget drawing (gl_conscale, 0 to 1).
+* Fixed widescreen FOV.
+* Removed alias models from the caching system.
+* Fixed remaining Alt-Tab crashes.
+* Added "vid_restart" command.
+* Cleaned out a lot of legacy code from draw, surf and vidnt.
+* Fixed window centering so it works properly on widescreen monitors.
+* Cleaned out unused header files.
+* Increased MINIMUM_WIN_MEMORY to 16 MB and MAXIMUM_WIN_MEMORY to 64 MB.
+* Fixed water and sky surfaces on inline brush models not being rendered.
+* Removed original Quake (all versions) crash when health goes below -19.
+* Changed mode enumeration to be more WinQuake-like.
+* Added Z-fail sky sphere warp (r_oldsky 0).
+* Restored gl_clear functionality.
+
+
+DIRECT 3D QUAKE!
+================
+
+What is it?
+-----------
+It's a true native Direct 3D 9.0c port of GLQuake.  It doesn't use the gl_fakegl wrapper, or any other wrapper, but is rather a complete rewrite of GLQuake's renderer to use proper Direct 3D.
+
+
+Why is it?
+----------
+A number of reasons.  The prevailing wisdom is that Direct 3D is foisted on us by evil alien overlords, so there was an element of perversity, I suppose.  I was also at the stage where I was sufficiently frustrated with OpenGL to make the switch.  I don't really like the direction OpenGL seems to be going in at the present moment, it reminds me a lot of the dying throes of 3DFX moreso than anything else, so that was another factor.
+
+Another consideration was the engines already out there.  There are - it seems to me - 3 main contenders.  ProQuake for the ultra-trads, QRack for eye candy, and DarkPlaces for everything *including* the kitchen sink (with extra kitchen sink).  However, there is a gap in the market, and that's for the people with Intel and ATI cards who often struggle to get OpenGL based engines working correctly.
+
+I'm not arrogantly thinking I'm going to fill that gap, this engine is purely for my own personal amusement first and foremost, but if it helps anyone else get enjoyment out of a 12 year old game it's a good thing too.
+
+
+What version of Direct 3D is needed?
+------------------------------------
+It should run on any Direct 3D 9.0c card, but it practice there are a few it probably won't run on.  I coded using the March 2008 SDK, so if you get an error saying that a required DLL is missing, you'll need to update your installed version of DirectX.
+
+
+What else is needed?
+--------------------
+If you can run GLQuake you can probably also run this.  Direct3D has a few features, like texture locking and vertex buffers, that allow this engine to more memory-efficient than GLQuake was, so even if you can't run GLQuake you might still be able to run this.
+
+
+How fast is it?
+---------------
+About the same speed as GLQuake.  I don't currently have a stock GLQuake to compare with, but on an Intel 915 mobile chipset I'm getting over 120 FPS in timedemo demo1, with a debug build.
+
+
+What's new in it?
+-----------------
+Not much really.  The initial goal was to just get a straight port of stock GLQuake functionality working, and this is it.  I have removed a few things, like mirrors and gl_flashblend 1 mode.  There's no interpolation and I haven't renamed or removed any of the gl_* cvars, so as not to mess with people's configs.  Maybe some small bugfixes, but overall nothing much beyond what was in stock GLQuake.
+
+I did add in 64 bit lightmaps, as they were really easy to do, and allowed me to significantly raise the cap on the maximum light intensity in the game (quadrupled, with better granularity than stock GLQuake, so stair-steps on them are vastly reduced).  I also removed the hard limits on the number of lightmaps, textures and video modes you can have.
+
+Future releases may add extra functionality.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_lightmap 1 uses the grey texture on account of 2 x overbrighting
 extern LPDIRECT3DTEXTURE9 r_greytexture;
 extern cvar_t r_lightmap;
+extern cvar_t r_lightscale;
 
 #define NUMVERTEXNORMALS	162
 
@@ -43,6 +44,9 @@ typedef struct aliasverts_s
 	DWORD color;
 	float s, t;
 	float fl, bl;
+
+	// pad to a multiple of 32 bytes
+	byte pad[20];
 } aliasverts_t;
 
 
@@ -304,8 +308,6 @@ void BuildTris (aliashdr_t *hdr)
 			vertexorder.push_back (k);
 			numorder++;
 
-			// vertexorder[numorder++] = k;
-
 			// emit s/t coords into the commands stream
 			s = stverts[k].s;
 			t = stverts[k].t;
@@ -390,20 +392,20 @@ void GL_MakeAliasModelDisplayLists (model_t *m, aliashdr_t *hdr)
 	BuildTris (hdr);
 
 	// save the data out
-	hdr->poseverts = numorder;
+	hdr->numorder = numorder;
 
-	hdr->commands = (int *) Heap_TagAlloc (TAG_ALIASMODELS, numcommands * 4);
+	hdr->commands = (int *) Heap_TagAlloc (TAG_ALIASMODELS, numcommands * sizeof (int));
 
 	for (i = 0; i < numcommands; i++)
 		hdr->commands[i] = commands[i];
 
-	hdr->posedata = Heap_TagAlloc (TAG_ALIASMODELS, hdr->numposes * hdr->poseverts * sizeof (drawvertx_t));
+	hdr->posedata = Heap_TagAlloc (TAG_ALIASMODELS, hdr->numposes * hdr->numorder * sizeof (drawvertx_t));
 	verts = (drawvertx_t *) hdr->posedata;
 
 	// store out the verts
 	for (i = 0; i < hdr->numposes; i++)
 	{
-		for (j = 0; j < hdr->poseverts; j++, verts++)
+		for (j = 0; j < hdr->numorder; j++, verts++)
 		{
 			// fill in
 			verts->lightnormalindex = ThePoseverts[i][vertexorder[j]].lightnormalindex;
@@ -461,13 +463,13 @@ void DelerpMuzzleFlashes (aliashdr_t *hdr)
 	drawvertx_t *vertsf1 = (drawvertx_t *) hdr->posedata;
 
 	// set these pointers to the 0th and 1st frames
-	vertsf0 += hdr->frames[0].firstpose * hdr->poseverts;
-	vertsf1 += hdr->frames[1].firstpose * hdr->poseverts;
+	vertsf0 += hdr->frames[0].firstpose * hdr->numorder;
+	vertsf1 += hdr->frames[1].firstpose * hdr->numorder;
 
 	// now go through them and compare.  we expect that (a) the animation is sensible and there's no major
 	// difference between the 2 frames to be expected, and (b) any verts that do exhibit a major difference
 	// can be assumed to belong to the muzzleflash
-	for (int j = 0; j < hdr->poseverts; j++)
+	for (int j = 0; j < hdr->numorder; j++)
 	{
 		// get difference in front to back movement
 		float vdiff = Mesh_ScaleVert (hdr, vertsf1, 0) - Mesh_ScaleVert (hdr, vertsf0, 0);
@@ -491,10 +493,10 @@ void DelerpMuzzleFlashes (aliashdr_t *hdr)
 		drawvertx_t *vertsfi = (drawvertx_t *) hdr->posedata;
 
 		// set these pointers to the 0th and i'th frames
-		vertsf0 += hdr->frames[0].firstpose * hdr->poseverts;
-		vertsfi += hdr->frames[i].firstpose * hdr->poseverts;
+		vertsf0 += hdr->frames[0].firstpose * hdr->numorder;
+		vertsfi += hdr->frames[i].firstpose * hdr->numorder;
 
-		for (int j = 0; j < hdr->poseverts; j++)
+		for (int j = 0; j < hdr->numorder; j++)
 		{
 			// just copy it across
 			vertsfi->lerpvert = vertsf0->lerpvert;
@@ -540,8 +542,8 @@ void D3D_DrawAliasFrame (aliashdr_t *hdr, int pose1, int pose2, float backlerp, 
 	lastposenum = pose1;
 
 	verts1 = verts2 =(drawvertx_t *) hdr->posedata;
-	verts1 += pose1 * hdr->poseverts;
-	verts2 += pose2 * hdr->poseverts;
+	verts1 += pose1 * hdr->numorder;
+	verts2 += pose2 * hdr->numorder;
 
 	order = hdr->commands;
 
@@ -604,15 +606,15 @@ void D3D_DrawAliasFrame (aliashdr_t *hdr, int pose1, int pose2, float backlerp, 
 			// set light color
 			aliasverts[numverts].color = D3DCOLOR_ARGB
 			(
-				D3D_TransformColourSpaceByte (BYTE_CLAMP (alphaval)),
-				D3D_TransformColourSpaceByte (BYTE_CLAMP (l * shadelight[0])),
-				D3D_TransformColourSpaceByte (BYTE_CLAMP (l * shadelight[1])),
-				D3D_TransformColourSpaceByte (BYTE_CLAMP (l * shadelight[2]))
+				BYTE_CLAMP (alphaval),
+				BYTE_CLAMP (l * shadelight[0]),
+				BYTE_CLAMP (l * shadelight[1]),
+				BYTE_CLAMP (l * shadelight[2])
 			);
 
 			// fill in vertexes
-			// fill in vertexes
 			// note - we'll end up storing most of this in a vertex buffer and just passing user data to the shader!
+			// amendment - alias models are NOT a bottleneck; the most this would gain is a frame or two, so we won't bother
 			aliasverts[numverts].x = verts1->v[0];
 			aliasverts[numverts].y = verts1->v[1];
 			aliasverts[numverts].z = verts1->v[2];
@@ -642,6 +644,15 @@ void D3D_DrawAliasFrame (aliashdr_t *hdr, int pose1, int pose2, float backlerp, 
 			numverts++;
 			order += 2;
 		} while (--count);
+
+		// uncomment this block to test out softwarelike replacement of fans/strips with points
+		// needs a distance calc, and potentially moving the point to the middle of each generated
+		// triangle.  doesn't really give much perf increase.
+		/*
+		PrimitiveType = D3DPT_POINTLIST;
+		numverts += 2;
+		D3D_SetRenderStatef (D3DRS_POINTSIZE, 2.0f);
+		*/
 
 		d3d_AliasFX.Draw (PrimitiveType, numverts - 2, aliasverts, sizeof (aliasverts_t));
 	}
@@ -804,10 +815,10 @@ void R_DrawAliasModel (entity_t *e)
 
 	if (currententity->alphaval < 255)
 	{
-		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-		d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 	}
 
 	// alias models should be affected by r_lightmap 1 too...
@@ -820,20 +831,33 @@ void R_DrawAliasModel (entity_t *e)
 		// if the texture is switched for a player model we still use the baseline fullbright map
 		d3d_AliasFX.SetTexture (1, (LPDIRECT3DTEXTURE9) hdr->fullbright[currententity->skinnum][anim]);
 
+		if (!r_hlsl.integer)
+		{
+			// add 0 to the colour arg for the vertex then modulate the result by 1
+			D3D_SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_ADD);
+			D3D_SetTextureStageState (1, D3DTSS_COLOROP, D3DTOP_MODULATE);
+		}
+
 		// luma pass
 		d3d_AliasFX.SwitchToPass (1);
 	}
-	else d3d_AliasFX.SwitchToPass (0);
+	else
+	{
+		if (!r_hlsl.integer)
+			D3D_SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+
+		d3d_AliasFX.SwitchToPass (0);
+	}
 
 	D3D_SetupAliasFrame (currententity, hdr);
 
-	if (currententity->alphaval < 255) d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-}
+	if (currententity->alphaval < 255) D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 
-
-DWORD Float2DWORD (float f)
-{
-	return *((DWORD *) &f);
+	if (!r_hlsl.integer)
+	{
+		D3D_SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+		D3D_SetTextureStageState (1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+	}
 }
 
 
@@ -860,12 +884,14 @@ void D3D_DrawAliasModels (void)
 	d3d_Device->SetVertexDeclaration (d3d_AliasVertexDeclaration);
 
 	d3d_AliasFX.BeginRender ();
-	d3d_AliasFX.SetScale (r_sRGBgamma.integer ? 2.0f : 1.0f);
+	d3d_AliasFX.SetScale (r_lightscale.value);
 	d3d_AliasFX.SwitchToPass (0);
 
-	if (gl_smoothmodels.value) d3d_Device->SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
+	if (gl_smoothmodels.value) D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
 
 	extern bool chase_nodraw;
+
+	int CullEnts = 0;
 
 	for (int i = 0; i < cl_numvisedicts; i++)
 	{
@@ -883,8 +909,22 @@ void D3D_DrawAliasModels (void)
 			currententity->angles[0] *= 0.3;
 		}
 
+		/*
+		// additional entity culling - doesn't achieve much at all...
+		// (despite culling up to 14 ents per frame even with this crude test)
+		mleaf_t *leaf = Mod_PointInLeaf (currententity->origin, cl.worldmodel);
+
+		if (leaf->visframe != r_visframecount)
+		{
+			CullEnts++;
+			continue;
+		}
+		*/
+
 		R_DrawAliasModel (currententity);
 	}
+
+	// if (CullEnts) Con_Printf ("Culled %i entities\n", CullEnts);
 
 	// add in the viewmodel here while we have the state up
 	if (renderview)
@@ -901,7 +941,7 @@ void D3D_DrawAliasModels (void)
 		// hack the depth range to prevent view model from poking into walls
 		// of course, we all know Direct3D doesn't support polygon offset... or at least those of us who read
 		// something written in 1995 and think that's the way things are gonna be forever more know it...
-		d3d_Device->SetRenderState (D3DRS_DEPTHBIAS, Float2DWORD (-0.3));
+		D3D_SetRenderStatef (D3DRS_DEPTHBIAS, -0.3f);
 
 		// only adjust if fov goes down (so that viewmodel will properly disappear in zoom mode)
 		if (FovYRadians > 1.1989051)
@@ -910,7 +950,6 @@ void D3D_DrawAliasModels (void)
 			// need to adjust the actual d3d_PerspectiveMatrix as this is what's used in the vertex shader input
 			D3DXMatrixIdentity (&d3d_PerspectiveMatrix);
 			D3DXMatrixPerspectiveFovRH (&d3d_PerspectiveMatrix, 1.1989051, (float) r_refdef.vrect.width / (float) r_refdef.vrect.height, 4, 4096);
-			d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_PerspectiveMatrix);
 		}
 
 		// check for ring
@@ -928,21 +967,14 @@ void D3D_DrawAliasModels (void)
 		R_DrawAliasModel (currententity);
 
 		// unhack the depth range
-		d3d_Device->SetRenderState (D3DRS_DEPTHBIAS, 0);
-
-		if (FovYRadians > 1.1989051)
-		{
-			// restore the projection matrix (only necessary if it was changed above)
-			d3d_PerspectiveMatrix = d3d_RestoreProjection;
-			d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_PerspectiveMatrix);
-		}
+		D3D_SetRenderStatef (D3DRS_DEPTHBIAS, 0.0f);
 	}
 
 	// take down
 	d3d_AliasFX.EndRender ();
 
 	// flat shading
-	d3d_Device->SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
+	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
 }
 
 
