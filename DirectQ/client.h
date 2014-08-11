@@ -293,6 +293,7 @@ extern	dlight_t		*cl_dlights;
 // cl_main
 dlight_t *CL_AllocDlight (int key);
 void	CL_DecayLights (void);
+void CL_PrepEntitiesForRendering (void);
 
 void CL_Init (void);
 

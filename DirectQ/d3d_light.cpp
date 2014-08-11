@@ -18,9 +18,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // r_light.c
 
+// all lighting is kept at RGB throughout the pipeline (for simplicity) - even though we're using a BGR texture format - and
+// is then swapped back to BGR during the final texture read in the shader.
+
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+
+cvar_t r_overbright ("r_overbright", 1.0f, CVAR_ARCHIVE);
+cvar_t r_hdrlight ("r_hdrlight", 1.0f, CVAR_ARCHIVE);
+cvar_alias_t gl_overbright ("gl_overbright", &r_overbright);
+cvar_t gl_overbright_models ("gl_overbright_models", 1.0f, CVAR_ARCHIVE);
 
 #define LIGHTMAP_WIDTH		512
 #define LIGHTMAP_HEIGHT		512
@@ -28,47 +36,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 int LightmapWidth = -1;
 int LightmapHeight = -1;
 
-typedef struct q_d3dlockedrect_s
-{
-	INT Pitch;
-	byte *Data;
-} q_d3dlockedrect_t;
-
-
 typedef struct d3d_lightmap_s
 {
-	LPDIRECT3DTEXTURE9 Texture;
-	RECT DirtyRect;
-	// byte *Data;
-	q_d3dlockedrect_t LockedRect;
-	unsigned short *Allocated;
+	LPDIRECT3DTEXTURE9 SysTexture;
+	LPDIRECT3DTEXTURE9 DefTexture;
+	bool Modified;
 } d3d_lightmap_t;
 
 d3d_lightmap_t d3d_Lightmaps[MAX_LIGHTMAPS];
 int d3d_LightHunkMark = 0;
-byte lm_gammatable[256];
 
-void D3DLight_BuildGammaTable (cvar_t *var)
-{
-	float gammaval = var->value;
-
-	if (gammaval < 0.25f) gammaval = 0.25f;
-	if (gammaval > 1.75f) gammaval = 1.75f;
-
-	for (int i = 0; i < 256; i++)
-	{
-		// the same gamma calc as GLQuake had some "gamma creep" where DirectQ would gradually get brighter
-		// the more it was run; this hopefully fixes it once and for all
-		float f = pow ((float) i / 255.0f, gammaval);
-		float inf = f * 255 + 0.5;
-
-		// return what we got
-		lm_gammatable[i] = BYTE_CLAMP ((int) inf);
-	}
-}
-
-
-cvar_t lm_gamma ("lm_gamma", "1", CVAR_ARCHIVE, D3DLight_BuildGammaTable);
+unsigned short *d3d_LMAllocated[MAX_LIGHTMAPS];
 
 /*
 ========================================================================================================================
@@ -137,9 +115,8 @@ void D3DLight_EndCoronas (void)
 {
 	if (num_coronadlights)
 	{
-		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_ONE);
-
+		// switch the blendfunc for coronas
+		D3DState_SetAlphaBlend (TRUE, D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_ONE);
 		D3DPart_BeginCoronas ();
 
 		for (int i = 0; i < num_coronadlights; i++)
@@ -154,8 +131,7 @@ void D3DLight_EndCoronas (void)
 		D3DPart_CommitCoronas ();
 
 		// revert the blend mode change
-		D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+		D3DState_SetAlphaBlend (TRUE);
 
 		num_coronadlights = 0;
 	}
@@ -180,7 +156,7 @@ void D3DLight_AddLightBlend (float r, float g, float b, float a2)
 
 	a2 = a2 / a;
 
-	blend[0] = blend[1] * (1 - a2) + r * a2;
+	blend[0] = blend[0] * (1 - a2) + r * a2;
 	blend[1] = blend[1] * (1 - a2) + g * a2;
 	blend[2] = blend[2] * (1 - a2) + b * a2;
 
@@ -276,21 +252,15 @@ DYNAMIC LIGHTS
 */
 
 cvar_t r_lerplightstyle ("r_lerplightstyle", "0", CVAR_ARCHIVE);
-cvar_t r_coloredlight ("r_coloredlight", "1");
-cvar_t r_overbright ("r_overbright", "1", CVAR_ARCHIVE);
+cvar_t r_coloredlight ("r_coloredlight", "1", CVAR_ARCHIVE);
 cvar_t r_ambient ("r_ambient", "0");
-
-cvar_alias_t gl_overbright ("gl_overbright", &r_overbright);
-
-// size increased for new max extents
-unsigned int *d3d_BlockLights;
 
 // used by dlights, should move to mathlib
 #pragma warning (disable:4035)
 __declspec (naked) long Q_ftol (float f)
 {
 	static int tmp;
-	__asm fld dword ptr [esp+4]
+	__asm fld dword ptr [esp + 4]
 	__asm fistp tmp
 	__asm mov eax, tmp
 	__asm ret
@@ -332,7 +302,6 @@ bool D3D_AddDynamicLights (msurface_t *surf)
 	vec3_t		impact, local;
 	int			s, t;
 	float		ftacc, fsacc;
-	int			i;
 	mtexinfo_t	*tex = surf->texinfo;
 	bool updated = false;
 
@@ -371,13 +340,14 @@ bool D3D_AddDynamicLights (msurface_t *surf)
 			(float) cl_dlights[lnum].rgb[2] * r_dynamic.value
 		};
 
-		unsigned *bl = d3d_BlockLights;
+		unsigned *blocklights = (unsigned *) scratchbuf;
+		int ladd = 0;
 
 		for (t = 0, ftacc = 0; t < surf->tmax; t++, ftacc += 16)
 		{
-			if ((td = local[1] - ftacc) < 0) td = -td;
+			if ((td = (int) (local[1] - ftacc)) < 0) td = -td;
 
-			for (s = 0, fsacc = 0; s < surf->smax; s++, fsacc += 16, bl += 3)
+			for (s = 0, fsacc = 0; s < surf->smax; s++, fsacc += 16, blocklights += 3)
 			{
 				if ((sd = Q_ftol (local[0] - fsacc)) < 0) sd = -sd;
 
@@ -385,12 +355,13 @@ bool D3D_AddDynamicLights (msurface_t *surf)
 					dist = sd + (td >> 1);
 				else dist = td + (sd >> 1);
 
-				if (dist < minlight)
+				ladd = (minlight - dist);
+
+				if (ladd > 0)
 				{
-					// swap to BGR
-					bl[0] += (minlight - dist) * dlrgb[2];
-					bl[1] += (minlight - dist) * dlrgb[1];
-					bl[2] += (minlight - dist) * dlrgb[0];
+					blocklights[0] += ladd * dlrgb[0];
+					blocklights[1] += ladd * dlrgb[1];
+					blocklights[2] += ladd * dlrgb[2];
 
 					// the lightmap is updated now
 					updated = true;
@@ -412,22 +383,8 @@ int light_valuetable[256];
 
 void R_SetDefaultLightStyles (void)
 {
-	// correct lightscaling so that 'm' is 256, not 264
 	for (int i = 0; i < 256; i++)
-	{
-		// make it explicit that yeah, it's a *signed* char we want to use here
-		// so that values > 127 will behave as expected
-		float fv = (float) ((signed char) i - 'a') * 22;
-
-		fv *= 256.0f;
-		fv /= 264.0f;
-
-		// in general a mod should never provide values for these that are outside of the 'a'..'z' range,
-		// but the argument could be made that ID Quake/QC does/did nothing to prevent it, so it's legal
-		if (fv < 0)
-			light_valuetable[i] = (int) (fv - 0.5f);
-		else light_valuetable[i] = (int) (fv + 0.5f);
-	}
+		light_valuetable[i] = ((((signed char) i - 'a') * 22) << 8) / 264;
 
 	// normal light value - making this consistent with a value of 'm' in R_AnimateLight
 	// will prevent the upload of lightmaps when a surface is first seen
@@ -441,7 +398,7 @@ void R_AnimateLight (float time)
 	if (r_lerplightstyle.value)
 	{
 		// interpolated light animations
-		int			j, k;
+		int			j;
 		float		l;
 		int			flight;
 		int			clight;
@@ -450,6 +407,7 @@ void R_AnimateLight (float time)
 
 		// light animations
 		// 'm' is normal light, 'a' is no light, 'z' is double bright
+		// to do - coarsen this lerp so that we don't overdo the updates
 		flight = (int) floor (time * 10.0f);
 		clight = (int) ceil (time * 10.0f);
 		lerpfrac = (time * 10.0f) - flight;
@@ -503,9 +461,6 @@ void R_AnimateLight (float time)
 
 void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b)
 {
-	// leave dlight with white value it had at allocation
-	if (!r_coloredlight.value) return;
-
 	dl->rgb[0] = r;
 	dl->rgb[1] = g;
 	dl->rgb[2] = b;
@@ -517,10 +472,24 @@ void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned 
 R_MarkLights
 =============
 */
+void R_MakeDLightVector (msurface_t *surf, float *lvec, int ndx, float *impact)
+{
+	float l = DotProduct (impact, surf->texinfo->vecs[ndx]) + surf->texinfo->vecs[ndx][3] - surf->texturemins[ndx];
+
+	lvec[ndx] = l + 0.5;
+	
+	if (lvec[ndx] < 0)
+		lvec[ndx] = 0;
+	else if (lvec[ndx] > surf->extents[ndx])
+		lvec[ndx] = surf->extents[ndx];
+
+	lvec[ndx] = l - lvec[ndx];
+}
+
+
 void R_MarkLights (dlight_t *light, int num, mnode_t *node)
 {
 	float dist;
-	float l, s, t;
 
 	// hey!  no goto!!!
 	while (1)
@@ -561,16 +530,15 @@ void R_MarkLights (dlight_t *light, int num, mnode_t *node)
 			light->origin[2] - surf->plane->normal[2] * dist
 		};
 
+		float lvec[3];
+
 		// clamp center of light to corner and check brightness
-		l = DotProduct (impact, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3] - surf->texturemins[0];
-		s = l + 0.5; if (s < 0) s = 0; else if (s > surf->extents[0]) s = surf->extents[0];
-		s = l - s;
+		R_MakeDLightVector (surf, lvec, 0, impact);
+		R_MakeDLightVector (surf, lvec, 1, impact);
 
-		l = DotProduct (impact, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3] - surf->texturemins[1];
-		t = l + 0.5; if (t < 0) t = 0; else if (t > surf->extents[1]) t = surf->extents[1];
-		t = l - t;
+		lvec[2] = dist;
 
-		if ((s * s + t * t + dist * dist) < maxdist)
+		if (DotProduct (lvec, lvec) < maxdist)
 		{
 			if (surf->dlightframe != d3d_RenderDef.framecount)
 			{
@@ -623,6 +591,72 @@ LIGHT SAMPLING
 msurface_t		*lightsurf;
 mplane_t		*lightplane;
 vec3_t			lightspot;
+
+void D3DLight_FromSurface (msurface_t *surf, float *color, int ds, int dt)
+{
+	if (!surf->samples[0]) return;
+
+	// LordHavoc: enhanced to interpolate lighting
+	byte *lightmap;
+	int maps,
+		dsfrac = ds & 15,
+		dtfrac = dt & 15,
+		r00 = 0, g00 = 0, b00 = 0,
+		r01 = 0, g01 = 0, b01 = 0,
+		r10 = 0, g10 = 0, b10 = 0,
+		r11 = 0, g11 = 0, b11 = 0;
+	float scale;
+	int line3 = ((surf->extents[0] >> 4) + 1) * 3;
+
+	// LordHavoc: *3 for color
+	lightmap = surf->samples[0] + ((dt >> 4) * ((surf->extents[0] >> 4) + 1) + (ds >> 4)) * 3;
+
+	for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+	{
+		// keep this consistent with BSP lighting
+		scale = (float) d_lightstylevalue[surf->styles[maps]];
+
+		r00 += (float) lightmap[0] * scale;
+		g00 += (float) lightmap[1] * scale;
+		b00 += (float) lightmap[2] * scale;
+
+		r01 += (float) lightmap[3] * scale;
+		g01 += (float) lightmap[4] * scale;
+		b01 += (float) lightmap[5] * scale;
+
+		r10 += (float) lightmap[line3 + 0] * scale;
+		g10 += (float) lightmap[line3 + 1] * scale;
+		b10 += (float) lightmap[line3 + 2] * scale;
+
+		r11 += (float) lightmap[line3 + 3] * scale;
+		g11 += (float) lightmap[line3 + 4] * scale;
+		b11 += (float) lightmap[line3 + 5] * scale;
+
+		// LordHavoc: *3 for colored lighting
+		lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3;
+	}
+
+	// somebody's just taking the piss here...
+	color[0] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
+	color[1] += (float) ((int) ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)));
+	color[2] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
+}
+
+
+void D3DLight_StaticEnt (entity_t *e, msurface_t *surf, float *color)
+{
+	int ds = (int) ((float) DotProduct (e->lightspot, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+	int dt = (int) ((float) DotProduct (e->lightspot, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+
+	ds -= surf->texturemins[0];
+	dt -= surf->texturemins[1];
+
+	lightsurf = e->lightsurf;
+	VectorCopy2 (lightspot, e->lightspot);
+
+	D3DLight_FromSurface (surf, color, ds, dt);
+}
+
 
 bool R_RecursiveLightPoint (vec3_t color, mnode_t *node, vec3_t start, vec3_t end)
 {
@@ -690,54 +724,7 @@ loc0:;
 			// out of range
 			if (ds > surf->extents[0] || dt > surf->extents[1]) continue;
 
-			if (surf->samples)
-			{
-				// LordHavoc: enhanced to interpolate lighting
-				byte *lightmap;
-				int maps,
-					dsfrac = ds & 15,
-					dtfrac = dt & 15,
-					r00 = 0, g00 = 0, b00 = 0,
-					r01 = 0, g01 = 0, b01 = 0,
-					r10 = 0, g10 = 0, b10 = 0,
-					r11 = 0, g11 = 0, b11 = 0;
-				float scale;
-				int line3 = ((surf->extents[0] >> 4) + 1) * 3;
-
-				// LordHavoc: *3 for color
-				lightmap = surf->samples + ((dt >> 4) * ((surf->extents[0] >> 4) + 1) + (ds >> 4)) * 3;
-
-				for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
-				{
-					// keep this consistent with BSP lighting
-					scale = (float) d_lightstylevalue[surf->styles[maps]];
-
-					r00 += (float) lightmap[0] * scale;
-					g00 += (float) lightmap[1] * scale;
-					b00 += (float) lightmap[2] * scale;
-
-					r01 += (float) lightmap[3] * scale;
-					g01 += (float) lightmap[4] * scale;
-					b01 += (float) lightmap[5] * scale;
-
-					r10 += (float) lightmap[line3 + 0] * scale;
-					g10 += (float) lightmap[line3 + 1] * scale;
-					b10 += (float) lightmap[line3 + 2] * scale;
-
-					r11 += (float) lightmap[line3 + 3] * scale;
-					g11 += (float) lightmap[line3 + 4] * scale;
-					b11 += (float) lightmap[line3 + 5] * scale;
-
-					// LordHavoc: *3 for colored lighting
-					lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3;
-				}
-
-				// somebody's just taking the piss here...
-				// (lightmap is BGR so swap back to RGB)
-				color[2] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
-				color[1] += (float) ((int) ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)));
-				color[0] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
-			}
+			D3DLight_FromSurface (surf, color, ds, dt);
 
 			// store out the surf that was hit
 			lightsurf = surf;
@@ -765,68 +752,6 @@ void R_MinimumLight (float *c, float factor)
 }
 
 
-void D3DLight_StaticEnt (entity_t *e, msurface_t *surf, float *color)
-{
-	int ds = (int) ((float) DotProduct (e->lightspot, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
-	int dt = (int) ((float) DotProduct (e->lightspot, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
-
-	ds -= surf->texturemins[0];
-	dt -= surf->texturemins[1];
-
-	lightsurf = e->lightsurf;
-	VectorCopy2 (lightspot, e->lightspot);
-
-	if (surf->samples)
-	{
-		// LordHavoc: enhanced to interpolate lighting
-		byte *lightmap;
-		int maps,
-			dsfrac = ds & 15,
-			dtfrac = dt & 15,
-			r00 = 0, g00 = 0, b00 = 0,
-			r01 = 0, g01 = 0, b01 = 0,
-			r10 = 0, g10 = 0, b10 = 0,
-			r11 = 0, g11 = 0, b11 = 0;
-		float scale;
-		int line3 = ((surf->extents[0] >> 4) + 1) * 3;
-
-		// LordHavoc: *3 for color
-		lightmap = surf->samples + ((dt >> 4) * ((surf->extents[0] >> 4) + 1) + (ds >> 4)) * 3;
-
-		for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
-		{
-			// keep this consistent with BSP lighting
-			scale = (float) d_lightstylevalue[surf->styles[maps]];
-
-			r00 += (float) lightmap[0] * scale;
-			g00 += (float) lightmap[1] * scale;
-			b00 += (float) lightmap[2] * scale;
-
-			r01 += (float) lightmap[3] * scale;
-			g01 += (float) lightmap[4] * scale;
-			b01 += (float) lightmap[5] * scale;
-
-			r10 += (float) lightmap[line3 + 0] * scale;
-			g10 += (float) lightmap[line3 + 1] * scale;
-			b10 += (float) lightmap[line3 + 2] * scale;
-
-			r11 += (float) lightmap[line3 + 3] * scale;
-			g11 += (float) lightmap[line3 + 4] * scale;
-			b11 += (float) lightmap[line3 + 5] * scale;
-
-			// LordHavoc: *3 for colored lighting
-			lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3;
-		}
-
-		// somebody's just taking the piss here...
-		// (lightmap is BGR so swap back to RGB)
-		color[2] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
-		color[1] += (float) ((int) ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)));
-		color[0] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
-	}
-}
-
-
 void D3DLight_LightPoint (entity_t *e, float *c)
 {
 	vec3_t dist;
@@ -847,15 +772,21 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 
 	// keep MDL lighting consistent with the world
 	if (r_fullbright.integer || !cl.worldmodel->brushhdr->lightdata)
-		c[0] = c[1] = c[2] = 255 * (256 >> r_overbright.integer);
+		c[0] = c[1] = c[2] = 32767;
 	else
 	{
 		// clear to ambient
 		if (cl.maxclients > 1 || r_ambient.integer < 1)
 			c[0] = c[1] = c[2] = 0;
-		else c[0] = c[1] = c[2] = r_ambient.integer * (256 >> r_overbright.integer);
+		else c[0] = c[1] = c[2] = r_ambient.integer * 128;
 
-		// add dynamic lights first (consistency with the world)
+		// add lighting from lightmaps
+		if (e->isStatic && e->lightsurf)
+			D3DLight_StaticEnt (e, e->lightsurf, c);
+		else if (!e->isStatic)
+			R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
+
+		// add dynamic lights
 		if (r_dynamic.value && (d3d_CoronaState != CORONA_ONLY))
 		{
 			for (int lnum = 0; lnum < MAX_DLIGHTS; lnum++)
@@ -874,44 +805,38 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 
 					if (fdist < fminlight)
 					{
-						c[0] += (fminlight - fdist) * cl_dlights[lnum].rgb[0] * r_dynamic.value;
-						c[1] += (fminlight - fdist) * cl_dlights[lnum].rgb[1] * r_dynamic.value;
-						c[2] += (fminlight - fdist) * cl_dlights[lnum].rgb[2] * r_dynamic.value;
+						c[0] += (fminlight - fdist) * cl_dlights[lnum].rgb[0] * r_dynamic.value * 0.5f;
+						c[1] += (fminlight - fdist) * cl_dlights[lnum].rgb[1] * r_dynamic.value * 0.5f;
+						c[2] += (fminlight - fdist) * cl_dlights[lnum].rgb[2] * r_dynamic.value * 0.5f;
 					}
 				}
 			}
 		}
-
-		// add lighting from lightmaps
-		if (e->isStatic && e->lightsurf)
-			D3DLight_StaticEnt (e, e->lightsurf, c);
-		else if (!e->isStatic)
-			R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
 	}
 
-	// round lighting to the nearest to help prevent stair steps
-	int add = (1 << (kurok ? ((6 + r_overbright.integer)) : ((7 + r_overbright.integer)))) >> 1;
-
-	// keep MDL lighting consistent with the world
-	for (int i = 0; i < 3; i++)
-	{
-		if (kurok)
-		{
-			int rgb = ((int) (c[i] + 0.5f) + add) >> (6 + r_overbright.integer);
-			c[i] = (float) lm_gammatable[BYTE_CLAMP (rgb)];
-		}
-		else
-		{
-			int rgb = ((int) (c[i] + 0.5f) + add) >> (7 + r_overbright.integer);
-			c[i] = (float) lm_gammatable[BYTE_CLAMP (rgb)];
-		}
-	}
+	// scale back to standard range
+	VectorScale (c, (1.0f / 255.0f), c);
 
 	// set minimum light values
-	if (e == &cl.viewent) R_MinimumLight (c, (72 >> r_overbright.integer));
-	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, (24 >> r_overbright.integer));
-	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, (72 >> r_overbright.integer));
-	if (e->model->type == mod_brush) R_MinimumLight (c, (18 >> r_overbright.integer));
+	if (e == &cl.viewent) R_MinimumLight (c, 72);
+	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, 24);
+	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, 72);
+
+	if (!r_overbright.integer)
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			c[i] *= 2.0f;
+			if (c[i] > 255.0f) c[i] = 255.0f;
+			c[i] *= 0.5f;
+		}
+	}
+
+	if (!r_coloredlight.integer)
+	{
+		float white[3] = {0.3f, 0.59f, 0.11f};
+		c[0] = c[1] = c[2] = DotProduct (c, white);
+	}
 }
 
 
@@ -938,190 +863,289 @@ void D3DLight_PrepStaticEntityLighting (entity_t *ent)
 ====================================================================================================================
 */
 
-__inline void D3DLight_ClearToAmbient (unsigned *bl, int size, int amb)
-{
-	int s = size * 3;
-	int n = (s + 7) >> 3;
+int d3d_LightProperty = 0;
 
-	switch (s % 8)
-	{
-	case 0: do {*bl++ = amb;
-	case 7: *bl++ = amb;
-	case 6: *bl++ = amb;
-	case 5: *bl++ = amb;
-	case 4: *bl++ = amb;
-	case 3: *bl++ = amb;
-	case 2: *bl++ = amb;
-	case 1: *bl++ = amb;
-	} while (--n > 0);
-	}
+void D3DLight_BoundPropertyVar (cvar_t *var, int minvar, int maxvar)
+{
+	if (var->integer < minvar) Cvar_Set (var, minvar);
+	if (var->integer > maxvar) Cvar_Set (var, maxvar);
 }
 
 
-#define DUFFLIGHT_NOGAMMA \
-	t = ((*bl++) + add) >> shift; *dest++ = BYTE_CLAMP (t); \
-	t = ((*bl++) + add) >> shift; *dest++ = BYTE_CLAMP (t); \
-	t = ((*bl++) + add) >> shift; *dest++ = BYTE_CLAMP (t); \
-	*dest++ = 255;
+void D3DLight_SetProperty (void)
+{
+	// pack the properties into a single int so that we can more cleanly check and set them
+	D3DLight_BoundPropertyVar (&r_ambient, 0, 255);
+	D3DLight_BoundPropertyVar (&r_fullbright, 0, 1);
+	D3DLight_BoundPropertyVar (&r_coloredlight, 0, 1);
+	D3DLight_BoundPropertyVar (&r_overbright, 0, 1);
+	D3DLight_BoundPropertyVar (&r_hdrlight, 0, 1);
+	D3DLight_BoundPropertyVar (&r_dynamic, 0, 1);
 
-#define DUFFLIGHT_WITHGAMMA \
-	t = ((*bl++) + add) >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
-	t = ((*bl++) + add) >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
-	t = ((*bl++) + add) >> shift; *dest++ = lm_gammatable[BYTE_CLAMP (t)]; \
-	*dest++ = 255;
+	d3d_LightProperty = (r_ambient.integer << 24) |
+		(r_fullbright.integer << 23) |
+		(r_coloredlight.integer << 22) |
+		(r_overbright.integer << 21) |
+		(r_hdrlight.integer << 20) |
+		(r_dynamic.integer << 19);
+
+	// note - bit 0 is a special control bit that we'll never change ourselves to ensure that we can do
+	// surf->LightProperties = ~d3d_LightProperty and have it valid even if the player resets everything else between frames
+	d3d_LightProperty |= 1;
+}
+
 
 void D3DLight_BuildLightmap (msurface_t *surf, int texnum)
 {
-	// cache these at the levels they were created or updated at
-	surf->overbright = r_overbright.integer;
-	surf->fullbright = r_fullbright.integer;
-	surf->ambient = r_ambient.integer;
-	surf->lm_gamma = lm_gamma.value;
+	if (!d3d_Lightmaps[texnum].SysTexture) return;
+	if (!d3d_Lightmaps[texnum].DefTexture) return;
 
-	int size = surf->smax * surf->tmax;
-	byte *lightmap = surf->samples;
-	unsigned *bl = d3d_BlockLights = (unsigned *) scratchbuf;
+	int size = surf->smax * surf->tmax * 3;
+	unsigned *blocklights = (unsigned *) scratchbuf;
 
-	// by default the lightmap is not updated
+	// by default the surf is not updated
 	bool updated = false;
 
-	// set to full bright if no light data (cl.worldmodel hasn't yet been set so we need to track it this way)
-	if (r_fullbright.integer || !surf->model->brushhdr->lightdata)
+	if (surf->LightProperties != d3d_LightProperty)
 	{
-		D3DLight_ClearToAmbient (d3d_BlockLights, size, 255 * (256 >> r_overbright.integer));
+		// any change in light properties must force an update even if nothing else changes
+		surf->LightProperties = d3d_LightProperty;
 		updated = true;
 	}
+
+	// eval base lighting for this surface
+	int baselight = 0;
+
+	if (r_fullbright.integer || !surf->model->brushhdr->lightdata)
+		baselight = 32767;
+	else if (cl.maxclients > 1 || r_ambient.integer < 1)
+		baselight = 0;
+	else baselight = r_ambient.integer << 7;
+
+	if (r_fullbright.integer || !surf->model->brushhdr->lightdata || !surf->numstyles)
+	{
+		// clear to base light
+		for (int i = 0; i < size; i += 3, blocklights += 3)
+		{
+			blocklights[0] = baselight;
+			blocklights[1] = baselight;
+			blocklights[2] = baselight;
+		}
+
+		// must reset this each time it's used so that it will be valid for next time
+		blocklights = (unsigned *) scratchbuf;
+	}
 	else
 	{
-		// clear to ambient
-		if (cl.maxclients > 1 || r_ambient.integer < 1)
-			D3DLight_ClearToAmbient (d3d_BlockLights, size, 0);
-		else D3DLight_ClearToAmbient (d3d_BlockLights, size, r_ambient.integer * (256 >> r_overbright.integer));
+		// init to the first lightstyle (adding baselight as we go)
+		int scale = d_lightstylevalue[surf->styles[0]];
+		byte *lightmap = surf->samples[0];
 
-		// if we had a cached dynamic light we must force an update to clear the light
-		if (surf->cached_dlight) updated = true;
-
-		// add all the dynamic lights first
-		if (surf->dlightframe == d3d_RenderDef.framecount)
+		if (baselight)
 		{
-			// ensure that it actually did get an update
-			if (D3D_AddDynamicLights (surf))
+			for (int i = 0; i < size; i += 3, blocklights += 3, lightmap += 3)
 			{
-				surf->cached_dlight = true;
+				blocklights[0] = lightmap[0] * scale + baselight;
+				blocklights[1] = lightmap[1] * scale + baselight;
+				blocklights[2] = lightmap[2] * scale + baselight;
+			}
+		}
+		else
+		{
+			for (int i = 0; i < size; i += 3, blocklights += 3, lightmap += 3)
+			{
+				blocklights[0] = lightmap[0] * scale;
+				blocklights[1] = lightmap[1] * scale;
+				blocklights[2] = lightmap[2] * scale;
+			}
+		}
+
+		if (surf->cached_light[0] != scale)
+		{
+			surf->cached_light[0] = scale;
+			updated = true;
+		}
+
+		// must reset this each time it's used so that it will be valid for next time
+		blocklights = (unsigned *) scratchbuf;
+
+		// add the rest of the styles (...if any...)
+		for (int maps = 1; maps < surf->numstyles; maps++)
+		{
+			scale = d_lightstylevalue[surf->styles[maps]];
+			lightmap = surf->samples[maps];
+
+			for (int i = 0; i < size; i += 3, blocklights += 3, lightmap += 3)
+			{
+				blocklights[0] += lightmap[0] * scale;
+				blocklights[1] += lightmap[1] * scale;
+				blocklights[2] += lightmap[2] * scale;
+			}
+
+			if (surf->cached_light[maps] != scale)
+			{
+				surf->cached_light[maps] = scale;
 				updated = true;
 			}
-			else surf->cached_dlight = false;
-		}
-		else surf->cached_dlight = false;
 
-		// add all the lightmaps
-		if (lightmap)
-		{
-			// can we not do this better?  like store 4 lightmaps per surf, send the scales as
-			// uniforms and do the update shader-side?  what about dynamics then?  attenuation maps?
-			for (int maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
-			{
-				unsigned int scale = d_lightstylevalue[surf->styles[maps]];
-				int n = ((size * 3) + 7) >> 3;
-
-				bl = d3d_BlockLights;
-
-				switch ((size * 3) % 8)
-				{
-				case 0: do {*bl++ += scale * *lightmap++;
-				case 7: *bl++ += scale * *lightmap++;
-				case 6: *bl++ += scale * *lightmap++;
-				case 5: *bl++ += scale * *lightmap++;
-				case 4: *bl++ += scale * *lightmap++;
-				case 3: *bl++ += scale * *lightmap++;
-				case 2: *bl++ += scale * *lightmap++;
-				case 1: *bl++ += scale * *lightmap++;
-				} while (--n > 0);
-				}
-
-				if (surf->cached_light[maps] != scale)
-				{
-					surf->cached_light[maps] = scale;
-					updated = true;
-				}
-			}
+			// must reset this each time it's used so that it will be valid for next time
+			blocklights = (unsigned *) scratchbuf;
 		}
 	}
 
-	// if the light wasn't updated then don't update the texture
+	if ((!r_fullbright.integer && surf->model->brushhdr->lightdata) && (surf->dlightframe == d3d_RenderDef.framecount))
+	{
+		// add all the dynamic lights (don't add if r_fullbright or no lightdata...)
+		if (D3D_AddDynamicLights (surf))
+		{
+			// dirty the properties to force an update next frame
+			surf->LightProperties = ~d3d_LightProperty;
+			updated = true;
+		}
+	}
+
+	// if the light didn't actually change then don't bother
 	if (!updated) return;
 
-	if (!d3d_Lightmaps[texnum].LockedRect.Data)
+	// track number of changed surfs
+	d3d_RenderDef.numdlight++;
+
+	// standard lighting
+	if (!r_coloredlight.integer)
 	{
-		D3DLOCKED_RECT lockrect;
+		// convert lighting from RGB to greyscale; done as a separate pass as we could have different texture formats now
+		int white[3] = {307, 604, 113};	// using a bigger scale to preserve precision
 
-		hr = d3d_Lightmaps[texnum].Texture->LockRect (0, (D3DLOCKED_RECT *) &d3d_Lightmaps[texnum].LockedRect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
-
-		// if we didn't get a lock we just don't bother updating it
-		if (FAILED (hr))
+		for (int i = 0; i < size; i += 3, blocklights += 3)
 		{
-			d3d_Lightmaps[texnum].LockedRect.Data = NULL;
-			return;
+			int t = (DotProduct (blocklights, white)) >> 10;
+			blocklights[0] = blocklights[1] = blocklights[2] = t;
 		}
+
+		blocklights = (unsigned *) scratchbuf;
 	}
 
-	int t;
-	int shift = (kurok ? 6 : 7) + r_overbright.integer;
-	int stride = (LightmapWidth << 2) - (surf->smax << 2);
-	byte *dest = d3d_Lightmaps[texnum].LockedRect.Data + surf->LightBase;
-	int add = (1 << shift) >> 1; // round lighting to the nearest to help prevent stair steps
+	// now update the texture rect
+	D3DLOCKED_RECT lockrect;
 
-	bl = d3d_BlockLights;
-
-	if (lm_gamma.value == 1)
+	// here we're just updating the system memory copy so we can lock/unlock per surf.
+	// This gives an error with the debug runtimes but it's OK.  (FIXME - can we lock and leave it locked???)
+	if (FAILED (d3d_Lightmaps[texnum].SysTexture->LockRect (0, &lockrect, &surf->LightRect, d3d_GlobalCaps.DefaultLock)))
 	{
-		for (int i = 0; i < surf->tmax; i++, dest += stride)
-		{
-			int n = (surf->smax + 7) >> 3;
+		Con_Printf ("IDirect3DTexture9::LockRect failed for lightmap texture.\n");
+		return;
+	}
 
-			switch (surf->smax % 8)
+	if (r_overbright.integer && r_hdrlight.integer)
+	{
+		unsigned *dest = (unsigned *) lockrect.pBits;
+		int stride = lockrect.Pitch >> 2;
+		int alpha = (kurok ? 128 : 255);
+		int maxl, r, g, b, a;
+
+		for (int i = 0; i < surf->tmax; i++)
+		{
+			for (int j = 0; j < surf->smax; j++, blocklights += 3)
 			{
-			case 0: do {DUFFLIGHT_NOGAMMA;
-			case 7: DUFFLIGHT_NOGAMMA;
-			case 6: DUFFLIGHT_NOGAMMA;
-			case 5: DUFFLIGHT_NOGAMMA;
-			case 4: DUFFLIGHT_NOGAMMA;
-			case 3: DUFFLIGHT_NOGAMMA;
-			case 2: DUFFLIGHT_NOGAMMA;
-			case 1: DUFFLIGHT_NOGAMMA;
-			} while (--n > 0);
+				// fixme - work on blocklights directly here?
+				r = blocklights[0] >> 7;
+				g = blocklights[1] >> 7;
+				b = blocklights[2] >> 7;
+
+				if ((r | g | b) > 255)
+				{
+					maxl = max3 (r, g, b);
+
+					// we can't << 8 because then 256 would overshoot a byte.  hopefully the compiler does a good job on this.
+					r = (r * 255) / maxl;
+					g = (g * 255) / maxl;
+					b = (b * 255) / maxl;
+
+					a = (alpha * 255) / maxl;
+				}
+				else a = alpha;
+
+				dest[j] = r | (g << 8) | (b << 16) | (a << 24);
 			}
+
+			dest += stride;
+		}
+	}
+	else if (r_overbright.integer)
+	{
+		byte *dest = (byte *) lockrect.pBits;
+		int stride = lockrect.Pitch - (surf->smax << 2);
+		int alpha = (kurok ? 64 : 128);
+
+		for (int i = 0, t = 0; i < surf->tmax; i++)
+		{
+			for (int j = 0; j < surf->smax; j++, blocklights += 3, dest += 4)
+			{
+				t = blocklights[0] >> 8; dest[0] = min2 (t, 255);
+				t = blocklights[1] >> 8; dest[1] = min2 (t, 255);
+				t = blocklights[2] >> 8; dest[2] = min2 (t, 255);
+				dest[3] = alpha;
+			}
+
+			dest += stride;
 		}
 	}
 	else
 	{
-		for (int i = 0; i < surf->tmax; i++, dest += stride)
-		{
-			int n = (surf->smax + 7) >> 3;
+		byte *dest = (byte *) lockrect.pBits;
+		int stride = lockrect.Pitch - (surf->smax << 2);
+		int alpha = (kurok ? 128 : 255);
 
-			switch (surf->smax % 8)
+		for (int i = 0, t = 0; i < surf->tmax; i++)
+		{
+			for (int j = 0; j < surf->smax; j++, blocklights += 3, dest += 4)
 			{
-			case 0: do {DUFFLIGHT_WITHGAMMA;
-			case 7: DUFFLIGHT_WITHGAMMA;
-			case 6: DUFFLIGHT_WITHGAMMA;
-			case 5: DUFFLIGHT_WITHGAMMA;
-			case 4: DUFFLIGHT_WITHGAMMA;
-			case 3: DUFFLIGHT_WITHGAMMA;
-			case 2: DUFFLIGHT_WITHGAMMA;
-			case 1: DUFFLIGHT_WITHGAMMA;
-			} while (--n > 0);
+				t = blocklights[0] >> 7; dest[0] = min2 (t, 255);
+				t = blocklights[1] >> 7; dest[1] = min2 (t, 255);
+				t = blocklights[2] >> 7; dest[2] = min2 (t, 255);
+				dest[3] = alpha;
 			}
+
+			dest += stride;
 		}
 	}
 
-	RECT *DirtyRect = &d3d_Lightmaps[texnum].DirtyRect;
-	RECT *LightRect = &surf->LightRect;
+	d3d_Lightmaps[texnum].SysTexture->UnlockRect (0);
+	d3d_Lightmaps[texnum].Modified = true;
+}
 
-	// expand the dirty region to include this surf
-	if (LightRect->left < DirtyRect->left) DirtyRect->left = LightRect->left;
-	if (LightRect->right > DirtyRect->right) DirtyRect->right = LightRect->right;
-	if (LightRect->top < DirtyRect->top) DirtyRect->top = LightRect->top;
-	if (LightRect->bottom > DirtyRect->bottom) DirtyRect->bottom = LightRect->bottom;
+
+void D3DLight_CreateTexture (LPDIRECT3DTEXTURE9 *tex, D3DPOOL pool, DWORD usage)
+{
+	// we need D3DFMT_A8R8G8B8 for the HDR format
+	hr = d3d_Device->CreateTexture
+	(
+		LightmapWidth,
+		LightmapHeight,
+		1,
+		usage,
+		D3DFMT_A8R8G8B8,
+		pool,
+		tex,
+		NULL
+	);
+
+	if (FAILED (hr))
+	{
+		hr = d3d_Device->CreateTexture
+		(
+			LightmapWidth,
+			LightmapHeight,
+			1,
+			0,
+			D3DFMT_A8R8G8B8,
+			pool,
+			tex,
+			NULL
+		);
+
+		if (FAILED (hr)) Sys_Error ("D3DLight_CreateTexture : IDirect3DDevice9::CreateTexture failed");
+	}
 }
 
 
@@ -1138,11 +1162,11 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 	{
 		// it's unsafe to use the scratch buffer for this because it happens during map loading and other loads
 		// may also want to use it for their own stuff; we'll just put it on the hunk instead
-		if (!d3d_Lightmaps[texnum].Allocated)
+		if (!d3d_LMAllocated[texnum])
 		{
 			// MainHunk->Alloc no longer does a memset 0
-			d3d_Lightmaps[texnum].Allocated = (unsigned short *) MainHunk->Alloc (LightmapWidth * sizeof (unsigned short));
-			memset (d3d_Lightmaps[texnum].Allocated, 0, LightmapWidth * sizeof (unsigned short));
+			d3d_LMAllocated[texnum] = (unsigned short *) MainHunk->Alloc (LightmapWidth * sizeof (unsigned short));
+			memset (d3d_LMAllocated[texnum], 0, LightmapWidth * sizeof (unsigned short));
 		}
 
 		int best = LightmapHeight;
@@ -1154,8 +1178,8 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 
 			for (j = 0; j < surf->smax; j++)
 			{
-				if (d3d_Lightmaps[texnum].Allocated[i + j] >= best) break;
-				if (d3d_Lightmaps[texnum].Allocated[i + j] > best2) best2 = d3d_Lightmaps[texnum].Allocated[i + j];
+				if (d3d_LMAllocated[texnum][i + j] >= best) break;
+				if (d3d_LMAllocated[texnum][i + j] > best2) best2 = d3d_LMAllocated[texnum][i + j];
 			}
 
 			if (j == surf->smax)
@@ -1176,59 +1200,25 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 
 		// mark allocated regions in this surf
 		for (int i = 0; i < surf->smax; i++)
-			d3d_Lightmaps[texnum].Allocated[surf->LightRect.left + i] = best + surf->tmax;
+			d3d_LMAllocated[texnum][surf->LightRect.left + i] = best + surf->tmax;
 
 		// reuse any lightmaps which were previously allocated
-		if (!d3d_Lightmaps[texnum].Texture)
-		{
-			hr = d3d_Device->CreateTexture
-			(
-				LightmapWidth,
-				LightmapHeight,
-				1,
-				0,
-				D3DFMT_X8R8G8B8,
-				D3DPOOL_MANAGED,
-				&d3d_Lightmaps[texnum].Texture,
-				NULL
-			);
+		if (!d3d_Lightmaps[texnum].SysTexture) D3DLight_CreateTexture (&d3d_Lightmaps[texnum].SysTexture, D3DPOOL_SYSTEMMEM, 0);
+		if (!d3d_Lightmaps[texnum].DefTexture) D3DLight_CreateTexture (&d3d_Lightmaps[texnum].DefTexture, D3DPOOL_DEFAULT, D3DUSAGE_DYNAMIC);
 
-			// oh shit
-			if (FAILED (hr)) Sys_Error ("D3DLight_CreateSurfaceLightmap : failed to create a texture in D3DPOOL_MANAGED");
-		}
-
-		// we can't create lightmap texcoords until the positioning of the surf within the
-		// lightmap texture is known so it's deferred until here
-		// note: _controlfp is ineffective here
-		for (int i = 0; i < surf->numvertexes; i++)
-		{
-			brushpolyvert_t *vert = &surf->vertexes[i];
-
-			vert->st[1][0] = DotProduct (vert->xyz, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
-			vert->st[1][0] -= surf->texturemins[0];
-			vert->st[1][0] += (int) surf->LightRect.left * 16;
-			vert->st[1][0] += 8;
-			vert->st[1][0] /= (float) (LightmapWidth * 16);
-
-			vert->st[1][1] = DotProduct (vert->xyz, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
-			vert->st[1][1] -= surf->texturemins[1];
-			vert->st[1][1] += (int) surf->LightRect.top * 16;
-			vert->st[1][1] += 8;
-			vert->st[1][1] /= (float) (LightmapHeight * 16);
-		}
+		// setup lightmap pointers
+		for (surf->numstyles = 0; surf->numstyles < MAXLIGHTMAPS && surf->styles[surf->numstyles] != 255; surf->numstyles++)
+			surf->samples[surf->numstyles] = surf->samples[0] + (surf->numstyles * surf->smax * surf->tmax * 3);
 
 		// ensure no dlight update happens and rebuild the lightmap fully
 		surf->dlightframe = -1;
 
 		// initially assign these
 		surf->LightmapTextureNum = texnum;
-		surf->d3d_LightmapTex = d3d_Lightmaps[surf->LightmapTextureNum].Texture;
+		surf->d3d_LightmapTex = d3d_Lightmaps[surf->LightmapTextureNum].DefTexture;
 
-		// offset of the data for this surf in the texture
-		surf->LightBase = (surf->LightRect.top * LightmapWidth + surf->LightRect.left) * 4;
-
-		// (hack) invalidate the cache to force an update
-		surf->cached_dlight = true;
+		// the surf initially has invalid properties set which forces the lightmap to be built here
+		surf->LightProperties = ~d3d_LightProperty;
 
 		// and build the map
 		D3DLight_BuildLightmap (surf, texnum);
@@ -1242,58 +1232,48 @@ void D3DLight_CreateSurfaceLightmap (msurface_t *surf)
 }
 
 
+int D3DLight_SurfaceSortFunc (msurface_t **s1, msurface_t **s2)
+{
+	return (*s2)->texinfo->texture - (*s1)->texinfo->texture;
+}
+
+
 void D3DLight_CreateSurfaceLightmaps (model_t *mod)
 {
+	// these can't go in the scratch buffer because it's used for blocklights
 	brushhdr_t *hdr = mod->brushhdr;
 
-	// fixme - ensure that all surfs with the same texture have the same lightmap too; doing something with the chains
-	// in d3d_surf???
-	for (int i = 0; i < hdr->numtextures; i++)
-	{
-		if (!hdr->textures[i]) continue;
-		hdr->textures[i]->chain = NULL;
-	}
-
-	for (int i = 0; i < hdr->numsurfaces; i++)
-	{
-		hdr->surfaces[i].LightmapTextureNum = -1;
-
-		if (hdr->surfaces[i].flags & SURF_DRAWSKY) continue;
-		if (hdr->surfaces[i].flags & SURF_DRAWTURB) continue;
-
-		hdr->surfaces[i].chain = hdr->surfaces[i].texinfo->texture->chain;
-		hdr->surfaces[i].texinfo->texture->chain = &hdr->surfaces[i];
-	}
-
-	for (int i = 0; i < hdr->numtextures; i++)
-	{
-		if (!hdr->textures[i]) continue;
-
-		for (msurface_t *surf = hdr->textures[i]->chain; surf; surf = surf->chain)
-			D3DLight_CreateSurfaceLightmap (surf);
-
-		hdr->textures[i]->chain = NULL;
-	}
+	msurface_t **lightsurfs = (msurface_t **) MainHunk->Alloc (hdr->numsurfaces * sizeof (msurface_t *));
+	int numlightsurfs = 0;
 
 	for (int i = 0; i < hdr->numsurfaces; i++)
 	{
 		if (hdr->surfaces[i].flags & SURF_DRAWSKY) continue;
 		if (hdr->surfaces[i].flags & SURF_DRAWTURB) continue;
 
-		if (hdr->surfaces[i].LightmapTextureNum == -1)
-			D3DLight_CreateSurfaceLightmap (&hdr->surfaces[i]);
+		lightsurfs[numlightsurfs] = &hdr->surfaces[i];
+		numlightsurfs++;
+	}
+
+	qsort (lightsurfs, numlightsurfs, sizeof (msurface_t *), (sortfunc_t) D3DLight_SurfaceSortFunc);
+
+	for (int i = 0; i < numlightsurfs; i++)
+	{
+		D3DLight_CreateSurfaceLightmap (lightsurfs[i]);
 	}
 }
 
 
+double d3d_LightUpdateTime = 0.0;
+bool d3d_LightUpdate = false;
+
 void D3DLight_BeginBuildingLightmaps (void)
 {
-	// build the default lightmaps gamma table (ensures that we have valid values in lm_gammatable even
-	// if the cvar is not changed - which will be the case on initial map load)
-	D3DLight_BuildGammaTable (&lm_gamma);
-
 	// set up the default styles so that (most) lightmaps won't have to be regenerated the first time they're seen
 	R_SetDefaultLightStyles ();
+
+	// and the default lighting properties for the current selection of cvars
+	D3DLight_SetProperty ();
 
 	// get the initial hunk mark so that we can do the allocation buffers
 	d3d_LightHunkMark = MainHunk->GetLowMark ();
@@ -1311,6 +1291,7 @@ void D3DLight_BeginBuildingLightmaps (void)
 	// eval max allowable extents
 	d3d_GlobalCaps.MaxExtents = d3d_DeviceCaps.MaxTextureWidth;
 
+	// note - some devices have a max height < max width (my ATI does)
 	if (d3d_DeviceCaps.MaxTextureHeight < d3d_GlobalCaps.MaxExtents) d3d_GlobalCaps.MaxExtents = d3d_DeviceCaps.MaxTextureHeight;
 	if (LightmapWidth < d3d_GlobalCaps.MaxExtents) d3d_GlobalCaps.MaxExtents = LightmapWidth;
 	if (LightmapHeight < d3d_GlobalCaps.MaxExtents) d3d_GlobalCaps.MaxExtents = LightmapHeight;
@@ -1320,18 +1301,11 @@ void D3DLight_BeginBuildingLightmaps (void)
 
 	Con_DPrintf ("max extents: %i\n", d3d_GlobalCaps.MaxExtents);
 
-	// unlock all lightmap textures that may be locked
+	// clear down allocation buffers
 	for (int i = 0; i < MAX_LIGHTMAPS; i++)
 	{
-		// ensure that the lightmap is unlocked
-		if (d3d_Lightmaps[i].LockedRect.Data)
-		{
-			d3d_Lightmaps[i].Texture->UnlockRect (0);
-			d3d_Lightmaps[i].LockedRect.Data = NULL;
-		}
-
-		// clear down allocation buffers
-		d3d_Lightmaps[i].Allocated = NULL;
+		d3d_Lightmaps[i].Modified = false;
+		d3d_LMAllocated[i] = NULL;
 	}
 }
 
@@ -1341,29 +1315,20 @@ void D3DLight_EndBuildingLightmaps (void)
 	// preload everything to prevent runtime stalls
 	for (int i = 0; i < MAX_LIGHTMAPS; i++)
 	{
-		// clear down allocation buffers
-		d3d_Lightmaps[i].Allocated = NULL;
-
 		// update any lightmaps which were created and release any left over which were unused
-		if (d3d_Lightmaps[i].LockedRect.Data)
+		if (!d3d_Lightmaps[i].SysTexture) continue;
+
+		if (d3d_Lightmaps[i].Modified)
 		{
-			// dirty the entire texture rectangle
-			d3d_Lightmaps[i].Texture->UnlockRect (0);
-			d3d_Lightmaps[i].Texture->AddDirtyRect (NULL);
-			d3d_Lightmaps[i].Texture->PreLoad ();
-			d3d_Lightmaps[i].LockedRect.Data = NULL;
+			d3d_Device->UpdateTexture (d3d_Lightmaps[i].SysTexture, d3d_Lightmaps[i].DefTexture);
+			d3d_Lightmaps[i].Modified = false;
 		}
 		else
 		{
 			// release any lightmaps which were unused
-			SAFE_RELEASE (d3d_Lightmaps[i].Texture);
+			SAFE_RELEASE (d3d_Lightmaps[i].SysTexture);
+			SAFE_RELEASE (d3d_Lightmaps[i].DefTexture);
 		}
-
-		// clear all dirty rects
-		d3d_Lightmaps[i].DirtyRect.left = LightmapWidth;
-		d3d_Lightmaps[i].DirtyRect.right = 0;
-		d3d_Lightmaps[i].DirtyRect.top = LightmapHeight;
-		d3d_Lightmaps[i].DirtyRect.bottom = 0;
 	}
 
 	MainHunk->FreeToLowMark (d3d_LightHunkMark);
@@ -1377,80 +1342,82 @@ void D3DLight_CheckSurfaceForModification (msurface_t *surf)
 	if (surf->flags & SURF_DRAWTURB) return;
 
 	// ensure that we've got the correct texture for this surf
-	surf->d3d_LightmapTex = d3d_Lightmaps[surf->LightmapTextureNum].Texture;
+	surf->d3d_LightmapTex = d3d_Lightmaps[surf->LightmapTextureNum].DefTexture;
 
-	// hack the cached dynamic light to force an update on a properties change
-	bool oldcache = surf->cached_dlight;
-	surf->cached_dlight = true;
+	if (!d3d_LightUpdate) return;
 
-	// check for overbright or fullbright modification
-	// these always override values of r_dynamic or light cache so that we ensure everything is updated
-	// if they ever change (should some of this be just encoded in d_lightstylevalue so that it will happen automatically???)
-	if (surf->overbright != r_overbright.integer) goto ModifyLightmap;
-	if (surf->fullbright != r_fullbright.integer) goto ModifyLightmap;
-	if (surf->ambient != r_ambient.integer) goto ModifyLightmap;
-	if (surf->lm_gamma != lm_gamma.value) goto ModifyLightmap;
+	// disable dynamic lights on this surf in coronas-only mode (don't set cached to false here as
+	// we want to clear any previous dlights; R_PushDLights will look after not adding more for us)
+	if (d3d_CoronaState == CORONA_ONLY)
+		surf->dlightframe = ~d3d_RenderDef.framecount;
 
-	// now restore the original cached dlight
-	surf->cached_dlight = oldcache;
+	// check for lighting parameter modification
+	if (surf->LightProperties != d3d_LightProperty)
+	{
+		D3DLight_BuildLightmap (surf, surf->LightmapTextureNum);
+		return;
+	}
 
 	// no lightmap modifications
-	if (!r_dynamic.value) return;
+	if (!r_dynamic.integer) return;
 
-	// disable dynamic lights on this surf in coronas-only mode
-	if (d3d_CoronaState == CORONA_ONLY)
+	// dynamic light this frame
+	if (surf->dlightframe == d3d_RenderDef.framecount)
 	{
-		surf->dlightframe = ~d3d_RenderDef.framecount;
-		surf->cached_dlight = false;
+		D3DLight_BuildLightmap (surf, surf->LightmapTextureNum);
+		return;
 	}
 
 	// cached lightstyle change
-	for (int maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+	for (int maps = 0; maps < surf->numstyles; maps++)
 	{
 		if (d_lightstylevalue[surf->styles[maps]] != surf->cached_light[maps])
 		{
 			// Con_Printf ("Modified light from %i to %i\n", surf->cached_light[maps], d_lightstylevalue[surf->styles[maps]]);
-			goto ModifyLightmap;
+			D3DLight_BuildLightmap (surf, surf->LightmapTextureNum);
+			return;
 		}
 	}
-
-	// dynamic this frame || dynamic previous frame
-	if (surf->dlightframe == d3d_RenderDef.framecount || surf->cached_dlight)
-		goto ModifyLightmap;
-
-	// no changes
-	return;
-
-ModifyLightmap:;
-	// rebuild the lightmap
-	D3DLight_BuildLightmap (surf, surf->LightmapTextureNum);
 }
 
+
+// set this to the number of times per second you want lightmaps to update at, or 0 to always update
+// some short-lived dynamic lights may not be visible if you set it too low...
+cvar_t r_lightmapupdaterate ("r_lightmapupdaterate", 0.0f, CVAR_ARCHIVE);
 
 void D3DLight_UpdateLightmaps (void)
 {
 	if (!d3d_Device) return;
 
+	if (r_lightmapupdaterate.value > 0)
+	{
+		if (cl.time >= d3d_LightUpdateTime)
+		{
+			d3d_LightUpdateTime = cl.time + (1.0 / r_lightmapupdaterate.value);
+			d3d_LightUpdate = true;
+		}
+		else d3d_LightUpdate = false;
+	}
+	else d3d_LightUpdate = true;
+
 	for (int i = 0; i < MAX_LIGHTMAPS; i++)
 	{
-		if (!d3d_Lightmaps[i].Texture) continue;
+		if (!d3d_Lightmaps[i].SysTexture) break;
 
-		// clear down allocation buffers (ensure)
-		d3d_Lightmaps[i].Allocated = NULL;
+		if (!d3d_Lightmaps[i].DefTexture)
+		{
+			// recreate the default pool texture
+			D3DLight_CreateTexture (&d3d_Lightmaps[i].DefTexture, D3DPOOL_DEFAULT, D3DUSAGE_DYNAMIC);
+
+			d3d_Lightmaps[i].SysTexture->AddDirtyRect (NULL);
+			d3d_Lightmaps[i].Modified = true;
+		}
 
 		// update any lightmaps which were modified
-		if (d3d_Lightmaps[i].LockedRect.Data)
+		if (d3d_Lightmaps[i].Modified)
 		{
-			d3d_Lightmaps[i].Texture->UnlockRect (0);
-			d3d_Lightmaps[i].Texture->AddDirtyRect (&d3d_Lightmaps[i].DirtyRect);
-			d3d_Lightmaps[i].Texture->PreLoad ();
-
-			d3d_Lightmaps[i].DirtyRect.left = LightmapWidth;
-			d3d_Lightmaps[i].DirtyRect.right = 0;
-			d3d_Lightmaps[i].DirtyRect.top = LightmapHeight;
-			d3d_Lightmaps[i].DirtyRect.bottom = 0;
-
-			d3d_Lightmaps[i].LockedRect.Data = NULL;
+			d3d_Device->UpdateTexture (d3d_Lightmaps[i].SysTexture, d3d_Lightmaps[i].DefTexture);
+			d3d_Lightmaps[i].Modified = false;
 		}
 	}
 }
@@ -1460,18 +1427,43 @@ void D3DLight_ReleaseLightmaps (void)
 {
 	for (int i = 0; i < MAX_LIGHTMAPS; i++)
 	{
-		// clear down allocation buffers (ensure)
-		d3d_Lightmaps[i].Allocated = NULL;
+		SAFE_RELEASE (d3d_Lightmaps[i].SysTexture);
+		SAFE_RELEASE (d3d_Lightmaps[i].DefTexture);
 
-		// ensure that the lightmap is unlocked
-		if (d3d_Lightmaps[i].LockedRect.Data)
-		{
-			d3d_Lightmaps[i].Texture->UnlockRect (0);
-			d3d_Lightmaps[i].LockedRect.Data = NULL;
-		}
-
-		SAFE_RELEASE (d3d_Lightmaps[i].Texture);
+		d3d_Lightmaps[i].Modified = false;
 	}
 }
 
+
+void D3DLight_OnLostDevice (void)
+{
+	for (int i = 0; i < MAX_LIGHTMAPS; i++)
+	{
+		SAFE_RELEASE (d3d_Lightmaps[i].DefTexture);
+
+		if (d3d_Lightmaps[i].SysTexture)
+		{
+			d3d_Lightmaps[i].SysTexture->AddDirtyRect (NULL);
+			d3d_Lightmaps[i].Modified = false;
+		}
+	}
+}
+
+
+void D3DLight_OnResetDevice (void)
+{
+	for (int i = 0; i < MAX_LIGHTMAPS; i++)
+	{
+		if (d3d_Lightmaps[i].SysTexture)
+		{
+			D3DLight_CreateTexture (&d3d_Lightmaps[i].DefTexture, D3DPOOL_DEFAULT, D3DUSAGE_DYNAMIC);
+			d3d_Lightmaps[i].SysTexture->AddDirtyRect (NULL);
+			d3d_Device->UpdateTexture (d3d_Lightmaps[i].SysTexture, d3d_Lightmaps[i].DefTexture);
+			d3d_Lightmaps[i].Modified = false;
+		}
+	}
+}
+
+
+CD3DDeviceLossHandler d3d_LightHander (D3DLight_OnLostDevice, D3DLight_OnResetDevice);
 

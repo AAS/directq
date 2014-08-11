@@ -58,6 +58,16 @@ public:
 	int				EdictSize;	// in bytes
 	unsigned short	CRC;
 
+	// string handling
+	int StringSize;
+	char **KnownStrings;
+	int NumKnownStrings;
+	int MaxKnownStrings;
+
+	int AllocString (int bufferlength, char **ptr);
+	char *GetString (int num);
+	int SetString (char *s);
+
 	// progs execution stack
 	prstack_t *Stack;
 	int StackDepth;
@@ -94,7 +104,9 @@ public:
 	edict_t **EdictPointers;
 	int NumEdicts;
 	int MaxEdicts;
+
 private:
+	void AllocStringSlots (void);
 };
 
 extern CProgsDat *SVProgs;

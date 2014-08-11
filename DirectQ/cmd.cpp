@@ -110,7 +110,7 @@ int CmdCvarCompareFunc (const void *a, const void *b)
 	complist_t *cc1 = (complist_t *) a;
 	complist_t *cc2 = (complist_t *) b;
 
-	return stricmp (cc1->name, cc2->name);
+	return _stricmp (cc1->name, cc2->name);
 }
 
 
@@ -215,7 +215,7 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 		assert (cl->name);
 		assert ((cl->alias || cl->cmd || cl->var));
 
-		if (!strnicmp (partial, cl->name, len))
+		if (!_strnicmp (partial, cl->name, len))
 		{
 			if (conout)
 			{
@@ -635,7 +635,7 @@ void Cmd_Exec_f (void)
 	char *name = Cmd_Argv (1);
 
 	// these need to go in reverse order otherwise config.cfg will overwrite directq.cfg
-	if (!stricmp (name, "config.cfg")) Cmd_ExecFile ("directq.cfg");
+	if (!_stricmp (name, "config.cfg")) Cmd_ExecFile ("directq.cfg");
 
 	Cmd_ExecFile (name);
 }
@@ -668,7 +668,7 @@ Creates a new command that executes a command string (possibly; seperated)
 
 void Cmd_Alias_f (void)
 {
-	cmdalias_t	*a;
+	cmdalias_t	*a = NULL;
 	char		cmd[1024];
 	int			i, c;
 	char		*s;
@@ -1048,7 +1048,7 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 			}
 			else
 			{
-				if (!stricmp (cl->cmd->name, "exec"))
+				if (!_stricmp (cl->cmd->name, "exec"))
 				{
 					// allow exec commands before everything comes up as they can call
 					// into other configs which also store cvars
@@ -1118,7 +1118,7 @@ void Cmd_ForwardToServer (void)
 
 	MSG_WriteByte (&cls.message, clc_stringcmd);
 
-	if (stricmp(Cmd_Argv(0), "cmd") != 0)
+	if (_stricmp(Cmd_Argv(0), "cmd") != 0)
 	{
 		SZ_Print (&cls.message, Cmd_Argv(0));
 		SZ_Print (&cls.message, " ");
@@ -1142,7 +1142,7 @@ void Cmd_ForwardToServer (void)
 	MSG_WriteByte (&cls.message, clc_stringcmd);
 
 	// JPG - handle say separately for formatting
-	if ((!stricmp (Cmd_Argv (0), "say") || !stricmp (Cmd_Argv (0), "say_team")) && Cmd_Argc () > 1)
+	if ((!_stricmp (Cmd_Argv (0), "say") || !_stricmp (Cmd_Argv (0), "say_team")) && Cmd_Argc () > 1)
 	{
 		SZ_Print (&cls.message, Cmd_Argv (0));
 		SZ_Print (&cls.message, " ");
@@ -1305,7 +1305,7 @@ void Cmd_ForwardToServer (void)
 		return;
 	}
 
-	if (stricmp (Cmd_Argv (0), "cmd") != 0)
+	if (_stricmp (Cmd_Argv (0), "cmd") != 0)
 	{
 		SZ_Print (&cls.message, Cmd_Argv (0));
 		SZ_Print (&cls.message, " ");
@@ -1336,7 +1336,7 @@ int Cmd_CheckParm (char *parm)
 	}
 
 	for (int i = 1; i < Cmd_Argc (); i++)
-		if (!stricmp (parm, Cmd_Argv (i)))
+		if (!_stricmp (parm, Cmd_Argv (i)))
 			return i;
 
 	return 0;

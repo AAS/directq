@@ -44,7 +44,7 @@ cvar_t *Cvar_FindVar (char *var_name)
 		// skip nehahra cvars
 		if (!nehahra && (var->usage & CVAR_NEHAHRA)) continue;
 
-		if (!stricmp (var_name, var->name))
+		if (!_stricmp (var_name, var->name))
 		{
 			return var;
 		}
@@ -56,7 +56,7 @@ cvar_t *Cvar_FindVar (char *var_name)
 		// skip nehahra cvars
 		if (!nehahra && (var->var->usage & CVAR_NEHAHRA)) continue;
 
-		if (!stricmp (var_name, var->name))
+		if (!_stricmp (var_name, var->name))
 		{
 			return var->var;
 		}

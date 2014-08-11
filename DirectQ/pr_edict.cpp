@@ -265,7 +265,7 @@ ddef_t *ED_FindField (char *name)
 	{
 		def = &SVProgs->FieldDefs[i];
 
-		if (!strcmp (SVProgs->Strings + def->s_name, name))
+		if (!strcmp (SVProgs->GetString (def->s_name), name))
 			return def;
 	}
 
@@ -287,7 +287,7 @@ ddef_t *ED_FindGlobal (char *name)
 	{
 		def = &SVProgs->GlobalDefs[i];
 
-		if (!strcmp (SVProgs->Strings + def->s_name, name))
+		if (!strcmp (SVProgs->GetString (def->s_name), name))
 			return def;
 	}
 
@@ -309,7 +309,7 @@ dfunction_t *ED_FindFunction (char *name)
 	{
 		func = &SVProgs->Functions[i];
 
-		if (!strcmp (SVProgs->Strings + func->s_name, name))
+		if (!strcmp (SVProgs->GetString (func->s_name), name))
 			return func;
 	}
 
@@ -370,18 +370,18 @@ char *PR_ValueString (etype_t type, eval_t *val)
 	switch (itype)
 	{
 	case ev_string:
-		_snprintf (line, 256, "%s", SVProgs->Strings + val->string);
+		_snprintf (line, 256, "%s", SVProgs->GetString (val->string));
 		break;
 	case ev_entity:
 		_snprintf (line, 256, "entity %i", GetNumberForEdict (PROG_TO_EDICT (val->edict)));
 		break;
 	case ev_function:
 		f = SVProgs->Functions + val->function;
-		_snprintf (line, 256, "%s()", SVProgs->Strings + f->s_name);
+		_snprintf (line, 256, "%s()", SVProgs->GetString (f->s_name));
 		break;
 	case ev_field:
 		def = ED_FieldAtOfs (val->_int);
-		_snprintf (line, 256, ".%s", SVProgs->Strings + def->s_name);
+		_snprintf (line, 256, ".%s", SVProgs->GetString (def->s_name));
 		break;
 	case ev_void:
 		_snprintf (line, 256, "void");
@@ -424,18 +424,18 @@ char *PR_UglyValueString (etype_t type, eval_t *val)
 	switch (itype)
 	{
 	case ev_string:
-		_snprintf (line, 256, "%s", SVProgs->Strings + val->string);
+		_snprintf (line, 256, "%s", SVProgs->GetString (val->string));
 		break;
 	case ev_entity:
 		_snprintf (line, 256, "%i", GetNumberForEdict (PROG_TO_EDICT (val->edict)));
 		break;
 	case ev_function:
 		f = SVProgs->Functions + val->function;
-		_snprintf (line, 256, "%s", SVProgs->Strings + f->s_name);
+		_snprintf (line, 256, "%s", SVProgs->GetString (f->s_name));
 		break;
 	case ev_field:
 		def = ED_FieldAtOfs (val->_int);
-		_snprintf (line, 256, "%s", SVProgs->Strings + def->s_name);
+		_snprintf (line, 256, "%s", SVProgs->GetString (def->s_name));
 		break;
 	case ev_void:
 		_snprintf (line, 256, "void");
@@ -478,7 +478,7 @@ char *PR_GlobalString (int ofs)
 	else
 	{
 		s = PR_ValueString ((etype_t) def->type, (eval_t *) val);
-		_snprintf (line, 128, "%i(%s)%s", ofs, SVProgs->Strings + def->s_name, s);
+		_snprintf (line, 128, "%i(%s)%s", ofs, SVProgs->GetString (def->s_name), s);
 	}
 
 	i = strlen (line);
@@ -502,7 +502,7 @@ char *PR_GlobalStringNoContents (int ofs)
 	if (!def)
 		_snprintf (line, 128, "%i(???)", ofs);
 	else
-		_snprintf (line, 128, "%i(%s)", ofs, SVProgs->Strings + def->s_name);
+		_snprintf (line, 128, "%i(%s)", ofs, SVProgs->GetString (def->s_name));
 
 	i = strlen (line);
 
@@ -544,7 +544,7 @@ void ED_Print (edict_t *ed)
 	for (i = 1; i < SVProgs->QC->numfielddefs; i++)
 	{
 		d = &SVProgs->FieldDefs[i];
-		name = SVProgs->Strings + d->s_name;
+		name = SVProgs->GetString (d->s_name);
 
 		if (name[strlen (name)-2] == '_')
 			continue;	// skip _x, _y, _z vars
@@ -597,7 +597,7 @@ void ED_Write (FILE *f, edict_t *ed)
 	for (i = 1; i < SVProgs->QC->numfielddefs; i++)
 	{
 		d = &SVProgs->FieldDefs[i];
-		name = SVProgs->Strings + d->s_name;
+		name = SVProgs->GetString (d->s_name);
 
 		if (name[strlen (name)-2] == '_')
 			continue;	// skip _x, _y, _z vars
@@ -745,7 +745,7 @@ void ED_WriteGlobals (FILE *f)
 		&& type != ev_entity)
 			continue;
 
-		name = SVProgs->Strings + def->s_name;
+		name = SVProgs->GetString (def->s_name);
 		fprintf (f, "\"%s\" ", name);
 		fprintf (f, "\"%s\"\n", PR_UglyValueString ((etype_t) type, (eval_t *) &SVProgs->Globals[def->ofs]));
 	}
@@ -803,17 +803,17 @@ void ED_ParseGlobals (char *data)
 
 /*
 =============
-ED_NewString
+ED_NewString2
 =============
 */
-char *ED_NewString (char *string)
+string_t ED_NewString2 (char *string)
 {
-	char	*newstring, *new_p;
+	char	*new_p;
 	int		i, l;
+	string_t	num;
 
 	l = strlen (string) + 1;
-	newstring = (char *) ServerZone->Alloc (l);
-	new_p = newstring;
+	num = SVProgs->AllocString (l, &new_p);
 
 	for (i = 0; i < l; i++)
 	{
@@ -830,7 +830,7 @@ char *ED_NewString (char *string)
 			*new_p++ = string[i];
 	}
 
-	return newstring;
+	return num;
 }
 
 
@@ -856,11 +856,11 @@ bool ED_ParseEpair (void *base, ddef_t *key, char *s)
 	switch (key->type & ~DEF_SAVEGLOBAL)
 	{
 	case ev_string:
-		* (string_t *) d = ED_NewString (s) - SVProgs->Strings;
+		*(string_t *) d = ED_NewString2 (s);
 		break;
 
 	case ev_float:
-		* (float *) d = atof (s);
+		*(float *) d = atof (s);
 		break;
 
 	case ev_vector:
@@ -939,7 +939,7 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 		memset (&ent->v, 0, SVProgs->QC->entityfields * 4);
 
 	// clear alpha
-	ent->alpha = 255;
+	ent->alphaval = 0;
 
 	// go through all the dictionary pairs
 	while (1)
@@ -993,10 +993,10 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 		if (!strcmp (keyname, "alpha"))
 		{
 			float f = atof (com_token);
-			ent->alpha = (int) (f * 255);
+			ent->alphaval = (int) (f * 255);
 
-			if (ent->alpha < 1) ent->alpha = 255;
-			if (ent->alpha > 255) ent->alpha = 255;
+			if (ent->alphaval < 1) ent->alphaval = 0;
+			if (ent->alphaval > 255) ent->alphaval = 255;
 		}
 
 		key = ED_FindField (keyname);
@@ -1076,7 +1076,7 @@ void SV_LevelStats_f (void)
 
 	for (entitystat_t *find = sv_levelstats.entitystats; find; find = find->next)
 	{
-		if (stricmp (lastent, find->firstword))
+		if (_stricmp (lastent, find->firstword))
 		{
 			Con_Printf ("%-32s  +------+------+------+------+\n", " ");
 			strcpy (lastent, find->firstword);
@@ -1109,11 +1109,11 @@ void SV_AddEntityStat (edict_t *ed)
 	if (!ed->v.classname) return;
 
 	entitystat_t *es = NULL;
-	char *classname = SVProgs->Strings + ed->v.classname;
+	char *classname = SVProgs->GetString (ed->v.classname);
 
 	for (entitystat_t *find = sv_levelstats.entitystats; find; find = find->next)
 	{
-		if (!stricmp (find->name, classname))
+		if (!_stricmp (find->name, classname))
 		{
 			es = find;
 			break;
@@ -1183,7 +1183,7 @@ void SV_AddEntityStat (edict_t *ed)
 
 int SV_EntityStatSortFunc (entitystat_t **es1, entitystat_t **es2)
 {
-	return stricmp (es1[0]->name, es2[0]->name);
+	return _stricmp (es1[0]->name, es2[0]->name);
 }
 
 
@@ -1270,14 +1270,14 @@ void ED_LoadFromFile (char *data)
 			continue;
 		}
 
-		char *classname = SVProgs->Strings + ent->v.classname;
+		char *classname = SVProgs->GetString (ent->v.classname);
 
 		// look for the spawn function
 		func = ED_FindFunction (classname);
 
 		if (!func)
 		{
-			if (!stricmp (classname, "func_detail"))
+			if (!_stricmp (classname, "func_detail"))
 			{
 				// if we couldn't find a spawn function for a func_detail entity we must convert it back to a func_wall
 				func = ED_FindFunction ("func_wall");
@@ -1394,4 +1394,5 @@ int GetNumberForEdict (edict_t *e)
 {
 	return e->ednum;
 }
+
 

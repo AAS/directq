@@ -47,6 +47,53 @@ float r_avertexnormals[NUMVERTEXNORMALS][3] =
 };
 
 extern cvar_t sv_gravity;
+extern cvar_t r_particlestyle;
+
+particlest_t *r_particlest;
+int r_numparticlest;
+
+void R_MakeParticleLocations (float s, float t, float size, particlest_t *loc, int numloc)
+{
+	loc[0].stbase[0] = s;
+	loc[0].stbase[1] = t;
+	loc[0].stadd[0] = size;
+	loc[0].stadd[1] = size;
+
+	r_numparticlest++;
+
+	if (numloc == 4)
+	{
+		loc[1].stbase[0] = s;
+		loc[1].stbase[1] = t + size;
+		loc[1].stadd[0] = size;
+		loc[1].stadd[1] = -size;
+
+		loc[2].stbase[0] = s + size;
+		loc[2].stbase[1] = t + size;
+		loc[2].stadd[0] = -size;
+		loc[2].stadd[1] = -size;
+
+		loc[3].stbase[0] = s + size;
+		loc[3].stbase[1] = t;
+		loc[3].stadd[0] = -size;
+		loc[3].stadd[1] = size;
+
+		r_numparticlest += 3;
+	}
+}
+
+
+#define ST_OFFSET_DEFAULT		0
+#define ST_OFFSET_BLOOD			1
+#define ST_OFFSET_SMOKE			5
+#define ST_OFFSET_SPARK1		9
+#define ST_OFFSET_SPARK2		10
+#define ST_OFFSET_WIZARDGOO		14
+#define ST_OFFSET_VOREGOO		18
+#define ST_OFFSET_KNIGHTFIRE	22
+#define ST_OFFSET_BLOOD2		26
+#define ST_OFFSET_BLAST			30
+
 
 /*
 ===============
@@ -55,22 +102,42 @@ R_InitParticles
 */
 void R_InitParticles (void)
 {
+	if (r_particlest)
+	{
+		MainZone->Free (r_particlest);
+		r_particlest = NULL;
+	}
+
+	r_particlest = (particlest_t *) scratchbuf;
+	r_numparticlest = 0;
+
+	// set up our locations
+	R_MakeParticleLocations (0.00f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_DEFAULT], 1);
+	R_MakeParticleLocations (0.75f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_BLOOD], 4);
+	R_MakeParticleLocations (0.00f, 0.50f, 0.50f, &r_particlest[ST_OFFSET_SMOKE], 4);
+	R_MakeParticleLocations (0.00f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_SPARK1], 1);
+	R_MakeParticleLocations (0.25f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_SPARK2], 4);
+	R_MakeParticleLocations (0.25f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_WIZARDGOO], 4);
+	R_MakeParticleLocations (0.50f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_VOREGOO], 4);
+	R_MakeParticleLocations (0.50f, 0.25f, 0.25f, &r_particlest[ST_OFFSET_KNIGHTFIRE], 4);
+	R_MakeParticleLocations (0.75f, 0.00f, 0.25f, &r_particlest[ST_OFFSET_BLOOD2], 4);
+	R_MakeParticleLocations (0.50f, 0.50f, 0.25f, &r_particlest[ST_OFFSET_BLAST], 4);
+
+	r_particlest = (particlest_t *) MainZone->Alloc (sizeof (particlest_t) * r_numparticlest);
+	memcpy (r_particlest, scratchbuf, sizeof (particlest_t) * r_numparticlest);
+
 	// setup default particle state
-	// we need to explicitly set stuff to 0 as memsetting to 0 doesn't
-	// actually equate to a value of 0 with floating point
 	r_defaultparticle.scale = 2.666f;
 	r_defaultparticle.alpha = 1.0f;
 	r_defaultparticle.fade = 0;
 	r_defaultparticle.growth = 0;
-
-	// default flags
-	r_defaultparticle.flags = PT_STATIC;
 
 	// default velocity change and gravity
 	r_defaultparticle.dvel[0] = r_defaultparticle.dvel[1] = r_defaultparticle.dvel[2] = 0;
 	r_defaultparticle.grav = 0;
 
 	// colour and ramps
+	r_defaultparticle.st = &r_particlest[ST_OFFSET_DEFAULT];
 	r_defaultparticle.colorramp = NULL;
 	r_defaultparticle.color = 0;
 	r_defaultparticle.ramp = 0;
@@ -205,8 +272,8 @@ R_EntityParticles
 vec3_t	avelocities[NUMVERTEXNORMALS];
 float	beamlength = 16;
 vec3_t	avelocity = {23, 7, 3};
-float	partstep = 0.01;
-float	timescale = 0.01;
+float	partstep = 0.01f;
+float	timescale = 0.01f;
 
 void R_EntityParticles (entity_t *ent)
 {
@@ -253,6 +320,12 @@ void R_EntityParticles (entity_t *ent)
 		p->org[0] = ent->origin[0] + r_avertexnormals[i][0] * dist + forward[0] * beamlength;
 		p->org[1] = ent->origin[1] + r_avertexnormals[i][1] * dist + forward[1] * beamlength;
 		p->org[2] = ent->origin[2] + r_avertexnormals[i][2] * dist + forward[2] * beamlength;
+
+		if (r_particlestyle.integer > 1)
+		{
+			p->st = &r_particlest[ST_OFFSET_DEFAULT];
+			p->scale = 1.333f;
+		}
 	}
 }
 
@@ -299,9 +372,14 @@ void R_ReadPointFile_f (void)
 			break;
 		}
 
+		if (r_particlestyle.integer > 1)
+		{
+			p->st = &r_particlest[ST_OFFSET_DEFAULT];
+			p->scale = 1.333f;
+		}
+
 		p->die = cl.time + 999999;
-		p->color = (-c) & 15;
-		p->flags |= PT_NOCLIP;
+		p->color = (float) ((-c) & 15);
 		p->color = 251;	// let's make pointfiles more visible
 		p->scale = 5;
 		VectorCopy2 (p->vel, vec3_origin);
@@ -368,6 +446,12 @@ void R_ParticleExplosion (vec3_t org, int count)
 				p->org[j] = org[j] + ((rand () % 32) - 16);
 				p->vel[j] = (rand () % 512) - 256;
 			}
+
+			if (r_particlestyle.integer > 1)
+			{
+				p->st = &r_particlest[ST_OFFSET_SPARK1];
+				p->scale = 1.333f * (rand () & 3) + 1;
+			}
 		}
 		else
 		{
@@ -381,6 +465,12 @@ void R_ParticleExplosion (vec3_t org, int count)
 				p->org[j] = org[j] + ((rand () % 32) - 16);
 				p->vel[j] = (rand () % 512) - 256;
 			}
+
+			if (r_particlestyle.integer > 1)
+			{
+				p->st = &r_particlest[ST_OFFSET_SPARK2 + (rand () & 3)];
+				p->scale = 1.333f * (rand () & 3) + 1;
+			}
 		}
 	}
 }
@@ -388,16 +478,58 @@ void R_ParticleExplosion (vec3_t org, int count)
 
 void R_ExplosionSmoke (vec3_t org)
 {
+	int			i, j, k;
+	particle_t	*p;
+	float		vel;
+	vec3_t		dir;
+
+	particle_type_t *pt = R_NewParticleType (org);
+
+	// this skips the "12" but because we're incrementing by 4 and because we're adding rand () & 7 that's OK;
+	for (i = -12; i < 12; i += 4)
+	{
+		for (j = -12; j < 12; j += 4)
+		{
+			for (k = 0; k < 1; k++)
+			{
+				if (!(p = R_NewParticle (pt))) return;
+
+				p->die = cl.time + 666.0f;
+
+				p->grav = -1;
+				p->color = ramp3[rand () % 6];
+
+				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SMOKE];
+				p->scale = (rand () & 31) + 4;
+				p->growth = 6.666f;
+				p->fade = 0.5f;
+				p->alpha = 0.666f;
+
+				dir[0] = j * 3 + (rand () & 7);
+				dir[1] = i * 3 + (rand () & 7);
+				dir[2] = 32;
+
+				p->org[0] = org[0] + dir[0];
+				p->org[1] = org[1] + dir[1];
+				p->org[2] = org[2] + (rand () & 15);
+
+				VectorNormalize (dir);
+				vel = 50 + (rand () & 31);
+				VectorScale (dir, vel, p->vel);
+			}
+		}
+	}
 }
 
 
 void R_ParticleExplosion (vec3_t org)
 {
-	// explosion core
-	R_ParticleExplosion (org, 1024);
-
-	// add some smoke (enhanced only)
-	R_ExplosionSmoke (org);
+	if (r_particlestyle.integer > 1)
+	{
+		R_ParticleExplosion (org, 256);
+		R_ExplosionSmoke (org);
+	}
+	else R_ParticleExplosion (org, 1024);
 }
 
 
@@ -407,7 +539,7 @@ R_ParticleExplosion2
 
 ===============
 */
-void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
+void R_ParticleExplosion2 (vec3_t org, int count, int colorStart, int colorLength)
 {
 	int			i, j;
 	particle_t	*p;
@@ -415,13 +547,19 @@ void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
 
 	particle_type_t *pt = R_NewParticleType (org);
 
-	for (i = 0; i < 512; i++)
+	for (i = 0; i < count; i++)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
 		p->die = cl.time + 0.3f;
 		p->color = colorStart + (colorMod % colorLength);
 		colorMod++;
+
+		if (r_particlestyle.integer > 1)
+		{
+			p->st = &r_particlest[ST_OFFSET_DEFAULT];
+			p->scale = 1.333f;
+		}
 
 		p->grav = -1;
 		p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
@@ -432,9 +570,17 @@ void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
 			p->vel[j] = (rand () % 512) - 256;
 		}
 	}
+}
 
-	// add some smoke (enhanced only)
-	R_ExplosionSmoke (org);
+
+void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
+{
+	if (r_particlestyle.integer > 1)
+	{
+		R_ParticleExplosion2 (org, 512, colorStart, colorLength);
+		R_ExplosionSmoke (org);
+	}
+	else R_ParticleExplosion2 (org, 512, colorStart, colorLength);
 }
 
 
@@ -444,14 +590,14 @@ R_BlobExplosion
 
 ===============
 */
-void R_BlobExplosion (vec3_t org)
+void R_BlobExplosion (vec3_t org, int count)
 {
 	int			i, j;
 	particle_t	*p;
 
 	particle_type_t *pt = R_NewParticleType (org);
 
-	for (i = 0; i < 1024; i++)
+	for (i = 0; i < count; i++)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
@@ -481,9 +627,17 @@ void R_BlobExplosion (vec3_t org)
 			}
 		}
 	}
+}
 
-	// add some smoke (enhanced only)
-	R_ExplosionSmoke (org);
+
+void R_BlobExplosion (vec3_t org)
+{
+	if (r_particlestyle.integer > 1)
+	{
+		R_BlobExplosion (org, 1024);
+		R_ExplosionSmoke (org);
+	}
+	else R_BlobExplosion (org, 1024);
 }
 
 
@@ -494,6 +648,9 @@ void R_BloodParticles (vec3_t org, vec3_t dir, int color, int count)
 
 	particle_type_t *pt = R_NewParticleType (org);
 
+	// save fillrate by spawning less particles
+	if (r_particlestyle.integer > 1) count >>= 1;
+
 	for (i = 0; i < count; i++)
 	{
 		if (!(p = R_NewParticle (pt))) return;
@@ -501,6 +658,14 @@ void R_BloodParticles (vec3_t org, vec3_t dir, int color, int count)
 		p->die = cl.time + (0.1 * (rand () % 5));
 		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
+
+		if (r_particlestyle.integer > 1)
+		{
+			p->st = &r_particlest[(rand () & 3) + ST_OFFSET_BLOOD];
+			p->scale = (rand () % 5) + 2;
+			p->growth = 2.666f;
+			p->fade = 0.25f;
+		}
 
 		for (j = 0; j < 3; j++)
 		{
@@ -558,6 +723,12 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
 
+		if (r_particlestyle.integer > 1)
+		{
+			p->st = &r_particlest[ST_OFFSET_DEFAULT];
+			p->scale = 1.333f;
+		}
+
 		for (j = 0; j < 3; j++)
 		{
 			p->org[j] = org[j] + ((rand () & 15) - 8);
@@ -576,11 +747,22 @@ void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count)
 
 	for (i = 0; i < count; i++)
 	{
-		if (!(p = R_NewParticle (pt))) return;
+		if (!(p = R_NewParticle (pt))) break;
 
-		p->die = cl.time + (0.1 * (rand () % 5));
-		p->color = (color & ~7) + (rand () & 7);
 		p->grav = -1;
+		p->die = cl.time + (0.1 * (rand () % 5));
+
+		if (r_particlestyle.integer > 1)
+		{
+			p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SPARK2];
+			p->scale = 1.0f + (rand () & 15) * 0.1f;
+			p->alpha = 1.0f;
+			p->color = 103 + (rand () & 7);	// fixme
+		}
+		else
+		{
+			p->color = (color & ~7) + (rand () & 7);
+		}
 
 		for (int j = 0; j < 3; j++)
 		{
@@ -591,13 +773,9 @@ void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count)
 }
 
 
-void R_SpawnSmoke (vec3_t org, float jitter, float time)
+void R_SpawnRainParticle (particle_type_t *pt, vec3_t mins, vec3_t maxs, int color, vec3_t vel, float time, float z, int type)
 {
-}
-
-
-void R_SpawnRainParticle (particle_type_t *pt, vec3_t mins, vec3_t maxs, int color, vec3_t vel, float time, float z)
-{
+	// type 1 is snow, 0 is rain
 	particle_t *p = R_NewParticle (pt);
 
 	if (!p) return;
@@ -645,6 +823,7 @@ void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorb
 	if (t < 0 || t > 2) // sanity check
 		t = 2;
 
+	// type 1 is snow, 0 is rain
 	switch (type)
 	{
 	case 0:
@@ -654,7 +833,7 @@ void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorb
 			vel[1] = dir[1] + Q_Random (-16, 16);
 			vel[2] = dir[2] + Q_Random (-32, 32);
 
-			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z);
+			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z, type);
 		}
 
 		break;
@@ -666,7 +845,7 @@ void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorb
 			vel[1] = dir[1] + Q_Random (-16, 16);
 			vel[2] = dir[2] + Q_Random (-32, 32);
 
-			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z);
+			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z, type);
 		}
 
 		break;
@@ -692,29 +871,68 @@ void R_LavaSplash (vec3_t org)
 
 	particle_type_t *pt = R_NewParticleType (org);
 
-	for (i = -16; i < 16; i++)
+	if (r_particlestyle.integer > 1)
 	{
-		for (j = -16; j < 16; j++)
+		for (i = -16; i < 16; i += 4)
 		{
-			for (k = 0; k < 1; k++)
+			for (j = -16; j < 16; j += 4)
 			{
-				if (!(p = R_NewParticle (pt))) return;
+				for (k = 0; k < 1; k++)
+				{
+					if (!(p = R_NewParticle (pt))) return;
 
-				p->die = cl.time + (2 + (rand () & 31) * 0.02);
-				p->color = 224 + (rand () & 7);
-				p->grav = -1;
+					p->die = cl.time + 666.0f;
 
-				dir[0] = j * 8 + (rand () & 7);
-				dir[1] = i * 8 + (rand () & 7);
-				dir[2] = 256;
+					p->grav = -1;
+					p->color = ramp3[rand () % 6];
 
-				p->org[0] = org[0] + dir[0];
-				p->org[1] = org[1] + dir[1];
-				p->org[2] = org[2] + (rand () & 63);
+					p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SMOKE];
+					p->scale = (rand () & 63) + 8;
+					p->growth = 13.666f;
+					p->fade = 0.1f;
+					p->alpha = 0.666f;
 
-				VectorNormalize (dir);
-				vel = 50 + (rand () & 63);
-				VectorScale (dir, vel, p->vel);
+					dir[0] = j * 8 + (rand () & 7);
+					dir[1] = i * 8 + (rand () & 7);
+					dir[2] = 256;
+
+					p->org[0] = org[0] + dir[0];
+					p->org[1] = org[1] + dir[1];
+					p->org[2] = org[2] + (rand () & 63);
+
+					VectorNormalize (dir);
+					vel = 50 + (rand () & 63);
+					VectorScale (dir, vel, p->vel);
+				}
+			}
+		}
+	}
+	else
+	{
+		for (i = -16; i < 16; i++)
+		{
+			for (j = -16; j < 16; j++)
+			{
+				for (k = 0; k < 1; k++)
+				{
+					if (!(p = R_NewParticle (pt))) return;
+
+					p->die = cl.time + (2 + (rand () & 31) * 0.02);
+					p->color = 224 + (rand () & 7);
+					p->grav = -1;
+
+					dir[0] = j * 8 + (rand () & 7);
+					dir[1] = i * 8 + (rand () & 7);
+					dir[2] = 256;
+
+					p->org[0] = org[0] + dir[0];
+					p->org[1] = org[1] + dir[1];
+					p->org[2] = org[2] + (rand () & 63);
+
+					VectorNormalize (dir);
+					vel = 50 + (rand () & 63);
+					VectorScale (dir, vel, p->vel);
+				}
 			}
 		}
 	}
@@ -736,29 +954,70 @@ void R_TeleportSplash (vec3_t org)
 
 	particle_type_t *pt = R_NewParticleType (org);
 
-	for (i = -16; i < 16; i += 4)
+	if (r_particlestyle.integer > 1)
 	{
-		for (j = -16; j < 16; j += 4)
+		for (i = -16; i < 16; i += 4)
 		{
-			for (k = -24; k < 32; k += 4)
+			for (j = -16; j < 16; j += 4)
 			{
-				if (!(p = R_NewParticle (pt))) return;
+				for (k = -24; k < 32; k += 4)
+				{
+					if (!(p = R_NewParticle (pt))) return;
 
-				p->die = cl.time + (0.2 + (rand () & 7) * 0.02);
-				p->color = 7 + (rand () & 7);
-				p->grav = -1;
+					p->die = cl.time + 666;//(0.2 + (rand () & 7) * 0.02);
+					p->grav = -1;
 
-				dir[0] = j * 8;
-				dir[1] = i * 8;
-				dir[2] = k * 8;
+					if (!(rand () & 3))
+						p->color = 39 + (rand () & 7);
+					else p->color = 7 + (rand () & 7);
 
-				p->org[0] = org[0] + i + (rand () & 3);
-				p->org[1] = org[1] + j + (rand () & 3);
-				p->org[2] = org[2] + k + (rand () & 3);
+					p->st = &r_particlest[ST_OFFSET_SPARK1];
+					p->scale = ((float) (rand () & 3) + 1) * 0.25f;
+					p->growth = 0;
+					p->fade = 2.666f;
+					p->alpha = 1.5f;
 
-				VectorNormalize (dir);
-				vel = 50 + (rand () & 63);
-				VectorScale (dir, vel, p->vel);
+					dir[0] = j * 8;
+					dir[1] = i * 8;
+					dir[2] = k * 8;
+
+					p->org[0] = org[0] + i + (rand () & 3);
+					p->org[1] = org[1] + j + (rand () & 3);
+					p->org[2] = org[2] + k + (rand () & 3);
+
+					VectorNormalize (dir);
+					vel = 50 + (rand () & 63);
+					VectorScale (dir, vel, p->vel);
+				}
+			}
+		}
+	}
+	else
+	{
+		for (i = -16; i < 16; i += 4)
+		{
+			for (j = -16; j < 16; j += 4)
+			{
+				for (k = -24; k < 32; k += 4)
+				{
+					if (!(p = R_NewParticle (pt))) return;
+
+					p->die = cl.time + (0.2 + (rand () & 7) * 0.02);
+					p->color = 7 + (rand () & 7);
+					p->grav = -1;
+
+					dir[0] = j * 8;
+					dir[1] = i * 8;
+					dir[2] = k * 8;
+
+					p->org[0] = org[0] + i + (rand () & 3);
+					p->org[1] = org[1] + j + (rand () & 3);
+					p->org[2] = org[2] + k + (rand () & 3);
+
+					VectorNormalize (dir);
+					vel = 50 + (rand () & 63);
+					VectorScale (dir, vel, p->vel);
+				}
 			}
 		}
 	}
@@ -806,6 +1065,18 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 			p->grav = 1;
 			p->colorramp = ramp3;
 
+			if (r_particlestyle.integer > 1)
+			{
+				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_SMOKE];
+				p->scale = (rand () & 3) + 1;
+				p->growth = 2.666f;
+				p->fade = 0.75f;
+				p->alpha = 0.666f;
+
+				// 0 is rocket, 1 is grenade
+				len -= 2;
+			}
+
 			// grenade trail decays faster
 			if (type == 1) p->ramp += 2;
 
@@ -821,7 +1092,17 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		case 4:
 			// blood/slight blood
 			p->grav = -1;
-			p->color = 67 + (rand () & 3);
+
+			if (r_particlestyle.integer > 1)
+			{
+				p->color = (73 & ~7) + (rand () & 7);
+
+				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_BLOOD2];
+				p->scale = 0.5f * ((rand () & 3) + 2);
+				p->growth = 1.0f;
+				p->fade = 0.15f;
+			}
+			else p->color = 67 + (rand () & 3);
 
 			for (j = 0; j < 3; j++)
 				p->org[j] = start[j] + ((rand () % 6) - 3);
@@ -835,10 +1116,6 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		case 5:
 			// tracer - wizard/hellknight
 			p->die = cl.time + 0.5f;
-
-			if (type == 3)
-				p->color = 52 + ((tracercount & 4) << 1);
-			else p->color = 230 + ((tracercount & 4) << 1);
 
 			tracercount++;
 
@@ -856,6 +1133,22 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				p->vel[1] = 30 * vec[0];
 			}
 
+			if (r_particlestyle.integer > 1 && type == 3)
+			{
+				p->color = 52 + ((tracercount & 4) << 1);
+				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_WIZARDGOO];
+				p->scale = 0.5f * ((rand () & 3) + 2);
+				p->fade = 0.15f;
+			}
+			else if (r_particlestyle.integer > 1 && type == 5)
+			{
+				p->color = 230 + (tracercount & 3);
+				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_KNIGHTFIRE];
+				p->scale = 0.5f * ((rand () & 3) + 2);
+				p->fade = 0.15f;
+			}
+			else p->color = ((type == 3) ? 52 : 230) + ((tracercount & 4) << 1);
+
 			break;
 
 		case 6:	// voor trail
@@ -864,6 +1157,13 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 			for (j = 0; j < 3; j++)
 				p->org[j] = start[j] + ((rand () & 15) - 8);
+
+			if (r_particlestyle.integer > 1)
+			{
+				p->st = &r_particlest[(rand () & 3) + ST_OFFSET_VOREGOO];
+				p->scale = ((rand () & 3) + 4);
+				p->fade = 0.15f;
+			}
 
 			break;
 		}
@@ -918,13 +1218,6 @@ void R_SetupParticleType (particle_type_t *pt)
 		break;
 	}
 
-	// particle updating has been moved back to here to preserve cache-friendliness
-	extern cvar_t sv_gravity;
-	float grav = cl.frametime * sv_gravity.value * 0.025f;
-	float gravchange;
-	float velchange[3];
-	float gravtime = cl.frametime * 0.5f;
-
 	for (p = pt->particles; p; p = p->next)
 	{
 		// remove from a mid-point in the list
@@ -958,64 +1251,82 @@ void R_SetupParticleType (particle_type_t *pt)
 			if (p->org[i] > pt->maxs[i]) pt->maxs[i] = p->org[i];
 		}
 
-		// particle updating has been moved back to here to preserve cache-friendliness
-		// also to ensure updates happen even if we've been bbculled
-		// fade alpha and increase size
-		p->alpha -= (p->fade * cl.frametime);
-		p->scale += (p->growth * cl.frametime);
+		// count the active particles for this type
+		pt->numactiveparticles++;
+	}
+}
 
-		// kill if fully faded or too small
-		if (p->alpha <= 0 || p->scale <= 0)
+
+void CL_UpdateParticles (void)
+{
+	// no types currently active
+	if (!active_particle_types) return;
+
+	// particle updating has been moved back to here to preserve cache-friendliness
+	extern cvar_t sv_gravity;
+	float grav = cl.frametime * sv_gravity.value * 0.025f;
+	float gravchange;
+	float velchange[3];
+	float gravtime = cl.frametime * 0.5f;
+
+	for (particle_type_t *pt = active_particle_types; pt; pt = pt->next)
+	{
+		for (particle_t *p = pt->particles; p; p = p->next)
 		{
-			// no further adjustments needed
-			p->die = -1;
-			continue;
-		}
+			// fade alpha and increase size
+			p->alpha -= (p->fade * cl.frametime);
+			p->scale += (p->growth * cl.frametime);
 
-		if (p->colorramp)
-		{
-			// colour ramps
-			p->ramp += p->ramptime * cl.frametime;
-
-			// adjust color for ramp
-			if (p->colorramp[(int) p->ramp] < 0)
+			// kill if fully faded or too small
+			if (p->alpha <= 0 || p->scale <= 0)
 			{
 				// no further adjustments needed
 				p->die = -1;
 				continue;
 			}
-			else p->color = p->colorramp[(int) p->ramp];
+
+			if (p->colorramp)
+			{
+				// colour ramps
+				p->ramp += p->ramptime * cl.frametime;
+
+				// adjust color for ramp
+				if (p->colorramp[(int) p->ramp] < 0)
+				{
+					// no further adjustments needed
+					p->die = -1;
+					continue;
+				}
+				else p->color = p->colorramp[(int) p->ramp];
+			}
+
+			// framerate independent delta factors
+			gravchange = grav * p->grav;
+			velchange[0] = p->dvel[0] * gravtime;
+			velchange[1] = p->dvel[1] * gravtime;
+			velchange[2] = p->dvel[2] * gravtime;
+
+			// adjust for gravity (framerate independent)
+			p->vel[2] += gravchange;
+
+			// adjust for velocity change (framerate-independent)
+			p->vel[0] += velchange[0];
+			p->vel[1] += velchange[1];
+			p->vel[2] += velchange[2];
+
+			// update origin (framerate-independent)
+			p->org[0] += p->vel[0] * cl.frametime;
+			p->org[1] += p->vel[1] * cl.frametime;
+			p->org[2] += p->vel[2] * cl.frametime;
+
+			// adjust for gravity (framerate independent)
+			p->vel[2] += gravchange;
+
+			// adjust for velocity change (framerate-independent)
+			p->vel[0] += velchange[0];
+			p->vel[1] += velchange[1];
+			p->vel[2] += velchange[2];
 		}
-
-		// framerate independent delta factors
-		gravchange = grav * p->grav;
-		velchange[0] = p->dvel[0] * gravtime;
-		velchange[1] = p->dvel[1] * gravtime;
-		velchange[2] = p->dvel[2] * gravtime;
-
-		// adjust for gravity (framerate independent)
-		p->vel[2] += gravchange;
-
-		// adjust for velocity change (framerate-independent)
-		p->vel[0] += velchange[0];
-		p->vel[1] += velchange[1];
-		p->vel[2] += velchange[2];
-
-		// update origin (framerate-independent)
-		p->org[0] += p->vel[0] * cl.frametime;
-		p->org[1] += p->vel[1] * cl.frametime;
-		p->org[2] += p->vel[2] * cl.frametime;
-
-		// adjust for gravity (framerate independent)
-		p->vel[2] += gravchange;
-
-		// adjust for velocity change (framerate-independent)
-		p->vel[0] += velchange[0];
-		p->vel[1] += velchange[1];
-		p->vel[2] += velchange[2];
-
-		// count the active particles for this type
-		pt->numactiveparticles++;
 	}
 }
 

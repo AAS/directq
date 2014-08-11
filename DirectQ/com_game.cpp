@@ -90,7 +90,7 @@ void D3DVid_ClearScreen (void);
 void Cmd_ClearAlias_f (void);
 void D3DMisc_CreatePalette (void);
 void D3DMisc_ReleasePalette (void);
-
+void D3DLight_ReleaseLightmaps (void);
 
 void COM_UnloadAllStuff (void)
 {
@@ -122,8 +122,8 @@ void COM_UnloadAllStuff (void)
 	SAFE_DELETE (GameZone);
 	MainCache->Flush ();
 
-	SoundCache->Flush ();
 	S_ClearSounds ();
+	SoundCache->Flush ();
 
 	SHOWLMP_newgame ();
 	D3DSky_UnloadSkybox ();
@@ -132,6 +132,7 @@ void COM_UnloadAllStuff (void)
 
 	D3DVid_LoseDeviceResources ();
 	D3DMisc_ReleasePalette ();
+	D3DLight_ReleaseLightmaps ();
 
 	// do this too...
 	Host_ClearMemory ();
@@ -255,16 +256,19 @@ void COM_AddGameDirectory (char *dir)
 		do
 		{
 			// skip over PAK files already loaded
-			if (!stricmp (FindFileData.cFileName, "pak0.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak1.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak2.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak3.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak4.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak5.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak6.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak7.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak8.pak")) continue;
-			if (!stricmp (FindFileData.cFileName, "pak9.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak0.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak1.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak2.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak3.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak4.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak5.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak6.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak7.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak8.pak")) continue;
+			if (!_stricmp (FindFileData.cFileName, "pak9.pak")) continue;
+
+			// catch file copies for backup purposes
+			if (!_strnicmp (FindFileData.cFileName, "Copy of ", 8)) continue;
 
 			// send through the appropriate loader
 			if (COM_FindExtension (FindFileData.cFileName, ".pak"))
@@ -516,12 +520,12 @@ void COM_LoadGame (char *gamename)
 		bool loadgame = true;
 
 		// check for games already loaded
-		if (!stricmp (thisgame, "rogue")) loadgame = false;
-		if (!stricmp (thisgame, "hipnotic")) loadgame = false;
-		if (!stricmp (thisgame, "quoth")) loadgame = false;
-		if (!stricmp (thisgame, "nehahra")) loadgame = false;
-		if (!stricmp (thisgame, "kurok")) loadgame = false;
-		if (!stricmp (thisgame, GAMENAME)) loadgame = false;
+		if (!_stricmp (thisgame, "rogue")) loadgame = false;
+		if (!_stricmp (thisgame, "hipnotic")) loadgame = false;
+		if (!_stricmp (thisgame, "quoth")) loadgame = false;
+		if (!_stricmp (thisgame, "nehahra")) loadgame = false;
+		if (!_stricmp (thisgame, "kurok")) loadgame = false;
+		if (!_stricmp (thisgame, GAMENAME)) loadgame = false;
 
 		// check is it actually a proper directory
 		// this is because i'm a fucking butterfingers and always type stuff wrong :)
@@ -541,6 +545,8 @@ void COM_LoadGame (char *gamename)
 
 	// hack to get the hipnotic sbar in quoth
 	if (quoth) hipnotic = true;
+
+	// to do - optionally link My Documents folder in for multiuser/non-admin/network support
 
 	// enum and register external textures
 	D3D_EnumExternalTextures ();

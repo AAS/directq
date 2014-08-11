@@ -57,6 +57,7 @@ typedef struct entity_s
 	bool				forcelink;		// model changed
 
 	int						update_type;
+	int					mergeframe;
 
 	entity_state_t			baseline;		// to fill in defaults in updates
 

@@ -60,6 +60,8 @@ void D3D_SetAllStates (void);
 // declarations that don't really fit in anywhere else
 LPDIRECT3D9 d3d_Object = NULL;
 LPDIRECT3DDEVICE9 d3d_Device = NULL;
+LPDIRECT3DSWAPCHAIN9 d3d_SwapChain = NULL;
+LPDIRECT3DQUERY9 d3d_FinishQuery = NULL;
 
 D3DADAPTER_IDENTIFIER9 d3d_Adapter;
 D3DCAPS9 d3d_DeviceCaps;
@@ -80,10 +82,6 @@ void VID_MenuKey (int key);
 
 // for building the menu after video comes up
 void Menu_VideoBuild (void);
-
-// hlsl
-void D3DHLSL_Init (void);
-void D3DHLSL_Shutdown (void);
 
 // lightmaps
 void D3D_LoseLightmapResources (void);
@@ -120,6 +118,8 @@ cvar_t		vid_contrast ("contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
 cvar_t		r_contrast ("r_contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
 cvar_t		g_contrast ("g_contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
 cvar_t		b_contrast ("b_contrast", "1", CVAR_ARCHIVE, D3DVid_SetActiveGamma);
+cvar_t		d3d_multisample ("d3d_multisample", "0", CVAR_ARCHIVE, D3DVid_QueueRestart);
+cvar_t		gl_finish ("gl_finish", 0.0f);
 
 cvar_t d3d_usinginstancing ("r_instancing", "1", CVAR_ARCHIVE);
 
@@ -148,6 +148,7 @@ void VID_SetAppGamma (void) {VID_SetGammaGeneric (&d3d_CurrentGamma);}
 // consistency with DP and FQ
 cvar_t r_anisotropicfilter ("gl_texture_anisotropy", "1", CVAR_ARCHIVE);
 cvar_alias_t r_anisotropicfilter_alias ("r_anisotropicfilter", &r_anisotropicfilter);
+cvar_alias_t gl_anisotropic_filter_alias ("gl_anisotropic_filter", &r_anisotropicfilter);
 
 cvar_t gl_triplebuffer ("gl_triplebuffer", 1, CVAR_ARCHIVE);
 
@@ -334,6 +335,16 @@ void D3DVid_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 {
 	memset (pp, 0, sizeof (D3DPRESENT_PARAMETERS));
 
+	hr = d3d_Object->CheckDeviceMultiSampleType (D3DADAPTER_DEFAULT,
+		D3DDEVTYPE_HAL,
+		(mode->RefreshRate == 0) ? d3d_DesktopMode.Format : mode->Format,
+		(mode->RefreshRate == 0),
+		D3DMULTISAMPLE_NONMASKABLE,
+		&d3d_GlobalCaps.MaxMultiSample);
+
+	// per the spec, max multisample quality is between 0 and 1 less than this
+	d3d_GlobalCaps.MaxMultiSample--;
+
 	if (mode->RefreshRate == 0)
 	{
 		pp->Windowed = TRUE;
@@ -359,8 +370,20 @@ void D3DVid_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 	pp->BackBufferWidth = mode->Width;
 	pp->BackBufferHeight = mode->Height;
 	pp->hDeviceWindow = d3d_Window;
-	pp->MultiSampleQuality = 0;
-	pp->MultiSampleType = D3DMULTISAMPLE_NONE;
+
+	if (d3d_multisample.integer > 0 && d3d_GlobalCaps.MaxMultiSample > 0)
+	{
+		if (d3d_multisample.integer > d3d_GlobalCaps.MaxMultiSample)
+			pp->MultiSampleQuality = d3d_GlobalCaps.MaxMultiSample;
+		else pp->MultiSampleQuality = d3d_multisample.integer;
+
+		pp->MultiSampleType = D3DMULTISAMPLE_NONMASKABLE;
+	}
+	else
+	{
+		pp->MultiSampleQuality = 0;
+		pp->MultiSampleType = D3DMULTISAMPLE_NONE;
+	}
 }
 
 
@@ -495,6 +518,9 @@ void D3DVid_RecoverDeviceResources (void)
 
 void D3DVid_LoseDeviceResources (void)
 {
+	SAFE_RELEASE (d3d_FinishQuery);
+	SAFE_RELEASE (d3d_SwapChain);
+
 	// release anything that needs to be released
 	for (int i = 0; i < MAX_HANDLERS; i++)
 	{
@@ -659,8 +685,6 @@ void D3DVid_EnumerateVideoModes (void)
 	d3d_NumModes = 0;
 	d3d_NumWindowedModes = 0;
 
-	int d3d_MaxDisplayModes = SCRATCHBUF_SIZE / sizeof (D3DDISPLAYMODE);
-
 	// enumerate them all
 	for (int i = 0; i < ModeCount; i++)
 	{
@@ -730,7 +754,6 @@ void D3DVid_EnumerateVideoModes (void)
 		// check for mode already set and return if it was a valid one already in our list
 		if (d3d_mode.integer >= 0 && d3d_mode.integer < d3d_NumModes)
 		{
-			D3DDISPLAYMODE *mode = d3d_ModeList + d3d_mode.integer;
 			return;
 		}
 	}
@@ -1021,8 +1044,17 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	// (Quark ETP needs D3DCREATE_FPU_PRESERVE - using _controlfp during texcoord gen doesn't work)
 	// here as the generated coords will also lose precision when being applied
 
-	d3d_GlobalCaps.supportHardwareTandL = true;
-	d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
+	// if we don't support > 64k indexes we create as software VP
+	if (d3d_DeviceCaps.MaxVertexIndex <= 0xffff)
+	{
+		d3d_GlobalCaps.supportHardwareTandL = false;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
+	}
+	else
+	{
+		d3d_GlobalCaps.supportHardwareTandL = true;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
+	}
 
 	// ensure our device is validly gone
 	SAFE_RELEASE (d3d_Device);
@@ -1094,17 +1126,13 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 
 	if (d3d_GlobalCaps.supportHardwareTandL)
-	{
 		Con_Printf ("Using Hardware Vertex Processing\n\n");
-		d3d_GlobalCaps.DiscardLock = D3DLOCK_DISCARD;
-		d3d_GlobalCaps.NoOverwriteLock = D3DLOCK_NOOVERWRITE;
-	}
-	else
-	{
-		Con_Printf ("Using Software Vertex Processing\n\n");
-		d3d_GlobalCaps.DiscardLock = 0;
-		d3d_GlobalCaps.NoOverwriteLock = 0;
-	}
+	else Con_Printf ("Using Software Vertex Processing\n\n");
+
+	d3d_GlobalCaps.DefaultLock = D3DLOCK_NOSYSLOCK;
+	d3d_GlobalCaps.DiscardLock = D3DLOCK_DISCARD | D3DLOCK_NOSYSLOCK;
+	d3d_GlobalCaps.DynamicLock = D3DLOCK_NO_DIRTY_UPDATE | D3DLOCK_NOSYSLOCK;
+	d3d_GlobalCaps.NoOverwriteLock = D3DLOCK_NOOVERWRITE | D3DLOCK_NOSYSLOCK;
 
 	// report some caps
 	Con_Printf ("Video mode %i (%ix%i) Initialized\n", d3d_mode.integer, mode->Width, mode->Height);
@@ -1132,6 +1160,8 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	Con_Printf ("Maximum Simultaneous Textures: %i\n", d3d_DeviceCaps.MaxSimultaneousTextures);
 	Con_Printf ("Maximum Texture Size: %i x %i\n", d3d_DeviceCaps.MaxTextureWidth, d3d_DeviceCaps.MaxTextureHeight);
 	Con_Printf ("Maximum Anisotropic Filter: %i\n", d3d_DeviceCaps.MaxAnisotropy);
+	Con_Printf ("\n");
+
 	Con_Printf ("\n");
 
 	// no np2 support by default
@@ -1480,6 +1510,9 @@ void D3DVid_ShutdownDirect3D (void)
 	// release anything that needs to be released
 	D3D_ReleaseTextures ();
 
+	// take down our shaders
+	D3DHLSL_Shutdown ();
+
 	// destroy the device and object
 	SAFE_RELEASE (d3d_Device);
 	SAFE_RELEASE (d3d_Object);
@@ -1570,7 +1603,7 @@ void D3DVid_TextureMode_f (void)
 
 	for (int i = 0; i < 6; i++)
 	{
-		if (!stricmp (d3d_filtermodes[i].name, desiredmode) || i == modenum)
+		if (!_stricmp (d3d_filtermodes[i].name, desiredmode) || i == modenum)
 		{
 			// reset filter
 			d3d_TexFilter = d3d_filtermodes[i].texfilter;
@@ -1804,6 +1837,28 @@ void D3DVid_BeginRendering (void)
 		return;
 	}
 
+	if (gl_finish.integer)
+	{
+		if (!d3d_FinishQuery)
+		{
+			if (FAILED (d3d_Device->CreateQuery (D3DQUERYTYPE_EVENT, &d3d_FinishQuery)))
+			{
+				// don't gl_finish if we couldn;t create a query to drain the command buffer
+				Cvar_Set (&gl_finish, 0.0f);
+			}
+		}
+
+		if (d3d_FinishQuery)
+		{
+			d3d_FinishQuery->Issue (D3DISSUE_END);
+
+			while (d3d_FinishQuery->GetData (NULL, 0, D3DGETDATA_FLUSH) == S_FALSE);
+		}
+	}
+
+	// get access to the swap chain if we don't have it
+	if (!d3d_SwapChain) d3d_Device->GetSwapChain (0, &d3d_SwapChain);
+
 	// force lighting calcs off; this is done every frame and it will be filtered if necessary
 	D3D_SetRenderState (D3DRS_LIGHTING, FALSE);
 	D3D_SetRenderState (D3DRS_CLIPPING, TRUE);
@@ -1826,14 +1881,11 @@ void D3DVid_EndRendering (void)
 	d3d_Device->EndScene ();
 	d3d_RenderDef.framecount++;
 
-	if ((hr = d3d_Device->Present (NULL, NULL, NULL, NULL)) == D3DERR_DEVICELOST)
+	// wtf?  presenting through the swap chain is faster?  ok, that's cool
+	hr = d3d_SwapChain->Present (NULL, NULL, NULL, NULL, 0);
+
+	if (hr == D3DERR_DEVICELOST)
 		D3DVid_RecoverLostDevice ();
-}
-
-
-void D3DVid_Finish (void)
-{
-	// bollocks!
 }
 
 

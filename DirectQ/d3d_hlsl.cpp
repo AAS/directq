@@ -32,13 +32,19 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 ============================================================================================================
 */
 
-// effects
-LPD3DXEFFECT d3d_MasterFXWithFog = NULL;
-LPD3DXEFFECT d3d_MasterFXNoFog = NULL;
+#define HLSL_RELEASE(s) if (s) \
+	{ \
+		(s)->OnLostDevice (); \
+		SAFE_RELEASE (s); \
+	}
+
+
+char *d3d_EffectString = 0;
 LPD3DXEFFECT d3d_MasterFX = NULL;
 
-// let's see, where is it documented that this must be a NULL-terminated array again?
-D3DXMACRO d3d_EnableFogInShaders[] = {{"hlsl_fog", "1"}, {NULL, NULL}};
+#define MAX_D3D_SHADERS 65536
+
+LPD3DXEFFECT d3d_CompiledShaders[MAX_D3D_SHADERS] = {NULL};
 
 bool SilentLoad = false;
 
@@ -168,16 +174,45 @@ void D3DHLSL_SetEntMatrix (D3DMATRIX *entmatrix)
 }
 
 
-void D3DHLSL_SetFogMatrix (D3DMATRIX *fogmatrix)
-{
-	d3d_HLSLState.commitpending = true;
-	d3d_MasterFX->SetMatrix ("ModelViewMatrix", D3DMatrix_ToD3DXMatrix (fogmatrix));
-}
-
+int d3d_DesiredShader = 0;
+void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *eff, D3DXMACRO *d3d_FogEnabled);
 
 void D3DHLSL_BeginFrame (void)
 {
 	UINT numpasses = 0;
+
+	// lazy build on demand because there are too many shaders to build up-front
+	if (!d3d_CompiledShaders[d3d_DesiredShader])
+	{
+		// build the shader with the new defines
+		D3DXMACRO *macros = (D3DXMACRO *) scratchbuf;
+		int nummacros = 0;
+
+		if (d3d_DesiredShader & HLSL_FOG)
+		{
+			macros[nummacros].Name = "hlsl_fog";
+			macros[nummacros].Definition = "1";
+			nummacros++;
+		}
+
+		// and null term the macro list
+		macros[nummacros].Name = NULL;
+		macros[nummacros].Definition = NULL;
+
+		// load it anew
+		D3DHLSL_LoadEffect (va ("Master Shader %i", d3d_DesiredShader),
+			d3d_EffectString,
+			strlen (d3d_EffectString),
+			&d3d_CompiledShaders[d3d_DesiredShader],
+			macros);
+	}
+
+	// check for a change in shader state
+	if (d3d_MasterFX != d3d_CompiledShaders[d3d_DesiredShader])
+	{
+		d3d_MasterFX = d3d_CompiledShaders[d3d_DesiredShader];
+		d3d_MasterFX->SetTechnique ("MasterRefresh");
+	}
 
 	// invalidate any cached states to keep each frame valid
 	D3DHLSL_InvalidateState ();
@@ -247,34 +282,6 @@ void D3DHLSL_SetVectorArray (D3DXHANDLE handle, D3DXVECTOR4 *vecs, int len)
 {
 	d3d_HLSLState.commitpending = true;
 	d3d_MasterFX->SetVectorArray (handle, vecs, len);
-}
-
-
-void D3DHLSL_EnableFog (bool enable)
-{
-	LPD3DXEFFECT d3d_DesiredFX = NULL;
-
-	// just switch the shader; these are really the same shader but with different stuff #ifdef'ed in and out
-	if (enable && d3d_MasterFXWithFog)
-		d3d_DesiredFX = d3d_MasterFXWithFog;
-	else if (d3d_MasterFXNoFog)
-		d3d_DesiredFX = d3d_MasterFXNoFog;
-	else if (d3d_MasterFXWithFog)
-		d3d_DesiredFX = d3d_MasterFXWithFog;
-	else Sys_Error ("No shaders were successfully loaded!");
-
-	// check for a change in shader state
-	if (d3d_MasterFX != d3d_DesiredFX)
-	{
-		// setting the technique is slow so only do it when the effect changes
-		d3d_DesiredFX->SetTechnique ("MasterRefresh");
-
-		// store out globally so that we can run it
-		d3d_MasterFX = d3d_DesiredFX;
-	}
-
-	// fix me - the shader might change but certain cached params don't - or are we invalidating the
-	// caches every frame??????????????????
 }
 
 
@@ -352,6 +359,16 @@ void D3DHLSL_LoadEffect (char *name, char *EffectString, int Len, LPD3DXEFFECT *
 }
 
 
+void D3DHLSL_SelectShader (int desiredshader)
+{
+	if (desiredshader < 0) desiredshader = 0;
+	if (desiredshader >= MAX_D3D_SHADERS) desiredshader = MAX_D3D_SHADERS - 1;
+
+	// just set what we want, set it for real on the next begin frame
+	d3d_DesiredShader = desiredshader;
+}
+
+
 void D3DHLSL_Init (void)
 {
 	// now set up effects
@@ -400,57 +417,79 @@ void D3DHLSL_Init (void)
 	int len = Sys_LoadResourceData (IDR_MASTERFX, (void **) &EffectString);
 
 	// copy if off so that we can change it safely (is this even needed???)
-	char *RealEffect = (char *) scratchbuf;
-	memcpy (RealEffect, EffectString, len);
+	d3d_EffectString = (char *) MainZone->Alloc (len + 1);
+	memcpy (d3d_EffectString, EffectString, len);
 
 	// upgrade to SM3 if possible
 	if (vsvermaj > 2 && psvermaj > 2)
 	{
 		for (int i = 0; i < len; i++)
 		{
-			if (!strncmp (&RealEffect[i], " vs_2_0 ", 8)) RealEffect[i + 4] = '3';
-			if (!strncmp (&RealEffect[i], " ps_2_0 ", 8)) RealEffect[i + 4] = '3';
+			if (!strncmp (&d3d_EffectString[i], " vs_2_0 ", 8)) d3d_EffectString[i + 4] = '3';
+			if (!strncmp (&d3d_EffectString[i], " ps_2_0 ", 8)) d3d_EffectString[i + 4] = '3';
 		}
 	}
 
-	// and now load 'em
-	D3DHLSL_LoadEffect ("Master Shader (No Fog)", RealEffect, len, &d3d_MasterFXNoFog, NULL);
-	D3DHLSL_LoadEffect ("Master Shader (With Fog)", RealEffect, len, &d3d_MasterFXWithFog, d3d_EnableFogInShaders);
+	// select the plain shader so that we've something valid at startup
+	D3DHLSL_SelectShader (HLSL_PLAIN);
 
-	// we'll be kind and allow one of them to fail, but at least one must succeed
-	if (d3d_MasterFXNoFog)
-		d3d_MasterFX = d3d_MasterFXNoFog;
-	else if (d3d_MasterFXWithFog)
-		d3d_MasterFX = d3d_MasterFXWithFog;
-	else Sys_Error ("No shaders were successfully loaded!");
+	// run one shader frame to force our shaders to cache
+	D3DHLSL_BeginFrame ();
+	D3DHLSL_EndFrame ();
 
-	// now begin the effect by setting the technique
-	d3d_MasterFX->SetTechnique ("MasterRefresh");
+	// also precache the fog shader because we might have underwater fog enabled and we don't want to
+	// stall for a second or so the first time we go underwater; everything else can remain uncached
+	D3DHLSL_SelectShader (HLSL_FOG);
 
-	if (!SilentLoad) Con_Printf ("Created Shaders OK\n");
+	// run one shader frame to force our shaders to cache
+	D3DHLSL_BeginFrame ();
+	D3DHLSL_EndFrame ();
 
-	// only display output on the first load
+	// subsequent loads are silent
 	SilentLoad = true;
 }
 
 
-#define HLSL_RELEASE(s) if (s) \
-{ \
-	(s)->OnLostDevice (); \
-	SAFE_RELEASE (s); \
-}
-
 void D3DHLSL_Shutdown (void)
 {
+	for (int i = 0; i < MAX_D3D_SHADERS; i++)
+	{
+		HLSL_RELEASE (d3d_CompiledShaders[i]);
+	}
+
+	// force recache and invalidate any cached states
 	d3d_MasterFX = NULL;
-
-	HLSL_RELEASE (d3d_MasterFXNoFog);
-	HLSL_RELEASE (d3d_MasterFXWithFog);
-
-	// invalidate any cached states
 	D3DHLSL_InvalidateState ();
 }
 
 
-CD3DDeviceLossHandler d3d_HLSLHandler (D3DHLSL_Shutdown, D3DHLSL_Init);
+void D3DHLSL_DeviceLoss (void)
+{
+	for (int i = 0; i < MAX_D3D_SHADERS; i++)
+	{
+		// this is all that's actually needed and vid_restart/game change is *much* faster now...
+		if (d3d_CompiledShaders[i])
+			d3d_CompiledShaders[i]->OnLostDevice ();
+	}
+
+	// force recache and invalidate any cached states
+	D3DHLSL_InvalidateState ();
+}
+
+
+void D3DHLSL_DeviceRestore (void)
+{
+	for (int i = 0; i < MAX_D3D_SHADERS; i++)
+	{
+		// this is all that's actually needed and vid_restart/game change is *much* faster now...
+		if (d3d_CompiledShaders[i])
+			d3d_CompiledShaders[i]->OnResetDevice ();
+	}
+
+	// force recache and invalidate any cached states
+	D3DHLSL_InvalidateState ();
+}
+
+
+CD3DDeviceLossHandler d3d_HLSLHandler (D3DHLSL_DeviceLoss, D3DHLSL_DeviceRestore);
 

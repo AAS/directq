@@ -42,12 +42,15 @@ typedef struct d3d_alphalist_s
 	// our qsort for dist is always going to return ints so we just store dist as an int
 	int Dist;
 
+	// added for brush surfaces so that they don't need to allocate a modelsurf (yuck)
+	entity_t *SurfEntity;
+
 	union
 	{
 		dlight_t *DLight;
 		entity_t *Entity;
 		particle_type_t *Particle;
-		struct d3d_modelsurf_s *ModelSurf;
+		msurface_t *surf;
 		void *data;
 	};
 } d3d_alphalist_t;
@@ -110,14 +113,17 @@ void D3DAlpha_AddToList (entity_t *ent)
 }
 
 
-void D3DAlpha_AddToList (d3d_modelsurf_t *modelsurf)
+void D3DAlpha_AddToList (msurface_t *surf, entity_t *ent)
 {
 	// we only support turb surfaces for now
-	if (modelsurf->surf->flags & SURF_DRAWTURB)
-		D3DAlpha_AddToList (D3D_ALPHATYPE_WATERWARP, modelsurf, D3DAlpha_GetDist (modelsurf->surf->midpoint));
-	else if (modelsurf->surf->flags & SURF_DRAWFENCE)
-		D3DAlpha_AddToList (D3D_ALPHATYPE_FENCE, modelsurf, D3DAlpha_GetDist (modelsurf->surf->midpoint));
-	else D3DAlpha_AddToList (D3D_ALPHATYPE_SURFACE, modelsurf, D3DAlpha_GetDist (modelsurf->surf->midpoint));
+	if (surf->flags & SURF_DRAWTURB)
+		D3DAlpha_AddToList (D3D_ALPHATYPE_WATERWARP, surf, D3DAlpha_GetDist (surf->midpoint));
+	else if (surf->flags & SURF_DRAWFENCE)
+		D3DAlpha_AddToList (D3D_ALPHATYPE_FENCE, surf, D3DAlpha_GetDist (surf->midpoint));
+	else D3DAlpha_AddToList (D3D_ALPHATYPE_SURFACE, surf, D3DAlpha_GetDist (surf->midpoint));
+
+	// eeewwww
+	d3d_AlphaList[d3d_NumAlphaList - 1]->SurfEntity = ent;
 }
 
 
@@ -135,8 +141,8 @@ void D3DAlpha_AddToList (dlight_t *dl)
 
 int D3DAlpha_SortFunc (const void *a, const void *b)
 {
-	d3d_alphalist_t *al1 = * (d3d_alphalist_t **) a;
-	d3d_alphalist_t *al2 = * (d3d_alphalist_t **) b;
+	d3d_alphalist_t *al1 = *(d3d_alphalist_t **) a;
+	d3d_alphalist_t *al2 = *(d3d_alphalist_t **) b;
 
 	// back to front ordering
 	return (al2->Dist - al1->Dist);
@@ -150,7 +156,7 @@ void R_AddParticleTypeToRender (particle_type_t *pt);
 
 void D3DWarp_SetupTurbState (void);
 void D3DWarp_TakeDownTurbState (void);
-void D3DWarp_DrawSurface (d3d_modelsurf_t *modelsurf);
+void D3DWarp_DrawSurface (msurface_t *surf, entity_t *ent);
 
 void D3DPart_BeginParticles (void);
 void D3DPart_EndParticles (void);
@@ -158,13 +164,10 @@ void D3DPart_EndParticles (void);
 void D3DSprite_Begin (void);
 void D3DSprite_End (void);
 
-void D3DBrush_Begin (void);
-void D3DBrush_End (void);
-void D3DBrush_EmitSurface (d3d_modelsurf_t *ms);
-
 void D3DLight_BeginCoronas (void);
 void D3DLight_EndCoronas (void);
 void D3DLight_DrawCorona (dlight_t *dl);
+texture_t *R_TextureAnimation (entity_t *ent, texture_t *base);
 
 
 void D3DAlpha_Cull (void)
@@ -194,7 +197,7 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 			D3DSprite_End ();
 		case D3D_ALPHATYPE_ALIAS:
 		case D3D_ALPHATYPE_BRUSH:
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+			D3DState_SetZBuffer (D3DZB_TRUE, FALSE);
 			break;
 
 		case D3D_ALPHATYPE_SURFACE:
@@ -203,13 +206,13 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 
 		case D3D_ALPHATYPE_FENCE:
 			D3DBrush_End ();
-			D3D_SetRenderState (D3DRS_ALPHAREF, (DWORD) 0x00000001);
+			D3DState_SetAlphaTest (FALSE);
 			break;
 
 		case D3D_ALPHATYPE_WATERWARP:
 			D3DWarp_TakeDownTurbState ();
 			D3DAlpha_Cull ();
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+			D3DState_SetZBuffer (D3DZB_TRUE, FALSE);
 			break;
 
 		case D3D_ALPHATYPE_CORONA:
@@ -233,19 +236,19 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 			D3DSprite_Begin ();
 		case D3D_ALPHATYPE_ALIAS:
 		case D3D_ALPHATYPE_BRUSH:
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+			D3DState_SetZBuffer (D3DZB_TRUE, TRUE);
 			break;
 
 		case D3D_ALPHATYPE_FENCE:
 			// hack - solid edges
-			D3D_SetRenderState (D3DRS_ALPHAREF, (DWORD) 0x000000aa);
+			D3DState_SetAlphaTest (TRUE, D3DCMP_GREATEREQUAL, (DWORD) 0x000000aa);
 			D3DBrush_Begin ();
 			break;
 
 		case D3D_ALPHATYPE_WATERWARP:
 			D3DWarp_SetupTurbState ();
 			D3DAlpha_NoCull ();
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+			D3DState_SetZBuffer (D3DZB_TRUE, TRUE);
 			break;
 
 		case D3D_ALPHATYPE_PARTICLE:
@@ -266,16 +269,8 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 void D3DAlpha_Setup (void)
 {
 	// enable blending
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-
-	// don't write anything with 0 alpha
-	D3D_SetRenderState (D3DRS_ALPHAREF, (DWORD) 0x00000001);
-	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+	D3DState_SetAlphaBlend (TRUE);
+	D3DState_SetZBuffer (D3DZB_TRUE, FALSE);
 }
 
 
@@ -284,9 +279,9 @@ void D3DAlpha_Takedown (void)
 	// disable blending (done)
 	// the cull type may have been modified going through here so put it back the way it was
 	D3D_BackfaceCull (D3DCULL_CCW);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
-	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
+	D3DState_SetZBuffer (D3DZB_TRUE, TRUE);
+	D3DState_SetAlphaBlend (FALSE);
+	D3DState_SetAlphaTest (FALSE);
 }
 
 
@@ -351,12 +346,18 @@ void D3DAlpha_RenderList (void)
 			break;
 
 		case D3D_ALPHATYPE_WATERWARP:
-			D3DWarp_DrawSurface (d3d_AlphaList[i]->ModelSurf);
+			D3DWarp_DrawSurface (d3d_AlphaList[i]->surf, d3d_AlphaList[i]->SurfEntity);
 			break;
 
 		case D3D_ALPHATYPE_SURFACE:
 		case D3D_ALPHATYPE_FENCE:
-			D3DBrush_EmitSurface (d3d_AlphaList[i]->ModelSurf);
+			{
+				msurface_t *surf = d3d_AlphaList[i]->surf;
+				entity_t *ent = d3d_AlphaList[i]->SurfEntity;
+				texture_t *tex = R_TextureAnimation (ent, surf->texinfo->texture);
+
+				D3DBrush_EmitSurface (surf, tex, ent, ent->alphaval);
+			}
 			break;
 
 		case D3D_ALPHATYPE_CORONA:

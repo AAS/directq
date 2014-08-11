@@ -242,14 +242,14 @@ void Con_Init (void)
 	char	temp[MAXGAMEDIRLEN+1];
 	char	*t2 = "/qconsole.log";
 
-	con_debuglog = COM_CheckParm ("-condebug");
+	con_debuglog = (COM_CheckParm ("-condebug") != 0);
 
 	if (con_debuglog)
 	{
 		if (strlen (com_gamedir) < (MAXGAMEDIRLEN - strlen (t2)))
 		{
 			_snprintf (temp, 1001, "%s%s", com_gamedir, t2);
-			unlink (temp);
+			_unlink (temp);
 		}
 	}
 

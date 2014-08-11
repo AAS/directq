@@ -414,8 +414,6 @@ a lot of this can go away with a non-sw renderer
 */
 void V_UpdateCShifts (void)
 {
-	int		i, j;
-
 	if (cl.intermission)
 	{
 		// certain cshifts are removed on intermission

@@ -383,7 +383,7 @@ static void Slist_Poll (void *soak)
 		return;
 	}
 
-	if (! slistSilent)
+	if (!slistSilent)
 		PrintSlistTrailer();
 
 	slistInProgress = false;
@@ -414,7 +414,7 @@ qsocket_t *NET_Connect (char *host)
 
 	if (host)
 	{
-		if (stricmp (host, "local") == 0)
+		if (_stricmp (host, "local") == 0)
 		{
 			numdrivers = 1;
 			goto JustDoIt;
@@ -424,7 +424,7 @@ qsocket_t *NET_Connect (char *host)
 		{
 			for (n = 0; n < hostCacheCount; n++)
 			{
-				if (stricmp (host, hostcache[n].name) == 0)
+				if (_stricmp (host, hostcache[n].name) == 0)
 				{
 					host = hostcache[n].cname;
 					break;
@@ -435,11 +435,20 @@ qsocket_t *NET_Connect (char *host)
 				goto JustDoIt;
 		}
 	}
+	else
+	{
+		// connect with no args is the same as "connect local"
+		numdrivers = 1;
+		goto JustDoIt;
+	}
 
+	// this code was just for connecting to a server on the local LAN when issuing a connect command with no args
+	// it doesn't affect ability to connect to either local or remote servers by name
+	/*
 	slistSilent = host ? true : false;
 	NET_Slist_f ();
 
-	while (slistInProgress)
+	//while (slistInProgress)
 		NET_Poll();
 
 	if (host == NULL)
@@ -450,12 +459,13 @@ qsocket_t *NET_Connect (char *host)
 		host = hostcache[0].cname;
 		Con_Printf ("Connecting to...\n%s @ %s\n\n", hostcache[0].name, host);
 	}
+	*/
 
 	if (hostCacheCount)
 	{
 		for (n = 0; n < hostCacheCount; n++)
 		{
-			if (stricmp (host, hostcache[n].name) == 0)
+			if (_stricmp (host, hostcache[n].name) == 0)
 			{
 				host = hostcache[n].cname;
 				break;
@@ -463,8 +473,7 @@ qsocket_t *NET_Connect (char *host)
 		}
 	}
 
-JustDoIt:
-
+JustDoIt:;
 	for (net_driverlevel = 0; net_driverlevel < numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false)
@@ -680,7 +689,7 @@ bool NET_CanSendMessage (qsocket_t *sock)
 
 	r = sfunc.CanSendMessage (sock);
 
-	return r;
+	return (r != 0);
 }
 
 

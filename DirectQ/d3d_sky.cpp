@@ -22,10 +22,32 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-// surface interface
-void D3DBrush_Begin (void);
-void D3DBrush_End (void);
-void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent);
+LPDIRECT3DTEXTURE9 solidskytexture = NULL;
+LPDIRECT3DTEXTURE9 alphaskytexture = NULL;
+LPDIRECT3DCUBETEXTURE9 skyboxcubemap = NULL;
+LPDIRECT3DTEXTURE9 skyboxtextures[6] = {NULL};
+LPDIRECT3DTEXTURE9 skyspheretexture = NULL;
+LPDIRECT3DTEXTURE9 skyatan2texture = NULL;
+
+extern float AngleBuf[256];
+
+void D3DSky_ReleaseTextures (void)
+{
+	SAFE_RELEASE (skyboxtextures[0]);
+	SAFE_RELEASE (skyboxtextures[1]);
+	SAFE_RELEASE (skyboxtextures[2]);
+	SAFE_RELEASE (skyboxtextures[3]);
+	SAFE_RELEASE (skyboxtextures[4]);
+	SAFE_RELEASE (skyboxtextures[5]);
+
+	SAFE_RELEASE (skyboxcubemap);
+	SAFE_RELEASE (skyspheretexture);
+	SAFE_RELEASE (skyatan2texture);
+
+	SAFE_RELEASE (solidskytexture);
+	SAFE_RELEASE (alphaskytexture);
+}
+
 
 /*
 ==============================================================================================================================
@@ -35,45 +57,90 @@ void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent);
 ==============================================================================================================================
 */
 
-LPDIRECT3DTEXTURE9 solidskytexture = NULL;
-LPDIRECT3DTEXTURE9 alphaskytexture = NULL;
-LPDIRECT3DCUBETEXTURE9 skyboxcubemap = NULL;
-LPDIRECT3DTEXTURE9 skyboxtextures[6] = {NULL};
-
 // the menu needs to know the name of the loaded skybox
 char CachedSkyBoxName[MAX_PATH] = {0};
 bool SkyboxValid = false;
+bool SkySphereValid = false;
 int NumSkyboxComponents = 0;
+
+float spherescale_y = 1.0f;
 
 cvar_t r_skybackscroll ("r_skybackscroll", 8, CVAR_ARCHIVE);
 cvar_t r_skyfrontscroll ("r_skyfrontscroll", 16, CVAR_ARCHIVE);
 cvar_t r_skyalpha ("r_skyalpha", 1, CVAR_ARCHIVE);
+cvar_t r_skyscale ("r_skyscale", 3, CVAR_ARCHIVE);
 
-int r_numskysurfaces = 0;
+// intended to be used by mods
+cvar_t r_skyrotate_x ("r_skyrotate_x", 0.0f);
+cvar_t r_skyrotate_y ("r_skyrotate_y", 0.0f);
+cvar_t r_skyrotate_z ("r_skyrotate_z", 0.0f);
+cvar_t r_skyrotate_speed ("r_skyrotate_speed", 0.0f);
 
-void D3DSky_Begin (void)
+cvar_t r_skyspherescale ("r_skyspherescale", 1, CVAR_ARCHIVE);
+
+void D3DSky_DrawSkySurfaces (msurface_t *chain)
 {
-	if (SkyboxValid)
+	// instead of doing all this in the VS by hand we'll use a matrix instead; this lets us
+	// use the same VS for all 3 sky types
+	D3DMATRIX skymatrix;
+	D3DMatrix_Identity (&skymatrix);
+
+	if (SkyboxValid || SkySphereValid)
 	{
-		D3DHLSL_SetTexture (0, skyboxcubemap);
+		if ((r_skyrotate_x.value || r_skyrotate_y.value || r_skyrotate_z.value) && r_skyrotate_speed.value)
+		{
+			// rotate the skybox
+			float rot[3] =
+			{
+				r_skyrotate_x.value,
+				r_skyrotate_y.value,
+				r_skyrotate_z.value
+			};
+
+			VectorNormalize (rot);
+			D3DMatrix_Rotate (&skymatrix, rot[0], rot[1], rot[2], cl.time * r_skyrotate_speed.value);
+		}
 
 		D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
-		D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
 
-		D3DHLSL_SetPass (FX_PASS_SKYBOX);
+		if (SkyboxValid)
+		{
+			D3DHLSL_SetTexture (0, skyboxcubemap);
+			D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
+			D3DHLSL_SetPass (FX_PASS_SKYBOX);
+		}
+		else
+		{
+			D3D_SetSamplerState (0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
+			D3D_SetSamplerState (0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+			D3DHLSL_SetTexture (0, skyspheretexture);
+			D3DHLSL_SetTexture (1, skyatan2texture);
+
+			D3DHLSL_SetFloat ("skyspherescaley", spherescale_y * r_skyspherescale.value);
+
+			D3D_SetTextureMipmap (1, d3d_TexFilter, D3DTEXF_NONE);
+			D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
+
+			D3DHLSL_SetPass (FX_PASS_SKYSPHERE);
+		}
 	}
 	else
 	{
+		// flatten the sphere
+		D3DMatrix_Scale (&skymatrix, 1, 1, 3.0f);
+
 		// hlsl sky warp
 		float speedscale[] =
 		{
 			cl.time * r_skybackscroll.value,
 			cl.time * r_skyfrontscroll.value,
-			1
+			r_skyscale.value
 		};
 
-		speedscale[0] -= (int) speedscale[0] & ~127;
-		speedscale[1] -= (int) speedscale[1] & ~127;
+		// wrap in 0 to 127 range and bring back to 0 to 1 range
+		speedscale[0] = (speedscale[0] - ((int) speedscale[0] & ~127)) * 0.0078125f;
+		speedscale[1] = (speedscale[1] - ((int) speedscale[1] & ~127)) * 0.0078125f;
 
 		D3DHLSL_SetTexture (0, solidskytexture);
 		D3DHLSL_SetTexture (1, alphaskytexture);
@@ -83,39 +150,28 @@ void D3DSky_Begin (void)
 
 		D3D_SetTextureMipmap (0, d3d_TexFilter, D3DTEXF_NONE);
 		D3D_SetTextureMipmap (1, d3d_TexFilter, D3DTEXF_NONE);
+
 		D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
 		D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 
 		D3DHLSL_SetPass (FX_PASS_SKYWARP);
 	}
-}
 
+	// initialize sky for the frame
+	if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
+	if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
 
-void D3DSky_AddSurfaceToRender (msurface_t *surf, entity_t *ent)
-{
-	if (!r_numskysurfaces)
+	// move relative to view position only
+	D3DMatrix_Translate (&skymatrix, -r_refdef.vieworigin[0], -r_refdef.vieworigin[1], -r_refdef.vieworigin[2]);
+	D3DHLSL_SetMatrix ("EntMatrix", &skymatrix);
+
+	for (; chain; chain = chain->texturechain)
 	{
-		// initialize sky for the frame
-		if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
-		if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
-
-		D3DBrush_Begin ();
-		D3DSky_Begin ();
+		D3DBrush_PrecheckSurface (chain, NULL);
+		D3DBrush_BatchSurface (chain);
 	}
 
-	D3DBrush_SubmitSurface (surf, ent);
-	r_numskysurfaces++;
-}
-
-
-void D3DSky_FinalizeSky (void)
-{
-	if (r_numskysurfaces)
-	{
-		// draw anything left over
-		D3DBrush_End ();
-		r_numskysurfaces = 0;
-	}
+	D3DBrush_FlushSurfaces ();
 }
 
 
@@ -126,6 +182,9 @@ void D3DSky_FinalizeSky (void)
 
 ==============================================================================================================================
 */
+
+void FractalNoise (unsigned char *noise, int size, int startgrid);
+void FractalNoise32 (unsigned int *noise, int size, int startgrid);
 
 
 /*
@@ -148,7 +207,8 @@ void D3DSky_InitTextures (miptex_t *mt)
 	}
 
 	// because you never know when a mapper might use a non-standard size...
-	unsigned *trans = (unsigned *) Zone_Alloc (mt->width * mt->height * sizeof (unsigned) / 2);
+	int hunkmark = MainHunk->GetLowMark ();
+	unsigned *trans = (unsigned *) MainHunk->Alloc (mt->width * mt->height * sizeof (unsigned) / 2);
 
 	// copy out
 	int transwidth = mt->width / 2;
@@ -165,7 +225,6 @@ void D3DSky_InitTextures (miptex_t *mt)
 	lastwidth = transwidth;
 	lastheight = transheight;
 
-	byte *src = (byte *) mt + mt->offsets[0];
 	unsigned int transpix, r = 0, g = 0, b = 0;
 
 	// make an average value for the back to avoid a fringe on the top level
@@ -174,7 +233,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 		for (int j = 0; j < transwidth; j++)
 		{
 			// solid sky can go up as 8 bit
-			int p = src[i * mt->width + j + transwidth];
+			int p = mt->texels[i * mt->width + j + transwidth];
 			((byte *) trans)[(i * transwidth) + j] = p;
 
 			r += d3d_QuakePalette.standard[p].peRed;
@@ -198,7 +257,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 	{
 		for (int j = 0; j < transwidth; j++)
 		{
-			int p = src[i * mt->width + j];
+			int p = mt->texels[i * mt->width + j];
 
 			if (p == 0)
 				trans[(i * transwidth) + j] = transpix;
@@ -212,7 +271,7 @@ void D3DSky_InitTextures (miptex_t *mt)
 		D3D_UploadTexture (&alphaskytexture, trans, transwidth, transheight, IMAGE_32BIT | IMAGE_ALPHA);
 
 	// prevent it happening first time during game play
-	Zone_Free (trans);
+	MainHunk->FreeToLowMark (hunkmark);
 }
 
 
@@ -227,10 +286,15 @@ void D3DSky_UnloadSkybox (void)
 	SAFE_RELEASE (skyboxtextures[3]);
 	SAFE_RELEASE (skyboxtextures[4]);
 	SAFE_RELEASE (skyboxtextures[5]);
+
 	SAFE_RELEASE (skyboxcubemap);
+	SAFE_RELEASE (skyspheretexture);
+	SAFE_RELEASE (skyatan2texture);
 
 	// the skybox is invalid now so revert to regular warps
 	SkyboxValid = false;
+	SkySphereValid = false;
+
 	CachedSkyBoxName[0] = 0;
 	NumSkyboxComponents = 0;
 }
@@ -492,6 +556,59 @@ void D3DSky_LoadSkyBox (char *basename, bool feedback)
 		return;
 	}
 
+	// not a skybox so try load a sphere texture
+	if (D3D_LoadExternalTexture (&skyspheretexture, basename, IMAGE_32BIT))
+	{
+		D3DSURFACE_DESC surfdesc;
+
+		skyspheretexture->GetLevelDesc (0, &surfdesc);
+		spherescale_y = ((float) surfdesc.Width / (float) surfdesc.Height) / 2.0f;
+
+		SAFE_RELEASE (skyatan2texture);
+		D3DLOCKED_RECT lockrect;
+
+		d3d_Device->CreateTexture (256, 256, 1, 0, D3DFMT_L16, D3DPOOL_MANAGED, &skyatan2texture, NULL);
+		skyatan2texture->LockRect (0, &lockrect, NULL, 0);
+
+		unsigned short *data = (unsigned short *) lockrect.pBits;
+
+		// skyatan2texture
+		for (int y = 0, i = 0; y < 256; y++)
+		{
+			for (int x = 0; x < 256; x++, i++)
+			{
+				if (x == 0 && y == 0)
+					data[i] = 0;
+				else
+				{
+					float fx = (float) x / 255.0f;
+					float fy = (float) y / 255.0f;
+
+					fx = (fx * 2.0f) - 1.0f;
+					fy = (fy * 2.0f) - 1.0f;
+
+					float at2 = atan2 (fy, fx);
+
+					if (at2 == at2)
+					{
+						if ((at2 = (at2 + D3DX_PI) / (2 * D3DX_PI)) > 1)
+							data[i] = 65535;
+						else if (at2 < 0)
+							data[i] = 0;
+						else data[i] = (unsigned short) ((at2 * 65535.0f) + 0.5f);
+					}
+					else data[i] = 0;
+				}
+			}
+		}
+
+		skyatan2texture->UnlockRect (0);
+		SkySphereValid = true;
+
+		SCR_WriteTextureToTGA ("at2.tga", skyatan2texture, D3DFMT_X8R8G8B8);
+		return;
+	}
+
 	if (feedback) Con_Printf ("Failed to load skybox\n");
 }
 
@@ -589,7 +706,7 @@ void D3DSky_ParseWorldSpawn (void)
 		if (!data) return;
 
 		// check the key for a sky - notice the lack of standardisation in full swing again here!
-		if (!stricmp (key, "sky") || !stricmp (key, "skyname") || !stricmp (key, "q1sky") || !stricmp (key, "skybox"))
+		if (!_stricmp (key, "sky") || !_stricmp (key, "skyname") || !_stricmp (key, "q1sky") || !_stricmp (key, "skybox"))
 		{
 			// attempt to load it (silently fail)
 			// direct from com_token - is this safe?  should be...

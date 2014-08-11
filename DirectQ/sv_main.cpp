@@ -32,7 +32,7 @@ server_t		sv;
 server_static_t	svs;
 
 // inline model names for precache - extra space for an extra digit
-char	localmodels[MAX_MODELS][6];
+char	localmodels[MAX_MODELS][8];
 
 
 CQuakeHunk *Pool_Edicts = NULL;
@@ -146,7 +146,7 @@ static void SV_SetProtocol_f (void)
 	{
 		if (!protolist[i]) break;
 
-		if (!stricmp (protolist[i], newprotocol))
+		if (!_stricmp (protolist[i], newprotocol))
 		{
 			if (!i)
 				sv_protocol = 15;
@@ -170,7 +170,7 @@ SV_Init
 */
 void SV_Init (void)
 {
-	for (int i = 0; i < MAX_MODELS; i++) _snprintf (localmodels[i], 6, "*%i", i);
+	for (int i = 0; i < MAX_MODELS; i++) sprintf (localmodels[i], "*%i", i);
 
 	memset (&sv, 0, sizeof (server_t));
 }
@@ -382,7 +382,7 @@ void SV_SendServerinfo (client_t *client)
 	else
 		MSG_WriteByte (&client->message, GAME_COOP);
 
-	_snprintf (message, 2048, SVProgs->Strings + SVProgs->EdictPointers[0]->v.message);
+	_snprintf (message, 2048, SVProgs->GetString (SVProgs->EdictPointers[0]->v.message));
 
 	MSG_WriteString (&client->message, message);
 
@@ -404,7 +404,7 @@ void SV_SendServerinfo (client_t *client)
 		}
 
 		// this catches cases where the sound has already been set up for precaching
-		if (!stricmp (sv.sound_precache[i], Damage2Hack)) break;
+		if (!_stricmp (sv.sound_precache[i], Damage2Hack)) break;
 	}
 
 	for (s = sv.sound_precache + 1; s[0]; s++)
@@ -652,7 +652,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (ent != clent)	// clent is ALLWAYS sent
 		{
 			// ignore ents without visible models
-			if (!ent->v.modelindex || !SVProgs->Strings[ent->v.model])
+			if (!ent->v.modelindex || !SVProgs->GetString (ent->v.model)[0])
 			{
 				ent->steplerptime = 0;
 				continue;
@@ -771,6 +771,8 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		if (ent->baseline.effects != ent->v.effects) bits |= U_EFFECTS;
 		if (ent->baseline.modelindex != ent->v.modelindex) bits |= U_MODEL;
 
+		alpha = ent->baseline.alpha;
+		/*
 		// assume that alpha is not going to change
 		alpha = ent->baseline.alpha;
 
@@ -785,24 +787,23 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		{
 			alpha = ent->alpha;
 		}
+		*/
 
 		// Nehahra: Model Alpha
-		eval_t  *val;
-		alpha = ent->alpha;
+		eval_t *val = NULL;
 
-		if (ed_alpha && alpha > 254)
+		alpha = ent->alphaval;
+
+		if (ed_alpha)
 		{
-			// if we have an alpha field in the progs we use it
-			if (val = GETEDICTFIELDVALUEFAST (ent, ed_alpha))
+			if ((val = GETEDICTFIELDVALUEFAST (ent, ed_alpha)) != NULL)
 			{
-				float falpha = val->_float * 255.0f;
-
-				alpha = falpha;
-
-				if (alpha < 1) alpha = 255;
-				if (alpha > 255) alpha = 255;
+				if (val->_float <= 0)
+					alpha = 0;
+				else if (val->_float >= 1)
+					alpha = 0;
+				else alpha = val->_float * 255;
 			}
-			else alpha = 255;
 		}
 
 		// to do
@@ -816,13 +817,13 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		}
 		else fullbright = 0;
 
-		// only send if not protocol 15 - note - FUCKING nehahra uses protocol 15 but sends non-standard messages - FUCK FUCK FUCK
-//		if ((alpha < 255 || fullbright) && (sv.Protocol != PROTOCOL_VERSION_NQ || nehahra)) bits |= U_TRANS;
+		// only send U_TRANS if protocol 15 - note - FUCKING nehahra uses protocol 15 but sends non-standard messages - FUCK FUCK FUCK
+		// if (((alpha < 255 && alpha > 0) || fullbright) && (sv.Protocol == PROTOCOL_VERSION_NQ || nehahra)) bits |= U_TRANS;
 
 		if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ)
 		{
 			// certain FQ protocol messages are not yet implemented
-			// if (ent->baseline.alpha != alpha) bits |= U_ALPHA;
+			if (ent->baseline.alpha != alpha) bits |= U_ALPHA;
 			if ((bits & U_FRAME) && (int) ent->v.frame & 0xFF00) bits |= U_FRAME2;
 			if ((bits & U_MODEL) && (int) ent->v.modelindex & 0xFF00) bits |= U_MODEL2;
 			if (ent->sendinterval) bits |= U_LERPFINISH;
@@ -877,11 +878,11 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 //		Con_Printf ("sending %s\n", sv.model_precache[(int) ent->v.modelindex]);
 
 		/*
-		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION_NQ) && (sv.Protocol != PROTOCOL_VERSION_FITZ) && (sv.Protocol != PROTOCOL_VERSION_RMQ))
+		if (bits & U_TRANS)
 		{
 			// Nehahra/.alpha
 			MSG_WriteFloat (msg, 2);
-			MSG_WriteFloat (msg, (float) ent->alpha / 255.0f);
+			MSG_WriteFloat (msg, (float) alpha / 255.0f);
 			MSG_WriteFloat (msg, fullbright);
 		}
 		*/
@@ -997,7 +998,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 
 	if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ)
 	{
-		if ((bits & SU_WEAPON) && (SV_ModelIndex (SVProgs->Strings + ent->v.weaponmodel) & 0xFF00)) bits |= SU_WEAPON2;
+		if ((bits & SU_WEAPON) && (SV_ModelIndex (SVProgs->GetString (ent->v.weaponmodel)) & 0xFF00)) bits |= SU_WEAPON2;
 		if ((int) ent->v.armorvalue & 0xFF00) bits |= SU_ARMOR2;
 		if ((int) ent->v.currentammo & 0xFF00) bits |= SU_AMMO2;
 		if ((int) ent->v.ammo_shells & 0xFF00) bits |= SU_SHELLS2;
@@ -1005,7 +1006,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 		if ((int) ent->v.ammo_rockets & 0xFF00) bits |= SU_ROCKETS2;
 		if ((int) ent->v.ammo_cells & 0xFF00) bits |= SU_CELLS2;
 		if ((bits & SU_WEAPONFRAME) && ((int) ent->v.weaponframe & 0xFF00)) bits |= SU_WEAPONFRAME2;
-		if ((bits & SU_WEAPON) && ent->alpha != 255) bits |= SU_WEAPONALPHA;
+		if ((bits & SU_WEAPON) && (ent->alphaval < 255 && ent->alphaval > 0)) bits |= SU_WEAPONALPHA;
 		if (bits >= 65536) bits |= SU_EXTEND1;
 		if (bits >= 16777216) bits |= SU_EXTEND2;
 	}
@@ -1032,7 +1033,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	if (bits & SU_ARMOR) MSG_WriteByte (msg, ent->v.armorvalue);
 
 	// always sent
-	SV_WriteByteShort (msg, SV_ModelIndex (SVProgs->Strings + ent->v.weaponmodel));
+	SV_WriteByteShort (msg, SV_ModelIndex (SVProgs->GetString (ent->v.weaponmodel)));
 
 	MSG_WriteShort (msg, ent->v.health);
 	MSG_WriteByte (msg, ent->v.currentammo);
@@ -1055,7 +1056,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 		}
 	}
 
-	if (bits & SU_WEAPON2) MSG_WriteByte (msg, SV_ModelIndex (SVProgs->Strings + ent->v.weaponmodel) >> 8);
+	if (bits & SU_WEAPON2) MSG_WriteByte (msg, SV_ModelIndex (SVProgs->GetString (ent->v.weaponmodel)) >> 8);
 	if (bits & SU_ARMOR2) MSG_WriteByte (msg, (int) ent->v.armorvalue >> 8);
 	if (bits & SU_AMMO2) MSG_WriteByte (msg, (int) ent->v.currentammo >> 8);
 	if (bits & SU_SHELLS2) MSG_WriteByte (msg, (int) ent->v.ammo_shells >> 8);
@@ -1063,7 +1064,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	if (bits & SU_ROCKETS2) MSG_WriteByte (msg, (int) ent->v.ammo_rockets >> 8);
 	if (bits & SU_CELLS2) MSG_WriteByte (msg, (int) ent->v.ammo_cells >> 8);
 	if (bits & SU_WEAPONFRAME2) MSG_WriteByte (msg, (int) ent->v.weaponframe >> 8);
-	if (bits & SU_WEAPONALPHA) MSG_WriteByte (msg, ent->alpha);
+	if (bits & SU_WEAPONALPHA) MSG_WriteByte (msg, ent->alphaval);
 }
 
 
@@ -1379,14 +1380,14 @@ void SV_CreateBaseline (void)
 			// player model
 			svent->baseline.colormap = entnum;
 			svent->baseline.modelindex = SV_ModelIndex ("progs/player.mdl");
-			svent->baseline.alpha = 255;
+			svent->baseline.alpha = 0;
 		}
 		else
 		{
 			// other model
 			svent->baseline.colormap = 0;
-			svent->baseline.modelindex = SV_ModelIndex (SVProgs->Strings + svent->v.model);
-			svent->baseline.alpha = svent->alpha;
+			svent->baseline.modelindex = SV_ModelIndex (SVProgs->GetString (svent->v.model));
+			svent->baseline.alpha = svent->alphaval;
 		}
 
 		bits = 0;
@@ -1395,7 +1396,7 @@ void SV_CreateBaseline (void)
 		{
 			if (svent->baseline.modelindex & 0xFF00) bits |= B_LARGEMODEL;
 			if (svent->baseline.frame & 0xFF00) bits |= B_LARGEFRAME;
-			if (svent->baseline.alpha < 255) bits |= B_ALPHA;
+			if (svent->baseline.alpha < 255 && svent->baseline.alpha > 0) bits |= B_ALPHA;
 		}
 		else svent->baseline.alpha = 255;
 
@@ -1620,8 +1621,10 @@ void SV_SpawnServer (char *server)
 	// clear world interaction links
 	SV_ClearWorld ();
 
-	sv.sound_precache[0] = SVProgs->Strings;
-	sv.model_precache[0] = SVProgs->Strings;
+	static char	dummy[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+	sv.sound_precache[0] = dummy;
+	sv.model_precache[0] = dummy;
 	sv.model_precache[1] = sv.modelname;
 
 	for (i = 1; i < sv.worldmodel->brushhdr->numsubmodels; i++)
@@ -1640,7 +1643,7 @@ void SV_SpawnServer (char *server)
 	ent = GetEdictForNumber (0);
 	memset (&ent->v, 0, SVProgs->QC->entityfields * 4);
 	ent->free = false;
-	ent->v.model = sv.worldmodel->name - SVProgs->Strings;
+	ent->v.model = SVProgs->SetString (sv.worldmodel->name);
 	ent->v.modelindex = 1;		// world model
 	ent->v.solid = SOLID_BSP;
 	ent->v.movetype = MOVETYPE_PUSH;
@@ -1650,7 +1653,7 @@ void SV_SpawnServer (char *server)
 		SVProgs->GlobalStruct->coop = coop.value;
 	else SVProgs->GlobalStruct->deathmatch = deathmatch.value;
 
-	SVProgs->GlobalStruct->mapname = sv.name - SVProgs->Strings;
+	SVProgs->GlobalStruct->mapname = SVProgs->SetString (sv.name);
 
 	// serverflags are for cross level information (sigils)
 	SVProgs->GlobalStruct->serverflags = svs.serverflags;

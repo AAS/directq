@@ -143,6 +143,13 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 	this->GlobalStruct = (globalvars_t *) this->Globals;
 	this->EdictSize = this->QC->entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
 
+	// init the string table
+	this->StringSize = this->QC->numstrings;
+	this->KnownStrings = NULL;
+	this->NumKnownStrings = 0;
+	this->MaxKnownStrings = 0;
+	this->SetString ("");
+
 	// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
 	// initialize function numbers for PROGS.DAT
 	pr_numbuiltins = 0;
@@ -175,11 +182,11 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 			if (this->Functions[i].first_statement < 0)	// builtin function
 			{
 				funcno = -this->Functions[i].first_statement;
-				funcname = this->Strings + this->Functions[i].s_name;
+				funcname = SVProgs->GetString (this->Functions[i].s_name);
 
 				// search function name
 				for (j = 1; j < pr_ebfs_numbuiltins; j++)
-					if (!(stricmp (funcname, pr_ebfs_builtins[j].funcname)))
+					if (!(_stricmp (funcname, pr_ebfs_builtins[j].funcname)))
 						break;	// found
 
 				if (j < pr_ebfs_numbuiltins)	// found
@@ -263,7 +270,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 	dfunction_t	*f, *newf;
 	int		runaway;
 	int		i;
-	edict_t		*ed;
+	edict_t		*ed = NULL;
 	int		exitdepth;
 	eval_t		*ptr;
 
@@ -379,7 +386,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 			c->_float = !a->vector[0] && !a->vector[1] && !a->vector[2];
 			break;
 		case OP_NOT_S:
-			c->_float = !a->string || !this->Strings[a->string];
+			c->_float = !a->string || !(SVProgs->GetString (a->string))[0];
 			break;
 		case OP_NOT_FNC:
 			c->_float = !a->function;
@@ -396,7 +403,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 						(a->vector[2] == b->vector[2]);
 			break;
 		case OP_EQ_S:
-			c->_float = !strcmp (this->Strings + a->string, this->Strings + b->string);
+			c->_float = !strcmp (SVProgs->GetString (a->string), SVProgs->GetString (b->string));
 			break;
 		case OP_EQ_E:
 			c->_float = a->_int == b->_int;
@@ -413,7 +420,7 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 						(a->vector[2] != b->vector[2]);
 			break;
 		case OP_NE_S:
-			c->_float = strcmp (this->Strings + a->string, this->Strings + b->string);
+			c->_float = strcmp (SVProgs->GetString (a->string), SVProgs->GetString (b->string));
 			break;
 		case OP_NE_E:
 			c->_float = a->_int != b->_int;
@@ -712,7 +719,7 @@ void CProgsDat::Profile (void)
 		if (best)
 		{
 			if (num < 10)
-				Con_Printf ("%7i %s\n", best->profile, this->Strings + best->s_name);
+				Con_Printf ("%7i %s\n", best->profile, SVProgs->GetString (best->s_name));
 
 			num++;
 			best->profile = 0;
@@ -746,11 +753,109 @@ void CProgsDat::StackTrace (void)
 			Con_Printf
 			(
 				"%12s : %s statement %i\n",
-				this->Strings + f->s_file,
-				this->Strings + f->s_name,
+				SVProgs->GetString (f->s_file),
+				SVProgs->GetString (f->s_name),
 				this->Stack[i].s - f->first_statement
 			);
 		}
 		else Con_Printf ("<NO FUNCTION>\n");
 	}
 }
+
+
+// =====================================================================================================================
+// STRINGS
+
+#define	PR_STRING_ALLOCSLOTS	256
+
+void CProgsDat::AllocStringSlots (void)
+{
+	int oldmax = this->MaxKnownStrings;
+
+	this->MaxKnownStrings += PR_STRING_ALLOCSLOTS;
+	Con_DPrintf ("PR_AllocStringSlots: realloc'ing for %d slots\n", this->MaxKnownStrings);
+
+	// don't abuse zone memory
+	if (this->KnownStrings)
+	{
+		char **tmpks = (char **) ServerZone->Alloc (this->MaxKnownStrings * sizeof (char *));
+		memset (tmpks, 0, this->MaxKnownStrings * sizeof (char *));
+
+		memcpy (tmpks, this->KnownStrings, oldmax * sizeof (char *));
+
+		ServerZone->Free (this->KnownStrings);
+		this->KnownStrings = tmpks;
+	}
+	else
+	{
+		this->KnownStrings = (char **) ServerZone->Alloc (this->MaxKnownStrings * sizeof (char *));
+		memset (this->KnownStrings, 0, this->MaxKnownStrings * sizeof (char *));
+	}
+}
+
+
+int CProgsDat::AllocString (int size, char **ptr)
+{
+	int i;
+
+	if (!size)
+		return 0;
+
+	for (i = 0; i < this->NumKnownStrings; i++)
+	{
+		if (!this->KnownStrings[i])
+			break;
+	}
+
+	if (i >= this->MaxKnownStrings)
+		this->AllocStringSlots ();
+
+	this->NumKnownStrings++;
+	this->KnownStrings[i] = (char *) ServerZone->Alloc (size);
+
+	if (ptr)
+		*ptr = this->KnownStrings[i];
+
+	return -1 - i;
+}
+
+
+char *CProgsDat::GetString (int num)
+{
+	if (num >= 0 && num < this->StringSize)
+		return this->Strings + num;
+	else if (num < 0 && num >= -this->NumKnownStrings)
+	{
+		if (!this->KnownStrings[-1 - num])
+			return "";
+		else return this->KnownStrings[-1 - num];
+	}
+	else return "";
+}
+
+
+int CProgsDat::SetString (char *s)
+{
+	int		i;
+
+	if (!s) return 0;
+
+	if (s >= this->Strings && s <= this->Strings + this->StringSize - 2)
+		return (int) (s - this->Strings);
+
+	for (i = 0; i < this->NumKnownStrings; i++)
+	{
+		// replace an existing string
+		if (this->KnownStrings[i] == s)
+			return -1 - i;
+	}
+
+	if (i >= this->MaxKnownStrings)
+		this->AllocStringSlots ();
+
+	this->NumKnownStrings++;
+	this->KnownStrings[i] = s;
+
+	return -1 - i;
+}
+

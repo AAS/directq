@@ -41,24 +41,18 @@ typedef struct
 	int 	length;
 	int 	loopstart;
 	int 	speed;
-	int 	width;
 	int 	stereo;
 	int		memsize;
-	byte	data[1];		// variable sized
+	short	data[1];		// variable sized
 } sfxcache_t;
-
-
-#define	MAX_SFX		512
 
 
 typedef struct sfx_s
 {
 	char 	name[MAX_QPATH];
+	LPDIRECTSOUNDBUFFER8 Buffer;
 	sfxcache_t *sndcache;
-	struct sfx_s *next;
 } sfx_t;
-
-extern sfx_t *active_sfx;
 
 extern CQuakeCache *SoundCache;
 extern CQuakeZone *SoundHeap;
@@ -98,6 +92,8 @@ typedef struct
 	int		rate;
 	int		width;
 	int		channels;
+	int		byterate;
+	int		blockalign;
 	int		loopstart;
 	int		samples;
 	int		dataofs;		// chunk starts this many bytes from file start
@@ -160,7 +156,6 @@ extern vec3_t listener_up;
 extern volatile dma_t *shm;
 extern volatile dma_t sn;
 
-extern	cvar_t loadas8bit;
 extern	cvar_t bgmvolume;
 extern	cvar_t volume;
 
@@ -173,8 +168,6 @@ sfxcache_t *S_LoadSound (sfx_t *s);
 void S_BlockSound (bool block);
 
 wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength);
-
-void SND_InitScaletable (void);
 
 void S_AmbientOff (void);
 void S_AmbientOn (void);

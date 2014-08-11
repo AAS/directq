@@ -31,7 +31,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern HRESULT hr;
 
 #include <ddraw.h>
-#include <dsound.h>
 
 extern	int			global_nCmdShow;
 
@@ -39,7 +38,7 @@ void S_ClearSounds (void);
 bool D3DVid_IsFullscreen (void);
 
 extern HWND			d3d_Window;
-extern bool		ActiveApp, Minimized;
+extern BOOL			ActiveApp, Minimized;
 
 extern bool	WinNT;
 

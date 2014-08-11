@@ -110,9 +110,9 @@ IN_StartupJoystick
 */
 void IN_StartupJoystick (void)
 {
-	int			i, numdevs;
+	int			numdevs;
 	JOYCAPS		jc;
-	MMRESULT	mmr;
+	MMRESULT	mmr = JOYERR_NOERROR;
 
 	// assume no joystick
 	joy_avail = false;
@@ -158,7 +158,7 @@ void IN_StartupJoystick (void)
 
 	// save the joystick's number of buttons and POV status
 	joy_numbuttons = jc.wNumButtons;
-	joy_haspov = jc.wCaps & JOYCAPS_HASPOV;
+	joy_haspov = (jc.wCaps & JOYCAPS_HASPOV) ? true : false;
 
 	// old button and POV states default to no buttons pressed
 	joy_oldbuttonstate = joy_oldpovstate = 0;

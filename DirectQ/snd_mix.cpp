@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -30,7 +30,6 @@ extern DWORD ds_SoundBufferSize;
 
 portable_samplepair_t *paintbuffer = NULL;
 
-int		**snd_scaletable = NULL;
 int 	*snd_p, snd_linear_count, snd_vol;
 short	*snd_out;
 
@@ -51,10 +50,10 @@ void Snd_WriteLinearBlastStereo16 (void)
 	for (int l = 0, r = 1; l < snd_linear_count; l += 2, r += 2)
 	{
 		int val = (snd_p[l] * snd_vol) >> 8;
-		snd_out[l] = (val > 32767) ? 32767 : ((val < -32768) ? -32768 : val);
+		snd_out[l] = (val > 32767) ? 32767 : ( (val < -32768) ? -32768 : val);
 
 		val = (snd_p[r] * snd_vol) >> 8;
-		snd_out[r] = (val > 32767) ? 32767 : ((val < -32768) ? -32768 : val);
+		snd_out[r] = (val > 32767) ? 32767 : ( (val < -32768) ? -32768 : val);
 	}
 }
 
@@ -83,7 +82,7 @@ void S_TransferStereo16 (int endtime)
 	while (lpaintedtime < endtime)
 	{
 		// handle recirculating buffer issues
-		lpos = lpaintedtime & ((shm->samples >> 1) - 1);
+		lpos = lpaintedtime & ( (shm->samples >> 1) - 1);
 
 		snd_out = (short *) pbuf + (lpos << 1);
 		snd_linear_count = (shm->samples >> 1) - lpos;
@@ -120,7 +119,7 @@ void S_TransferPaintBuffer (int endtime)
 
 	int *p = (int *) paintbuffer;
 	int count = (endtime - paintedtime) * shm->channels;
-	int out_mask = shm->samples - 1; 
+	int out_mask = shm->samples - 1;
 	int out_idx = paintedtime * shm->channels & (shm->samples - 1);
 	int step = 3 - shm->channels;
 	int snd_vol = volume.value * 256;
@@ -134,7 +133,7 @@ void S_TransferPaintBuffer (int endtime)
 
 		while (count--)
 		{
-			int val = ((*p) * snd_vol) >> 8;
+			int val = ( (*p) * snd_vol) >> 8;
 			p += step;
 
 			if (val > 32767) val = 32767; else if (val < -32768) val = -32768;
@@ -149,7 +148,7 @@ void S_TransferPaintBuffer (int endtime)
 
 		while (count--)
 		{
-			int val = ((*p) * snd_vol) >> 8;
+			int val = ( (*p) * snd_vol) >> 8;
 			p += step;
 
 			if (val > 32767) val = 32767; else if (val < -32768) val = -32768;
@@ -170,50 +169,6 @@ CHANNEL MIXING
 
 ===============================================================================
 */
-
-void SND_InitScaletable (void)
-{
-	// set up the scale table first time
-	if (!snd_scaletable)
-	{
-		// use a higher quality scale table than the Quake default
-		// (this is just an array lookup so the only real penalty comes from memory overhead)
-		snd_scaletable = (int **) Zone_Alloc (256 * sizeof (int *));
-		for (int i = 0; i < 256; i++) snd_scaletable[i] = NULL;
-	}
-
-	for (int i = 0; i < 256; i++)
-	{
-		if (!snd_scaletable[i]) snd_scaletable[i] = (int *) Zone_Alloc (256 * sizeof (int));
-		for (int j = 0; j < 256; j++) snd_scaletable[i][j] = ((signed char) j) * i;
-	}
-}
-
-
-void SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int count)
-{
-	// init the paintbuffer if we need to
-	Snd_InitPaintBuffer ();
-
-	if (ch->leftvol > 255) ch->leftvol = 255;
-	if (ch->rightvol > 255) ch->rightvol = 255;
-
-	int *lscale = snd_scaletable[ch->leftvol];
-	int *rscale = snd_scaletable[ch->rightvol];
-
-	unsigned char *sfx = (unsigned char *) sc->data + ch->pos;
-
-	for (int i = 0; i < count; i++)
-	{
-		int data = sfx[i];
-
-		paintbuffer[i].left += lscale[data];
-		paintbuffer[i].right += rscale[data];
-	}
-
-	ch->pos += count;
-}
-
 
 void SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count)
 {
@@ -283,11 +238,8 @@ void S_PaintChannels (int endtime)
 				else count = end - ltime;
 
 				if (count > 0)
-				{	
-					if (sc->width == 1)
-						SND_PaintChannelFrom8 (ch, sc, count);
-					else SND_PaintChannelFrom16 (ch, sc, count);
-	
+				{
+					SND_PaintChannelFrom16 (ch, sc, count);
 					ltime += count;
 				}
 
@@ -299,8 +251,9 @@ void S_PaintChannels (int endtime)
 						ch->pos = sc->loopstart;
 						ch->end = ltime + sc->length - ch->pos;
 					}
-					else				
-					{	// channel just stopped
+					else
+					{
+						// channel just stopped
 						ch->sfx = NULL;
 						break;
 					}

@@ -699,7 +699,7 @@ void CL_UpdateTEnts (void)
 				break;
 
 			ent->model = b->model;
-			ent->alphaval = 255;
+			ent->alphaval = 0;
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
 			ent->angles[2] = anglestable[(int) ((cl.time * cl_shaftspeed.value) + d) & 1023];

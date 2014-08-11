@@ -42,7 +42,8 @@ LPDIRECT3DTEXTURE9 d3d_PaletteRowTextures[16] = {NULL};
 LPDIRECT3DTEXTURE9 r_notexture = NULL;
 
 extern LPDIRECT3DTEXTURE9 crosshairtexture;
-extern LPDIRECT3DTEXTURE9 smokepufftexture;
+extern LPDIRECT3DTEXTURE9 particletexture;
+extern LPDIRECT3DTEXTURE9 shadetexture;
 
 
 void D3DMisc_CreatePalette (void)
@@ -92,18 +93,156 @@ void R_InitTextures (void)
 }
 
 
+void FractalNoise (unsigned char *noise, int size, int startgrid)
+{
+	int x, y, g, g2, amplitude, min, max, size1 = size - 1, sizepower, gridpower;
+	int *noisebuf;
+	int hunkmark = MainHunk->GetLowMark ();
+
+#define n(x, y) noisebuf[((y) & size1) * size + ((x) & size1)]
+
+	for (sizepower = 0; (1 << sizepower) < size; sizepower++);
+
+	if (size != (1 << sizepower))
+	{
+		Con_Printf ("fractalnoise: size must be power of 2\n");
+		return;
+	}
+
+	for (gridpower = 0; (1 << gridpower) < startgrid; gridpower++);
+
+	if (startgrid != (1 << gridpower))
+	{
+		Con_Printf ("fractalnoise: grid must be power of 2\n");
+		return;
+	}
+
+	if (startgrid < 0) startgrid = 0;
+	if (startgrid > size) startgrid = size;
+
+	amplitude = 0xffff; // this gets halved before use
+	noisebuf = (int *) MainHunk->Alloc (size * size * sizeof (int));
+	memset (noisebuf, 0, size * size * sizeof (int));
+
+	for (g2 = startgrid; g2; g2 >>= 1)
+	{
+		// brownian motion (at every smaller level there is random behavior)
+		amplitude >>= 1;
+
+		for (y = 0; y < size; y += g2)
+			for (x = 0; x < size; x += g2)
+				n (x, y) += (rand () & amplitude);
+
+		g = g2 >> 1;
+
+		if (g)
+		{
+			// subdivide, diamond-square algorithm (really this has little to do with squares)
+			// diamond
+			for (y = 0; y < size; y += g2)
+				for (x = 0; x < size; x += g2)
+					n (x + g, y + g) = (n (x, y) + n (x + g2, y) + n (x, y + g2) + n (x + g2, y + g2)) >> 2;
+
+			// square
+			for (y = 0; y < size; y += g2)
+			{
+				for (x = 0; x < size; x += g2)
+				{
+					n (x + g, y) = (n (x, y) + n (x + g2, y) + n (x + g, y - g) + n (x + g, y + g)) >> 2;
+					n (x, y + g) = (n (x, y) + n (x, y + g2) + n (x - g, y + g) + n (x + g, y + g)) >> 2;
+				}
+			}
+		}
+	}
+
+	// find range of noise values
+	min = max = 0;
+
+	for (y = 0; y < size; y++)
+	{
+		for (x = 0; x < size; x++)
+		{
+			if (n (x, y) < min) min = n (x, y);
+			if (n (x, y) > max) max = n (x, y);
+		}
+	}
+
+	max -= min;
+	max++;
+
+	// normalize noise and copy to output
+	for (y = 0; y < size; y++)
+		for (x = 0; x < size; x++)
+			*noise++ = (unsigned char) (((n (x, y) - min) * 256) / max);
+
+	MainHunk->FreeToLowMark (hunkmark);
+#undef n
+}
+
+
+void FractalNoise32 (unsigned int *noise, int size, int startgrid)
+{
+	int hunkmark = MainHunk->GetLowMark ();
+
+	byte *b = (byte *) MainHunk->Alloc (size * size);
+	byte *g = (byte *) MainHunk->Alloc (size * size);
+	byte *r = (byte *) MainHunk->Alloc (size * size);
+	byte *a = (byte *) MainHunk->Alloc (size * size);
+
+	FractalNoise (b, size, startgrid);
+	FractalNoise (g, size, startgrid);
+	FractalNoise (r, size, startgrid);
+	FractalNoise (a, size, startgrid);
+
+	byte *bgra = (byte *) noise;
+
+	for (int i = 0; i < size * size; i++, bgra += 4)
+	{
+		bgra[0] = b[i];
+		bgra[1] = g[i];
+		bgra[2] = r[i];
+		bgra[3] = a[i];
+	}
+
+	MainHunk->FreeToLowMark (hunkmark);
+}
+
+
 void Draw_FreeCrosshairs (void);
 void D3DWarp_WWTexOnRecover (void);
 void D3DPart_OnRecover (void);
 
 void R_ReleaseResourceTextures (void)
 {
-	SAFE_RELEASE (smokepufftexture);
 	SAFE_RELEASE (crosshairtexture);
+	SAFE_RELEASE (particletexture);
 	SAFE_RELEASE (r_notexture);
+	SAFE_RELEASE (shadetexture);
 
 	// and replacement crosshairs too
 	Draw_FreeCrosshairs ();
+}
+
+
+void R_FlattenTexture (unsigned *data, int width, int height)
+{
+	byte *bgra = (byte *) data;
+
+	for (int h = 0; h < height; h++)
+	{
+		for (int w = 0; w < width; w++, bgra += 4)
+		{
+			for (int c = 0; c < 4; c++)
+			{
+				int in = bgra[c];
+
+				in >>= 1;
+				in += 64;
+
+				bgra[c] = in;
+			}
+		}
+	}
 }
 
 
@@ -111,20 +250,47 @@ void D3D_MakeAlphaTexture (LPDIRECT3DTEXTURE9 tex);
 
 void R_InitResourceTextures (void)
 {
+	// load the notexture properly
+	// D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->size[0], r_notexture_mip->size[1], IMAGE_MIPMAP);
+	r_notexture_mip->teximage = D3D_LoadTexture ("notexture", r_notexture_mip->size[0], r_notexture_mip->size[1], (byte *) (r_notexture_mip + 1), IMAGE_MIPMAP);
+	r_notexture_mip->lumaimage = NULL;
+
 	D3DMisc_CreatePalette ();
 	D3DPart_OnRecover ();
 	D3DWarp_WWTexOnRecover ();
 
 	// load any textures contained in exe resources
 	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, IMAGE_ALPHA);
-	D3D_LoadResourceTexture ("smokepuff", &smokepufftexture, IDR_SMOKEPUFF, IMAGE_ALPHA);
+	D3D_LoadResourceTexture ("particles", &particletexture, IDR_PARTICLES, IMAGE_ALPHA);
 
 	// convert them to alpha mask textures
 	D3D_MakeAlphaTexture (crosshairtexture);
-	D3D_MakeAlphaTexture (smokepufftexture);
+	D3D_MakeAlphaTexture (particletexture);
 
-	// load the notexture properly
-	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->size[0], r_notexture_mip->size[1], IMAGE_MIPMAP);
+	byte shade[256][4];
+
+	for (int i = 0; i < 256; i++)
+	{
+		float f = (float) i / 127.5f;
+
+		// wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case 
+		if (f < 1)
+		{
+			f -= 1.0f;
+			f *= (13.0f / 44.0f);
+			f += 1.0f;
+		}
+
+		f *= 127.5f;
+
+		shade[i][0] = BYTE_CLAMP (f);
+		shade[i][1] = BYTE_CLAMP (f);
+		shade[i][2] = BYTE_CLAMP (f);
+		shade[i][3] = BYTE_CLAMP (f);
+	}
+
+	// hmmm - this means using a fifth texture for MDLs - maybe branching would be OK after all????
+	D3D_UploadTexture (&shadetexture, shade, 256, 1, IMAGE_32BIT);
 }
 
 
@@ -168,11 +334,6 @@ void D3DSky_ParseWorldSpawn (void);
 
 bool R_RecursiveLeafContents (mnode_t *node)
 {
-	int			side;
-	mplane_t	*plane;
-	msurface_t	*surf;
-	float		dot;
-
 	if (node->contents == CONTENTS_SOLID) return true;
 	if (node->visframe != d3d_RenderDef.visframecount) return true;
 
@@ -246,19 +407,15 @@ extern byte *fatpvs;
 void Con_RemoveConsole (void);
 void Menu_RemoveMenu (void);
 void D3DSky_RevalidateSkybox (void);
-void D3D_ModelSurfsBeginMap (void);
 void Fog_ParseWorldspawn (void);
 void IN_ClearMouseState (void);
 void D3DAlias_CreateBuffers (void);
 void D3DAlpha_NewMap (void);
 void Mod_InitForMap (model_t *mod);
-void D3DTexture_RegisterChains (void);
 void D3DBrush_CreateVBOs (void);
 void D3DLight_EndBuildingLightmaps (void);
-void D3DBrush_BuildBModelVBOs (void);
 void Host_ResetFixedTime (void);
 void D3DSurf_BuildWorldCache (void);
-void D3DPart_SmokePuffNewMap (void);
 void ClearAllStates (void);;
 
 void R_NewMap (void)
@@ -304,11 +461,9 @@ void R_NewMap (void)
 	D3D_FlushTextures ();
 	R_SetLeafContents ();
 	D3DSky_ParseWorldSpawn ();
-	D3D_ModelSurfsBeginMap ();
 	D3DAlpha_NewMap ();
 	Fog_ParseWorldspawn ();
 	D3DAlias_CreateBuffers ();
-	D3DPart_SmokePuffNewMap ();
 
 	// as sounds are now cleared between maps these sounds also need to be
 	// reloaded otherwise the known_sfx will go out of sequence for them
@@ -316,9 +471,7 @@ void R_NewMap (void)
 	CL_InitTEnts ();
 	S_InitAmbients ();
 	LOC_LoadLocations ();
-	D3DTexture_RegisterChains ();
 	D3DBrush_CreateVBOs ();
-	D3DBrush_BuildBModelVBOs ();
 	D3DSurf_BuildWorldCache ();
 
 	// see do we need to switch off the menus or console

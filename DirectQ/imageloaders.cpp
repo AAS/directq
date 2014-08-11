@@ -39,6 +39,8 @@ typedef struct q2wal_s
 #pragma pack (pop)
 
 
+#pragma warning (disable: 4245)
+// yeah yeah yeah, I know what I'm doing here, just shut up already, OK
 unsigned int q2palette_hc[256] =
 {
 	// hard-coded version of the q2 palette for .wal loading; this will break if a .wal uses anything other than the standard q2 palette
@@ -61,6 +63,7 @@ unsigned int q2palette_hc[256] =
 	-13697024, -15007744, -1114112, -13158401, -65536, -16776961, -13948125, -15000809, -15527153, -1337473, -3968173, -6334669, -8700133, -1322041, -3691621, 
 	-5797001, -7902377, 0
 };
+#pragma warning (default: 4245)
 
 byte *D3D_LoadWAL (byte *f, int *loadsize)
 {
@@ -166,7 +169,7 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		D3DSURFACE_DESC surfdesc;
 
 		tex[0]->GetLevelDesc (0, &surfdesc);
-		tex[0]->LockRect (0, &lockrect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+		tex[0]->LockRect (0, &lockrect, NULL, d3d_GlobalCaps.DynamicLock);
 		D3D_UploadTexture (&tex2, lockrect.pBits, surfdesc.Width, surfdesc.Height, flags | IMAGE_32BIT);
 		tex[0]->UnlockRect (0);
 		tex[0]->Release ();
@@ -613,7 +616,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 	}
 
 	// convert to lowercase
-	strlwr (texname);
+	_strlwr (texname);
 
 	// prevent infinite looping
 	bool abort_retry = false;
@@ -664,7 +667,6 @@ retry_nonstd:;
 	}
 
 	// this is used as a goto target for .link files
-ext_tex_load:;
 	HANDLE fh = INVALID_HANDLE_VALUE;
 	int filelen = 0;
 
@@ -706,40 +708,8 @@ ext_tex_load:;
 		}
 	}
 
-	if (!stricmp (texext, ".link"))
+	if (!_stricmp (texext, ".link"))
 	{
-#if 0
-		// copy out the name
-		Q_strncpy (texname, extpath, 255);
-
-		// now build the new name from the same path as the link file
-		for (int c = strlen (texname) - 1; c; c--)
-		{
-			if (texname[c] == '/' || texname[c] == '\\')
-			{
-				for (int cc = 0;; cc++)
-				{
-					char fc = COM_FReadChar (fh);
-
-					if (fc == '\n' || fc < 1 || fc == '\r') break;
-
-					texname[c + cc + 1] = fc;
-					texname[c + cc + 2] = 0;
-				}
-
-				break;
-			}
-		}
-
-		// done with the file
-		COM_FCloseFile (&fh);
-
-		// set the new path
-		extpath = texname;
-
-		// now go round again to load it for real
-		goto ext_tex_load;
-#else
 		for (int cc = 0;; cc++)
 		{
 			char fc = COM_FReadChar (fh);
@@ -758,7 +728,6 @@ ext_tex_load:;
 		COM_FCloseFile (&fh);
 
 		return D3D_LoadExternalTexture (tex, texname, flags);
-#endif
 	}
 
 	// all other supported formats
@@ -956,7 +925,7 @@ void D3D_AlignCubeMapFaceTexels (LPDIRECT3DSURFACE9 surf, D3DCUBEMAP_FACES face)
 	D3DLOCKED_RECT lockrect;
 
 	surf->GetDesc (&surfdesc);
-	surf->LockRect (&lockrect, NULL, 0);
+	surf->LockRect (&lockrect, NULL, d3d_GlobalCaps.DefaultLock);
 
 	if (surfdesc.Width == surfdesc.Height)
 	{

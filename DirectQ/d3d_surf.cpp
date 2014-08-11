@@ -26,40 +26,17 @@ void D3DLight_CheckSurfaceForModification (msurface_t *surf);
 void D3DLight_UpdateLightmaps (void);
 
 void R_PushDlights (mnode_t *headnode);
-void D3DSky_AddSurfaceToRender (msurface_t *surf, entity_t *ent);
-void D3DWarp_DrawWaterSurfaces (d3d_modelsurf_t **chains, int numchains);
-
-void D3DSky_Clear (void);
-void D3DSky_FinalizeSky (void);
-void D3DSky_MarkWorld (void);
-void D3DSky_SetEntities (void);
+void D3DWarp_DrawWaterSurfaces (brushhdr_t *hdr, msurface_t *chain, entity_t *ent);
+void D3DSky_DrawSkySurfaces (msurface_t *chain);
 
 void R_MarkLeaves (void);
-void D3D_EmitModelSurfToAlpha (d3d_modelsurf_t *modelsurf);
-void D3D_AddParticesToAlphaList (void);
 
 extern cvar_t r_lockpvs;
 extern cvar_t r_lockfrustum;
 float r_farclip = 4096.0f;
 
-cvar_t r_shownodedepth ("r_shownodedepth", "0");
-cvar_t r_shownodes ("r_shownodes", "0");
-cvar_t r_drawflat ("r_drawflat", "0");
-
-// surface interface
-void D3DBrush_Begin (void);
-void D3DBrush_End (void);
-void D3DBrush_EmitSurface (d3d_modelsurf_t *ms);
-void D3DBrush_TransferMainSurfaces (d3d_modelsurf_t **lightchains);
-void D3DBrush_DrawVBOSurfaces (void);
-
-void D3DBrush_ShowNodesBegin (void);
-void D3DBrush_ShowNodesDrawSurfaces (mnode_t *node, int depth);
-void D3DBrush_ShowLeafsDrawSurfaces (mleaf_t *leaf);
-
 msurface_t **r_cachedworldsurfaces = NULL;
 int r_numcachedworldsurfaces = 0;
-
 
 mleaf_t **r_cachedworldleafs = NULL;
 int r_numcachedworldleafs = 0;
@@ -72,7 +49,7 @@ void D3DSurf_BuildWorldCache (void)
 	r_cachedworldsurfaces = (msurface_t **) RenderZone->Alloc (cl.worldmodel->brushhdr->numsurfaces * sizeof (msurface_t *));
 	r_numcachedworldsurfaces = 0;
 
-	r_cachedworldleafs = (mleaf_t **) RenderZone->Alloc (cl.worldmodel->brushhdr->numleafs * sizeof (mleaf_t *));
+	r_cachedworldleafs = (mleaf_t **) RenderZone->Alloc ((cl.worldmodel->brushhdr->numleafs + 1) * sizeof (mleaf_t *));
 	r_numcachedworldleafs = 0;
 
 	// not doing anything with this yet...
@@ -92,150 +69,34 @@ void D3DSurf_BuildWorldCache (void)
 =============================================================
 */
 
-d3d_modelsurf_t **d3d_TextureChains;
-int d3d_NumTextureChains = 0;
-
-
-void D3DSurf_RegisterTextureChain (image_t *image)
+void D3DSurf_EmitSurfToAlpha (msurface_t *surf, entity_t *ent)
 {
-	image->ChainNumber = d3d_NumTextureChains;
-	d3d_NumTextureChains++;
-}
-
-
-void D3DSurf_FinishTextureChains (void)
-{
-	d3d_TextureChains = (d3d_modelsurf_t **) RenderZone->Alloc (d3d_NumTextureChains * sizeof (d3d_modelsurf_t *));
-	// Con_Printf ("registered %i texture chains\n", d3d_NumTextureChains);
-}
-
-
-void D3DSurf_ClearTextureChains (void)
-{
-	for (int i = 0; i < d3d_NumTextureChains; i++)
-		d3d_TextureChains[i] = NULL;
-}
-
-
-// a BSP cannot contain more than 65536 marksurfaces and we add some headroom for instanced models
-#define MAX_MODELSURFS 131072
-
-d3d_modelsurf_t **d3d_ModelSurfs = NULL;
-int d3d_NumModelSurfs = 0;
-
-
-void D3D_ModelSurfsBeginMap (void)
-{
-	d3d_ModelSurfs = (d3d_modelsurf_t **) RenderZone->Alloc (MAX_MODELSURFS * sizeof (d3d_modelsurf_t *));
-
-	// allocate an initial batch
-	for (int i = 0; i < 4096; i++)
-		d3d_ModelSurfs[i] = (d3d_modelsurf_t *) RenderZone->Alloc (sizeof (d3d_modelsurf_t));
-
-	d3d_NumModelSurfs = 0;
-}
-
-
-void D3D_SetupModelSurf (d3d_modelsurf_t *ms, msurface_t *surf, texture_t *tex, entity_t *ent = NULL, int alpha = 255)
-{
-	// check for lightmap modifications
-	D3DLight_CheckSurfaceForModification (surf);
-
-	// base textures are commnon to all (liquids won't have lightmaps but they'll be NULL anyway)
-	ms->textures[TEXTURE_LIGHTMAP] = surf->d3d_LightmapTex;
-	ms->textures[TEXTURE_DIFFUSE] = tex->teximage->d3d_Texture;
-
-	// the luma image also decides the shader pass to use
-	// (this assumes that the surf is solid, it will be correctly set for liquid elsewhere)
-	if (tex->lumaimage && gl_fullbrights.integer)
+	if (ent)
 	{
-		ms->textures[TEXTURE_LUMA] = tex->lumaimage->d3d_Texture;
-		ms->shaderpass = alpha < 255 ? FX_PASS_WORLD_LUMA_ALPHA : FX_PASS_WORLD_LUMA;
+		// copy out the midpoint for matrix transforms
+		float midpoint[3] =
+		{
+			surf->midpoint[0],
+			surf->midpoint[1],
+			surf->midpoint[2]
+		};
+
+		// transform the surface midpoint by the modelsurf matrix so that it goes into the proper place
+		D3DMatrix_TransformPoint (&ent->matrix, midpoint, surf->midpoint);
+
+		// now add it
+		D3DAlpha_AddToList (surf, ent);
+
+		// restore the original midpoint
+		surf->midpoint[0] = midpoint[0];
+		surf->midpoint[1] = midpoint[1];
+		surf->midpoint[2] = midpoint[2];
 	}
 	else
 	{
-		ms->textures[TEXTURE_LUMA] = NULL;
-		ms->shaderpass = alpha < 255 ? FX_PASS_WORLD_NOLUMA_ALPHA : FX_PASS_WORLD_NOLUMA;
+		// just add it
+		D3DAlpha_AddToList (surf, ent);
 	}
-
-	// copy out everything else
-	ms->surf = surf;
-	ms->ent = ent;
-	ms->surfalpha = alpha;
-
-	// chain the modelsurf in it's proper texture chain for proper f2b ordering
-	// (this actually gives b2f but the reversal of the chain per-lightmap will return it to f2b)
-	ms->next = d3d_TextureChains[tex->teximage->ChainNumber];
-	d3d_TextureChains[tex->teximage->ChainNumber] = ms;
-}
-
-
-void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, entity_t *ent = NULL, int alpha = 255)
-{
-	if (surf->flags & SURF_DRAWSKY)
-	{
-		// sky is rendered immediately as it passes
-		D3DSky_AddSurfaceToRender (surf, ent);
-		return;
-	}
-
-	// catch surfaces without textures
-	// (done after sky as sky surfaces don't have textures...)
-	if (!tex->teximage) return;
-
-	// everything else is batched up for drawing in the main pass
-	// ensure that there is space
-	if (d3d_NumModelSurfs >= MAX_MODELSURFS) return;
-
-	// allocate as required
-	if (!d3d_ModelSurfs[d3d_NumModelSurfs])
-		d3d_ModelSurfs[d3d_NumModelSurfs] = (d3d_modelsurf_t *) RenderZone->Alloc (sizeof (d3d_modelsurf_t));
-
-	// take the next modelsurf
-	d3d_modelsurf_t *ms = d3d_ModelSurfs[d3d_NumModelSurfs];
-	d3d_NumModelSurfs++;
-
-	D3D_SetupModelSurf (ms, surf, tex, ent, alpha);
-}
-
-
-d3d_modelsurf_t *d3d_LightChains[MAX_LIGHTMAPS];
-
-void D3DSurf_DrawSurfaces (void)
-{
-	for (int i = 0; i < d3d_NumTextureChains; i++)
-	{
-		if (!d3d_TextureChains[i]) continue;
-
-		for (d3d_modelsurf_t *ms = d3d_TextureChains[i]; ms; ms = ms->next)
-		{
-			msurface_t *surf = ms->surf;
-
-			if ((surf->flags & SURF_DRAWFENCE) || (ms->surfalpha < 255))
-			{
-				// store out for drawing later
-				D3D_EmitModelSurfToAlpha (ms);
-				continue;
-			}
-
-			// sky should never happen but turb might
-			if (surf->flags & SURF_DRAWSKY) continue;
-			if (surf->flags & SURF_DRAWTURB) continue;
-
-			// the original texture chains were built from back-to-front with entities at the start of the lists 
-			// and this operation reverses them into front-to-back with entities at the end of the list,
-			// which is the correct final order for drawing in.
-			ms->chain = d3d_LightChains[surf->LightmapTextureNum];
-			d3d_LightChains[surf->LightmapTextureNum] = ms;
-
-			// NULL the chain here if it was used for drawing in this pass
-			// needs to be done here otherwise we won't know for certain if it actually was used...
-			d3d_TextureChains[i] = NULL;
-		}
-	}
-
-	// and transfer them for drawing with
-	D3DBrush_TransferMainSurfaces (d3d_LightChains);
 }
 
 
@@ -277,6 +138,114 @@ texture_t *R_TextureAnimation (entity_t *ent, texture_t *base)
 }
 
 
+msurface_t *d3d_SurfSkyChain = NULL;
+msurface_t *d3d_SurfWaterChain = NULL;
+msurface_t *d3d_SurfLightmapChains[MAX_LIGHTMAPS] = {NULL};
+
+void D3DMain_BBoxForEnt (entity_t *ent);
+
+void D3DSurf_ClearTextureChains (model_t *mod, brushhdr_t *hdr)
+{
+	for (int i = 0; i < hdr->numtextures; i++)
+	{
+		if (!hdr->textures[i]) continue;
+
+		hdr->textures[i]->texturechain = NULL;
+	}
+
+	d3d_SurfSkyChain = NULL;
+	d3d_SurfWaterChain = NULL;
+}
+
+
+void D3DSurf_DrawSolidSurfaces (model_t *mod, brushhdr_t *hdr, entity_t *ent, bool fullbright)
+{
+	texture_t *tex;
+	msurface_t *surf;
+
+	for (int i = 0; i < hdr->numtextures; i++)
+	{
+		if (!(tex = hdr->textures[i])) continue;
+		if (!(surf = tex->texturechain)) continue;
+
+		if (surf->flags & SURF_DRAWSKY) continue;
+		if (surf->flags & SURF_DRAWTURB) continue;
+
+		// animate only one texture at a time
+		texture_t *anim = R_TextureAnimation (ent, tex);
+
+		if (anim->lumaimage && !fullbright) continue;
+		if (!anim->lumaimage && fullbright) continue;
+
+		// reorder by lightmap for cache coherence
+		for (; surf; surf = surf->texturechain)
+		{
+			surf->lightmapchain = d3d_SurfLightmapChains[surf->LightmapTextureNum];
+			d3d_SurfLightmapChains[surf->LightmapTextureNum] = surf;
+		}
+
+		// and draw in lightmap order
+		// this also inverts the draw order from b2f to f2b (reasonably enough)
+		for (int j = 0; j < MAX_LIGHTMAPS; j++)
+		{
+			// no entity used as this entity has already been transformed
+			for (surf = d3d_SurfLightmapChains[j]; surf; surf = surf->lightmapchain)
+				D3DBrush_EmitSurface (surf, anim, NULL, 255);
+
+			D3DBrush_FlushSurfaces ();
+			d3d_SurfLightmapChains[j] = NULL;
+		}
+
+		tex->texturechain = NULL;
+	}
+}
+
+
+void D3DSurf_DrawTextureChains (model_t *mod, brushhdr_t *hdr, entity_t *ent)
+{
+	// invalidate the state so we don't have anything hanging over from last time
+	D3DBrush_Begin ();
+
+	// we assume that solid surfaces will always be present
+	D3DSurf_DrawSolidSurfaces (mod, hdr, ent, false);
+	D3DSurf_DrawSolidSurfaces (mod, hdr, ent, true);
+
+	// only opaque water is actually drawn here but this adds alpha surfaces to the alpha list
+	if (d3d_SurfWaterChain)
+	{
+		D3DWarp_DrawWaterSurfaces (hdr, d3d_SurfWaterChain, ent);
+		d3d_SurfWaterChain = NULL;
+	}
+
+	// do sky last so that we can get early z rejection from it
+	if (d3d_SurfSkyChain)
+	{
+		D3DSky_DrawSkySurfaces (d3d_SurfSkyChain);
+		d3d_SurfSkyChain = NULL;
+	}
+}
+
+
+void D3DSurf_ChainSurface (msurface_t *surf)
+{
+	if (surf->flags & SURF_DRAWSKY)
+	{
+		surf->texturechain = d3d_SurfSkyChain;
+		d3d_SurfSkyChain = surf;
+	}
+	else if (surf->flags & SURF_DRAWTURB)
+	{
+		surf->lightmapchain = d3d_SurfWaterChain;
+		d3d_SurfWaterChain = surf;
+	}
+	else
+	{
+		surf->texturechain = surf->texinfo->texture->texturechain;
+		surf->texinfo->texture->texturechain = surf;
+	}
+}
+
+
 __inline float R_PlaneDist (mplane_t *plane, entity_t *ent)
 {
 	// for axial planes it's quicker to just eval the dist and there's no need to cache;
@@ -301,6 +270,7 @@ __inline float R_PlaneDist (mplane_t *plane, entity_t *ent)
 
 void R_StoreEfrags (struct efrag_s **ppefrag);
 
+// this now only builds a cache of surfs and leafs for drawing from; the real draw lists are built separately
 void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 {
 	// the compiler should optimize this automatically anyway
@@ -314,7 +284,7 @@ tail_recurse:;
 		{
 			// clipflags is a 4 bit mask, for each bit 0 = auto accept on this side, 1 = need to test on this side
 			// BOPS returns 0 (intersect), 1 (inside), or 2 (outside).  if a node is inside on any side then all
-			// of it's child nodes are also guaranteed to be inside on the same side
+			// of it's child nodes are also guaranteed to be inside on the same side (ditto outside, rejected by return)
 			if (!(clipflags & (1 << c))) continue;
 			if ((side = BOX_ON_PLANE_SIDE (node->mins, node->maxs, &frustum[c])) == 2) return;
 			if (side == 1) clipflags &= ~(1 << c);
@@ -339,12 +309,13 @@ tail_recurse:;
 			} while (--c);
 		}
 
-		// cache this leaf for reuse (only needed for efrags)
-		r_cachedworldleafs[r_numcachedworldleafs] = leaf;
-		r_numcachedworldleafs++;
-
 		if (leaf->efrags)
+		{
+			// cache this leaf for reuse (only needed for efrags)
 			R_StoreEfrags (&leaf->efrags);
+			r_cachedworldleafs[r_numcachedworldleafs] = leaf;
+			r_numcachedworldleafs++;
+		}
 
 		d3d_RenderDef.numleaf++;
 		return;
@@ -382,17 +353,13 @@ tail_recurse:;
 			if (dot > r_farclip) r_farclip = dot;
 			if (-dot > r_farclip) r_farclip = -dot;
 
-			// this only ever comes from the world so entity is always NULL and we never have explicit alpha
-			D3D_AllocModelSurf (surf, R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture));
+			// add to texture chains
+			D3DSurf_ChainSurface (surf);
 
 			// cache this surface for reuse
 			r_cachedworldsurfaces[r_numcachedworldsurfaces] = surf;
 			r_numcachedworldsurfaces++;
 
-			// because multiple surfs can share the same mesh we need to invalidate it's visframe to prevent it
-			// from being added multiple times; this marks the surface as being visible in the next frame too
-			// which resolves a LOT of problems with crossing water boundaries
-			surf->visframe = d3d_RenderDef.framecount + 1;
 			nodesurfs++;
 		}
 
@@ -411,69 +378,7 @@ tail_recurse:;
 }
 
 
-void D3DSurf_RecursiveShowNodes (mnode_t *node, int clipflags, int depth)
-{
-	if (node->contents == CONTENTS_SOLID) return;
-	if (node->visframe != d3d_RenderDef.visframecount) return;
-
-	if (clipflags)
-	{
-		for (int c = 0, side = 0; c < 4; c++)
-		{
-			// clipflags is a 4 bit mask, for each bit 0 = auto accept on this side, 1 = need to test on this side
-			// BOPS returns 0 (intersect), 1 (inside), or 2 (outside).  if a node is inside on any side then all
-			// of it's child nodes are also guaranteed to be inside on the same side
-			if (!(clipflags & (1 << c))) continue;
-			if ((side = BOX_ON_PLANE_SIDE (node->mins, node->maxs, &frustum[c])) == 2) return;
-			if (side == 1) clipflags &= ~(1 << c);
-		}
-	}
-
-	// if it's a leaf node draw stuff
-	if (node->contents < 0)
-	{
-		// node is a leaf so add stuff for drawing
-		msurface_t **mark = ((mleaf_t *) node)->firstmarksurface;
-		int c = ((mleaf_t *) node)->nummarksurfaces;
-
-		if (c)
-		{
-			do
-			{
-				(*mark)->visframe = d3d_RenderDef.framecount;
-				mark++;
-			} while (--c);
-		}
-
-		//D3DBrush_ShowLeafsDrawSurfaces ((mleaf_t *) node);
-		return;
-	}
-
-	// node is just a decision point, so go down the appropriate sides
-	node->dot = R_PlaneDist (node->plane, &d3d_RenderDef.worldentity);
-	node->side = (node->dot >= 0 ? 0 : 1);
-
-	// recurse down the children, front side first
-	D3DSurf_RecursiveShowNodes (node->children[node->side], clipflags, depth + 1);
-
-	// draw stuff
-	D3DBrush_ShowNodesDrawSurfaces (node, depth);
-
-	// recurse down the back side (the compiler should optimize this tail recursion)
-	D3DSurf_RecursiveShowNodes (node->children[!node->side], clipflags, depth + 1);
-}
-
-
-void D3DSurf_ShowNodes (void)
-{
-	D3DBrush_ShowNodesBegin ();
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-	D3DSurf_RecursiveShowNodes (cl.worldmodel->brushhdr->nodes, 15, 1);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-}
-
-
-void D3D_SetupBrushModel (entity_t *ent)
+void D3DSurf_DrawBrushModel (entity_t *ent)
 {
 	model_t *mod = ent->model;
 
@@ -510,69 +415,133 @@ void D3D_SetupBrushModel (entity_t *ent)
 	if (mod->name[0] == '*')
 		R_PushDlights (mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
 
-	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
-	entity_t *modent = NULL;
+	ent->angles[0] = -ent->angles[0];	// stupid quake bug
 
-	// we only need to specify an ent if the model needs to be transformed
-	if (ent->angles[0] || ent->angles[1] || ent->angles[2]) modent = ent;
-	if (ent->origin[0] || ent->origin[1] || ent->origin[2]) modent = ent;
-
-	// always load identity even if we're not transforming it
 	D3DMatrix_Identity (&ent->matrix);
+	D3D_RotateForEntity (ent, &ent->matrix, ent->origin, ent->angles);
 
-	// and we only need to calc it's matrix if transforming too
-	if (modent)
-	{
-		// store transform for model - we need to run this in software as we are potentially submitting
-		// multiple brush models in a single batch, all of which will be merged with the world render.
-		ent->angles[0] = -ent->angles[0];	// stupid quake bug
-		D3D_RotateForEntity (ent, &ent->matrix, ent->origin, ent->angles);
-		ent->angles[0] = -ent->angles[0];	// stupid quake bug
-	}
+	ent->angles[0] = -ent->angles[0];	// stupid quake bug
 
-	// prevent addition of the same surf for the same entity more than once
-	// (and enforce addition of the same surf for multiple entities more than once - instanced bmodels still suck)
-	d3d_RenderDef.entframecount++;
+	int numsurfaces = 0;
+	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
 
-	ent->update_type = 0;
+	D3DSurf_ClearTextureChains (mod, mod->brushhdr);
 
 	// don't bother with ordering these for now; we'll sort them by texture later
 	for (int s = 0; s < mod->brushhdr->nummodelsurfaces; s++, surf++)
 	{
-		if (surf->visframe == d3d_RenderDef.entframecount) continue;
-
+		// fixme - do this per node?
 		float dot = R_PlaneDist (surf->plane, ent);
 
-		// r_farclip should be affected by this too
-		if (dot > r_farclip) r_farclip = dot;
-		if (-dot > r_farclip) r_farclip = -dot;
-
-		if (((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
-			(!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
+		if (((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) || (!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
 		{
-			// add to the modelsurfs list
-			// (most surfaces will be deferred to later for drawind in static VBOs)
-			if (ent->alphaval < 255)
-				D3D_AllocModelSurf (surf, R_TextureAnimation (ent, surf->texinfo->texture), modent, ent->alphaval);
-			else if (surf->flags & SURF_DRAWTURB)
-				D3D_AllocModelSurf (surf, surf->texinfo->texture, modent, ent->alphaval);
-			else if (surf->flags & SURF_DRAWSKY)
-				D3D_AllocModelSurf (surf, surf->texinfo->texture, modent, ent->alphaval);
-			else if (!mod->brushhdr->NumDrawCalls)
-				D3D_AllocModelSurf (surf, R_TextureAnimation (ent, surf->texinfo->texture), modent, ent->alphaval);
+			if (ent->alphaval > 0 && ent->alphaval < 255)
+				D3DSurf_EmitSurfToAlpha (surf, ent);
 			else
 			{
-				if (mod->name[0] == '*') D3DLight_CheckSurfaceForModification (surf);
-				ent->update_type = 1;
+				// regular surface
+				D3DSurf_ChainSurface (surf);
+				numsurfaces++;
 			}
-
-			surf->visframe = d3d_RenderDef.entframecount;
 		}
+	}
+
+	// and now multiply it out
+	D3DMatrix_Multiply (&ent->matrix, &d3d_ModelViewProjMatrix);
+
+	if (numsurfaces)
+	{
+		// only if any surfs came through
+		D3DHLSL_SetWorldMatrix (&ent->matrix);
+		D3DSurf_DrawTextureChains (mod, mod->brushhdr, ent);
 	}
 }
 
 
 void D3D_SetupProjection (float fovx, float fovy, float zn, float zf);
+void R_ModParanoia (entity_t *ent);
+void D3DAlias_AddModelToList (entity_t *ent);
+
+void D3D_MergeInlineBModels (void)
+{
+	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
+	{
+		entity_t *ent = d3d_RenderDef.visedicts[i];
+		model_t *mod = ent->model;
+
+		if (!mod) continue;
+		if (mod->type != mod_brush) continue;
+
+		// this is only valid for inline bmodels as instanced models may have textures which are not in the world
+		if (mod->name[0] != '*') continue;
+
+		// now we check for transforms
+		if (ent->angles[0]) continue;
+		if (ent->angles[1]) continue;
+		if (ent->angles[2]) continue;
+
+		if (ent->origin[0]) continue;
+		if (ent->origin[1]) continue;
+		if (ent->origin[2]) continue;
+
+		// add entities to the draw lists
+		if (!r_drawentities.integer) continue;
+		if (ent->alphaval > 0 && ent->alphaval < 255) continue;
+
+		// OK, we have a bmodel that doesn't move so merge it to the world list
+		R_ModParanoia (ent);
+		D3DMain_BBoxForEnt (ent);
+		ent->mergeframe = d3d_RenderDef.framecount;
+
+		// static entities already have the leafs they are in bbox culled
+		if (R_CullBox (ent->mins, ent->maxs, frustum))
+		{
+			// mark as not visible
+			ent->visframe = -1;
+			continue;
+		}
+
+		// now do the merging
+		ent->visframe = d3d_RenderDef.framecount;
+
+		// get origin vector relative to viewer
+		// this is now stored in the entity so we can read it back any time we want
+		VectorSubtract (r_refdef.vieworigin, ent->origin, ent->modelorg);
+
+		R_PushDlights (mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
+
+		msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
+
+		// ensure that there is a valid matrix in the entity for alpha sorting/distance
+		D3DMatrix_Identity (&ent->matrix);
+
+		// don't bother with ordering these for now; we'll sort them by texture later
+		for (int s = 0; s < mod->brushhdr->nummodelsurfaces; s++, surf++)
+		{
+			// prevent surfs from being added more than once (some custom maps get this)
+			if (surf->visframe == d3d_RenderDef.framecount) continue;
+
+			// fixme - do this per node?
+			float dot = R_PlaneDist (surf->plane, ent);
+
+			// we already checked for ent->alphaval above so we don't need to here
+			if (((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) || (!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
+				D3DSurf_ChainSurface (surf);
+
+			// prevent surfs from being added more than once (some custom maps get this)
+			surf->visframe = d3d_RenderDef.framecount;
+		}
+
+		// and now multiply it by the world matrix for the final entity matrix
+		D3DMatrix_Multiply (&ent->matrix, &d3d_ModelViewProjMatrix);
+	}
+}
+
+
+void D3D_SetupBrushModel (entity_t *ent)
+{
+}
+
 
 void D3D_BuildWorld (void)
 {
@@ -585,7 +554,6 @@ void D3D_BuildWorld (void)
 
 	// mark visible leafs
 	R_MarkLeaves ();
-	D3DSurf_ClearTextureChains ();
 
 	// assume that the world is always visible ;)
 	// (although it might not be depending on the scene...)
@@ -594,52 +562,46 @@ void D3D_BuildWorld (void)
 	// calculate dynamic lighting for the world
 	R_PushDlights (cl.worldmodel->brushhdr->nodes);
 
-	d3d_NumModelSurfs = 0;
-
 	d3d_RenderDef.numnode = 0;
 	d3d_RenderDef.numleaf = 0;
+
+	D3DSurf_ClearTextureChains (cl.worldmodel, cl.worldmodel->brushhdr);
 
 	if (d3d_RenderDef.rebuildworld)
 	{
 		// go to a new cache
 		r_numcachedworldsurfaces = 0;
 		r_numcachedworldleafs = 0;
+
 		r_farclip = 4096.0f;	// never go below this
+
 		R_RecursiveWorldNode (cl.worldmodel->brushhdr->nodes, 15);
-		d3d_RenderDef.rebuildworld = false;
+		r_numcachedworldnodes = d3d_RenderDef.numnode;
 
 		// r_farclip so far represents one side of a right-angled triangle with the longest side being what we actually want
 		r_farclip = sqrt (r_farclip * r_farclip + r_farclip * r_farclip);
+
+		// mark not to rebuild
+		d3d_RenderDef.rebuildworld = false;
 	}
 	else
 	{
-		// reuse from the existing cache
+		// build the draw lists from an existing cache
 		for (int i = 0; i < r_numcachedworldleafs; i++)
-		{
-			if (r_cachedworldleafs[i]->efrags)
-			{
-				R_StoreEfrags (&r_cachedworldleafs[i]->efrags);
-				d3d_RenderDef.numleaf++;
-			}
-		}
+			R_StoreEfrags (&r_cachedworldleafs[i]->efrags);
 
 		for (int i = 0; i < r_numcachedworldsurfaces; i++)
 		{
 			msurface_t *surf = r_cachedworldsurfaces[i];
 
-			D3D_AllocModelSurf (surf, R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture));
-			surf->visframe = d3d_RenderDef.framecount + 1;
+			D3DSurf_ChainSurface (surf);
+			surf->visframe = d3d_RenderDef.framecount;
 		}
 	}
-}
 
-
-void D3DSurf_DrawWorld (void)
-{
-	// update lightmaps as early as possible
-	// fixme - it's faster to do them at the end of the surf drawing in GL so that the new maps have more time to
-	// be uploading before they're needed again; cross-check this on intel/etc
-	D3DLight_UpdateLightmaps ();
+	// update r_speeds counters
+	d3d_RenderDef.numnode = r_numcachedworldnodes;
+	d3d_RenderDef.numleaf = r_numcachedworldleafs;
 
 	// set the final projection matrix that we'll actually use
 	D3D_SetupProjection (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_farclip);
@@ -653,31 +615,51 @@ void D3DSurf_DrawWorld (void)
 	// about THAT causing performance problems we've got too much time on our hands.
 	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
 
-	// finish up any sky surfs that were added
-	D3DSky_FinalizeSky ();
+	// the world entity needs a matrix set up correctly so that trans surfs will transform correctly
+	memcpy (&d3d_RenderDef.worldentity.matrix, &d3d_ModelViewProjMatrix, sizeof (D3DMATRIX));
 
-	// add particles here because it's useful work to be doing while waiting on lightmap updates
-	D3D_AddParticesToAlphaList ();
+	// kurok needs alpha testing on all surfs to do leaves/etc (this is ugly)
+	if (kurok) D3DState_SetAlphaTest (TRUE, D3DCMP_GREATEREQUAL, (DWORD) 0x000000aa);
 
-	if (kurok)
+	// bmodels which do not move may be merged to the world
+	D3D_MergeInlineBModels ();
+
+	// update lightmaps as late as possible before using them
+	D3DLight_UpdateLightmaps ();
+
+	D3DBrush_Begin ();
+	D3DSurf_DrawTextureChains (cl.worldmodel, cl.worldmodel->brushhdr, &d3d_RenderDef.worldentity);
+
+	// deferred until after the world so that we get statics on the list too
+	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
 	{
-		D3D_SetRenderState (D3DRS_ALPHATESTENABLE, TRUE);
-		D3D_SetRenderState (D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
-		D3D_SetRenderState (D3DRS_ALPHAREF, (DWORD) 0x000000aa);
+		entity_t *ent = d3d_RenderDef.visedicts[i];
+
+		if (!ent->model) continue;
+
+		// this ent had it's model merged to the world
+		if (ent->mergeframe == d3d_RenderDef.framecount) continue;
+
+		// add entities to the draw lists
+		if (!r_drawentities.integer) continue;
+
+		R_ModParanoia (ent);
+		D3DMain_BBoxForEnt (ent);
+
+		// to save on extra passes through the list we setup alias and sprite models here too
+		if (ent->model->type == mod_alias)
+			D3DAlias_AddModelToList (ent);
+		else if (ent->model->type == mod_brush)
+			D3DSurf_DrawBrushModel (ent);
+		else if (ent->model->type == mod_sprite)
+			D3DAlpha_AddToList (ent);
+		else Con_Printf ("Unknown model type for entity: %i\n", ent->model->type);
 	}
 
-	D3DSurf_DrawSurfaces ();
+	// reset to the original world matrix
+	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
 
-	D3DBrush_DrawVBOSurfaces ();
-
-	if (kurok) D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
-
-	if (r_shownodes.value || r_drawflat.value || r_shownodedepth.value)
-		D3DSurf_ShowNodes ();
-
-	// draw opaque water surfaces here; this includes bmodels and the world merged together;
-	// translucent water surfaces are drawn separately during the alpha surfaces pass
-	D3DWarp_DrawWaterSurfaces (d3d_TextureChains, d3d_NumTextureChains);
+	if (kurok) D3DState_SetAlphaTest (FALSE);
 }
 
 
@@ -720,12 +702,6 @@ void R_LeafVisibility (byte *vis)
 
 void R_MarkLeaves (void)
 {
-	byte	*vis;
-	mnode_t	*node;
-	int		i;
-	extern	byte *mod_novis;
-	msurface_t **mark;
-
 	// viewleaf hasn't changed or we're drawing with a locked PVS
 	if ((d3d_RenderDef.oldviewleaf == d3d_RenderDef.viewleaf) || r_lockpvs.value) return;
 
@@ -735,24 +711,11 @@ void R_MarkLeaves (void)
 	// rebuild the world lists
 	d3d_RenderDef.rebuildworld = true;
 
-	bool nearwaterportal = false;
-	mleaf_t *leaf = d3d_RenderDef.viewleaf;
-
-	for (i = 0, mark = leaf->firstmarksurface; i < leaf->nummarksurfaces; i++, mark++)
-	{
-		if ((*mark)->flags & SURF_DRAWTURB)
-		{
-			// one is all we need
-			nearwaterportal = true;
-			break;
-		}
-	}
-
 	// add in visible leafs - we always add the fat PVS to ensure that client visibility
 	// is the same as that which was used by the server; R_CullBox will take care of unwanted leafs
 	if (r_novis.integer)
 		R_LeafVisibility (NULL);
-	else if (nearwaterportal)
+	else if (d3d_RenderDef.viewleaf->flags & SURF_DRAWTURB)
 		R_LeafVisibility (Mod_FatPVS (r_refdef.vieworigin));
 	else R_LeafVisibility (Mod_LeafPVS (d3d_RenderDef.viewleaf, cl.worldmodel));
 
@@ -765,7 +728,7 @@ void R_MarkLeaves (void)
 			// if we're still in the same contents we still have the same contents colour
 			d3d_RenderDef.viewleaf->contentscolor = d3d_RenderDef.oldviewleaf->contentscolor;
 		}
-		else if (!r_novis.integer && !nearwaterportal)
+		else if (!r_novis.integer && ((d3d_RenderDef.viewleaf->flags & SURF_DRAWTURB) || (d3d_RenderDef.oldviewleaf->flags & SURF_DRAWTURB)))
 		{
 			// we've had a contents transition so merge the old pvs with the new
 			R_LeafVisibility (Mod_LeafPVS (d3d_RenderDef.oldviewleaf, cl.worldmodel));

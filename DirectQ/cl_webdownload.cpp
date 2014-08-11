@@ -50,6 +50,11 @@ DWORD Web_DoDownload (char *url, char *file, DOWNLOADPROGRESSPROC progress)
 	// the same versions as the app was compiled with.
 	HINSTANCE hInstWinInet = LoadLibrary ("wininet.dll");
 
+	FILE *fDownload = NULL;
+	HINTERNET hInternet = NULL;
+	HINTERNET hURL = NULL;
+	DWORD DownloadSize = -1;
+
 	if (!hInstWinInet) return DL_ERR_NO_DLL;
 
 	// progress (0, 0) just initializes some counters and sends a keepalive in case the dynamic load takes too long
@@ -75,11 +80,6 @@ DWORD Web_DoDownload (char *url, char *file, DOWNLOADPROGRESSPROC progress)
 		errcode = DL_ERR_NO_ENTRYPOINT;
 		goto cleanup_fail;
 	}
-
-	FILE *fDownload = NULL;
-	HINTERNET hInternet = NULL;
-	HINTERNET hURL = NULL;
-	DWORD DownloadSize = -1;
 
 	// this just opens an internet connection assuming that the configuration is already set for you
 	// we could set it to work through a user supplied proxy server, and we might extend the multiplayer
@@ -165,7 +165,7 @@ DWORD Web_DoDownload (char *url, char *file, DOWNLOADPROGRESSPROC progress)
 
 	while (1)
 	{
-		DWORD BytesRead;
+		DWORD BytesRead = 0;
 
 		// here we read from the URL into our temp buffer; we allow up to 10 retries if a read fails
 		// so that we can cope a little more robustly with transient connection dropouts
@@ -263,7 +263,6 @@ cleanup_fail:;
 	// because QInternetOpen and QInternetOpenUrl must have values for the handles to have values,
 	// QInternetCloseHandle is also guaranteed to have a value here.
 	if (hURL) QInternetCloseHandle (hURL);
-
 	if (hInternet) QInternetCloseHandle (hInternet);
 
 	QInternetOpen = NULL;
@@ -311,5 +310,4 @@ char *Web_GetErrorString (int errcode)
 	}
 
 	// never gets to here
-	return dlResultStrings[2];
 }

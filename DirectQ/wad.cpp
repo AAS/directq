@@ -195,7 +195,7 @@ miptex_t *W_ValidateHLWAD (HANDLE fh, char *texname)
 		W_CleanupName (lump.name, lump.name);
 
 		// check the name
-		if (!stricmp (lump.name, texname))
+		if (!_stricmp (lump.name, texname))
 		{
 			// found it; read in the miptex (if anything goes wrong during this procedure we need to return NULL
 			// as the pointer, infotable, etc are all out of whack)

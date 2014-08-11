@@ -23,6 +23,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include <shlobj.h>
 
+int profilestart;
+int profileend;
+
 HWND hwndSplash;
 SYSTEM_INFO SysInfo;
 bool bWindowActive = false;
@@ -46,7 +49,7 @@ HRESULT hr = S_OK;
 #define PAUSE_SLEEP		50				// sleep time on pause or minimization
 #define NOT_FOCUS_SLEEP	20				// sleep time when not focus
 
-bool	ActiveApp, Minimized;
+BOOL	ActiveApp, Minimized;
 bool	WinNT = false;
 
 static HANDLE	hFile;
@@ -126,7 +129,6 @@ void Sys_Error (char *error, ...)
 {
 	va_list		argptr;
 	char		text[1024];
-	DWORD		dummy;
 	static int	in_sys_error0 = 0;
 	static int	in_sys_error1 = 0;
 	static int	in_sys_error2 = 0;
@@ -182,32 +184,57 @@ void Sys_Quit (int ExitCode)
 }
 
 
+static __int64 sys_firstqpc;
+static __int64 sys_qpcfreq;
+static DWORD sys_milliseconds;
+
+void Sys_InitTimers (void)
+{
+	// this just gets the starting timers
+	QueryPerformanceFrequency ((LARGE_INTEGER *) &sys_qpcfreq);
+	QueryPerformanceCounter ((LARGE_INTEGER *) &sys_firstqpc);
+
+	sys_milliseconds = timeGetTime ();
+}
+
+
+void Sys_ChangeTimer (cvar_t *var)
+{
+	// update the timer resolutions
+	if (var->value)
+	{
+		QueryPerformanceFrequency ((LARGE_INTEGER *) &sys_qpcfreq);
+		timeBeginPeriod (1);
+	}
+	else
+	{
+		QueryPerformanceFrequency ((LARGE_INTEGER *) &sys_qpcfreq);
+		timeEndPeriod (1);
+	}
+}
+
+
+cvar_t sys_usetimegettime ("sys_usetimegettime", "1", CVAR_ARCHIVE, Sys_ChangeTimer);
+
 DWORD Sys_Milliseconds (void)
 {
-#if 1
-	return timeGetTime ();
-#else
-	static __int64 qpcfreq;
-	static bool first;
-	__int64 qpccount;
-
-	if (!first)
+	if (sys_usetimegettime.value)
 	{
-		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
-		first = true;
+		return (timeGetTime () - sys_milliseconds);
 	}
+	else
+	{
+		__int64 qpccount;
 
-	QueryPerformanceCounter ((LARGE_INTEGER *) &qpccount);
+		QueryPerformanceCounter ((LARGE_INTEGER *) &qpccount);
 
-	// compensate for integer division - this is valid in a FRAPS benchmark
-	return (((qpccount * 1000) + (qpcfreq >> 1)) / qpcfreq);
-#endif
+		return ((((qpccount - sys_firstqpc) * 1000) + (sys_qpcfreq >> 1)) / sys_qpcfreq);
+	}
 }
 
 
 double Sys_FloatTime (void)
 {
-#if 1
 	static DWORD starttime = 0;
 	static bool firsttime = true;
 
@@ -221,66 +248,6 @@ double Sys_FloatTime (void)
 	DWORD now = Sys_Milliseconds ();
 
 	return (double) (now - starttime) * 0.001;
-
-	/*
-	static bool first = true;
-
-	static __int64 qpcfreq;
-	static __int64 qpcstart;
-
-	if (first)
-	{
-		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
-		QueryPerformanceCounter ((LARGE_INTEGER *) &qpcstart);
-		first = false;
-		return 0;
-	}
-
-	__int64 qpccount;
-
-	QueryPerformanceCounter ((LARGE_INTEGER *) &qpccount);
-
-	return ((double) qpccount - (double) qpcstart) / (double) qpcfreq;
-	*/
-#else
-	static bool firsttime = true;
-	static __int64 qpcfreq = 0;
-	static __int64 currqpccount = 0;
-	static __int64 lastqpccount = 0;
-	static double qpcfudge = 0;
-	DWORD currtime = 0;
-	static DWORD lasttime = 0;
-	static DWORD starttime = 0;
-
-	if (firsttime)
-	{
-		timeBeginPeriod (1);
-		starttime = lasttime = Sys_Milliseconds ();
-		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
-		QueryPerformanceCounter ((LARGE_INTEGER *) &lastqpccount);
-		firsttime = false;
-		return 0;
-	}
-
-	// get the current time from both counters
-	currtime = Sys_Milliseconds ();
-	QueryPerformanceCounter ((LARGE_INTEGER *) &currqpccount);
-
-	if (currtime != lasttime)
-	{
-		// requery the frequency in case it changes (which it can on multicore machines)
-		QueryPerformanceFrequency ((LARGE_INTEGER *) &qpcfreq);
-
-		// store back times and calc a fudge factor as Sys_Milliseconds can overshoot on a sub-millisecond scale
-		qpcfudge = ((double) (currqpccount - lastqpccount) / (double) qpcfreq) - ((double) (currtime - lasttime) * 0.001);
-		lastqpccount = currqpccount;
-		lasttime = currtime;
-	}
-	else qpcfudge = 0;
-
-	// the final time is the base from Sys_Milliseconds plus an addition from QPC
-	return ((double) (currtime - starttime) * 0.001) + ((double) (currqpccount - lastqpccount) / (double) qpcfreq) + qpcfudge;
-#endif
 }
 
 
@@ -725,9 +692,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		return 0;
 
 	case WM_DESTROY:
-		if (d3d_Window)
-			DestroyWindow (d3d_Window);
-
 		PostQuitMessage (0);
 		return 0;
 
@@ -753,7 +717,7 @@ LONG WINAPI TildeDirectQ (LPEXCEPTION_POINTERS toast)
 	// restore monitor gamma
 	VID_DefaultMonitorGamma_f ();
 
-	MessageBox (NULL, "Unhandled exception during initialization.\n",
+	MessageBox (NULL, "An unhandled exception occurred.\n",
 				"An error has occurred",
 				MB_OK | MB_ICONSTOP);
 
@@ -992,12 +956,13 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	Host_Init (&parms);
 
 	// init the timers
-	timeBeginPeriod (1);
+	Sys_InitTimers ();
+	Sys_ChangeTimer (&sys_usetimegettime);
 
 	DWORD oldtime = Sys_Milliseconds ();
 	MSG msg;
 
-	while (true)
+	while (1)
 	{
 		// note - a normal frame needs to be run even if paused otherwise we'll never be able to unpause!!!
 		if (cl.paused)

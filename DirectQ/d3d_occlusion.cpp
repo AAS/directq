@@ -42,7 +42,7 @@ void D3DOQ_PopulateVBO (void)
 {
 	r_bbvertex_t *bboxverts = NULL;
 
-	hr = d3d_BBoxVBO->Lock (0, 0, (void **) &bboxverts, 0);
+	hr = d3d_BBoxVBO->Lock (0, 0, (void **) &bboxverts, d3d_GlobalCaps.DefaultLock);
 	if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to lock vertex buffer");
 
 	// and fill it in properly
@@ -58,6 +58,7 @@ void D3DOQ_PopulateVBO (void)
 	}
 
 	hr = d3d_BBoxVBO->Unlock ();
+	d3d_RenderDef.numlock++;
 	if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to unlock vertex buffer");
 }
 
@@ -95,12 +96,13 @@ void D3DOQ_CreateBuffers (void)
 			4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6
 		};
 
-		hr = d3d_BBoxIBO->Lock (0, 0, (void **) &ndx, 0);
+		hr = d3d_BBoxIBO->Lock (0, 0, (void **) &ndx, d3d_GlobalCaps.DefaultLock);
 		if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to lock index buffer");
 
 		memcpy (ndx, bboxindexes, 36 * sizeof (unsigned short));
 
 		hr = d3d_BBoxIBO->Unlock ();
+		d3d_RenderDef.numlock++;
 		if (FAILED (hr)) Sys_Error ("D3DOQ_CreateBuffers: failed to unlock index buffer");
 	}
 }
@@ -165,19 +167,14 @@ void D3DOC_ShowBBoxes (void)
 			D3D_SetStreamSource (2, NULL, 0, 0);
 			D3D_SetIndices (d3d_BBoxIBO);
 
-			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+			D3DState_SetZBuffer (D3DZB_TRUE, FALSE);
 			D3D_SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
 
 			D3DHLSL_SetPass (FX_PASS_BBOXES);
 			D3D_SetVertexDeclaration (d3d_BBoxDecl);
 
 			if (r_showbboxes.integer > 1)
-			{
-				D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-				D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-				D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-				D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-			}
+				D3DState_SetAlphaBlend (TRUE);
 			else D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_WIREFRAME);
 
 			stateset = true;
@@ -195,10 +192,10 @@ void D3DOC_ShowBBoxes (void)
 	if (stateset)
 	{
 		D3D_BackfaceCull (D3DCULL_CCW);
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+		D3DState_SetZBuffer (D3DZB_TRUE, TRUE);
 
 		if (r_showbboxes.integer > 1)
-			D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+			D3DState_SetAlphaBlend (FALSE);
 		else D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
 	}
 }

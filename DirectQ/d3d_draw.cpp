@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+#include "d3d_Quads.h"
 
 typedef struct drawrect_s
 {
@@ -70,52 +71,12 @@ typedef struct d3d_drawsurf_s
 	drawrect_t texrect;
 } d3d_drawsurf_t;
 
-#define MAX_DRAW_SURFS	1024
-
-d3d_drawsurf_t d3d_DrawSurfs[MAX_DRAW_SURFS];
+d3d_drawsurf_t d3d_DrawSurfs[D3D_MAX_QUADS];
 int d3d_NumDrawSurfs = 0;
 
-typedef struct drawvert_s
+__inline void D3DDraw_Vertex (quadvert_t *vert, float x, float y, D3DCOLOR c, float s, float t)
 {
-	float xyz[3];
-	DWORD color;
-	float st[2];
-} drawvert_t;
-
-
-LPDIRECT3DVERTEXDECLARATION9 d3d_DrawDecl = NULL;
-
-void D3DDraw_OnLoss (void)
-{
-	SAFE_RELEASE (d3d_DrawDecl);
-}
-
-
-void D3DDraw_OnRecover (void)
-{
-	if (!d3d_DrawDecl)
-	{
-		D3DVERTEXELEMENT9 d3d_drawlayout[] =
-		{
-			{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
-			{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
-			D3DDECL_END ()
-		};
-
-		hr = d3d_Device->CreateVertexDeclaration (d3d_drawlayout, &d3d_DrawDecl);
-		if (FAILED (hr)) Sys_Error ("D3DDraw_OnRecover: d3d_Device->CreateVertexDeclaration failed");
-	}
-}
-
-CD3DDeviceLossHandler d3d_DrawHandler (D3DDraw_OnLoss, D3DDraw_OnRecover);
-
-
-__inline void D3DDraw_Vertex (drawvert_t *vert, float x, float y, D3DCOLOR c, float s, float t)
-{
-	vert->xyz[0] = x + d3d_DrawOfs_x;
-	vert->xyz[1] = y + d3d_DrawOfs_y;
-	vert->xyz[2] = 0;
+	VectorSet (vert->xyz, x + d3d_DrawOfs_x, y + d3d_DrawOfs_y, 0);
 
 	vert->color = c;
 
@@ -126,16 +87,15 @@ __inline void D3DDraw_Vertex (drawvert_t *vert, float x, float y, D3DCOLOR c, fl
 
 void D3DDraw_DrawBatch (void)
 {
+	// - do an instancing thing like with particles here???
+	// x/y/w/h - stbase/stadd - color
 	if (d3d_NumDrawSurfs)
 	{
-		D3DDraw_OnRecover ();
-		D3D_UnbindStreams ();
-		D3D_SetVertexDeclaration (d3d_DrawDecl);
+		quadvert_t *verts = NULL;
 
-		drawvert_t *verts = (drawvert_t *) scratchbuf;
-		unsigned short *ndx = (unsigned short *) (verts + d3d_NumDrawSurfs * 4);
+		D3DQuads_Begin (d3d_NumDrawSurfs, &verts);
 
-		for (int i = 0, v = 0; i < d3d_NumDrawSurfs; i++, v += 4)
+		for (int i = 0; i < d3d_NumDrawSurfs; i++, verts += 4)
 		{
 			d3d_drawsurf_t *ds = &d3d_DrawSurfs[i];
 
@@ -143,27 +103,10 @@ void D3DDraw_DrawBatch (void)
 			D3DDraw_Vertex (&verts[1], ds->x + ds->w, ds->y, ds->c, ds->texrect.sh, ds->texrect.tl);
 			D3DDraw_Vertex (&verts[2], ds->x + ds->w, ds->y + ds->h, ds->c, ds->texrect.sh, ds->texrect.th);
 			D3DDraw_Vertex (&verts[3], ds->x, ds->y + ds->h, ds->c, ds->texrect.sl, ds->texrect.th);
-
-			ndx[0] = v + 0;
-			ndx[1] = v + 1;
-			ndx[2] = v + 2;
-			ndx[3] = v + 0;
-			ndx[4] = v + 2;
-			ndx[5] = v + 3;
-
-			verts += 4;
-			ndx += 6;
 		}
 
-		verts = (drawvert_t *) scratchbuf;
-		ndx = (unsigned short *) (verts + d3d_NumDrawSurfs * 4);
+		D3DQuads_End ();
 
-		D3DHLSL_CheckCommit ();
-
-		d3d_Device->DrawIndexedPrimitiveUP (D3DPT_TRIANGLELIST, 0, d3d_NumDrawSurfs * 4,
-			d3d_NumDrawSurfs * 2, ndx, D3DFMT_INDEX16, verts, sizeof (drawvert_t));
-
-		d3d_RenderDef.numdrawprim++;
 		d3d_NumDrawSurfs = 0;
 	}
 }
@@ -222,7 +165,7 @@ void D3DDraw_SubmitQuad (float x, float y, float w, float h, D3DCOLOR c = 0xffff
 		d3d_DrawState.LastTexture = tex;
 	}
 
-	if (d3d_NumDrawSurfs >= MAX_DRAW_SURFS) D3DDraw_DrawBatch ();
+	if (d3d_NumDrawSurfs >= D3D_MAX_QUADS) D3DDraw_DrawBatch ();
 
 	d3d_drawsurf_t *ds = &d3d_DrawSurfs[d3d_NumDrawSurfs];
 	d3d_NumDrawSurfs++;
@@ -258,7 +201,7 @@ drawrect_t charrects[256];
 
 // fixme - move to a struct, or lock the texture
 int			scrap_allocated[SCRAP_WIDTH];
-byte		scrap_texels[SCRAP_WIDTH *SCRAP_HEIGHT];
+byte		scrap_texels[SCRAP_WIDTH * SCRAP_HEIGHT];
 bool		scrap_dirty = false;
 image_t		scrap_textures;
 
@@ -299,7 +242,6 @@ bool Scrap_AllocBlock (int w, int h, int *x, int *y)
 {
 	int		i, j;
 	int		best, best2;
-	int		texnum;
 
 	best = SCRAP_HEIGHT;
 
@@ -627,6 +569,8 @@ void Draw_FreeCrosshairs (void)
 }
 
 
+void D3D_MakeAlphaTexture (LPDIRECT3DTEXTURE9 tex);
+
 void Draw_LoadCrosshairs (void)
 {
 	// free anything that we may have had previously
@@ -675,7 +619,7 @@ void Draw_LoadCrosshairs (void)
 		LPDIRECT3DTEXTURE9 newcrosshair = NULL;
 
 		// standard loader; qrack crosshairs begin at 1 and so should we
-		if (!D3D_LoadExternalTexture (&newcrosshair, va ("crosshair%i", i + 1), 0))
+		if (!D3D_LoadExternalTexture (&newcrosshair, va ("crosshair%i", i + 1), IMAGE_ALPHA))
 			break;
 
 		// fill it in
@@ -835,14 +779,6 @@ void Draw_Init (void)
 	Draw_SetCharrects (256, 256, 8, 8);
 
 	// Draw_DumpLumps ();
-
-	qpic_t	*cb;
-	byte	*dest;
-	int		x, y, z;
-	char	ver[40];
-	glpic_t	*gl;
-	int		start;
-	byte	*ncdata;
 
 	// initialize scrap textures
 	Scrap_Init ();
@@ -1253,7 +1189,7 @@ void Draw_Mapshot (char *name, int x, int y)
 		return;
 	}
 
-	if (stricmp (name, cached_name))
+	if (_stricmp (name, cached_name))
 	{
 		// save to cached name
 		Q_strncpy (cached_name, name, 255);
@@ -1462,39 +1398,6 @@ void Draw_FadeScreen (int alpha)
 
 //=============================================================================
 
-/*
-============
-Draw_PolyBlend
-============
-*/
-void Draw_PolyBlend (void)
-{
-	if (!(gl_polyblend.value > 0.0f)) return;
-	if (v_blend[3] < 1) return;
-
-	D3DDraw_SetSize (&vid.sbarsize);
-
-	float alpha = (float) v_blend[3] * gl_polyblend.value;
-
-	DWORD blendcolor = D3DCOLOR_ARGB
-	(
-		BYTE_CLAMP (alpha),
-		BYTE_CLAMP (v_blend[0]),
-		BYTE_CLAMP (v_blend[1]),
-		BYTE_CLAMP (v_blend[2])
-	);
-
-	// don't go down into sbar territory
-	D3DDraw_SubmitQuad (0, 0, vid.sbarsize.width, vid.sbarsize.height - sb_lines, blendcolor);
-
-	// this needs to flush immediately as state is changing immediately after it
-	D3DDraw_DrawBatch ();
-
-	// ensure
-	v_blend[3] = 0;
-}
-
-
 void D3D_Set2DShade (float shadecolor)
 {
 	if (shadecolor >= 0.99f)
@@ -1525,8 +1428,7 @@ void D3DDraw_Begin2D (void)
 	Scrap_Upload ();
 
 	// disable depth testing and writing
-	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+	D3DState_SetZBuffer (D3DZB_FALSE, FALSE);
 
 	// no backface culling
 	D3D_BackfaceCull (D3DCULL_NONE);
@@ -1542,10 +1444,7 @@ void D3DDraw_Begin2D (void)
 	D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
 
 	// enable alpha blending (always)
-	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
-	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
-	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	D3DState_SetAlphaBlend (TRUE);
 
 	// set up shader for drawing; always force a pass switch first time
 	d3d_DrawState.ShaderPass = FX_PASS_NOTBEGUN;
@@ -1556,11 +1455,6 @@ void D3DDraw_Begin2D (void)
 
 	// clear size to force a recache as the world matrix always needs to be updated for the first 2D draw
 	vid.currsize = NULL;
-
-	// do the polyblends here for simplicity
-	// note - this is a good bit faster with this code than doing them in r_main
-	// note 2 - the gun model code assumes that it's the last thing drawn in the 3D view
-	Draw_PolyBlend ();
 }
 
 

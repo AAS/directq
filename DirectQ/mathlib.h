@@ -20,6 +20,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // mathlib.h
 
+#define min2(a, b) ((a) < (b) ? (a) : (b))
+#define min3(a, b, c) (min2 ((a), min2 ((b), (c))))
+
+#define max2(a, b) ((a) > (b) ? (a) : (b))
+#define max3(a, b, c) (max2 ((a), max2 ((b), (c))))
+
 typedef float vec_t;
 typedef vec_t vec3_t[3];
 typedef vec_t vec5_t[5];
@@ -41,6 +47,7 @@ extern	int nanmask;
 #define VectorCopy(src,dst) {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];}
 #define VectorCopy2(dst,src) {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];}
 #define VectorClear(vec) {(vec)[0] = (vec)[1] = (vec)[2] = 0.0f;}
+#define VectorSet(vec,x,y,z) {(vec)[0] = x; (vec)[1] = y; (vec)[2] = z;}
 
 void VectorMad (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
 

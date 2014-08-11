@@ -148,7 +148,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 		if (str[i] == '_') str[i] = ' ';
 
 		// null term after map name
-		if (!strnicmp (&str[i], "kills:", 6)) str[i] = 0;
+		if (!_strnicmp (&str[i], "kills:", 6)) str[i] = 0;
 	}
 
 	// trim trailing spaces
@@ -273,10 +273,10 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 				if (com_token[0] == '}') break;
 
 				// interpret - these are stored as floats in the save file
-				if (!stricmp (keyname, "total_secrets")) total_secrets = (int) (atof (com_token) + 0.1f);
-				if (!stricmp (keyname, "found_secrets")) num_secrets = (int) (atof (com_token) + 0.1f);
-				if (!stricmp (keyname, "total_monsters")) total_kills = (int) (atof (com_token) + 0.1f);
-				if (!stricmp (keyname, "killed_monsters")) num_kills = (int) (atof (com_token) + 0.1f);
+				if (!_stricmp (keyname, "total_secrets")) total_secrets = (int) (atof (com_token) + 0.1f);
+				if (!_stricmp (keyname, "found_secrets")) num_secrets = (int) (atof (com_token) + 0.1f);
+				if (!_stricmp (keyname, "total_monsters")) total_kills = (int) (atof (com_token) + 0.1f);
+				if (!_stricmp (keyname, "killed_monsters")) num_kills = (int) (atof (com_token) + 0.1f);
 			}
 		}
 	}
@@ -514,7 +514,7 @@ void Menu_SaveLoadScanSaves (void)
 			// remove the .sav extension from the list entry
 			for (int i = strlen (saveloadlist[slindex]); i; i--)
 			{
-				if (!stricmp (&saveloadlist[slindex][i], ".sav"))
+				if (!_stricmp (&saveloadlist[slindex][i], ".sav"))
 				{
 					saveloadlist[slindex][i] = 0;
 					break;
@@ -878,7 +878,8 @@ void Menu_SaveLoadCustomKey (int key)
 	if (!ActiveScrollbox) return;
 
 	// get what the position is when we come in here
-	int oldcurr = ActiveScrollbox->GetCurrent ();
+	// uncomment this when we figure out what's going on below
+	// int oldcurr = ActiveScrollbox->GetCurrent ();
 
 	switch (key)
 	{
@@ -897,6 +898,10 @@ void Menu_SaveLoadCustomKey (int key)
 		return;
 	}
 
+	// What WTFery is this?  of course this does nothing, it was told to do nothing just up above.
+	// note the fall through to default.  unfortunately i can't remember exactly what i was thinking back then
+	// can KeyFunc make a scroll box item go null?  it's ugly code anyway...
+	/*
 	// hmmm - this seems to do nothing...
 	// get what the position is now
 	int newcurr = ActiveScrollbox->GetCurrent ();
@@ -915,6 +920,7 @@ void Menu_SaveLoadCustomKey (int key)
 		// save item is one less
 		SaveScrollbox->SetCurrent (newcurr + 1);
 	}
+	*/
 }
 
 

@@ -157,7 +157,7 @@ entity_t *CL_EntityNum (int num)
 				// alloc a new entity and set it's number
 				cl_entities[cl.num_entities] = CL_AllocEntity ();
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
-				cl_entities[cl.num_entities]->alphaval = 255;
+				cl_entities[cl.num_entities]->alphaval = 0;
 			}
 
 			// force cl.numentities up until it exceeds the number we're looking for
@@ -892,12 +892,7 @@ void CL_ParseUpdate (int bits)
 		if (transbits == 2) MSG_ReadFloat ();
 	}
 	else if (ent != cl_entities[cl.viewentity])
-	{
-		ent->alphaval = 255;
-	}
-
-	// an alpha of 0 is equivalent to 255 (so that memset 0 will work correctly)
-	if (ent->alphaval < 1) ent->alphaval = 255;
+		ent->alphaval = 0;
 
 	if (bits & U_NOLERP)
 	{
@@ -1327,7 +1322,7 @@ void CL_ParseServerMessage (void)
 
 			// Still want to add text, even on ProQuake messages.  This guarantees compatibility;
 			// unrecognized messages will essentially be ignored but there will be no parse errors
-			if (!strnicmp (stufftxt, "crosshair", 9) && nehahra)
+			if (!_strnicmp (stufftxt, "crosshair", 9) && nehahra)
 			{
 				// gotcha FUCKING nehahra
 				// the crosshair cvar belongs to the PLAYER, not to the mod
@@ -1448,7 +1443,7 @@ void CL_ParseServerMessage (void)
 
 		case svc_setpause:
 		{
-			cl.paused = MSG_ReadByte ();
+			cl.paused = (MSG_ReadByte () != 0);
 
 			if (cl.paused)
 			{

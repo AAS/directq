@@ -19,9 +19,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // quakedef.h -- primary header for client
 
-// be a little kinder to the CRT in Quake by telling it to act like it's single-threaded
-// #define _CRT_DISABLE_PERFCRIT_LOCKS
-
 // defined as early as possible as it's needed in multiple headers
 #define	MAX_DLIGHTS		128
 
@@ -41,13 +38,23 @@ typedef int (*sortfunc_t) (const void *, const void *);
 #include <d3d9.h>
 #include <d3dx9.h>
 
+// likewise
+#include <dsound.h>
+
 
 // disable unwanted warnings
+// right now these just generate a whole heapa noise during compiles, making it impossible to dig out the
+// stuff you REALLY want to be looking out for.  Let's disable them and come back to them at some undetermined future date.
+#pragma warning (disable: 4244)		// conversion/possible loss of data - too much noise, not enough signal getting through
+#pragma warning (disable: 4305)		// truncation from double to float
+#pragma warning (disable: 4018)		// signed/unsigned mismatch
+#pragma warning (disable: 4706)		// assignment within condition
+#pragma warning (disable: 4389)		// another signed/unsigned mismatch
+#pragma warning (disable: 4127)		// conditional expression is constant
+#pragma warning (disable: 4100)		// unreferenced formal parameter
+#pragma warning (disable: 4245)		// more signed/unsigned
 /*
-#pragma warning (disable: 4305)
-#pragma warning (disable: 4244)
 #pragma warning (disable: 4311)
-#pragma warning (disable: 4018)
 #pragma warning (disable: 4800)
 #pragma warning (disable: 4267)
 #pragma warning (disable: 4996)
@@ -84,7 +91,6 @@ typedef char quakepath[260];
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <setjmp.h>
 
 // was 1; does this actually DO anything?  Not mentioned in MSDN; must be WinQuake or DOSQuake legacy
 #define UNALIGNED_OK	0
@@ -387,3 +393,16 @@ int Sys_LoadResourceData (int resourceid, void **resbuf);
 void UpdateTitlebarText (char *mapname = NULL);
 
 void Host_DisableForLoading (bool disable);
+
+
+extern int profilestart;
+extern int profileend;
+
+#define BEGIN_PROFILE \
+	profilestart = timeGetTime ();
+
+// let's pick a name that we'll be certain of never using as a variable anywhere...
+#define END_PROFILE(fuckedtime) \
+	profileend = timeGetTime (); \
+	if (profileend - profilestart > fuckedtime) Con_Printf ("%4i ms\n", profileend - profilestart);
+

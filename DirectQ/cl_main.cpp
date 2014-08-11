@@ -652,8 +652,6 @@ cvar_t cl_itembobheight ("cl_itembobheight", 0.0f);
 cvar_t cl_itembobspeed ("cl_itembobspeed", 0.5f);
 cvar_t cl_itemrotatespeed ("cl_itemrotatespeed", 100.0f);
 
-void D3DPart_AddSmokePuff (float *origin, int numpuffs, int spread);
-
 void CL_RelinkEntities (void)
 {
 	extern cvar_t r_lerporient;
@@ -849,22 +847,6 @@ void CL_RelinkEntities (void)
 
 				VectorMad (dl->origin, 18, av.forward, dl->origin);
 				dl->radius = 200 + (rand () & 31);
-
-#if _DEBUG
-				if (!kurok && i == cl.viewentity && 0)
-				{
-					// fixme - correct origin...
-					if (cl.stats[STAT_ACTIVEWEAPON] == IT_NAILGUN)
-						D3DPart_AddSmokePuff (dl->origin, 1, 6);
-					else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_LIGHTNING)
-						D3DPart_AddSmokePuff (dl->origin, 1, 4);
-					else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)
-						D3DPart_AddSmokePuff (dl->origin, 1, 4);
-					else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_NAILGUN)
-						D3DPart_AddSmokePuff (dl->origin, 1, 4);
-					else D3DPart_AddSmokePuff (dl->origin, 4, 2);
-				}
-#endif
 
 				// the server clears muzzleflashes after each frame, but as the client is now running faster, it won't get the message for several
 				// frames - potentially over 10.  therefore we should also clear the flash on the client too.  this also fixes demos ;)
@@ -1080,10 +1062,17 @@ void CL_UpdateClient (double frametime, bool readfromserver)
 
 		if (cl_shownet.value) Con_Printf ("\n");
 	}
+}
 
-	// entity states are always brought up to date, even if not reading from the server
-	CL_RelinkEntities ();
-	CL_UpdateTEnts ();
+
+void CL_PrepEntitiesForRendering (void)
+{
+	if (cls.state == ca_connected)
+	{
+		// entity states are always brought up to date, even if not reading from the server
+		CL_RelinkEntities ();
+		CL_UpdateTEnts ();
+	}
 }
 
 

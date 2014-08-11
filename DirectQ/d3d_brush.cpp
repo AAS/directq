@@ -23,122 +23,25 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-
-__inline void D3DBrush_TransferSurfaceMesh (msurface_t *surf, entity_t *ent, brushpolyvert_t **verts, unsigned short **ndx, int ndxofs)
-{
-	unsigned short *srcindexes = surf->indexes;
-	int n = (surf->numindexes + 7) >> 3;
-
-	// we can't just memcpy the indexes as we need to add an offset to each so instead we'll Duff the bastards
-	switch (surf->numindexes % 8)
-	{
-	case 0: do {*ndx[0]++ = ndxofs + *srcindexes++;
-	case 7: *ndx[0]++ = ndxofs + *srcindexes++;
-	case 6: *ndx[0]++ = ndxofs + *srcindexes++;
-	case 5: *ndx[0]++ = ndxofs + *srcindexes++;
-	case 4: *ndx[0]++ = ndxofs + *srcindexes++;
-	case 3: *ndx[0]++ = ndxofs + *srcindexes++;
-	case 2: *ndx[0]++ = ndxofs + *srcindexes++;
-	case 1: *ndx[0]++ = ndxofs + *srcindexes++;
-	} while (--n > 0);
-	}
-
-	// transform in software to save on draw call and locking overhead (wouldn't IDirect3DDevice9::ProcessVertices be better???)
-	// perf is about even with hardware T&L, with software we're transforming in software anyway
-	if (ent)
-	{
-		// transform to a temp buffer so that we can fast-copy the transformed verts to the final buffer
-		// this works out better than transforming directly to the VBO as we can get a DMA copy and transforms
-		// can make better use of CPU cache and optimized instructions
-		brushpolyvert_t *srcverts = surf->vertexes;
-		static brushpolyvert_t dstverts[64];	// quake mandates no more than 64 verts on a surface thru qbsp
-		D3DMATRIX *matrix = &ent->matrix;
-
-		for (int v = 0; v < surf->numvertexes; v++, srcverts++)
-		{
-			D3DMatrix_TransformPoint (matrix, srcverts->xyz, dstverts[v].xyz);
-
-			dstverts[v].st[0][0] = srcverts->st[0][0];
-			dstverts[v].st[0][1] = srcverts->st[0][1];
-			dstverts[v].st[1][0] = srcverts->st[1][0];
-			dstverts[v].st[1][1] = srcverts->st[1][1];
-		}
-
-		memcpy (verts[0], dstverts, surf->numvertexes * sizeof (brushpolyvert_t));
-		verts[0] += surf->numvertexes;
-	}
-	else
-	{
-		memcpy (verts[0], surf->vertexes, surf->numvertexes * sizeof (brushpolyvert_t));
-		verts[0] += surf->numvertexes;
-	}
-}
-
-
-__inline void D3DBrush_TransferSurface (msurface_t *surf, entity_t *ent, brushpolyvert_t *verts, unsigned short *ndx, int ndxofs)
-{
-	unsigned short *srcindexes = surf->indexes;
-	int n = (surf->numindexes + 7) >> 3;
-
-	// we can't just memcpy the indexes as we need to add an offset to each so instead we'll Duff the bastards
-	switch (surf->numindexes % 8)
-	{
-	case 0: do {*ndx++ = ndxofs + *srcindexes++;
-	case 7: *ndx++ = ndxofs + *srcindexes++;
-	case 6: *ndx++ = ndxofs + *srcindexes++;
-	case 5: *ndx++ = ndxofs + *srcindexes++;
-	case 4: *ndx++ = ndxofs + *srcindexes++;
-	case 3: *ndx++ = ndxofs + *srcindexes++;
-	case 2: *ndx++ = ndxofs + *srcindexes++;
-	case 1: *ndx++ = ndxofs + *srcindexes++;
-	} while (--n > 0);
-	}
-
-	// transform in software to save on draw call and locking overhead (wouldn't IDirect3DDevice9::ProcessVertices be better???)
-	// perf is about even with hardware T&L, with software we're transforming in software anyway
-	if (ent)
-	{
-		// transform to a temp buffer so that we can fast-copy the transformed verts to the final buffer
-		// this works out better than transforming directly to the VBO as we can get a DMA copy and transforms
-		// can make better use of CPU cache and optimized instructions
-		brushpolyvert_t *srcverts = surf->vertexes;
-		static brushpolyvert_t dstverts[64];	// quake mandates no more than 64 verts on a surface thru qbsp
-		D3DMATRIX *matrix = &ent->matrix;
-
-		for (int v = 0; v < surf->numvertexes; v++, srcverts++)
-		{
-			D3DMatrix_TransformPoint (matrix, srcverts->xyz, dstverts[v].xyz);
-
-			dstverts[v].st[0][0] = srcverts->st[0][0];
-			dstverts[v].st[0][1] = srcverts->st[0][1];
-			dstverts[v].st[1][0] = srcverts->st[1][0];
-			dstverts[v].st[1][1] = srcverts->st[1][1];
-		}
-
-		memcpy (verts, dstverts, surf->numvertexes * sizeof (brushpolyvert_t));
-	}
-	else memcpy (verts, surf->vertexes, surf->numvertexes * sizeof (brushpolyvert_t));
-}
-
+#define BRUSH_HWTLMODE (d3d_GlobalCaps.supportHardwareTandL)
 
 void D3DBrush_SetShader (int ShaderNum)
 {
 	// common
-	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_NONE);
-	D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
+	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
+	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
+
+	D3D_SetTextureAddress (0, D3DTADDRESS_WRAP);
+	D3D_SetTextureAddress (1, D3DTADDRESS_CLAMP);
 
 	switch (ShaderNum)
 	{
 	case FX_PASS_WORLD_NOLUMA:
 	case FX_PASS_WORLD_NOLUMA_ALPHA:
-		D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
-		D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 		break;
 
 	default:
 		// some kind of luma style
-		D3D_SetTextureAddress (0, D3DTADDRESS_CLAMP);
-		D3D_SetTextureAddress (1, D3DTADDRESS_WRAP);
 		D3D_SetTextureAddress (2, D3DTADDRESS_WRAP);
 		D3D_SetTextureMipmap (2, d3d_TexFilter, d3d_MipFilter);
 		break;
@@ -148,40 +51,121 @@ void D3DBrush_SetShader (int ShaderNum)
 }
 
 
-// fit in our 1 MB buffer
-#define MAX_SURF_VERTEXES 32768
-#define MAX_SURF_INDEXES 65536
-
-LPDIRECT3DVERTEXDECLARATION9 d3d_SurfDecl = NULL;
-LPDIRECT3DVERTEXDECLARATION9 d3d_NodeDecl = NULL;
-
-
 typedef struct d3d_surfstate_s
 {
 	int NumVertexes;
-	int NumIndexes;
+	int NumListIndexes;
+	int NumStripIndexes;
+
+	int MaxIndexes;
+	int MaxVertexes;
+
+	int FirstIndex;
+	int FirstVertex;
+
 	int Alpha;
 	int ShaderPass;
-	LPDIRECT3DTEXTURE9 tmu0tex;
-	LPDIRECT3DTEXTURE9 tmu1tex;
-	LPDIRECT3DTEXTURE9 tmu2tex;
+	int StreamOffset;
+
+	entity_t *CurrentEnt;
+
+	D3DFORMAT LightmapFormat;
+
+	LPDIRECT3DTEXTURE9 Lightmap;
+	LPDIRECT3DTEXTURE9 Diffuse;
+	LPDIRECT3DTEXTURE9 Luma;
+
+	msurface_t *PreviousSurf;
+	msurface_t **BatchedSurfaces;
+	int NumSurfaces;
 } d3d_surfstate_t;
 
 
-#define MAX_SURF_MODELSURFS		4096
-
 d3d_surfstate_t d3d_SurfState;
 
-typedef struct d3d_brushsurf_s
+#define MAX_STREAM_VERTS	60000
+
+LPDIRECT3DINDEXBUFFER9 d3d_BrushIBO;
+LPDIRECT3DVERTEXBUFFER9 d3d_BrushVBO;
+LPDIRECT3DVERTEXDECLARATION9 d3d_SurfDecl = NULL;
+brushpolyvert_t *d3d_BrushVerts = NULL;
+
+void Mod_RecalcNodeBBox (mnode_t *node);
+void Mod_CalcBModelBBox (model_t *mod, brushhdr_t *hdr);
+
+// qbsp guarantees no more than 64 verts per surf
+unsigned short surfindexes[(64 - 2) * 3];
+unsigned short stripindexes[64];
+
+extern int LightmapWidth, LightmapHeight;
+
+void D3DBrush_BuildPolygonForSurface (brushhdr_t *hdr, msurface_t *surf, brushpolyvert_t *verts)
 {
-	msurface_t *surf;
-	entity_t *ent;
-} d3d_brushsurf_t;
+	surf->mins[0] = surf->mins[1] = surf->mins[2] = 99999999;
+	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -99999999;
 
-d3d_brushsurf_t d3d_BrushSurfs[MAX_SURF_MODELSURFS];
-int d3d_NumBrushSurfs = 0;
+	for (int v = 0, v2 = surf->numvertexes; v < surf->numvertexes; v++, v2--)
+	{
+		int stripdst = v ? (v * 2 - 1) : 0;
+		int lindex = hdr->dsurfedges[surf->firstedge + v];
+		float *vec;
 
-// fixme - shift this to load time
+		if (stripdst >= surf->numvertexes) stripdst = v2 * 2;
+
+		if (lindex > 0)
+			vec = hdr->dvertexes[hdr->dedges[lindex].v[0]].point;
+		else vec = hdr->dvertexes[hdr->dedges[-lindex].v[1]].point;
+
+		for (int x = 0; x < 3; x++)
+		{
+			verts[stripdst].xyz[x] = vec[x];
+
+			if (surf->mins[x] > vec[x]) surf->mins[x] = vec[x];
+			if (surf->maxs[x] < vec[x]) surf->maxs[x] = vec[x];
+		}
+
+		float st[2] =
+		{
+			(DotProduct (vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]),
+			(DotProduct (vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3])
+		};
+
+		if (surf->texinfo->texture == r_notexture_mip)
+		{
+			verts[stripdst].st[0][0] = verts[stripdst].st[1][0] = (st[0] - surf->texinfo->vecs[0][3]) / 8.0f;
+			verts[stripdst].st[0][1] = verts[stripdst].st[1][1] = (st[1] - surf->texinfo->vecs[1][3]) / 8.0f;
+		}
+		else if (surf->flags & SURF_DRAWTURB)
+		{
+			verts[stripdst].st[0][0] = verts[stripdst].st[1][0] = (st[0] - surf->texinfo->vecs[0][3]) / 64.0f;
+			verts[stripdst].st[0][1] = verts[stripdst].st[1][1] = (st[1] - surf->texinfo->vecs[1][3]) / 64.0f;
+		}
+		else
+		{
+			verts[stripdst].st[0][0] = st[0] / surf->texinfo->texture->size[0];
+			verts[stripdst].st[0][1] = st[1] / surf->texinfo->texture->size[1];
+		}
+
+		if (!(surf->flags & SURF_DRAWSKY) && !(surf->flags & SURF_DRAWTURB))
+		{
+			verts[stripdst].st[1][0] = ((st[0] - surf->texturemins[0]) + (surf->LightRect.left * 16) + 8) / (float) (LightmapWidth * 16);
+			verts[stripdst].st[1][1] = ((st[1] - surf->texturemins[1]) + (surf->LightRect.top * 16) + 8) / (float) (LightmapHeight * 16);
+		}
+	}
+
+	for (int v = 0; v < 3; v++)
+	{
+		// expand the bbox by 1 unit in each direction to ensure that marginal surfs don't get culled
+		// (needed for R_RecursiveWorldNode avoidance)
+		surf->mins[v] -= 1.0f;
+		surf->maxs[v] += 1.0f;
+
+		// get final mindpoint
+		surf->midpoint[v] = surf->mins[v] + (surf->maxs[v] - surf->mins[v]) * 0.5f;
+	}
+}
+
+
 void D3DBrush_CreateVBOs (void)
 {
 	if (!d3d_SurfDecl)
@@ -198,601 +182,768 @@ void D3DBrush_CreateVBOs (void)
 		if (FAILED (hr)) Sys_Error ("D3DBrush_CreateVBOs: d3d_Device->CreateVertexDeclaration failed");
 	}
 
-	if (!d3d_NodeDecl)
-	{
-		D3DVERTEXELEMENT9 d3d_nodelayout[] =
-		{
-			{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-			{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
-			{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
-			D3DDECL_END ()
-		};
+	// ensure because this gets called at map load as well as at vid_restart
+	SAFE_RELEASE (d3d_BrushIBO);
+	SAFE_RELEASE (d3d_BrushVBO);
 
-		hr = d3d_Device->CreateVertexDeclaration (d3d_nodelayout, &d3d_NodeDecl);
-		if (FAILED (hr)) Sys_Error ("D3DBrush_CreateVBOs: d3d_Device->CreateVertexDeclaration failed");
+	// we can't do this at load time because we don't know how many vertexes we're going to need yet...
+	int totalverts = 0;
+	int totalsurfs = 0;
+
+	if (!cl.model_precache) return;
+
+	// first pass counts the verts and sets up the firstvertex member for each surf (we could merge this with the loader but it's no big deal...)
+	for (int j = 1; j < MAX_MODELS; j++)
+	{
+		model_t *m = cl.model_precache[j];
+
+		if (!m) break;
+		if (m->type != mod_brush) continue;
+		if (m->name[0] == '*') continue;
+
+		totalverts += m->brushhdr->numsurfvertexes;
+		totalsurfs += m->brushhdr->numsurfaces;
+	}
+
+	if (!totalsurfs) return;
+	if (!totalverts) return;
+
+	d3d_SurfState.MaxVertexes = 0;
+	d3d_SurfState.MaxIndexes = 0;
+	d3d_SurfState.BatchedSurfaces = (msurface_t **) RenderZone->Alloc (totalsurfs * sizeof (msurface_t *));
+	d3d_SurfState.NumSurfaces = 0;
+
+	brushpolyvert_t *verts = NULL;
+	unsigned short *ndx = NULL;
+	int streamoffset = 0, streamverts = 0;
+
+	if (!BRUSH_HWTLMODE)
+	{
+		D3DMain_CreateVertexBuffer (totalverts * sizeof (brushpolyvert_t), D3DUSAGE_DYNAMIC, &d3d_BrushVBO);
+		d3d_BrushVerts = (brushpolyvert_t *) RenderZone->Alloc (totalverts * sizeof (brushpolyvert_t));
+		verts = d3d_BrushVerts;
+		d3d_SurfState.FirstVertex = 0;
+	}
+	else
+	{
+		D3DMain_CreateVertexBuffer (totalverts * sizeof (brushpolyvert_t), 0, &d3d_BrushVBO);
+
+		if (FAILED (d3d_BrushVBO->Lock (0, 0, (void **) &verts, d3d_GlobalCaps.DefaultLock)))
+			Sys_Error ("D3DBrush_CreateVBOs : IDirect3DVertexBuffer9::Lock failed\n");
+	}
+
+	totalverts = 0;
+
+	for (int j = 1; j < MAX_MODELS; j++)
+	{
+		model_t *m = cl.model_precache[j];
+
+		if (!m) break;
+		if (m->type != mod_brush) continue;
+
+		if (m->name[0] == '*')
+		{
+			// the model has already had it's surfs calced so just recalc it's bbox
+			Mod_CalcBModelBBox (m, m->brushhdr);
+			continue;
+		}
+
+		// alloc the surfs into the vertex buffer in as close to the same order they will be drawn as possible
+		texture_t *tex = NULL;
+		brushhdr_t *hdr = m->brushhdr;
+		msurface_t *surf = hdr->surfaces;
+
+		for (int i = 0; i < hdr->numsurfaces; i++, surf++)
+		{
+			// chain by texture
+			surf->texturechain = surf->texinfo->texture->texturechain;
+			surf->texinfo->texture->texturechain = surf;
+
+			// accumumate to index batch
+			d3d_SurfState.MaxIndexes += surf->numindexes;
+			d3d_SurfState.MaxVertexes += surf->numvertexes;
+		}
+
+		msurface_t *lightmap_surfaces[MAX_LIGHTMAPS];
+
+		for (int i = 0; i < hdr->numtextures; i++)
+		{
+			if (!(tex = hdr->textures[i])) continue;
+			if (!(surf = tex->texturechain)) continue;
+
+			for (int k = 0; k < MAX_LIGHTMAPS; k++)
+				lightmap_surfaces[k] = NULL;
+
+			for (; surf; surf = surf->texturechain)
+			{
+				// this is a fixup for sky and turb surfs
+				if (surf->LightmapTextureNum < 0)
+					surf->LightmapTextureNum = 0;
+
+				surf->lightmapchain = lightmap_surfaces[surf->LightmapTextureNum];
+				lightmap_surfaces[surf->LightmapTextureNum] = surf;
+			}
+
+			for (int k = 0; k < MAX_LIGHTMAPS; k++)
+			{
+				if (!(surf = lightmap_surfaces[k])) continue;
+
+				int batchverts = 0;
+
+				for (; surf; surf = surf->lightmapchain)
+				{
+					D3DBrush_BuildPolygonForSurface (hdr, surf, verts);
+
+					if (!BRUSH_HWTLMODE)
+					{
+						surf->streamoffset = -1;
+						surf->firstvertex = totalverts;
+						surf->vertexrange = surf->firstvertex + surf->numvertexes;
+						totalverts += surf->numvertexes;
+					}
+					else
+					{
+						// partition the vertex buffer so that we can reasonably index into it
+						if (totalverts + surf->numvertexes > MAX_STREAM_VERTS)
+						{
+							streamoffset = streamverts * sizeof (brushpolyvert_t);
+							totalverts = 0;
+						}
+
+						surf->streamoffset = streamoffset;
+						surf->firstvertex = totalverts;
+						surf->vertexrange = surf->firstvertex + surf->numvertexes;
+
+						totalverts += surf->numvertexes;
+						streamverts += surf->numvertexes;
+					}
+
+					verts += surf->numvertexes;
+					batchverts += surf->numvertexes;
+				}
+			}
+
+			tex->texturechain = NULL;
+		}
+
+		Mod_RecalcNodeBBox (hdr->nodes);
+		Mod_CalcBModelBBox (m, hdr);
+	}
+
+	if (BRUSH_HWTLMODE)
+	{
+		d3d_BrushVBO->Unlock ();
+		d3d_RenderDef.numlock++;
+	}
+
+	// take a minimum index buffer size of 1 MB (512k indexes) - it doesn't have to do a discard
+	// lock so often, and when it does it can do it quickly enough (measured)
+	if (d3d_SurfState.MaxIndexes < 512 * 1024) d3d_SurfState.MaxIndexes = 512 * 1024;
+
+	// also ensure room for degenerate tri indexes
+	if (d3d_SurfState.MaxIndexes < d3d_SurfState.MaxVertexes + ((totalsurfs - 1) * 5)) d3d_SurfState.MaxIndexes = d3d_SurfState.MaxVertexes + ((totalsurfs - 1) * 5);
+
+	// now create our index buffer
+	D3DMain_CreateIndexBuffer (d3d_SurfState.MaxIndexes, D3DUSAGE_DYNAMIC, &d3d_BrushIBO);
+	hr = d3d_BrushIBO->Lock (0, 0, (void **) &ndx, d3d_GlobalCaps.DiscardLock);
+
+	if (FAILED (hr)) Sys_Error ("D3DBrush_BatchSurface : IDirect3DIndexBuffer9::Lock failed\n");
+
+	d3d_BrushIBO->Unlock ();
+	d3d_RenderDef.numlock++;
+	d3d_SurfState.FirstIndex = 0;
+
+	// calc base surf indexes (we really only need to do this once but it does no harm)
+	for (int i = 0; i < 64; i++) stripindexes[i] = i;
+
+	// and now for converting a strip to a tri list
+	ndx = surfindexes;
+
+	// qbsp guarantees no more than 64 verts per surf
+	for (int i = 2; i < 64; i++, ndx += 3)
+	{
+		ndx[0] = i - 2;
+		ndx[1] = (i & 1) ? i : i - 1;
+		ndx[2] = (i & 1) ? i - 1 : i;
 	}
 }
 
 
 void D3DBrush_ReleaseVBOs (void)
 {
+	SAFE_RELEASE (d3d_BrushIBO);
+	SAFE_RELEASE (d3d_BrushVBO);
 	SAFE_RELEASE (d3d_SurfDecl);
-	SAFE_RELEASE (d3d_NodeDecl);
 }
 
 
 CD3DDeviceLossHandler d3d_SurfVBOHandler (D3DBrush_ReleaseVBOs, D3DBrush_CreateVBOs);
 
-
-LPDIRECT3DVERTEXBUFFER9 d3d_BModelVBOs[MAX_MODELS];
-LPDIRECT3DINDEXBUFFER9 d3d_BModelIBOs[MAX_MODELS];
-
-
-typedef struct d3d_drawcall_s
+void D3DBrush_ResetBatch (void)
 {
-	int FirstVertex;
-	int FirstIndex;
-	int NumVertexes;
-	int NumIndexes;
-	int ShaderPass;
-	LPDIRECT3DTEXTURE9 tmu0tex;
-	LPDIRECT3DTEXTURE9 tmu1tex;
-	LPDIRECT3DTEXTURE9 tmu2tex;
-
-	// only used by bmodels
-	LPDIRECT3DVERTEXBUFFER9 vbo;
-	LPDIRECT3DINDEXBUFFER9 ibo;
-	texture_t *basetex;
-} d3d_drawcall_t;
-
-
-void D3DBrush_InitDrawCall (d3d_drawcall_t *dc)
-{
-	dc->FirstIndex = 0;
-	dc->FirstVertex = 0;
-	dc->NumIndexes = 0;
-	dc->NumVertexes = 0;
-	dc->tmu0tex = NULL;
-	dc->tmu1tex = NULL;
-	dc->tmu2tex = NULL;
-	dc->ShaderPass = FX_PASS_NOTBEGUN;
-
-	// only bmodels use these
-	dc->vbo = NULL;
-	dc->ibo = NULL;
-	dc->basetex = NULL;
+	d3d_SurfState.NumVertexes = 0;
+	d3d_SurfState.NumListIndexes = 0;
+	d3d_SurfState.NumStripIndexes = 0;
+	d3d_SurfState.NumSurfaces = 0;
+	d3d_SurfState.PreviousSurf = NULL;
 }
 
 
-void D3DBrush_ReleaseBModelVBOs (void)
+// we can't just memcpy the indexes as we need to add an offset to each so instead we'll Duff the bastards
+// (8 seems optimal in testing)
+#define D3DBrush_TransferIndexes(offset, count, source) \
+	{ \
+		int n = (count + 7) >> 3; \
+		unsigned short *src = source; \
+		 \
+		switch (count % 8) \
+		{ \
+		case 0: do {*ndx++ = offset + *src++; \
+		case 7: *ndx++ = offset + *src++; \
+		case 6: *ndx++ = offset + *src++; \
+		case 5: *ndx++ = offset + *src++; \
+		case 4: *ndx++ = offset + *src++; \
+		case 3: *ndx++ = offset + *src++; \
+		case 2: *ndx++ = offset + *src++; \
+		case 1: *ndx++ = offset + *src++; \
+		} while (--n > 0); \
+		} \
+	}
+
+
+#define D3DBrush_TransferVertex(dest, source) \
+	(dest)->xyz[0] = (source)->xyz[0]; \
+	(dest)->xyz[1] = (source)->xyz[1]; \
+	(dest)->xyz[2] = (source)->xyz[2]; \
+	(dest)->st[0][0] = (source)->st[0][0]; \
+	(dest)->st[0][1] = (source)->st[0][1]; \
+	(dest)->st[1][0] = (source)->st[1][0]; \
+	(dest)->st[1][1] = (source)->st[1][1]; \
+	(dest)++; \
+	(source)++;
+
+#define D3DBrush_TransferVertexes(dest, source, count) \
+	{ \
+		int n = (count + 7) >> 3; \
+		brushpolyvert_t *src = source; \
+		 \
+		switch (count % 8) \
+		{ \
+		case 0: do {D3DBrush_TransferVertex (dest, src); \
+		case 7: D3DBrush_TransferVertex (dest, src); \
+		case 6: D3DBrush_TransferVertex (dest, src); \
+		case 5: D3DBrush_TransferVertex (dest, src); \
+		case 4: D3DBrush_TransferVertex (dest, src); \
+		case 3: D3DBrush_TransferVertex (dest, src); \
+		case 2: D3DBrush_TransferVertex (dest, src); \
+		case 1: D3DBrush_TransferVertex (dest, src); \
+		} while (--n > 0); \
+		} \
+	}
+
+
+void D3DBrush_LockVBO (void **verts, int numverts)
 {
-	for (int i = 1; i < MAX_MODELS; i++)
+	if (d3d_SurfState.FirstVertex + numverts >= d3d_SurfState.MaxVertexes)
 	{
-		SAFE_RELEASE (d3d_BModelVBOs[i]);
-		SAFE_RELEASE (d3d_BModelIBOs[i]);
+		if (FAILED (d3d_BrushVBO->Lock (0, 0, verts, d3d_GlobalCaps.DiscardLock)))
+			Sys_Error ("D3DBrush_FlushSurfaces : IDirect3DVertexBuffer9::Lock failed");
+
+		d3d_SurfState.FirstVertex = 0;
+	}
+	else
+	{
+		hr = d3d_BrushVBO->Lock (d3d_SurfState.FirstVertex * sizeof (brushpolyvert_t),
+			numverts * sizeof (brushpolyvert_t),
+			verts,
+			d3d_GlobalCaps.NoOverwriteLock);
+
+		if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces : IDirect3DVertexBuffer9::Lock failed");
 	}
 }
 
 
-typedef struct minsurf_s
+void D3DBrush_LockIBO (void **indexes, int numindexes)
 {
+	// the index buffer was sized so that the entire draw can fit in so that we can avoid checking for overflow per surf
+	if (d3d_SurfState.FirstIndex + numindexes >= d3d_SurfState.MaxIndexes)
+	{
+		// discard lock
+		if (FAILED (d3d_BrushIBO->Lock (0, 0, indexes, d3d_GlobalCaps.DiscardLock)))
+			Sys_Error ("D3DBrush_BatchSurface : IDirect3DIndexBuffer9::Lock failed\n");
+
+		d3d_SurfState.FirstIndex = 0;
+	}
+	else
+	{
+		// no overwrite lock
+		hr = d3d_BrushIBO->Lock (d3d_SurfState.FirstIndex * sizeof (unsigned short),
+			numindexes * sizeof (unsigned short),
+			indexes,
+			d3d_GlobalCaps.NoOverwriteLock);
+
+		if (FAILED (hr)) Sys_Error ("D3DBrush_BatchSurface : IDirect3DIndexBuffer9::Lock failed\n");
+	}
+}
+
+
+void D3DBrush_DrawIndexedTriStripSW (void)
+{
+	brushpolyvert_t *verts = NULL;
+	unsigned short *ndx = NULL;
+
+	D3DBrush_LockVBO ((void **) &verts, d3d_SurfState.NumVertexes);
+	D3DBrush_LockIBO ((void **) &ndx, d3d_SurfState.NumStripIndexes);
+
+	int numstripverts = 0;
+	int numprimitives = 0;
+
+	// the first surf forms the beginning of the strip
+	msurface_t *surf = d3d_SurfState.BatchedSurfaces[0];
+
+	D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex], surf->numvertexes);
+	D3DBrush_TransferIndexes (numstripverts, surf->numvertexes, stripindexes);
+	numstripverts += surf->numvertexes;
+	numprimitives += surf->numvertexes - 2;
+
+	for (int s = 1; s < d3d_SurfState.NumSurfaces; s++)
+	{
+		// note - this is the previous surface...
+		if (surf->numvertexes & 1)
+		{
+			// odd number of verts in previous strip, duplicate the last vertex for a single degenerate tri
+			*ndx++ = numstripverts - 1;
+			numprimitives++;
+		}
+
+		// add degenerate tris to join the strips
+		*ndx++ = numstripverts - 1;
+		*ndx++ = numstripverts;
+		*ndx++ = numstripverts;
+		*ndx++ = numstripverts + 1;
+
+		// not sure that i see the logic of why this adds 6 and not 4, unless we're compensating for
+		// the two we removed from the previous surface... (which we probably are)
+		numprimitives += 6;
+
+		// ...now set the current surface
+		surf = d3d_SurfState.BatchedSurfaces[s];
+
+		// now add the new surface as extra verts to the strip
+		D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex], surf->numvertexes);
+		D3DBrush_TransferIndexes (numstripverts, surf->numvertexes, stripindexes);
+		numprimitives += surf->numvertexes - 2;
+		numstripverts += surf->numvertexes;
+	}
+
+	d3d_BrushIBO->Unlock ();
+	d3d_RenderDef.numlock++;
+
+	d3d_BrushVBO->Unlock ();
+	d3d_RenderDef.numlock++;
+
+	// d3d_SurfState.NumVertexes should be == numstripverts but we need to keep numstripverts so that we can get the correct offset for each index
+	D3D_SetStreamSource (0, d3d_BrushVBO, d3d_SurfState.FirstVertex * sizeof (brushpolyvert_t), sizeof (brushpolyvert_t));
+	D3D_DrawIndexedPrimitive (D3DPT_TRIANGLESTRIP, 0, d3d_SurfState.NumVertexes, d3d_SurfState.FirstIndex, numprimitives);
+
+	d3d_SurfState.FirstVertex += d3d_SurfState.NumVertexes;
+	d3d_SurfState.FirstIndex += d3d_SurfState.NumStripIndexes;
+}
+
+
+void D3DBrush_DrawDegenTriStrip (void)
+{
+	brushpolyvert_t *verts = NULL;
+
+	// make extra space for degenerate tri verts
+	d3d_SurfState.NumVertexes += ((d3d_SurfState.NumSurfaces - 1) * 5);
+
+	D3DBrush_LockVBO ((void **) &verts, d3d_SurfState.NumVertexes);
+
 	msurface_t *surf;
-} minsurf_t;
+	int numstripverts = 0;
 
+	// the first surf forms the beginning of the strip
+	surf = d3d_SurfState.BatchedSurfaces[0];
 
-int D3DBrush_SortFunc (minsurf_t *s1, minsurf_t *s2)
-{
-	if (s1->surf->texinfo->texture == s2->surf->texinfo->texture)
-		return ((int) s1->surf->LightmapTextureNum - (int) s2->surf->LightmapTextureNum);
-	else return ((int) s1->surf->texinfo->texture - (int) s2->surf->texinfo->texture);
+	D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex], surf->numvertexes);
+	numstripverts += surf->numvertexes;
+
+	for (int s = 1; s < d3d_SurfState.NumSurfaces; s++)
+	{
+		// fixme - would these degenerate tris go better if we used indexes (we would just need to dupe the indexes,
+		// not the full verts)
+		if (surf->numvertexes & 1)
+		{
+			// odd number of verts in previous strip, duplicate the last vertex for a single degenerate tri
+			D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->vertexrange - 1], 1);
+			numstripverts++;
+		}
+
+		// add degenerate tris to join the trips
+		D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->vertexrange - 1], 1);
+
+		// now update the surf
+		surf = d3d_SurfState.BatchedSurfaces[s];
+
+		D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex], 1);
+		D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex], 1);
+		D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex + 1], 1);
+
+		numstripverts += 4;
+
+		// now add the new surface as extra verts to the strip
+		D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex], surf->numvertexes);
+		numstripverts += surf->numvertexes;
+	}
+
+	d3d_BrushVBO->Unlock ();
+	d3d_RenderDef.numlock++;
+
+	D3D_SetStreamSource (0, d3d_BrushVBO, 0, sizeof (brushpolyvert_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLESTRIP, d3d_SurfState.FirstVertex, numstripverts - 2);
+
+	d3d_SurfState.FirstVertex += d3d_SurfState.NumVertexes;
 }
 
 
-// this is quite an arbitrary number and is just intended to cut off smaller boxes where it may be
-// more efficient to just fill the goddam dynamic buffer.  it was largely tuned by going to the immediate
-// back-right corner after you come out of the starting cave in ne_tower, looking up, and seeing which
-// number gave the overall best average framerate.
-cvar_t r_brushvbocutoff ("r_brushvbocutoff", "20");
-
-void D3DBrush_BuildBModelVBOs (void)
+void D3DBrush_DrawIndexedListSW (void)
 {
-	D3DBrush_ReleaseBModelVBOs ();
+	unsigned short *ndx = NULL;
+	brushpolyvert_t *verts = NULL;
 
-	if (!cl.model_precache) return;
-	//if (!d3d_GlobalCaps.supportHardwareTandL) return;
+	D3DBrush_LockVBO ((void **) &verts, d3d_SurfState.NumVertexes);
+	D3DBrush_LockIBO ((void **) &ndx, d3d_SurfState.NumListIndexes);
 
-	// to do - pack all of these into a single vbo???
-	for (int i = 1; i < MAX_MODELS; i++)
+	int NumPrimitives = 0;
+	int IndexOffset = 0;
+
+	for (int s = 0; s < d3d_SurfState.NumSurfaces; s++)
 	{
-		model_t *mod = cl.model_precache[i];
+		msurface_t *surf = d3d_SurfState.BatchedSurfaces[s];
 
-		if (!mod) continue;
-		if (mod->type != mod_brush) continue;
-		if (!(mod->flags & MOD_BMODEL)) continue;
+		// transfer
+		D3DBrush_TransferVertexes (verts, &d3d_BrushVerts[surf->firstvertex], surf->numvertexes);
+		D3DBrush_TransferIndexes (IndexOffset, surf->numindexes, surfindexes);
 
-		mod->brushhdr->DrawCalls = NULL;
-		mod->brushhdr->NumDrawCalls = 0;
+		NumPrimitives += surf->numvertexes - 2;
+		IndexOffset += surf->numvertexes;
+	}
 
-		int numvbosurfaces = 0;
-		int numvbovertexes = 0;
-		int numvboindexes = 0;
-		int maxminsurfs = SCRATCHBUF_SIZE / (sizeof (minsurf_t) + sizeof (d3d_drawcall_t));
-		msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
-		minsurf_t *minsurfs = (minsurf_t *) scratchbuf;
+	d3d_BrushVBO->Unlock ();
+	d3d_RenderDef.numlock++;
+	d3d_BrushIBO->Unlock ();
+	d3d_RenderDef.numlock++;
 
-		// worst case - each surf is it's own draw call
-		// in practice that never happens, so we don't care really.  but we make room for them all the same.
-		if (mod->brushhdr->nummodelsurfaces > maxminsurfs) continue;
+	D3D_SetStreamSource (0, d3d_BrushVBO, d3d_SurfState.FirstVertex * sizeof (brushpolyvert_t), sizeof (brushpolyvert_t));
+	D3D_DrawIndexedPrimitive (0, d3d_SurfState.NumVertexes, d3d_SurfState.FirstIndex, NumPrimitives);
 
-		for (int s = 0; s < mod->brushhdr->nummodelsurfaces; s++, surf++)
-		{
-			if (surf->flags & SURF_DRAWTURB) continue;
-			if (surf->flags & SURF_DRAWSKY) continue;
-			if (!surf->texinfo->texture) continue;
-			if (!surf->texinfo->texture->teximage) continue;
+	d3d_SurfState.FirstVertex += d3d_SurfState.NumVertexes;
+	d3d_SurfState.FirstIndex += d3d_SurfState.NumListIndexes;
+}
 
-			// copy out minimal data
-			minsurfs[numvbosurfaces].surf = surf;
 
-			numvbosurfaces++;
-			numvbovertexes += surf->numvertexes;
-			numvboindexes += surf->numindexes;
-		}
+void D3DBrush_DrawUnbatched (void)
+{
+	D3D_SetStreamSource (0, d3d_BrushVBO, d3d_SurfState.StreamOffset, sizeof (brushpolyvert_t));
 
-		if (numvbosurfaces < 1) continue;
-		if (numvbosurfaces < r_brushvbocutoff.integer) continue;
-		if (numvbovertexes > 60000) continue;
+	for (int s = 0; s < d3d_SurfState.NumSurfaces; s++)
+	{
+		msurface_t *surf = d3d_SurfState.BatchedSurfaces[s];
 
-		// sort the surfaces for cache locality
-		qsort (minsurfs, numvbosurfaces, sizeof (minsurf_t), (sortfunc_t) D3DBrush_SortFunc);
-
-		brushpolyvert_t *verts = NULL;
-		unsigned short *ndx = NULL;
-
-		// create and lock the buffers for this model
-		D3DMain_CreateVertexBuffer (numvbovertexes * sizeof (brushpolyvert_t), D3DUSAGE_WRITEONLY, &d3d_BModelVBOs[i]);
-		hr = d3d_BModelVBOs[i]->Lock (0, 0, (void **) &verts, 0);
-		if (FAILED (hr)) Sys_Error ("D3DBrush_BuildBModelVBOs : failed to lock vertex buffer");
-
-		D3DMain_CreateIndexBuffer (numvboindexes, D3DUSAGE_WRITEONLY, &d3d_BModelIBOs[i]);
-		hr = d3d_BModelIBOs[i]->Lock (0, 0, (void **) &ndx, 0);
-		if (FAILED (hr)) Sys_Error ("D3DBrush_BuildBModelVBOs : failed to lock index buffer");
-
-		// fill in buffers and draw calls
-		d3d_drawcall_t *dc = (d3d_drawcall_t *) (minsurfs + numvbosurfaces);
-		int numdc = 0;
-
-		D3DBrush_InitDrawCall (dc);
-
-		LPDIRECT3DTEXTURE9 lasttex = NULL;
-		LPDIRECT3DTEXTURE9 lastlm = NULL;
-
-		int numverts = 0;
-		int numindexes = 0;
-		int totalvertexes = 0;
-
-		for (int s = 0; s < numvbosurfaces; s++)
-		{
-			surf = minsurfs[s].surf;
-
-			if (surf->texinfo->texture->teximage->d3d_Texture != lasttex || surf->d3d_LightmapTex != lastlm)
-			{
-				if (numdc) dc++;
-				numdc++;
-
-				// fill in the rest of this draw call
-				dc->basetex = surf->texinfo->texture;
-				dc->FirstVertex = numverts;
-				dc->FirstIndex = numindexes;
-				dc->NumVertexes = 0;
-				dc->NumIndexes = 0;
-
-				// store back
-				lasttex = surf->texinfo->texture->teximage->d3d_Texture;
-				lastlm = surf->d3d_LightmapTex;
-			}
-
-			// write in the surface mesh
-			D3DBrush_TransferSurfaceMesh (surf, NULL, &verts, &ndx, totalvertexes);
-
-			// advance counters
-			dc->NumVertexes += surf->numvertexes;
-			dc->NumIndexes += surf->numindexes;
-			dc->vbo = d3d_BModelVBOs[i];
-			dc->ibo = d3d_BModelIBOs[i];
-			dc->tmu0tex = surf->d3d_LightmapTex;
-
-			numverts += surf->numvertexes;
-			numindexes += surf->numindexes;
-			totalvertexes += surf->numvertexes;
-		}
-
-		hr = d3d_BModelVBOs[i]->Unlock ();
-		if (FAILED (hr)) Sys_Error ("D3DBrush_BuildBModelVBOs : failed to unlock vertex buffer");
-
-		hr = d3d_BModelIBOs[i]->Unlock ();
-		if (FAILED (hr)) Sys_Error ("D3DBrush_BuildBModelVBOs : failed to unlock index buffer");
-
-		mod->brushhdr->NumDrawCalls = numdc;
-		mod->brushhdr->DrawCalls = (d3d_drawcall_t *) RenderZone->Alloc (sizeof (d3d_drawcall_t) * numdc);
-		memcpy (mod->brushhdr->DrawCalls, (minsurfs + numvbosurfaces), sizeof (d3d_drawcall_t) * numdc);
-
-		// Con_Printf ("model %s has %i draw calls (%i v %i s)\n", mod->name, numdc, numvbovertexes, numvbosurfaces);
+		D3D_DrawPrimitive (D3DPT_TRIANGLESTRIP, surf->firstvertex, surf->numvertexes - 2);
 	}
 }
 
 
-CD3DDeviceLossHandler d3d_BModelVBOHandler (D3DBrush_ReleaseBModelVBOs, D3DBrush_BuildBModelVBOs);
+void D3DBrush_DrawIndexedListHW (void)
+{
+	unsigned short *ndx = NULL;
 
-// experiment with batch breaking
-cvar_t r_surfbatchcutoff ("r_surfbatchcutoff", "1");
+	D3DBrush_LockIBO ((void **) &ndx, d3d_SurfState.NumListIndexes);
 
+	int FirstVertex = 0x7fffffff;
+	int LastVertex = 0;
+	int PrimitiveCount = 0;
+
+	// now blast in the indexes
+	for (int s = 0; s < d3d_SurfState.NumSurfaces; s++)
+	{
+		msurface_t *surf = d3d_SurfState.BatchedSurfaces[s];
+
+		D3DBrush_TransferIndexes (surf->firstvertex, surf->numindexes, surfindexes);
+
+		// eval DIP params
+		if (surf->firstvertex < FirstVertex) FirstVertex = surf->firstvertex;
+		if (surf->vertexrange > LastVertex) LastVertex = surf->vertexrange;
+
+		// this should be the same as NumIndexes / 3 always
+		PrimitiveCount += (surf->numvertexes - 2);
+	}
+
+	d3d_BrushIBO->Unlock ();
+	d3d_RenderDef.numlock++;
+
+	D3D_SetStreamSource (0, d3d_BrushVBO, d3d_SurfState.StreamOffset, sizeof (brushpolyvert_t));
+
+	// note: the documentation is seriously misleading here; numvertexes is not the number of vertexes used in the
+	// draw call, it is the range from the lowest numbered vert to the highest numbered, inclusive.
+	D3D_DrawIndexedPrimitive (FirstVertex,
+		LastVertex - FirstVertex,
+		d3d_SurfState.FirstIndex,
+		PrimitiveCount);
+
+	d3d_SurfState.FirstIndex += d3d_SurfState.NumListIndexes;
+}
+
+
+void D3DBrush_DrawIndexedTriStripHW (void)
+{
+	unsigned short *ndx = NULL;
+
+	D3DBrush_LockIBO ((void **) &ndx, d3d_SurfState.NumStripIndexes);
+
+	int FirstVertex = 0x7fffffff;
+	int LastVertex = 0;
+	int PrimitiveCount = 0;
+	int IndexTransfer = 0;
+
+	// the first surf forms the beginning of the strip
+	msurface_t *surf = d3d_SurfState.BatchedSurfaces[0];
+
+	D3DBrush_TransferIndexes (surf->firstvertex, surf->numvertexes, stripindexes);
+	PrimitiveCount += surf->numvertexes - 2;
+	IndexTransfer += surf->numvertexes;
+
+	if (surf->firstvertex < FirstVertex) FirstVertex = surf->firstvertex;
+	if (surf->vertexrange > LastVertex) LastVertex = surf->vertexrange;
+
+	for (int s = 1; s < d3d_SurfState.NumSurfaces; s++)
+	{
+		// note - this is the previous surface...
+		if (surf->numvertexes & 1)
+		{
+			// odd number of verts in previous strip, duplicate the last vertex for a single degenerate tri
+			*ndx++ = surf->vertexrange - 1;
+			PrimitiveCount++;
+			IndexTransfer++;
+		}
+
+		// add degenerate tris to join the strips
+		*ndx++ = surf->vertexrange - 1;
+
+		// ...now set the current surface
+		surf = d3d_SurfState.BatchedSurfaces[s];
+
+		*ndx++ = surf->firstvertex;
+		*ndx++ = surf->firstvertex;
+		*ndx++ = surf->firstvertex + 1;
+
+		// not sure that i see the logic of why this adds 6 and not 4, unless we're compensating for
+		// the two we removed from the previous surface... (which we probably are)
+		PrimitiveCount += 6;
+		IndexTransfer += 4;
+
+		// now add the new surface as extra verts to the strip
+		D3DBrush_TransferIndexes (surf->firstvertex, surf->numvertexes, stripindexes);
+		PrimitiveCount += surf->numvertexes - 2;
+		IndexTransfer += surf->numvertexes;
+
+		if (surf->firstvertex < FirstVertex) FirstVertex = surf->firstvertex;
+		if (surf->vertexrange > LastVertex) LastVertex = surf->vertexrange;
+	}
+
+	d3d_BrushIBO->Unlock ();
+	d3d_RenderDef.numlock++;
+
+	D3D_SetStreamSource (0, d3d_BrushVBO, d3d_SurfState.StreamOffset, sizeof (brushpolyvert_t));
+
+	D3D_DrawIndexedPrimitive (D3DPT_TRIANGLESTRIP,
+		FirstVertex,
+		LastVertex - FirstVertex,
+		d3d_SurfState.FirstIndex,
+		PrimitiveCount);
+
+	// hardware T&L doesn't like us if we have unused regions in the index buffer
+	d3d_SurfState.FirstIndex += d3d_SurfState.NumStripIndexes;
+}
+
+
+void D3DBrush_DrawSingleSurfaceHW (void)
+{
+	msurface_t *surf = d3d_SurfState.BatchedSurfaces[0];
+
+	D3D_SetStreamSource (0, d3d_BrushVBO, d3d_SurfState.StreamOffset, sizeof (brushpolyvert_t));
+	D3D_DrawPrimitive (D3DPT_TRIANGLESTRIP, surf->firstvertex, surf->numvertexes - 2);
+}
+
+
+cvar_t r_batchmode ("r_batchmode", "1");
 
 void D3DBrush_FlushSurfaces (void)
 {
-	D3D_SetVertexDeclaration (d3d_SurfDecl);
-	D3D_UnbindStreams ();
-
-	if (d3d_NumBrushSurfs > r_surfbatchcutoff.integer)
+	if (d3d_SurfState.NumSurfaces)
 	{
-		brushpolyvert_t *verts = (brushpolyvert_t *) scratchbuf;
-		unsigned short *ndx = (unsigned short *) (verts + MAX_SURF_VERTEXES);
-
-		int numverts = 0;
-		int numindexes = 0;
-
-		for (int i = 0; i < d3d_NumBrushSurfs; i++)
+		if (!BRUSH_HWTLMODE)
 		{
-			msurface_t *surf = d3d_BrushSurfs[i].surf;
-
-			D3DBrush_TransferSurface (surf, d3d_BrushSurfs[i].ent, &verts[numverts], &ndx[numindexes], numverts);
-
-			numverts += surf->numvertexes;
-			numindexes += surf->numindexes;
+			if (d3d_SurfState.NumSurfaces == 1)
+				D3DBrush_DrawDegenTriStrip ();
+			else if (r_batchmode.integer == 0)
+				D3DBrush_DrawDegenTriStrip ();
+			else if (r_batchmode.integer == 1)
+				D3DBrush_DrawIndexedListSW ();
+			else D3DBrush_DrawIndexedTriStripSW ();
+		}
+		else
+		{
+			if (d3d_SurfState.NumSurfaces == 1)
+				D3DBrush_DrawSingleSurfaceHW ();
+			else if (r_batchmode.integer == 0)
+				D3DBrush_DrawUnbatched ();
+			else if (r_batchmode.integer == 1)
+				D3DBrush_DrawIndexedListHW ();
+			else D3DBrush_DrawIndexedTriStripHW ();
 		}
 
-		D3DHLSL_CheckCommit ();
-
-		d3d_Device->DrawIndexedPrimitiveUP (D3DPT_TRIANGLELIST, 0, numverts, numindexes / 3,
-			(((brushpolyvert_t *) scratchbuf) + MAX_SURF_VERTEXES),
-			D3DFMT_INDEX16, scratchbuf, sizeof (brushpolyvert_t));
-
-		d3d_RenderDef.numdrawprim++;
+		D3DBrush_ResetBatch ();
 	}
-	else if (d3d_NumBrushSurfs)
-	{
-		D3DHLSL_CheckCommit ();
-
-		for (int i = 0; i < d3d_NumBrushSurfs; i++)
-		{
-			msurface_t *surf = d3d_BrushSurfs[i].surf;
-			entity_t *ent = d3d_BrushSurfs[i].ent;
-
-			if (ent)
-			{
-				brushpolyvert_t *srcverts = surf->vertexes;
-				static brushpolyvert_t dstverts[64];	// quake mandates no more than 64 verts on a surface thru qbsp
-				D3DMATRIX *matrix = &ent->matrix;
-
-				for (int v = 0; v < surf->numvertexes; v++, srcverts++)
-				{
-					D3DMatrix_TransformPoint (matrix, srcverts->xyz, dstverts[v].xyz);
-
-					dstverts[v].st[0][0] = srcverts->st[0][0];
-					dstverts[v].st[0][1] = srcverts->st[0][1];
-					dstverts[v].st[1][0] = srcverts->st[1][0];
-					dstverts[v].st[1][1] = srcverts->st[1][1];
-				}
-
-				d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, surf->numvertexes - 2, dstverts, sizeof (brushpolyvert_t));
-			}
-			else d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, surf->numvertexes - 2, surf->vertexes, sizeof (brushpolyvert_t));
-
-			d3d_RenderDef.numdrawprim++;
-		}
-	}
-
-	// these are done outside the loop
-	d3d_NumBrushSurfs = 0;
-	d3d_SurfState.NumIndexes = 0;
-	d3d_SurfState.NumVertexes = 0;
 }
 
 
-// hmmm - ideally this would just take a pointer to the modelsurf and build a count of them rather than
-// needing to build a second list, but then it would break with sky and we wouldn't be able to combine the locks
-// oh well, shit happens.  the next one will be better.
-void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent)
+void D3DBrush_BatchSurface (msurface_t *surf)
 {
-	// if the list is full we must flush it before appending more
-	if (d3d_NumBrushSurfs >= MAX_SURF_MODELSURFS) D3DBrush_FlushSurfaces ();
-	if (d3d_SurfState.NumVertexes >= MAX_SURF_VERTEXES) D3DBrush_FlushSurfaces ();
-	if (d3d_SurfState.NumIndexes >= MAX_SURF_INDEXES) D3DBrush_FlushSurfaces ();
-
-	// grab a new one from the list
-	d3d_BrushSurfs[d3d_NumBrushSurfs].surf = surf;
-	d3d_BrushSurfs[d3d_NumBrushSurfs].ent = ent;
-	d3d_NumBrushSurfs++;
-
-	// increment the lock size counters
 	d3d_SurfState.NumVertexes += surf->numvertexes;
-	d3d_SurfState.NumIndexes += surf->numindexes;
+	d3d_SurfState.NumListIndexes += surf->numindexes;
+	d3d_SurfState.NumStripIndexes += surf->numvertexes;
 
+	if (d3d_SurfState.PreviousSurf)
+	{
+		if (d3d_SurfState.PreviousSurf->numvertexes & 1)
+			d3d_SurfState.NumStripIndexes += 5;
+		else d3d_SurfState.NumStripIndexes += 4;
+	}
+
+	d3d_SurfState.PreviousSurf = surf;
+	d3d_SurfState.BatchedSurfaces[d3d_SurfState.NumSurfaces] = surf;
+	d3d_SurfState.NumSurfaces++;
 	d3d_RenderDef.brush_polys++;
+}
+
+
+void D3DBrush_PrecheckSurface (msurface_t *surf, entity_t *ent)
+{
+	if (surf->streamoffset != d3d_SurfState.StreamOffset)
+	{
+		D3DBrush_FlushSurfaces ();
+		d3d_SurfState.StreamOffset = surf->streamoffset;
+	}
+
+	if (ent != d3d_SurfState.CurrentEnt)
+	{
+		D3DBrush_FlushSurfaces ();
+
+		if (ent)
+			D3DHLSL_SetWorldMatrix (&ent->matrix);
+		else D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
+
+		d3d_SurfState.CurrentEnt = ent;
+	}
 }
 
 
 void D3DBrush_Begin (void)
 {
+	D3D_SetVertexDeclaration (d3d_SurfDecl);
+
+	// stream 0 is set later
+	D3D_SetStreamSource (1, NULL, 0, 0);
+	D3D_SetStreamSource (2, NULL, 0, 0);
+	D3D_SetStreamSource (3, NULL, 0, 0);
+	D3D_SetIndices (d3d_BrushIBO);
+
+	D3DBrush_ResetBatch ();
+
+	d3d_SurfState.StreamOffset = -1;
+
 	d3d_SurfState.Alpha = -1;
-	d3d_SurfState.tmu0tex = NULL;
-	d3d_SurfState.tmu1tex = NULL;
-	d3d_SurfState.tmu2tex = NULL;
+	d3d_SurfState.CurrentEnt = NULL;
+	d3d_SurfState.LightmapFormat = D3DFMT_UNKNOWN;
+	d3d_SurfState.Lightmap = NULL;
+	d3d_SurfState.Diffuse = NULL;
+	d3d_SurfState.Luma = NULL;
 	d3d_SurfState.ShaderPass = FX_PASS_NOTBEGUN;
 }
 
 
 void D3DBrush_End (void)
 {
-	// draw anything left over
 	D3DBrush_FlushSurfaces ();
+
+	if (d3d_SurfState.CurrentEnt)
+	{
+		// restore the matrix if it had changed
+		D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
+	}
 }
 
 
-void D3DBrush_EmitSurface (d3d_modelsurf_t *ms)
+void D3DLight_CheckSurfaceForModification (msurface_t *surf);
+
+void D3DBrush_EmitSurface (msurface_t *surf, texture_t *tex, entity_t *ent, int alpha)
 {
-	msurface_t *surf = ms->surf;
-	bool recommit = false;
-	byte thisalpha = 255;
+	// figure the shader to use
+	int shaderpass = FX_PASS_NOTBEGUN;
 
-	// explicit alpha only
-	if (ms->surfalpha < 255) thisalpha = ms->surfalpha;
+	// check the surface for lightmap modification and also ensures that the correct lightmap tex is set
+	D3DLight_CheckSurfaceForModification (surf);
 
-	// check for state changes
-	if (thisalpha != d3d_SurfState.Alpha) recommit = true;
-	if (ms->textures[TEXTURE_LIGHTMAP] != d3d_SurfState.tmu0tex) recommit = true;
-	if (ms->textures[TEXTURE_DIFFUSE] != d3d_SurfState.tmu1tex) recommit = true;
-	if (ms->textures[TEXTURE_LUMA] != d3d_SurfState.tmu2tex) recommit = true;
+	// precheck for baseline changes
+	D3DBrush_PrecheckSurface (surf, ent);
 
-	// if we need to change state here we must flush anything batched so far before doing so
-	// either way we flag a commit pending too
-	if (recommit) D3DBrush_FlushSurfaces ();
-
-	if (recommit)
+	if (alpha != d3d_SurfState.Alpha)
 	{
-		D3DHLSL_SetTexture (0, ms->textures[TEXTURE_LIGHTMAP]);
-		D3DHLSL_SetTexture (1, ms->textures[TEXTURE_DIFFUSE]);
-		D3DHLSL_SetTexture (2, ms->textures[TEXTURE_LUMA]);
-
-		d3d_SurfState.tmu0tex = ms->textures[TEXTURE_LIGHTMAP];
-		d3d_SurfState.tmu1tex = ms->textures[TEXTURE_DIFFUSE];
-		d3d_SurfState.tmu2tex = ms->textures[TEXTURE_LUMA];
+		D3DBrush_FlushSurfaces ();
+		d3d_SurfState.Alpha = alpha;
+		D3DHLSL_SetAlpha ((float) d3d_SurfState.Alpha / 255.0f);
 	}
 
-	if (thisalpha != d3d_SurfState.Alpha)
+	// texture change checking needs to remain split out here for alpha surfaces
+	if (tex->teximage->d3d_Texture != d3d_SurfState.Diffuse)
 	{
-		D3DHLSL_SetAlpha ((float) thisalpha / 255.0f);
-		d3d_SurfState.Alpha = thisalpha;
+		D3DBrush_FlushSurfaces ();
+		d3d_SurfState.Diffuse = tex->teximage->d3d_Texture;
+		D3DHLSL_SetTexture (0, d3d_SurfState.Diffuse);
 	}
 
-	if (ms->shaderpass != d3d_SurfState.ShaderPass)
+	if (surf->d3d_LightmapTex != d3d_SurfState.Lightmap)
+	{
+		D3DBrush_FlushSurfaces ();
+		d3d_SurfState.Lightmap = surf->d3d_LightmapTex;
+		D3DHLSL_SetTexture (1, d3d_SurfState.Lightmap);
+	}
+
+	if (tex->lumaimage && gl_fullbrights.integer)
+	{
+		if (tex->lumaimage->d3d_Texture != d3d_SurfState.Luma)
+		{
+			D3DBrush_FlushSurfaces ();
+			d3d_SurfState.Luma = tex->lumaimage->d3d_Texture;
+			D3DHLSL_SetTexture (2, d3d_SurfState.Luma);
+		}
+
+		shaderpass = alpha < 255 ? FX_PASS_WORLD_LUMA_ALPHA : FX_PASS_WORLD_LUMA;
+	}
+	else shaderpass = alpha < 255 ? FX_PASS_WORLD_NOLUMA_ALPHA : FX_PASS_WORLD_NOLUMA;
+
+	if (shaderpass != d3d_SurfState.ShaderPass)
 	{
 		// now do the pass switch after all state has been set
-		D3DBrush_SetShader (ms->shaderpass);
-		d3d_SurfState.ShaderPass = ms->shaderpass;
+		D3DBrush_FlushSurfaces ();
+		D3DBrush_SetShader (shaderpass);
+		d3d_SurfState.ShaderPass = shaderpass;
 	}
 
-	D3DBrush_SubmitSurface (surf, ms->ent);
-}
-
-
-void D3DBrush_IssueDrawCalls (d3d_drawcall_t *dc, int num_drawcalls)
-{
-	for (int i = 0; i < num_drawcalls; i++, dc++)
-	{
-		D3DHLSL_SetTexture (0, dc->tmu0tex);
-		D3DHLSL_SetTexture (1, dc->tmu1tex);
-		D3DHLSL_SetTexture (2, dc->tmu2tex);
-		D3DBrush_SetShader (dc->ShaderPass);
-
-		D3D_DrawIndexedPrimitive (dc->FirstVertex, dc->NumVertexes, dc->FirstIndex, dc->NumIndexes / 3);
-	}
-}
-
-
-// fixme - we're getting too many locks here so we need to lock once only, transfer everything, then run through this drawing
-void D3DBrush_TransferMainSurfaces (d3d_modelsurf_t **lightchains)
-{
-	D3DBrush_Begin ();
-
-	for (int l = 0; l < MAX_LIGHTMAPS; l++)
-	{
-		if (!lightchains[l]) continue;
-
-		for (d3d_modelsurf_t *ms = lightchains[l]; ms; ms = ms->chain)
-		{
-			D3DBrush_EmitSurface (ms);
-			d3d_RenderDef.brush_polys++;
-		}
-
-		lightchains[l] = NULL;
-	}
-
-	D3DBrush_End ();
-}
-
-
-int D3DBrush_ModelSortFunc (entity_t **e1, entity_t **e2)
-{
-	return (int) (e1[0]->model - e2[0]->model);
-}
-
-
-void D3DBrush_DrawVBOSurfaces (void)
-{
-	bool drawsurfs = false;
-	entity_t **d3d_BrushEntities = (entity_t **) scratchbuf;
-	int d3d_NumBrushEntities = 0;
-
-	// build a list of all such entities that we're going to draw
-	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
-	{
-		entity_t *ent = d3d_RenderDef.visedicts[i];
-		model_t *mod = ent->model;
-
-		if (ent->visframe != d3d_RenderDef.framecount) continue;
-		if (ent->model->type != mod_brush) continue;
-		if (ent->alphaval < 255) continue;
-		if (!ent->update_type) continue;
-
-		if (!mod->brushhdr->DrawCalls) continue;
-
-		d3d_BrushEntities[d3d_NumBrushEntities] = ent;
-		d3d_NumBrushEntities++;
-	}
-
-	// nothing to draw
-	if (!d3d_NumBrushEntities) return;
-
-	// sort by model for VBO cache locality
-	qsort (d3d_BrushEntities, d3d_NumBrushEntities, sizeof (entity_t *), (sortfunc_t) D3DBrush_ModelSortFunc);
-
-	// now draw them
-	for (int i = 0; i < d3d_NumBrushEntities; i++)
-	{
-		entity_t *ent = d3d_BrushEntities[i];
-		model_t *mod = ent->model;
-
-		brushhdr_t *hdr = mod->brushhdr;
-		d3d_drawcall_t *dc = hdr->DrawCalls;
-
-		// build the correct transformation for this entity
-		D3DMATRIX m;
-
-		D3DMatrix_Multiply (&m, &ent->matrix, &d3d_ModelViewProjMatrix);
-		D3DHLSL_SetWorldMatrix (&m);
-
-		D3DMatrix_Multiply (&m, &ent->matrix, &d3d_ViewMatrix);
-		D3DHLSL_SetFogMatrix (&m);
-
-		drawsurfs = true;
-
-		// fixme - add filtering here???
-		// although the calling functions will filter too...
-		for (int d = 0; d < hdr->NumDrawCalls; d++, dc++)
-		{
-			D3D_SetStreamSource (0, dc->vbo, 0, sizeof (brushpolyvert_t));
-			D3D_SetStreamSource (1, NULL, 0, 0);
-			D3D_SetStreamSource (2, NULL, 0, 0);
-			D3D_SetStreamSource (3, NULL, 0, 0);
-
-			D3D_SetIndices (dc->ibo);
-
-			texture_t *tex = R_TextureAnimation (ent, dc->basetex);
-
-			D3DHLSL_SetTexture (0, dc->tmu0tex);
-			D3DHLSL_SetTexture (1, tex->teximage->d3d_Texture);
-
-			if (tex->lumaimage && gl_fullbrights.integer)
-			{
-				dc->ShaderPass = FX_PASS_WORLD_LUMA;
-				D3DHLSL_SetTexture (2, tex->lumaimage->d3d_Texture);
-			}
-			else dc->ShaderPass = FX_PASS_WORLD_NOLUMA;
-
-			D3DBrush_SetShader (dc->ShaderPass);
-
-			D3D_DrawIndexedPrimitive (dc->FirstVertex, dc->NumVertexes, dc->FirstIndex, dc->NumIndexes / 3);
-		}
-	}
-
-	if (drawsurfs)
-	{
-		// restore the world matrix
-		D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
-		D3DHLSL_SetFogMatrix (&d3d_ViewMatrix);
-	}
-}
-
-
-void D3DBrush_ShowNodesBegin (void)
-{
-	D3D_SetVertexDeclaration (d3d_NodeDecl);
-	D3D_UnbindStreams ();
-
-	D3DHLSL_SetPass (FX_PASS_DRAWCOLORED);
-	D3DHLSL_CheckCommit ();
-}
-
-
-typedef struct snvert_s
-{
-	float xyz[3];
-	D3DCOLOR color;
-	float pad[2];
-} snvert_t;
-
-extern cvar_t r_drawflat;
-extern cvar_t r_shownodedepth;
-
-void D3DBrush_ShowNodesDrawSurfaces (mnode_t *node, int depth)
-{
-	D3DCOLOR color = d3d_QuakePalette.standard32[((int) node) & 255];
-	snvert_t *snsurf = (snvert_t *) scratchbuf;
-
-	if (r_shownodedepth.value)
-		color = D3DCOLOR_XRGB (depth & 255, depth & 255, depth & 255);
-
-	if (node->numsurfaces)
-	{
-		msurface_t *surf = node->surfaces;
-
-		// add stuff to the draw lists
-		for (int c = node->numsurfaces; c; c--, surf++)
-		{
-			if (r_drawflat.value)
-				color = d3d_QuakePalette.standard32[((int) node->plane) & 255];
-
-			for (int i = 0; i < surf->numvertexes; i++)
-			{
-				snsurf[i].xyz[0] = surf->vertexes[i].xyz[0];
-				snsurf[i].xyz[1] = surf->vertexes[i].xyz[1];
-				snsurf[i].xyz[2] = surf->vertexes[i].xyz[2];
-				snsurf[i].color = color;
-			}
-
-			d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, surf->numvertexes - 2, snsurf, sizeof (snvert_t));
-		}
-	}
-}
-
-
-void D3DBrush_ShowLeafsDrawSurfaces (mleaf_t *leaf)
-{
-	D3DCOLOR color = d3d_QuakePalette.standard32[((int) leaf) & 255];
-	snvert_t *snsurf = (snvert_t *) scratchbuf;
-
-	if (leaf->nummarksurfaces)
-	{
-		// add stuff to the draw lists
-		for (int c = 0; c < leaf->nummarksurfaces; c++)
-		{
-			msurface_t *surf = leaf->firstmarksurface[c];
-
-			if (r_drawflat.value)
-				color = d3d_QuakePalette.standard32[((int) surf) & 255];
-
-			for (int i = 0; i < surf->numvertexes; i++)
-			{
-				snsurf[i].xyz[0] = surf->vertexes[i].xyz[0];
-				snsurf[i].xyz[1] = surf->vertexes[i].xyz[1];
-				snsurf[i].xyz[2] = surf->vertexes[i].xyz[2];
-				snsurf[i].color = color;
-			}
-
-			d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, surf->numvertexes - 2, snsurf, sizeof (snvert_t));
-		}
-	}
+	D3DBrush_BatchSurface (surf);
 }
 
 

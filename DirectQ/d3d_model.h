@@ -50,25 +50,6 @@ BRUSH MODELS
 ==============================================================================
 */
 
-
-#define TEXTURE_LIGHTMAP	0
-#define TEXTURE_DIFFUSE		1
-#define TEXTURE_LUMA		2
-
-typedef struct d3d_modelsurf_s
-{
-	struct msurface_s *surf;
-	struct texture_s *basetex;
-	entity_t *ent;
-	LPDIRECT3DTEXTURE9 textures[3];
-	int surfalpha;
-	int shaderpass;
-
-	struct d3d_modelsurf_s *chain;
-	struct d3d_modelsurf_s *next;
-} d3d_modelsurf_t;
-
-
 #define	SIDE_FRONT	0
 #define	SIDE_BACK	1
 #define	SIDE_ON		2
@@ -119,7 +100,7 @@ typedef struct texture_s
 	int contentscolor[3];
 
 	// chains for rendering
-	struct msurface_s *chain;
+	struct msurface_s *texturechain;
 } texture_t;
 
 
@@ -127,7 +108,6 @@ typedef struct texture_s
 #define	SURF_PLANEBACK		2
 #define	SURF_DRAWSKY		4
 #define SURF_DRAWTURB		16
-#define SURF_UNDERWATER		128
 
 // contents types
 #define SURF_DRAWLAVA		256
@@ -149,33 +129,6 @@ typedef struct
 	texture_t	*texture;
 	int			flags;
 } mtexinfo_t;
-
-
-typedef struct genericvert_s
-{
-	// heh, this is evil
-	union
-	{
-		struct
-		{
-			float xyz[3];
-
-			union
-			{
-				float tex3[3];
-				struct {DWORD color; float st[2];};
-				struct
-				{
-					union {float tc[2]; float st1[2];};
-					union {float lm[2]; float st2[2];};
-				};
-			};
-		};
-
-		float v[8];
-		byte raw[32];
-	};
-} genericvert_t;
 
 
 typedef struct warpverts_s
@@ -210,12 +163,11 @@ typedef struct brushpolyvert_s
 typedef struct msurface_s
 {
 	// data needed to draw the surface
-	brushpolyvert_t *vertexes;
-	int numvertexes;
 	int firstvertex;
-
-	unsigned short *indexes;
+	int numvertexes;
+	int vertexrange;
 	int numindexes;
+	int streamoffset;
 
 	mtexinfo_t	*texinfo;
 
@@ -224,18 +176,16 @@ typedef struct msurface_s
 
 	// other stuff
 	int			clipflags;
-	int			surfnum;
 	int			visframe;		// should be drawn when node is crossed
 
 	struct model_s *model;
 	mplane_t	*plane;
 	int			flags;
 
-	bool		rotated;
-
 	int			firstedge;
 
-	struct msurface_s *chain;
+	struct msurface_s *texturechain;
+	struct msurface_s *lightmapchain;
 
 	short		texturemins[2];
 	short		extents[2];
@@ -247,17 +197,13 @@ typedef struct msurface_s
 	// rectangle specifying the surface lightmap
 	RECT		LightRect;
 	int			LightmapOffset;
-	int			LightBase;
 
 	// lighting info
 	int			dlightframe;
 	int			dlightbits[MAX_DLIGHTS >> 5];
 
-	// overbright factor for surf
-	int			overbright;
-	int			fullbright;
-	int			ambient;
-	float		lm_gamma;
+	// lighting parameters may change in which case the lightmap is rebuilt for this surface
+	int			LightProperties;
 
 	// extents of the surf in world space
 	float		mins[3];
@@ -265,8 +211,9 @@ typedef struct msurface_s
 
 	byte		styles[MAXLIGHTMAPS];
 	int			cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
-	bool		cached_dlight;				// true if dynamic light in cache
-	byte		*samples;		// [numstyles*surfsize]
+	int			numstyles;
+
+	byte		*samples[MAXLIGHTMAPS];		// [numstyles*surfsize]
 
 	// for alpha sorting
 	float		midpoint[3];
@@ -311,8 +258,8 @@ typedef struct mleaf_s
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
 	struct efrag_s	*efrags;	// client-side for static entities
-	int			sv_visframe;
-	int			key;			// BSP sequence number for leaf's contents
+	// int			sv_visframe;
+	// int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
 
 	// contents colour for cshifts
@@ -448,6 +395,8 @@ typedef struct aliashdr_s
 
 	aliasmesh_t			*meshverts;
 	int					nummesh;
+	int					meshoffset;
+	int					*streamoffsets;
 
 	unsigned short		*indexes;
 	int					numindexes;
@@ -460,10 +409,6 @@ typedef struct aliashdr_s
 	struct drawvertx_s	**vertexes;
 	maliasframedesc_t	*frames;
 	aliasbbox_t			*bboxes;
-
-	// vertex and index buffers to use for this model
-	// fixme - we can potentially get rid of the memory storage for these now
-	int			buffernum;
 
 	int			skinwidth;
 	int			skinheight;
@@ -531,11 +476,15 @@ typedef struct brushheader_s
 	byte		*lightdata;
 	char		*entities;
 
+	// loaded directly from disk with no intermediate processing
+	dvertex_t	*dvertexes;
+	dedge_t		*dedges;
+	int			*dsurfedges;
+
+	int			numsurfvertexes;
+
 	// 29 (Q1) or 30 (HL)
 	int			bspversion;
-
-	struct d3d_drawcall_s *DrawCalls;
-	int NumDrawCalls;
 
 	// bounding box used for rendering with
 	float		bmins[3];

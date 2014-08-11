@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -35,10 +35,10 @@ static int	sample16;
 static int	snd_sent, snd_completed;
 
 
-/* 
- * Global variables. Must be visible to window-procedure function 
- *  so it can unlock and free the data block after it has been played. 
- */ 
+/*
+ * Global variables. Must be visible to window-procedure function
+ *  so it can unlock and free the data block after it has been played.
+ */
 
 HPSTR		lpData;
 
@@ -217,11 +217,11 @@ sndinitstat SNDDMA_InitDirect (void)
 	DSBUFFERDESC	ds_BufferDesc;
 	DSBCAPS			ds_BufferCaps;
 	DWORD			dwSize, dwWrite;
-	WAVEFORMATEX	format, pformat;
+	WAVEFORMATEX	format;
 
 	CoInitialize (NULL);
 
-	memset ((void *) &sn, 0, sizeof (sn));
+	memset ( (void *) &sn, 0, sizeof (sn));
 
 	shm = &sn;
 
@@ -233,6 +233,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	// people like higher sampling rates even though Quake's resampling is actually lower quality...
 	// oh well
 	int rc = COM_CheckParm ("-sspeed");
+
 	if (!rc) rc = COM_CheckParm ("-sndspeed");
 
 	if (rc)
@@ -253,6 +254,7 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	// qrack users expect this
 	if (COM_CheckParm ("-44khz")) shm->speed = 44100;
+
 	if (COM_CheckParm ("-22khz")) shm->speed = 22050;
 
 	// now we need to tidy up the speed as users may provide invalid values...
@@ -262,14 +264,14 @@ sndinitstat SNDDMA_InitDirect (void)
 		shm->speed = 22050;
 	else shm->speed = 44100;
 
-	memset (&format, 0, sizeof(format));
+	memset (&format, 0, sizeof (format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
-    format.nChannels = shm->channels;
-    format.wBitsPerSample = shm->samplebits;
-    format.nSamplesPerSec = shm->speed;
-    format.nBlockAlign = format.nChannels * format.wBitsPerSample / 8;
-    format.cbSize = 0;
-    format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign; 
+	format.nChannels = shm->channels;
+	format.wBitsPerSample = shm->samplebits;
+	format.nSamplesPerSec = shm->speed;
+	format.nBlockAlign = format.nChannels * format.wBitsPerSample / 8;
+	format.cbSize = 0;
+	format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
 
 	// enumerate the devices available - this is not so much a case of "pick the best"
 	// as it is a case of "get the description"
@@ -295,6 +297,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	}
 
 	if (ds_device.integer < 0) Cvar_Set (&ds_device, 0.0f);
+
 	if (ds_device.integer >= MAX_DS_DEVICES) Cvar_Set (&ds_device, (float) (MAX_DS_DEVICES - 1));
 
 	if (!ds_Devices[ds_device.integer].Valid)
@@ -324,19 +327,21 @@ sndinitstat SNDDMA_InitDirect (void)
 		}
 
 		int MBReturn = MessageBox
-		(
-			NULL,
-			"The sound hardware is in use by another Application.\n\n"
-			"Select Retry to try to start sound again or Cancel to run Quake with no sound.",
-			"Sound not available",
-			MB_RETRYCANCEL | MB_SETFOREGROUND | MB_ICONEXCLAMATION
-		);
+					   (
+						   NULL,
+						   "The sound hardware is in use by another Application.\n\n"
+						   "Select Retry to try to start sound again or Cancel to run Quake with no sound.",
+						   "Sound not available",
+						   MB_RETRYCANCEL | MB_SETFOREGROUND | MB_ICONEXCLAMATION
+					   );
 
 		if (MBReturn != IDRETRY)
 		{
 			Con_SafePrintf ("DirectSoundCreate failure\n  hardware already in use\n");
 			return SIS_NOTAVAIL;
 		}
+
+		Sleep (5);
 	}
 
 	Con_SafePrintf ("DirectSound Device OK\n");
@@ -351,6 +356,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	else
 	{
 		if (ds_DeviceCaps.dwFlags & DSCAPS_CERTIFIED) Con_SafePrintf ("Using Certified Sound Device\n");
+
 		if (ds_DeviceCaps.dwFlags & DSCAPS_EMULDRIVER) Con_SafePrintf ("Using Emulated Sound Device\n");
 	}
 
@@ -466,7 +472,7 @@ Try to find a sound device to mix for.
 Returns false if nothing is found.
 ==================
 */
-bool SNDDMA_Init(void)
+bool SNDDMA_Init (void)
 {
 	sndinitstat	stat;
 
@@ -508,7 +514,7 @@ int SNDDMA_GetDMAPos (void)
 	int		s;
 	DWORD	dwWrite;
 
-	if (dsound_init) 
+	if (dsound_init)
 	{
 		mmtime.wType = TIME_SAMPLES;
 		ds_SecondaryBuffer8->GetCurrentPosition (&mmtime.u.sample, &dwWrite);
@@ -531,7 +537,7 @@ SNDDMA_Shutdown
 Reset the sound device for exiting
 ===============
 */
-void SNDDMA_Shutdown(void)
+void SNDDMA_Shutdown (void)
 {
 	FreeSound ();
 }

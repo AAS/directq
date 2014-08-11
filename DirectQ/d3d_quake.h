@@ -23,6 +23,7 @@ void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m, float *origin, float *angle
 
 void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf);
 void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf);
+void D3DMain_CreateIndexBuffer32 (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf);
 
 void D3D_PrelockVertexBuffer (LPDIRECT3DVERTEXBUFFER9 vb);
 void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib);
@@ -78,8 +79,6 @@ D3DXMATRIX *D3DMatrix_ToD3DXMatrix (D3DMATRIX *matrix);
 
 extern HRESULT hr;
 
-extern cvar_t r_overbright;
-
 // hlsl
 void D3DHLSL_SetPass (int passnum);
 void D3DHLSL_SetAlpha (float alphaval);
@@ -88,7 +87,6 @@ void D3DHLSL_CheckCommit (void);
 void D3DHLSL_SetMatrix (D3DXHANDLE h, D3DMATRIX *matrix);
 void D3DHLSL_SetWorldMatrix (D3DMATRIX *worldmatrix);
 void D3DHLSL_SetEntMatrix (D3DMATRIX *entmatrix);
-void D3DHLSL_SetFogMatrix (D3DMATRIX *fogmatrix);
 void D3DHLSL_InvalidateState (void);
 void D3DHLSL_BeginFrame (void);
 void D3DHLSL_EndFrame (void);
@@ -97,6 +95,9 @@ void D3DHLSL_SetFloatArray (D3DXHANDLE handle, float *fl, int len);
 void D3DHLSL_SetInt (D3DXHANDLE handle, int n);
 void D3DHLSL_SetLerp (float curr, float last);
 void D3DHLSL_SetVectorArray (D3DXHANDLE handle, D3DXVECTOR4 *vecs, int len);
+
+#define HLSL_PLAIN			0
+#define HLSL_FOG			1
 
 #define FX_PASS_NOTBEGUN					-1
 #define FX_PASS_ALIAS_NOLUMA				0
@@ -125,14 +126,20 @@ void D3DHLSL_SetVectorArray (D3DXHANDLE handle, D3DXVECTOR4 *vecs, int len);
 #define FX_PASS_ALIAS_KUROK					23
 #define FX_PASS_ALIAS_PLAYER_NOLUMA			24
 #define FX_PASS_ALIAS_PLAYER_LUMA			25
+#define FX_PASS_POLYBLEND					26
+#define FX_PASS_PARTICLE_ENHANCED			27
+#define FX_PASS_SKYSPHERE					28
+
 
 void D3DHLSL_Init (void);
 void D3DHLSL_Shutdown (void);
 
 
 extern cvar_t gl_fullbrights;
+extern cvar_t r_overbright;
 
 // this one wraps DIP so that I can check for commit and anything else i need to do before drawing
+void D3D_DrawIndexedPrimitive (D3DPRIMITIVETYPE PrimitiveType, int FirstVertex, int NumVertexes, int FirstIndex, int NumPrimitives);
 void D3D_DrawIndexedPrimitive (int FirstVertex, int NumVertexes, int FirstIndex, int NumPrimitives);
 void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount);
 
@@ -255,11 +262,14 @@ void D3DDraw_Begin2D (void);
 // enforced on us through device caps
 typedef struct d3d_global_caps_s
 {
+	DWORD MaxMultiSample;
 	D3DFORMAT DepthStencilFormat;
 	bool supportHardwareTandL;
 	bool supportNonPow2;
 	bool supportInstancing;
 	DWORD deviceCreateFlags;
+	DWORD DefaultLock;
+	DWORD DynamicLock;
 	DWORD DiscardLock;
 	DWORD NoOverwriteLock;
 	int MaxExtents;
@@ -281,6 +291,7 @@ typedef struct d3d_renderdef_s
 	int numlock;
 	int numnode;
 	int numleaf;
+	int numdlight;
 
 	bool rebuildworld;
 
@@ -309,9 +320,9 @@ typedef struct d3d_renderdef_s
 extern d3d_renderdef_t d3d_RenderDef;
 
 void D3DAlpha_AddToList (entity_t *ent);
-void D3DAlpha_AddToList (struct d3d_modelsurf_s *modelsurf);
 void D3DAlpha_AddToList (struct particle_type_s *particle);
 void D3DAlpha_RenderList (void);
+void D3DAlpha_AddToList (msurface_t *surf, entity_t *ent);
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
@@ -328,6 +339,11 @@ void D3D_SetStreamSource (DWORD stream, LPDIRECT3DVERTEXBUFFER9 vb, DWORD offset
 void D3D_SetIndices (LPDIRECT3DINDEXBUFFER9 ib);
 void D3D_UnbindStreams (void);
 
+void D3DState_SetAlphaBlend (DWORD enable, DWORD op = D3DBLENDOP_ADD, DWORD srcblend = D3DBLEND_SRCALPHA, DWORD dstblend = D3DBLEND_INVSRCALPHA);
+void D3DState_SetZBuffer (D3DZBUFFERTYPE enable = D3DZB_TRUE, DWORD write = TRUE, D3DCMPFUNC comp = D3DCMP_LESSEQUAL);
+void D3DState_SetStencil (BOOL enable);
+void D3DState_SetAlphaTest (BOOL enable, D3DCMPFUNC comp = D3DCMP_ALWAYS, DWORD ref = 0);
+
 void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE texfilter, D3DTEXTUREFILTERTYPE mipfilter = D3DTEXF_NONE);
 void D3D_SetTextureAddress (DWORD stage, DWORD mode);
 
@@ -342,10 +358,6 @@ bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory);
 
 void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fmt);
 void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts, D3DFORMAT fmt);
-
-// modulation factors for overbrights; the first is for fixed, the second for HLSL
-extern DWORD D3D_OVERBRIGHT_MODULATE;
-extern float d3d_OverbrightModulate;
 
 // enumeration to string conversion
 char *D3DTypeToString (D3DFORMAT enumval);
@@ -400,3 +412,11 @@ public:
 extern cvar_t d3d_usinginstancing;
 
 #define MAX_LIGHTMAPS		256
+
+void D3DBrush_Begin (void);
+void D3DBrush_FlushSurfaces (void);
+void D3DBrush_BatchSurface (msurface_t *surf);
+void D3DBrush_EmitSurface (msurface_t *surf, texture_t *tex, entity_t *ent, int alpha);
+void D3DBrush_PrecheckSurface (msurface_t *surf, entity_t *ent);
+void D3DBrush_End (void);
+

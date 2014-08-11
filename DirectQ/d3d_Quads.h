@@ -1,4 +1,3 @@
-
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
 
@@ -18,22 +17,16 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-// common version definitions
-// this should be the first thing included in quakedef.h
-// if in any source file another file is included before quakedef.h this should also be included first there
 
-#ifndef __VERSIONS_H_INCLUDED__
-#define __VERSIONS_H_INCLUDED__
+#define D3D_MAX_QUADS	4096
 
-// DirectSound version used - failing to specify this will #ifdef out important stuff in newer SDKs
-#define DIRECTSOUND_VERSION 0x0800
+typedef struct quadvert_s
+{
+	float xyz[3];
+	DWORD color;
+	float st[2];
+} quadvert_t;
 
-// here we define a windows version to ensure that we'll always compile OK for the minimum supported platform
-// we support windows XP as a minimum
-#define WINVER 0x0501
-#define _WIN32_WINNT 0x0501
 
-// this is the current version of DirectQ
-#define DIRECTQ_VERSION "1.8.8 Patch Release 2 ("__DATE__")"
-
-#endif
+void D3DQuads_Begin (int numquads, quadvert_t **quadverts);
+void D3DQuads_End (void);

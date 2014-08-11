@@ -31,6 +31,7 @@ extern cvar_t scr_screenshotformat;
 extern cvar_t r_lerporient;
 extern cvar_t r_lerpframe;
 extern cvar_t r_lerplightstyle;
+extern cvar_t r_coloredlight;
 extern cvar_t r_coronas;
 extern cvar_t gl_flashblend;
 extern cvar_t freelook;
@@ -42,7 +43,6 @@ extern cvar_t chase_scale;
 extern cvar_t sound_nominal_clip_dist;
 extern cvar_t ambient_level;
 extern cvar_t ambient_fade;
-extern cvar_t r_coloredlight;
 extern cvar_t r_extradlight;
 extern cvar_t r_warpspeed;
 extern cvar_t r_lavaalpha;
@@ -63,11 +63,9 @@ extern cvar_t r_waterwarptime;
 extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
 extern cvar_t v_gamma;
-extern cvar_t lm_gamma;
 extern cvar_t vid_contrast;
 extern cvar_t r_waterwarp;
 extern cvar_t r_wateralpha;
-extern cvar_t loadas8bit;
 extern cvar_t s_khz;
 extern cvar_t scr_sbaralpha;
 extern cvar_t scr_centersbar;
@@ -75,7 +73,10 @@ extern cvar_t r_aliaslightscale;
 extern cvar_t r_particlesize;
 extern cvar_t r_particlestyle;
 extern cvar_t gl_fullbrights;
+extern cvar_t r_overbright;
+extern cvar_t r_hdrlight;
 extern cvar_t r_truecontentscolour;
+extern cvar_t gl_underwaterfog;
 
 CQMenu menu_Main (m_main);
 CQMenu menu_Singleplayer (m_other);
@@ -544,7 +545,7 @@ void Menu_GameCustomEnter (void)
 		}
 
 		// found it
-		if (!stricmp (gamedir, gamedirs[gamedirnum])) break;
+		if (!_stricmp (gamedir, gamedirs[gamedirnum])) break;
 	}
 }
 
@@ -676,7 +677,7 @@ void Menu_ContentCustomEnter (void)
 	{
 		if (!ShotTypes[i]) break;
 
-		if (!stricmp (scr_screenshotformat.string, ShotTypes[i]))
+		if (!_stricmp (scr_screenshotformat.string, ShotTypes[i]))
 		{
 			Cvar_Set (&scr_screenshotformat, ShotTypes[i]);
 			old_shottype_number = shottype_number = i;
@@ -712,9 +713,6 @@ extern char *suf[];
 char **skybox_menulist = NULL;
 int skybox_menunumber = 0;
 int old_skybox_menunumber = 0;
-
-#define TAG_SKYBOXAPPLY		1
-#define TAG_WATERALPHA		4
 
 void Menu_LoadAvailableSkyboxes (void)
 {
@@ -765,7 +763,7 @@ void Menu_LoadAvailableSkyboxes (void)
 		{
 			if (!NewSkyboxList[j]) break;
 
-			if (!stricmp (NewSkyboxList[j], SkyboxList[i]))
+			if (!_stricmp (NewSkyboxList[j], SkyboxList[i]))
 			{
 				present = true;
 				break;
@@ -830,46 +828,40 @@ extern cvar_t gl_conscale;
 char *hud_invshow[] = {"On", "Off", NULL};
 int hud_invshownum = 0;
 
-char *overbright_options[] = {"Off", "2 x Overbright", "4 x Overbright", NULL};
-int overbright_num = 1;
-extern cvar_t r_overbright;
-
 char *waterwarp_options[] = {"Off", "Classic", "Perspective", NULL};
 int waterwarp_num = 1;
 
-char *particle_options[] = {"Dots", "Squares", NULL};
+char *particle_options[] = {"Dots", "Squares", "Enhanced", NULL};
 int particle_num = 0;
 
 // the wording has been chosen to hint at the player that there is something more here...
 char *flashblend_options[] = {"Lightmaps Only", "Coronas Only", "Lightmaps/Coronas", NULL};
 int flashblend_num = 0;
 
+char *overbright_options[] = {"Off", "Overbright", "High Dynamic Range", NULL};
+int overbright_num = 0;
+
 
 int Menu_WarpCustomDraw (int y)
 {
-	if (skybox_menunumber != old_skybox_menunumber)
-	{
-		menu_WarpSurf.EnableMenuOptions (TAG_SKYBOXAPPLY);
-		// this broke the enable/disable switch - it's now done at load time instead
-		//old_skybox_menunumber = skybox_menunumber;
-	}
-	else menu_WarpSurf.DisableMenuOptions (TAG_SKYBOXAPPLY);
-
-	// this is a little cleaner now...
-	if (r_lockalpha.value)
-	{
-		menu_EffectsSimple.DisableMenuOptions (TAG_WATERALPHA);
-		menu_WarpSurf.DisableMenuOptions (TAG_WATERALPHA);
-	}
-	else
-	{
-		menu_EffectsSimple.EnableMenuOptions (TAG_WATERALPHA);
-		menu_WarpSurf.EnableMenuOptions (TAG_WATERALPHA);
-	}
-
-	Cvar_Set (&r_overbright, overbright_num);
 	Cvar_Set (&r_waterwarp, waterwarp_num);
 	Cvar_Set (&r_particlestyle, particle_num);
+
+	if (overbright_num == 0)
+	{
+		Cvar_Set (&r_overbright, 0.0f);
+		Cvar_Set (&r_hdrlight, 0.0f);
+	}
+	else if (overbright_num == 1)
+	{
+		Cvar_Set (&r_overbright, 1.0f);
+		Cvar_Set (&r_hdrlight, 0.0f);
+	}
+	else if (overbright_num == 2)
+	{
+		Cvar_Set (&r_overbright, 1.0f);
+		Cvar_Set (&r_hdrlight, 1.0f);
+	}
 
 	if (flashblend_num == 0)
 	{
@@ -952,9 +944,8 @@ void Menu_WarpCustomEnter (void)
 	old_skybox_menunumber = 0;
 
 	GETCVAROPTION (hudstyle->integer, hudstyleselection, 0, 3);
-	GETCVAROPTION (r_overbright.integer, overbright_num, 0, 2);
 	GETCVAROPTION (r_waterwarp.integer, waterwarp_num, 0, 2);
-	GETCVAROPTION (r_particlestyle.integer, particle_num, 0, 2);
+	GETCVAROPTION (r_particlestyle.integer, particle_num, 0, 3);
 
 	// set correct flashblend mode
 	if (gl_flashblend.integer)
@@ -963,6 +954,12 @@ void Menu_WarpCustomEnter (void)
 		flashblend_num = 2;
 	else flashblend_num = 0;
 
+	if (r_overbright.integer && r_hdrlight.integer)
+		overbright_num = 2;
+	else if (r_overbright.integer)
+		overbright_num = 1;
+	else overbright_num = 0;
+
 	extern char CachedSkyBoxName[];
 
 	// find the current skybox
@@ -970,7 +967,7 @@ void Menu_WarpCustomEnter (void)
 	{
 		if (!skybox_menulist[i]) break;
 
-		if (!stricmp (CachedSkyBoxName, skybox_menulist[i]))
+		if (!_stricmp (CachedSkyBoxName, skybox_menulist[i]))
 		{
 			// set up the menu to display it
 			skybox_menunumber = i;
@@ -1211,31 +1208,34 @@ void Menu_InitOptionsMenu (void)
 	//menu_Sound.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	//menu_Sound.AddOption (new CQMenuSpacer ("(Disabled Options)"));
 	//menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuSpinControl ("Sound Speed", &soundspeednum, soundspeedlist));
-	//menu_Sound.AddOption (TAG_SOUNDDISABLED, new CQMenuCvarToggle ("8-Bit Sounds", &loadas8bit));
 
 	Cvar_Get (hudstyle, "cl_sbar");
 
 	menu_EffectsSimple.AddOption (new CQMenuCustomEnter (Menu_WarpCustomEnter));
 	menu_EffectsSimple.AddOption (new CQMenuCustomDraw (Menu_WarpCustomDraw));
 	menu_EffectsSimple.AddOption (new CQMenuBanner (&gfx_p_option_lmp));
+
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Interpolation"));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Orientation", &r_lerporient, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Frame", &r_lerpframe, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Light Style", &r_lerplightstyle, 0, 1));
+
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Lighting"));
-	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Overbright Light", &overbright_num, overbright_options));
+	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Colored Lighting", &r_coloredlight, 0, 1));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Overbright Lighting", &overbright_num, overbright_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Fullbrights", &gl_fullbrights, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Dynamic Light Style", &flashblend_num, flashblend_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("MDL Light Scale", &r_aliaslightscale, 0, 5, 0.1));
-	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Lightmap Gamma", &lm_gamma, 1.75, 0.25, 0.05));
+
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Particles"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Particle Style", &particle_num, particle_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Particle Size", &r_particlesize, 0.5, 10, 0.5));
+
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Water and Liquids"));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Water Alpha", &r_wateralpha, 0, 1, 0.1));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Underwater Warp", &waterwarp_num, waterwarp_options));
-	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Correct Color Shift", &r_truecontentscolour, 0, 1));
+	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Underwater Fog", &gl_underwaterfog, 0, 5, 0.25));
 
 	// keybindings
 	menu_Keybindings.AddOption (new CQMenuBanner (&gfx_ttl_cstm_lmp));
@@ -1449,7 +1449,7 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 		if (!data) return;
 
 		// check the key for info we wanna cache - value is stored in com_token
-		if (!stricmp (key, "message"))
+		if (!_stricmp (key, "message"))
 		{
 			info->mapname = (char *) GameZone->Alloc (strlen (com_token) + 1);
 			strcpy (info->mapname, com_token);
@@ -1472,20 +1472,20 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 				}
 			}
 		}
-		else if (!stricmp (key, "sounds"))
+		else if (!_stricmp (key, "sounds"))
 		{
 			info->cdtrack = atoi (com_token);
 		}
-		else if (!stricmp (key, "worldtype"))
+		else if (!_stricmp (key, "worldtype"))
 		{
 			info->ambience = atoi (com_token);
 		}
-		else if (!stricmp (key, "sky") || !stricmp (key, "skyname") || !stricmp (key, "q1sky") || !stricmp (key, "skybox"))
+		else if (!_stricmp (key, "sky") || !_stricmp (key, "skyname") || !_stricmp (key, "q1sky") || !_stricmp (key, "skybox"))
 		{
 			info->skybox = (char *) GameZone->Alloc (strlen (com_token) + 1);
 			strcpy (info->skybox, com_token);
 		}
-		else if (!stricmp (key, "wad"))
+		else if (!_stricmp (key, "wad"))
 		{
 			info->wad = (char *) GameZone->Alloc (strlen (com_token) + 1);
 			strcpy (info->wad, com_token);
@@ -1607,7 +1607,7 @@ bool ValidateMap (char *mapname, int itemnum)
 	{
 		// this check is potentially suspect as the entity could be called anything;
 		// info_player_* is just an informal convention...!
-		if (!strnicmp (&entlump[i], "info_player", 11))
+		if (!_strnicmp (&entlump[i], "info_player", 11))
 		{
 			// map is valid
 			menu_mapslist[itemnum].bspname = (char *) GameZone->Alloc (strlen (mapname) + 1);
@@ -1870,7 +1870,7 @@ bool M_Menu_Demo_Info (char *demofile)
 		{
 			char cmsg;
 
-			int rlen = COM_FReadFile (fh, &cmsg, 1);
+			COM_FReadFile (fh, &cmsg, 1);
 
 			if (cmsg == '\n') break;
 
@@ -2067,7 +2067,7 @@ int Menu_DemoCustomDraw2 (int y)
 		{
 			if (!spinbox_bsps[i]) break;
 
-			if (!stricmp (spinbox_bsps[i], dsi.mapname))
+			if (!_stricmp (spinbox_bsps[i], dsi.mapname))
 			{
 				Menu_DoMapInfo (160, y, i, false);
 				break;

@@ -111,6 +111,7 @@ typedef struct miptex_s
 	char		name[16];
 	unsigned int		width, height;
 	unsigned int		offsets[MIPLEVELS];		// four mip maps stored
+	byte		texels[1];	// variable sized
 } miptex_t;
 
 

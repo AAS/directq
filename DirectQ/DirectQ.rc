@@ -26,8 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #endif
 
 // images
+IDR_PARTICLES		RCDATA		"ParticleFont.png"
 IDR_CROSSHAIR		RCDATA		"CrosshairFont.png"
-IDR_SMOKEPUFF		RCDATA		"smokepuff.png"
 IDB_DQLOGO256		BITMAP  DISCARDABLE     "dqlogoint.bmp"
 
 // shaders

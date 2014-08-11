@@ -191,7 +191,7 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 		if (ent->v.movetype != MOVETYPE_PUSH)
 			Sys_Error ("SOLID_BSP without MOVETYPE_PUSH");
 
-		model = sv.models[(int) ent->v.modelindex ];
+		model = sv.models[(int) ent->v.modelindex];
 
 		if (!model || model->type != mod_brush)
 			Sys_Error ("MOVETYPE_PUSH with a non bsp model");
@@ -634,6 +634,10 @@ int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
 {
 	sv_frame--;
 
+	// bengt jardrup hack for more clipnodes
+	if (num < CONTENTS_CLIP)
+		num += 65536;
+
 	while (num >= 0)
 	{
 		if (num < hull->firstclipnode || num > hull->lastclipnode)
@@ -717,6 +721,10 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 	vec3_t		mid;
 	int			side;
 	float		midf;
+
+	// bengt jardrup hack for more clipnodes
+	if (num < CONTENTS_CLIP)
+		num += 65536;
 
 	// check for empty
 	if (num < 0)

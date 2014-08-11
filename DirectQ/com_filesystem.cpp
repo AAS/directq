@@ -202,7 +202,7 @@ void COM_CreatePath (char *path)
 
 bool SortCompare (char *left, char *right)
 {
-	if (stricmp (left, right) < 0)
+	if (_stricmp (left, right) < 0)
 		return true;
 	else return false;
 }
@@ -214,12 +214,10 @@ bool CheckExists (char **fl, char *mapname)
 	{
 		// end of list
 		if (!fl[i]) return false;
-
-		if (!stricmp (fl[i], mapname)) return true;
+		if (!_stricmp (fl[i], mapname)) return true;
 	}
 
 	// never reached
-	return false;
 }
 
 
@@ -266,8 +264,8 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 			{
 				int filelen = strlen (pak->files[i].name);
 				if (filelen < typelen + dirlen) continue;
-				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
-				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
+				if (_strnicmp (pak->files[i].name, basedir, dirlen)) continue;
+				if (_stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
 				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
@@ -284,8 +282,8 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype, int f
 				int filelen = strlen (pak->files[i].name);
 
 				if (filelen < typelen + dirlen) continue;
-				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
-				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
+				if (_strnicmp (pak->files[i].name, basedir, dirlen)) continue;
+				if (_stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
 				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
 				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
@@ -403,18 +401,18 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 }
 
 
+#pragma warning (disable: 4702)	// this throws a 4702 because of unzips cutesy defines
+
 void COM_DecompressFile (char *filename, byte **decompressbuf, int *decompresslen)
 {
 	byte *buf = NULL;
 	decompresslen[0] = 0;
 
-	unzFile			uf = NULL;
-	int				err;
 	unz_global_info gi;
 	unz_file_info	file_info;
 
-	uf = unzOpen (filename);
-	err = unzGetGlobalInfo (uf, &gi);
+	unzFile uf = unzOpen (filename);
+	int err = unzGetGlobalInfo (uf, &gi);
 
 	if (err == UNZ_OK)
 	{
@@ -475,7 +473,7 @@ HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 	// initial scan ensures the file is present before opening the zip (perf)
 	for (int i = 0; i < pk3->numfiles; i++)
 	{
-		if (!stricmp (pk3->files[i].name, filename))
+		if (!_stricmp (pk3->files[i].name, filename))
 		{
 			unzFile			uf = NULL;
 			int				err;
@@ -506,11 +504,10 @@ HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 
 					if (err == UNZ_OK)
 					{
-						if (!stricmp (filename_inzip, filename))
+						if (!_stricmp (filename_inzip, filename))
 						{
 							// got it, so unzip it to the temp folder
 							byte *unztemp = (byte *) scratchbuf;
-							DWORD byteswritten;
 
 							HANDLE pk3handle = COM_MakeTempFile (filename);
 
@@ -637,7 +634,7 @@ int COM_FOpenFile (char *filename, void *hf)
 
 	for (int i = strlen (filename); i; i--)
 	{
-		if (!stricmp (&filename[i], ".mdl"))
+		if (!_stricmp (&filename[i], ".mdl"))
 		{
 			checkmdl = true;
 			break;
@@ -665,7 +662,7 @@ int COM_FOpenFile (char *filename, void *hf)
 
 			for (int i = 0; i < pak->numfiles; i++)
 			{
-				if (!stricmp (pak->files[i].name, filename))
+				if (!_stricmp (pak->files[i].name, filename))
 				{
 					// note - we need to share read access because e.g. a demo could result in 2 simultaneous
 					// reads, one for the .dem file and one for a .bsp file
@@ -683,7 +680,7 @@ int COM_FOpenFile (char *filename, void *hf)
 					// this can happen if a PAK file was enumerated on startup but deleted while running
 					if (*hFile == INVALID_HANDLE_VALUE)
 					{
-						DWORD dwerr = GetLastError ();
+						GetLastError ();
 						continue;
 					}
 

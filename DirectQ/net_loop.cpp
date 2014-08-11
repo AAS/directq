@@ -62,7 +62,7 @@ void Loop_SearchForHosts (bool xmit)
 
 qsocket_t *Loop_Connect (char *host)
 {
-	if (strcmp (host, "local") != 0)
+	if (host && strcmp (host, "local") != 0)
 		return NULL;
 
 	localconnectpending = true;

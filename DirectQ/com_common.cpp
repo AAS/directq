@@ -407,7 +407,7 @@ bool COM_FindExtension (char *filename, char *ext)
 	for (int i = 0;; i++)
 	{
 		if (!filename[i]) break;
-		if (!stricmp (&filename[i], ext)) return true;
+		if (!_stricmp (&filename[i], ext)) return true;
 	}
 
 	return false;
@@ -425,7 +425,7 @@ bool COM_StringContains (char *str1, char *str2)
 	for (int i = 0;; i++)
 	{
 		if (!str1[i]) break;
-		if (!strnicmp (&str1[i], str2, strlen (str2))) return true;
+		if (!_strnicmp (&str1[i], str2, strlen (str2))) return true;
 	}
 
 	// not found

@@ -262,9 +262,9 @@ float CL_KeyState (kbutton_t *key)
 	float		val;
 	bool	impulsedown, impulseup, down;
 
-	impulsedown = key->state & 2;
-	impulseup = key->state & 4;
-	down = key->state & 1;
+	impulsedown = (key->state & 2) ? true : false;
+	impulseup = (key->state & 4) ? true : false;
+	down = (key->state & 1) ? true : false;
 	val = 0;
 
 	if (impulsedown && !impulseup)

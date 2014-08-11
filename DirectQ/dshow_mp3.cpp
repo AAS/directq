@@ -62,8 +62,8 @@ char *IsURLContainer (char *filename)
 	fscanf (f, "%1023s", urlname);
 	fclose (f);
 
-	if (!strnicmp (urlname, "http://", 7)) return urlname;
-	if (!strnicmp (urlname, "https://", 8)) return urlname;
+	if (!_strnicmp (urlname, "http://", 7)) return urlname;
+	if (!_strnicmp (urlname, "https://", 8)) return urlname;
 
 	return NULL;
 }

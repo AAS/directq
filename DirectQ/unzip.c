@@ -12,7 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
+#include <string.h>
 #include "unzip.h"
+
+#pragma warning (disable: 4127)		// conditional expression is constant
+#pragma warning (disable: 4100)		// unreferenced formal parameter
 
 /* unzip.h -- IO for uncompress .zip files using zlib
    Version 0.15 beta, Mar 19th, 1998,

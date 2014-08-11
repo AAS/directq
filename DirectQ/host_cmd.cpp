@@ -419,9 +419,17 @@ char server_name[MAX_QPATH];
 
 void Host_Connect_f (void)
 {
+	if (Cmd_Argc () < 2)
+	{
+		Con_Printf ("Host_Connect_f : no server specified\n");
+		return;
+	}
+
 	char	name[MAX_QPATH];
 
 	cls.demonum = -1;		// stop demo loop in case this fails
+
+	int iii = Cmd_Argc ();
 
 	if (cls.demoplayback)
 	{
@@ -899,7 +907,7 @@ void Host_Name_f (void)
 			Con_Printf ("%s renamed to %s\n", host_client->name, newName);
 
 	strcpy (host_client->name, newName);
-	host_client->edict->v.netname = host_client->name - SVProgs->Strings;
+	host_client->edict->v.netname = SVProgs->SetString (host_client->name);
 
 	// JPG 1.05 - log the IP address
 	if (sscanf (host_client->netconnection->address, "%d.%d.%d", &a, &b, &c) == 3)
@@ -958,7 +966,7 @@ void Host_Please_f (void)
 		if (!cl->active)
 			continue;
 
-		if (stricmp (cl->name, Cmd_Argv (1)) == 0)
+		if (_stricmp (cl->name, Cmd_Argv (1)) == 0)
 		{
 			if (cl->privileged)
 			{
@@ -1094,7 +1102,7 @@ void Host_Tell_f (void)
 		if (!client->active || !client->spawned)
 			continue;
 
-		if (stricmp (client->name, Cmd_Argv (1)))
+		if (_stricmp (client->name, Cmd_Argv (1)))
 			continue;
 
 		host_client = client;
@@ -1214,8 +1222,8 @@ void Host_Pause_f (void)
 		sv.paused ^= 1;
 
 		if (sv.paused)
-			SV_BroadcastPrintf ("%s paused the game\n", SVProgs->Strings + sv_player->v.netname);
-		else SV_BroadcastPrintf ("%s unpaused the game\n", SVProgs->Strings + sv_player->v.netname);
+			SV_BroadcastPrintf ("%s paused the game\n", SVProgs->GetString (sv_player->v.netname));
+		else SV_BroadcastPrintf ("%s unpaused the game\n", SVProgs->GetString (sv_player->v.netname));
 
 		// send notification to all clients
 		MSG_WriteByte (&sv.reliable_datagram, svc_setpause);
@@ -1294,7 +1302,7 @@ void Host_Spawn_f (void)
 		memset (&ent->v, 0, SVProgs->QC->entityfields * 4);
 		ent->v.colormap = GetNumberForEdict (ent);
 		ent->v.team = (host_client->colors & 15) + 1;
-		ent->v.netname = host_client->name - SVProgs->Strings;
+		ent->v.netname = SVProgs->SetString (host_client->name);
 
 		// copy spawn parms out of the client_t
 		for (i = 0; i < NUM_SPAWN_PARMS; i++)
@@ -1460,7 +1468,7 @@ void Host_Kick_f (void)
 		for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 		{
 			if (!host_client->active) continue;
-			if (stricmp (host_client->name, Cmd_Argv (1)) == 0) break;
+			if (_stricmp (host_client->name, Cmd_Argv (1)) == 0) break;
 		}
 	}
 
@@ -1747,7 +1755,7 @@ edict_t	*FindViewthing (void)
 	{
 		e = GetEdictForNumber (i);
 
-		if (!strcmp (SVProgs->Strings + e->v.classname, "viewthing"))
+		if (!strcmp (SVProgs->GetString (e->v.classname), "viewthing"))
 			return e;
 	}
 

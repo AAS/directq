@@ -420,12 +420,12 @@ int Menu_VideoCustomDraw (int y)
 
 		if (i == sshot_format_number)
 		{
-			if (!stricmp (sshot_formats[i], "jpg"))
+			if (!_stricmp (sshot_formats[i], "jpg"))
 			{
 				Cvar_Set (&scr_screenshot_jpeg, 1.0f);
 				Cvar_Set (&scr_screenshot_png, 0.0f);
 			}
-			else if (!stricmp (sshot_formats[i], "png"))
+			else if (!_stricmp (sshot_formats[i], "png"))
 			{
 				Cvar_Set (&scr_screenshot_jpeg, 0.0f);
 				Cvar_Set (&scr_screenshot_png, 1.0f);
@@ -474,7 +474,7 @@ void Menu_VideoCustomEnter (void)
 			break;
 		}
 
-		if (!stricmp (scr_screenshotformat.string, sshot_formats[i]))
+		if (!_stricmp (scr_screenshotformat.string, sshot_formats[i]))
 		{
 			// found a format
 			sshot_format_number = i;
@@ -589,8 +589,8 @@ void Menu_VideoBuild (void)
 
 	menu_Video.AddOption (new CQMenuSpacer ());
 	menu_Video.AddOption (new CQMenuTitle ("IDGamma Settings"));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Intensity", &idgamma_intensity, 0.1f, 2.0f, 0.1f));	// 0.1 .. 10.0
-	menu_Video.AddOption (new CQMenuCvarSlider ("Gamma", &idgamma_gamma, 0.1f, 1.0f, 0.05f));	// 0.1 .. 1.0
+	menu_Video.AddOption (new CQMenuCvarSlider ("Intensity", &idgamma_intensity, 0.0f, 2.0f, 0.1f));	// 0.1 .. 10.0
+	menu_Video.AddOption (new CQMenuCvarSlider ("Gamma", &idgamma_gamma, 0.0f, 1.0f, 0.05f));	// 0.1 .. 1.0
 	menu_Video.AddOption (new CQMenuCvarSlider ("Saturation", &idgamma_saturation, 1, 3, 1));	// none/little/medium/full
 	menu_Video.AddOption (new CQMenuCvarToggle ("Modify Fullbrights", &idgamma_modifyfullbrights, 0, 1));
 }

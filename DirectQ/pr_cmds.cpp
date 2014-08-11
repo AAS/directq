@@ -90,7 +90,7 @@ bool extension_find (char *name)
 	{
 		if (!pr_extensions[i]) break;
 
-		if (!stricmp (pr_extensions[i], name)) return true;
+		if (!_stricmp (pr_extensions[i], name)) return true;
 	}
 
 	return false;
@@ -137,7 +137,7 @@ void PR_Extension_List_f (void)
 	{
 		if (!pr_extensions[i]) break;
 
-		if (partial && strnicmp (partial, pr_extensions[i], len))
+		if (partial && _strnicmp (partial, pr_extensions[i], len))
 		{
 			continue;
 		}
@@ -206,27 +206,18 @@ char *PR_GetTempString (void)
 
 char *PF_VarString (int	first)
 {
-	static char *out = NULL;
+	// use out own string pool so that this memory gets properly walled off
+	static char out[PR_MAX_TEMP_STRING];
 
-	out = PR_GetTempString ();
+	// ensure
+	out[0] = 0;
 
 	for (int i = first, len = 0; i < SVProgs->Argc; i++)
 	{
-		char *append = SVProgs->Strings + ((int *) SVProgs->Globals)[OFS_PARM0 + i * 3];
-		float fvarstring = SVProgs->Globals[OFS_PARM0 + i * 3];
-
-		if (fvarstring != fvarstring)
-		{
-			// http://www.doomworld.com/vb/everything-else/46926-sdl-quake/
-			// PF_VarString NaN bug - this only happens when changing a level or exiting the game so swallow it silently
-			out[0] = 0;
-			return out;
-		}
+		char *append = SVProgs->GetString (((int *) SVProgs->Globals)[OFS_PARM0 + i * 3]);
 
 		// prevent buffer overflow in this function
-		len += strlen (append) + 1;
-
-		if (len >= PR_MAX_TEMP_STRING) break;
+		if ((len += strlen (append) + 1) >= PR_MAX_TEMP_STRING) break;
 
 		strcat (out, append);
 	}
@@ -251,11 +242,11 @@ void PF_error (void)
 	edict_t	*ed;
 
 	s = PF_VarString (0);
-	Con_Printf ("======SERVER ERROR in %s:\n%s\n", SVProgs->Strings + SVProgs->XFunction->s_name, s);
+	Con_Printf ("======SERVER ERROR in %s:\n%s\n", SVProgs->GetString (SVProgs->XFunction->s_name), s);
 	ed = PROG_TO_EDICT (SVProgs->GlobalStruct->self);
 	ED_Print (ed);
 
-	QC_DebugOutput ("======SERVER ERROR in %s:\n%s\n", SVProgs->Strings + SVProgs->XFunction->s_name, s);
+	QC_DebugOutput ("======SERVER ERROR in %s:\n%s\n", SVProgs->GetString (SVProgs->XFunction->s_name), s);
 	Host_Error ("Program error");
 }
 
@@ -276,12 +267,12 @@ void PF_objerror (void)
 	edict_t	*ed;
 
 	s = PF_VarString (0);
-	Con_Printf ("======OBJECT ERROR in %s:\n%s\n", SVProgs->Strings + SVProgs->XFunction->s_name, s);
+	Con_Printf ("======OBJECT ERROR in %s:\n%s\n", SVProgs->GetString (SVProgs->XFunction->s_name), s);
 	ed = PROG_TO_EDICT (SVProgs->GlobalStruct->self);
 	ED_Print (ed);
 	ED_Free (ed);
 
-	QC_DebugOutput ("======OBJECT ERROR in %s:\n%s\n", SVProgs->Strings + SVProgs->XFunction->s_name, s);
+	QC_DebugOutput ("======OBJECT ERROR in %s:\n%s\n", SVProgs->GetString (SVProgs->XFunction->s_name), s);
 	// Host_Error ("Program error");	// fitz says this should not be fatal, so...
 }
 
@@ -330,7 +321,6 @@ void SV_RotateBBoxToBBox (edict_t *ent, float *bbmin, float *bbmax, float *rmins
 void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 {
 	vec3_t	rmin, rmax;
-	float	bounds[2][3];
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -408,7 +398,7 @@ void PF_setmodel (void)
 		if (!strcmp (sv.model_precache[i], m)) break;
 	}
 
-	e->v.model = m - SVProgs->Strings;
+	e->v.model = SVProgs->SetString (m);
 	e->v.modelindex = i;
 
 	mod = sv.models[(int) e->v.modelindex];
@@ -1118,7 +1108,7 @@ void PF_ftos (void)
 	else
 		_snprintf (pr_string_temp, 128, "%f", v);
 
-	G_INT (OFS_RETURN) = pr_string_temp - SVProgs->Strings;
+	G_INT (OFS_RETURN) = SVProgs->SetString (pr_string_temp);
 }
 
 void PF_fabs (void)
@@ -1133,7 +1123,7 @@ void PF_vtos (void)
 	char *pr_string_temp = PR_GetTempString ();
 
 	_snprintf (pr_string_temp, 128, "'%5.1f %5.1f %5.1f'", G_VECTOR (OFS_PARM0)[0], G_VECTOR (OFS_PARM0)[1], G_VECTOR (OFS_PARM0)[2]);
-	G_INT (OFS_RETURN) = pr_string_temp - SVProgs->Strings;
+	G_INT (OFS_RETURN) = SVProgs->SetString (pr_string_temp);
 }
 
 void PF_etos (void)
@@ -1141,7 +1131,7 @@ void PF_etos (void)
 	char *pr_string_temp = PR_GetTempString ();
 
 	_snprintf (pr_string_temp, 128, "entity %i", G_EDICTNUM (OFS_PARM0));
-	G_INT (OFS_RETURN) = pr_string_temp - SVProgs->Strings;
+	G_INT (OFS_RETURN) = SVProgs->SetString (pr_string_temp);
 }
 
 void PF_Spawn (void)
@@ -1168,7 +1158,7 @@ void PF_Remove (void)
 		{
 			if (mod->type == mod_alias)
 			{
-				if (!strnicmp (mod->name, "progs/gib", 9))
+				if (!_strnicmp (mod->name, "progs/gib", 9))
 				{
 					// Con_Printf ("wrote gib as new static entity to client\n");
 					// MakeMeAStaticEntity (&sv.datagram, ed);
@@ -1830,13 +1820,13 @@ void MakeMeAStaticEntity (sizebuf_t *buf, edict_t *ent)
 	if (sv.Protocol == PROTOCOL_VERSION_FITZ || sv.Protocol == PROTOCOL_VERSION_RMQ)
 	{
 		// never send alpha
-		if (SV_ModelIndex (SVProgs->Strings + ent->v.model) & 0xFF00) bits |= B_LARGEMODEL;
+		if (SV_ModelIndex (SVProgs->GetString (ent->v.model)) & 0xFF00) bits |= B_LARGEMODEL;
 		if ((int) (ent->v.frame) & 0xFF00) bits |= B_LARGEFRAME;
-		if (ent->alpha < 255) bits |= B_ALPHA;
+		if (ent->alphaval < 255 && ent->alphaval > 0) bits |= B_ALPHA;
 	}
 	else
 	{
-		if (SV_ModelIndex (SVProgs->Strings + ent->v.model) & 0xFF00 || (int) (ent->v.frame) & 0xFF00)
+		if (SV_ModelIndex (SVProgs->GetString (ent->v.model)) & 0xFF00 || (int) (ent->v.frame) & 0xFF00)
 		{
 			// can't display the correct model & frame, so don't show it at all
 			ED_Free (ent);
@@ -1852,8 +1842,8 @@ void MakeMeAStaticEntity (sizebuf_t *buf, edict_t *ent)
 	else MSG_WriteByte (buf, svc_spawnstatic);
 
 	if (bits & B_LARGEMODEL)
-		MSG_WriteShort (buf, SV_ModelIndex (SVProgs->Strings + ent->v.model));
-	else SV_WriteByteShort (buf, SV_ModelIndex (SVProgs->Strings + ent->v.model));
+		MSG_WriteShort (buf, SV_ModelIndex (SVProgs->GetString (ent->v.model)));
+	else SV_WriteByteShort (buf, SV_ModelIndex (SVProgs->GetString (ent->v.model)));
 
 	if (bits & B_LARGEFRAME)
 		MSG_WriteShort (buf, ent->v.frame);
@@ -1868,7 +1858,7 @@ void MakeMeAStaticEntity (sizebuf_t *buf, edict_t *ent)
 		MSG_WriteAngle (buf, ent->v.angles[i], sv.Protocol, sv.PrototcolFlags, i);
 	}
 
-	if (bits & B_ALPHA) MSG_WriteByte (buf, ent->alpha);
+	if (bits & B_ALPHA) MSG_WriteByte (buf, ent->alphaval);
 
 	// throw the entity away now
 	ED_Free (ent);
@@ -1971,7 +1961,7 @@ void PF_builtin_find (void)
 	// search function name
 	for (j = 1; j < pr_ebfs_numbuiltins; j++)
 	{
-		if ((pr_ebfs_builtins[j].funcname) && (!(stricmp (funcname, pr_ebfs_builtins[j].funcname))))
+		if ((pr_ebfs_builtins[j].funcname) && (!(_stricmp (funcname, pr_ebfs_builtins[j].funcname))))
 		{
 			break;	// found
 		}
@@ -2111,7 +2101,7 @@ void PF_strzone (void)
 
 	strcpy (p, m);
 
-	G_INT (OFS_RETURN) = p - SVProgs->Strings;
+	G_INT (OFS_RETURN) = SVProgs->SetString (p);
 }
 
 
@@ -2195,7 +2185,7 @@ void PF_strcat (void)
 	}
 
 	// 2001-10-25 Enhanced temp string handling by Maddes  end
-	G_INT (OFS_RETURN) = pr_string_temp - SVProgs->Strings;
+	G_INT (OFS_RETURN) = SVProgs->SetString (pr_string_temp);
 }
 
 
@@ -2243,7 +2233,7 @@ void PF_substring (void)
 	strncpy (pr_string_temp, p, length);
 	pr_string_temp[length] = 0;
 
-	G_INT (OFS_RETURN) = pr_string_temp - SVProgs->Strings;
+	G_INT (OFS_RETURN) = SVProgs->SetString (pr_string_temp);
 }
 // 2001-09-20 QuakeC string manipulation by FrikaC/Maddes  end
 
@@ -2359,7 +2349,7 @@ void PF_fgets (void)
 
 	pr_string_temp[i] = 0;
 
-	G_INT (OFS_RETURN) = pr_string_temp - SVProgs->Strings;
+	G_INT (OFS_RETURN) = SVProgs->SetString (pr_string_temp);
 }
 
 
@@ -2412,7 +2402,7 @@ void PR_BuiltInList_f (void)
 
 	for (i = 1; i < pr_ebfs_numbuiltins; i++)
 	{
-		if (partial && strnicmp (partial, pr_ebfs_builtins[i].funcname, len))
+		if (partial && _strnicmp (partial, pr_ebfs_builtins[i].funcname, len))
 		{
 			continue;
 		}

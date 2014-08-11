@@ -544,7 +544,7 @@ void HUD_DrawFrags (void)
 	// JPG - check to see if we need to draw the timer
 	if (pq_timer.value && (cl.minutes != 255))
 	{
-		int colors, ent, minutes, seconds, mask; // JPG - added these
+		int minutes, seconds, mask; // JPG - added these
 		int match_time; // JPG - added this
 
 		// not needed with new positioning...
@@ -754,7 +754,6 @@ void HUD_DeathmatchOverlay (void)
 		cl.laststatustime = cl.time;
 	}
 
-	char str[128];
 	int l, i, x, y, f, k;
 	scoreboard_t *s;
 	int top, bottom;
@@ -865,7 +864,6 @@ void HUD_SoloScoreboard (qpic_t *pic, float solotime)
 {
 	char str[128];
 	int l;
-	int i;
 	int SBX;
 	int SBY;
 
@@ -1474,7 +1472,6 @@ void HUD_DrawTeamColors (void)
 	// as gl_conscale changes.  i don't suppose many folks play rogue ctf these days anyway.
 	// this routine was an ugly piece of hackery to begin with anyway
 	int				top, bottom;
-	int				xofs;
 	char			num[12];
 	scoreboard_t	*s;
 	int				f;
@@ -1614,7 +1611,7 @@ void HUD_MiniDeathmatchOverlay (void)
 	HUD_SortFrags ();
 
 	// draw the text
-	int i = 0, l = hud_scoreboardlines;
+	int i = 0;
 
 	//find us
 	for (i = 0; i < hud_scoreboardlines; i++)
@@ -1642,30 +1639,26 @@ void HUD_MiniDeathmatchOverlay (void)
 }
 
 
-int scr_frames = 0;
-double scr_startfps = 0;
-float scr_fps = 0;
-
 void HUD_DrawFPS (void)
 {
 	static float	oldtime = 0;
-	static float	fps = 0;
-	static int		oldframecount = 0;
+	static float	r_fps = 0;
+	static int		r_oldframecount = 0;
 
 	float time = realtime - oldtime;
 
 	if (time < 0)
 	{
 		oldtime = realtime;
-		oldframecount = d3d_RenderDef.framecount;
+		r_oldframecount = d3d_RenderDef.framecount;
 		return;
 	}
 
 	if (time > 0.25f) // update value every 1/4 second
 	{
-		fps = (float) (d3d_RenderDef.framecount - oldframecount) / time;
+		r_fps = (float) (d3d_RenderDef.framecount - r_oldframecount) / time;
 		oldtime = realtime;
-		oldframecount = d3d_RenderDef.framecount;
+		r_oldframecount = d3d_RenderDef.framecount;
 	}
 
 	if (scr_showfps.value)
@@ -1679,9 +1672,9 @@ void HUD_DrawFPS (void)
 
 		// sometimes between level transitions we get a < 0 fps so don't let it happen
 		// (round FPS to the nearest int)
-		if (fps < 0)
+		if (r_fps < 0)
 			_snprintf (str, 16, "0 fps");
-		else _snprintf (str, 16, "%i fps", (int) (fps + 0.5f));
+		else _snprintf (str, 16, "%i fps", (int) (r_fps + 0.5f));
 
 		int x = vid.currsize->width - (strlen (str) * 8 + 4);
 

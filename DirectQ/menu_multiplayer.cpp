@@ -420,15 +420,16 @@ void Menu_SListOnHover (int initialy, int y, int itemnum)
 		{
 			hostport = &hostipconfig[i + 1];
 			hostipconfig[i] = 0;
+
+			Menu_Print (212, initialy + 175, va ("IP Addr: %s", hostipconfig));
+			Menu_Print (212, initialy + 185, va ("Port:    %s", hostport));
+			Menu_Print (218, initialy + 200, DIVIDER_LINE);
+			Menu_Print (212, initialy + 215, va ("Map:     %s", hc->map));
+			Menu_Print (212, initialy + 225, va ("Players: %i of %i", hc->users, hc->maxusers));
+
 			break;
 		}
 	}
-
-	Menu_Print (212, initialy + 175, va ("IP Addr: %s", hostipconfig));
-	Menu_Print (212, initialy + 185, va ("Port:    %s", hostport));
-	Menu_Print (218, initialy + 200, DIVIDER_LINE);
-	Menu_Print (212, initialy + 215, va ("Map:     %s", hc->map));
-	Menu_Print (212, initialy + 225, va ("Players: %i of %i", hc->users, hc->maxusers));
 }
 
 

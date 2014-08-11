@@ -415,7 +415,7 @@ void SV_ClientThink (double frametime)
 	if (sv_player->v.movetype == MOVETYPE_NONE)
 		return;
 
-	onground = (int) sv_player->v.flags & FL_ONGROUND;
+	onground = ((int) sv_player->v.flags & FL_ONGROUND) ? true : false;
 
 	origin = sv_player->v.origin;
 	velocity = sv_player->v.velocity;
@@ -554,43 +554,43 @@ nextmsg:
 					ret = 2;
 				else ret = 0;
 
-				if (strnicmp (s, "status", 6) == 0)
+				if (_strnicmp (s, "status", 6) == 0)
 					ret = 1;
-				else if (strnicmp (s, "god", 3) == 0)
+				else if (_strnicmp (s, "god", 3) == 0)
 					ret = 1;
-				else if (strnicmp (s, "notarget", 8) == 0)
+				else if (_strnicmp (s, "notarget", 8) == 0)
 					ret = 1;
-				else if (strnicmp (s, "fly", 3) == 0)
+				else if (_strnicmp (s, "fly", 3) == 0)
 					ret = 1;
-				else if (strnicmp (s, "name", 4) == 0)
+				else if (_strnicmp (s, "name", 4) == 0)
 					ret = 1;
-				else if (strnicmp (s, "noclip", 6) == 0)
+				else if (_strnicmp (s, "noclip", 6) == 0)
 					ret = 1;
-				else if (strnicmp (s, "say", 3) == 0)
+				else if (_strnicmp (s, "say", 3) == 0)
 					ret = 1;
-				else if (strnicmp (s, "say_team", 8) == 0)
+				else if (_strnicmp (s, "say_team", 8) == 0)
 					ret = 1;
-				else if (strnicmp (s, "tell", 4) == 0)
+				else if (_strnicmp (s, "tell", 4) == 0)
 					ret = 1;
-				else if (strnicmp (s, "color", 5) == 0)
+				else if (_strnicmp (s, "color", 5) == 0)
 					ret = 1;
-				else if (strnicmp (s, "kill", 4) == 0)
+				else if (_strnicmp (s, "kill", 4) == 0)
 					ret = 1;
-				else if (strnicmp (s, "pause", 5) == 0)
+				else if (_strnicmp (s, "pause", 5) == 0)
 					ret = 1;
-				else if (strnicmp (s, "spawn", 5) == 0)
+				else if (_strnicmp (s, "spawn", 5) == 0)
 					ret = 1;
-				else if (strnicmp (s, "begin", 5) == 0)
+				else if (_strnicmp (s, "begin", 5) == 0)
 					ret = 1;
-				else if (strnicmp (s, "prespawn", 8) == 0)
+				else if (_strnicmp (s, "prespawn", 8) == 0)
 					ret = 1;
-				else if (strnicmp (s, "kick", 4) == 0)
+				else if (_strnicmp (s, "kick", 4) == 0)
 					ret = 1;
-				else if (strnicmp (s, "ping", 4) == 0)
+				else if (_strnicmp (s, "ping", 4) == 0)
 					ret = 1;
-				else if (strnicmp (s, "give", 4) == 0)
+				else if (_strnicmp (s, "give", 4) == 0)
 					ret = 1;
-				else if (strnicmp (s, "ban", 3) == 0)
+				else if (_strnicmp (s, "ban", 3) == 0)
 					ret = 1;
 
 				if (ret == 2)

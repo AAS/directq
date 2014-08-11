@@ -332,7 +332,7 @@ void Key_ContentMatch (char **contentlist)
 				return;
 			}
 
-			if (!strnicmp (contentlist[i], matched, strlen (matched)))
+			if (!_strnicmp (contentlist[i], matched, strlen (matched)))
 			{
 				// do the completion
 				Key_PrintContentMatch (contentlist[i]);
@@ -360,7 +360,7 @@ void Key_ContentMatch (char **contentlist)
 		if (passes > 1) return;
 
 		// check for a match
-		if (!strnicmp (contentlist[i], matched, strlen (matched)))
+		if (!_strnicmp (contentlist[i], matched, strlen (matched)))
 		{
 			// do the completion
 			Key_PrintContentMatch (contentlist[i]);
@@ -375,7 +375,7 @@ bool Key_CheckAutoTab (char *str, char **list)
 {
 	if (list && list[0])
 	{
-		if (!strnicmp (&key_lines[edit_line][1], str, strlen (str)))
+		if (!_strnicmp (&key_lines[edit_line][1], str, strlen (str)))
 		{
 			Key_ContentMatch (list);
 			return true;
@@ -395,8 +395,6 @@ Interactive line editing and console scrollback
 */
 void Key_Console (int key)
 {
-	char	*cmd;
-	char	*s;
 	int		i;
 	HANDLE	th;
 	char	*clipText, *textCopied;
@@ -792,7 +790,7 @@ int Key_StringToKeynum (char *str)
 
 	for (kn = keynames; kn->name; kn++)
 	{
-		if (!stricmp (str, kn->name))
+		if (!_stricmp (str, kn->name))
 			return kn->keynum;
 	}
 
@@ -977,7 +975,7 @@ int Key_GetBinding (char *cmd)
 		{
 			if (*keybindings[i])
 			{
-				if (!stricmp (cmd, keybindings[i]))
+				if (!_stricmp (cmd, keybindings[i]))
 				{
 					return i;
 				}

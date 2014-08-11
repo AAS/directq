@@ -331,3 +331,53 @@ void D3DState_PicmipChange (cvar_t *var)
 
 cvar_t gl_picmip ("gl_picmip", "0", 0, D3DState_PicmipChange);
 
+
+void D3DState_SetAlphaBlend (DWORD enable, DWORD op, DWORD srcblend, DWORD dstblend)
+{
+	if (enable)
+	{
+		D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_BLENDOP, op);
+		D3D_SetRenderState (D3DRS_SRCBLEND, srcblend);
+		D3D_SetRenderState (D3DRS_DESTBLEND, dstblend);
+	}
+	else D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+}
+
+
+void D3DState_SetZBuffer (D3DZBUFFERTYPE enable, DWORD write, D3DCMPFUNC comp)
+{
+	D3D_SetRenderState (D3DRS_ZENABLE, enable);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, write);
+	D3D_SetRenderState (D3DRS_ZFUNC, comp);
+}
+
+
+void D3DState_SetStencil (BOOL enable)
+{
+	if (enable)
+	{
+		D3D_SetRenderState (D3DRS_STENCILENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_STENCILFUNC, D3DCMP_EQUAL);
+		D3D_SetRenderState (D3DRS_STENCILREF, 0x00000001);
+		D3D_SetRenderState (D3DRS_STENCILMASK, 0x00000002);
+		D3D_SetRenderState (D3DRS_STENCILWRITEMASK, 0xFFFFFFFF);
+		D3D_SetRenderState (D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
+		D3D_SetRenderState (D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
+		D3D_SetRenderState (D3DRS_STENCILPASS, D3DSTENCILOP_INCRSAT);
+	}
+	else D3D_SetRenderState (D3DRS_STENCILENABLE, FALSE);
+}
+
+
+void D3DState_SetAlphaTest (BOOL enable, D3DCMPFUNC comp, DWORD ref)
+{
+	if (enable)
+	{
+		D3D_SetRenderState (D3DRS_ALPHATESTENABLE, TRUE);
+		D3D_SetRenderState (D3DRS_ALPHAFUNC, comp);
+		D3D_SetRenderState (D3DRS_ALPHAREF, ref);
+	}
+	else D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
+}
+

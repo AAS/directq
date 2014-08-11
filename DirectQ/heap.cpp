@@ -58,8 +58,8 @@ void *CQuakeZone::Alloc (int size)
 
 	// mark as no-execute; not critical so fail it silently
 	// note that HeapAlloc uses VirtualAlloc behind the scenes, so this is valid
-	DWORD dwdummy;
-	BOOL ret = VirtualProtect (buf, size, PAGE_READWRITE, &dwdummy);
+	DWORD dwdummy = 0;
+	VirtualProtect (buf, size, PAGE_READWRITE, &dwdummy);
 
 	buf[0] = HEAP_MAGIC;
 	buf[1] = size;
@@ -237,7 +237,7 @@ void *CQuakeCache::Check (char *name)
 		if (!cache->name) continue;
 		if (!cache->data) continue;
 
-		if (!stricmp (cache->name, name))
+		if (!_stricmp (cache->name, name))
 		{
 			Con_DPrintf ("Reusing %s from cache\n", cache->name);
 			return cache->data;

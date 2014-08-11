@@ -791,7 +791,7 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 
 		if (srcbpp == 8)
 			outcolor = (byte *) &d3d_QuakePalette.standard32[data[i]];
-		else outcolor = (byte *) & ((unsigned *) data)[i];
+		else outcolor = (byte *) &((unsigned *) data)[i];
 
 		if (dstbpp == 24)
 			fwrite (outcolor, 3, 1, f);
@@ -864,7 +864,7 @@ void SCR_WriteSurfaceToPCX (char *filename, LPDIRECT3DSURFACE9 rts)
 	}
 
 	// lock the surface rect
-	hr = surf->LockRect (&lockrect, NULL, 0);
+	hr = surf->LockRect (&lockrect, NULL, d3d_GlobalCaps.DefaultLock);
 
 	if (FAILED (hr))
 	{
@@ -1142,7 +1142,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fm
 		}
 
 		// lock the surface rect
-		hr = surf->LockRect (&lockrect, NULL, 0);
+		hr = surf->LockRect (&lockrect, NULL, d3d_GlobalCaps.DefaultLock);
 
 		if (FAILED (hr))
 		{
@@ -1225,9 +1225,8 @@ void SCR_ScreenShot_f (void)
 	// clear the sound buffer as this can take some time
 	S_ClearBuffer ();
 
-	byte		*buffer;
 	char		checkname[MAX_PATH];
-	int			i, c, temp;
+	int			i;
 
 	// try the screenshot format
 	if (scr_screenshotformat.string[0] == '.')
@@ -1250,17 +1249,17 @@ void SCR_ScreenShot_f (void)
 	if (scr_screenshot_jpeg.value) Cvar_Set (&scr_screenshotformat, "jpg");
 	if (scr_screenshot_png.value) Cvar_Set (&scr_screenshotformat, "png");
 
-	if (!stricmp (scr_screenshotformat.string, "bmp"))
+	if (!_stricmp (scr_screenshotformat.string, "bmp"))
 		ssfmt = D3DXIFF_BMP;
-	else if (!stricmp (scr_screenshotformat.string, "tga"))
+	else if (!_stricmp (scr_screenshotformat.string, "tga"))
 		ssfmt = D3DXIFF_TGA;
-	else if (!stricmp (scr_screenshotformat.string, "jpg"))
+	else if (!_stricmp (scr_screenshotformat.string, "jpg"))
 		ssfmt = D3DXIFF_JPG;
-	else if (!stricmp (scr_screenshotformat.string, "png"))
+	else if (!_stricmp (scr_screenshotformat.string, "png"))
 		ssfmt = D3DXIFF_PNG;
-	else if (!stricmp (scr_screenshotformat.string, "dds"))
+	else if (!_stricmp (scr_screenshotformat.string, "dds"))
 		ssfmt = D3DXIFF_DDS;
-	else if (!stricmp (scr_screenshotformat.string, "pcx"))
+	else if (!_stricmp (scr_screenshotformat.string, "pcx"))
 		ssfmt = D3DXIFF_FORCE_DWORD;	// there's no D3DXIFF_PCX so this is a hack
 	else
 	{
@@ -1270,29 +1269,46 @@ void SCR_ScreenShot_f (void)
 		Cvar_Set (&scr_screenshotformat, "tga");
 	}
 
-	// find a file name to save it to
-	for (i = 0; i <= 9999; i++)
+	if (Cmd_Argc () > 1)
 	{
+		// specify the name
 		_snprintf
 		(
 			checkname,
 			128,
-			"%s/%s%s%04i.%s",
+			"%s/%s%s.%s",
 			com_gamedir,
 			scr_screenshotdir.string,
-			scr_shotnamebase.string,
-			i,
+			Cmd_Argv (1),
 			scr_screenshotformat.string
 		);
-
-		// file doesn't exist (fixme - replace this with our fs table checker)
-		if (!Sys_FileExists (checkname)) break;
 	}
-
-	if (i == 10000)
+	else
 	{
-		Con_Printf ("SCR_ScreenShot_f: 9999 Screenshots exceeded.\n");
-		return;
+		// find a file name to save it to
+		for (i = 0; i <= 9999; i++)
+		{
+			_snprintf
+			(
+				checkname,
+				128,
+				"%s/%s%s%04i.%s",
+				com_gamedir,
+				scr_screenshotdir.string,
+				scr_shotnamebase.string,
+				i,
+				scr_screenshotformat.string
+			);
+
+			// file doesn't exist (fixme - replace this with our fs table checker)
+			if (!Sys_FileExists (checkname)) break;
+		}
+
+		if (i == 10000)
+		{
+			Con_Printf ("SCR_ScreenShot_f: 9999 Screenshots exceeded.\n");
+			return;
+		}
 	}
 
 	// run a screen refresh
@@ -1344,7 +1360,7 @@ void SCR_ScreenShot_f (void)
 
 				if (SUCCEEDED (hr))
 				{
-					hr = osps->LockRect (&lockrect, NULL, 0);
+					hr = osps->LockRect (&lockrect, NULL, d3d_GlobalCaps.DefaultLock);
 
 					if (SUCCEEDED (hr))
 					{
@@ -1449,8 +1465,17 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 		return;
 	}
 
+	extern D3DPRESENT_PARAMETERS d3d_PresentParams;
+
 	// create a surface for the mapshot to render to
-	hr = d3d_Device->CreateRenderTarget (d3d_CurrentMode.Width, d3d_CurrentMode.Height, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &d3d_MapshotRenderSurf, NULL);
+	hr = d3d_Device->CreateRenderTarget (d3d_CurrentMode.Width,
+		d3d_CurrentMode.Height,
+		D3DFMT_X8R8G8B8,
+		d3d_PresentParams.MultiSampleType,
+		d3d_PresentParams.MultiSampleQuality,
+		FALSE,
+		&d3d_MapshotRenderSurf,
+		NULL);
 
 	if (FAILED (hr))
 	{
@@ -1460,7 +1485,14 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	}
 
 	// create a surface for the final mapshot destination
-	d3d_Device->CreateRenderTarget (128, 128, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &d3d_MapshotFinalSurf, NULL);
+	d3d_Device->CreateRenderTarget (128,
+		128,
+		D3DFMT_X8R8G8B8,
+		d3d_PresentParams.MultiSampleType,
+		d3d_PresentParams.MultiSampleQuality,
+		FALSE,
+		&d3d_MapshotFinalSurf,
+		NULL);
 
 	if (FAILED (hr))
 	{
@@ -1932,13 +1964,9 @@ void SCR_UpdateScreen (double frametime)
 
 	SCR_SetUpToDrawConsole ();
 
+	// save conditiion as in Host_Frame
 	if (cls.maprunning && cl.worldmodel && cls.signon == SIGNON_CONNECTED)
-	{
-		// unfortunate note - there is fps-dependent code in cl_view - the "smooth out stair step-ups" thing
-		V_RenderView ();
 		R_RenderView (frametime);
-		V_UpdateCShifts ();
-	}
 
 	D3DDraw_Begin2D ();
 
@@ -1971,24 +1999,25 @@ void SCR_UpdateScreen (double frametime)
 
 			if (host_speeds.value && key_dest == key_game)
 			{
+				/*
 				D3DDraw_SetSize (&vid.sbarsize);
 				Draw_String (vid.currsize->width - 100, 20, "Host Speeds");
 				Draw_String (vid.currsize->width - 124, 30, va ("%5i total", scr_hostspeeds1 + scr_hostspeeds2 + scr_hostspeeds3));
 				Draw_String (vid.currsize->width - 124, 40, va ("%5i server", scr_hostspeeds1));
 				Draw_String (vid.currsize->width - 124, 50, va ("%5i graphics", scr_hostspeeds2));
 				Draw_String (vid.currsize->width - 124, 60, va ("%5i sound", scr_hostspeeds3));
+				*/
 			}
 			else if (r_speeds.value)
 			{
 				D3DDraw_SetSize (&vid.sbarsize);
-				Draw_String (vid.currsize->width - 100, 20, va ("%5i ms   ", r_speedstime));
+				Draw_String (vid.currsize->width - 100, 20, va ("%5i ms", r_speedstime));
 				Draw_String (vid.currsize->width - 100, 30, va ("%5i surf", d3d_RenderDef.brush_polys));
 				Draw_String (vid.currsize->width - 100, 40, va ("%5i mdl", d3d_RenderDef.alias_polys));
-				Draw_String (vid.currsize->width - 100, 50, va ("%5i node", d3d_RenderDef.numnode));
-				Draw_String (vid.currsize->width - 100, 60, va ("%5i leaf", d3d_RenderDef.numleaf));
-				Draw_String (vid.currsize->width - 100, 70, va ("%5i stream", d3d_RenderDef.numsss));
-				Draw_String (vid.currsize->width - 100, 80, va ("%5i lock", d3d_RenderDef.numlock));
-				Draw_String (vid.currsize->width - 100, 90, va ("%5i draw", d3d_RenderDef.numdrawprim));
+				Draw_String (vid.currsize->width - 100, 50, va ("%5i dlight", d3d_RenderDef.numdlight));
+				Draw_String (vid.currsize->width - 100, 60, va ("%5i stream", d3d_RenderDef.numsss));
+				Draw_String (vid.currsize->width - 100, 70, va ("%5i lock", d3d_RenderDef.numlock));
+				Draw_String (vid.currsize->width - 100, 80, va ("%5i draw", d3d_RenderDef.numdrawprim));
 			}
 
 			if (scr_showcoords.integer)
@@ -2016,8 +2045,10 @@ void SCR_UpdateScreen (double frametime)
 	d3d_RenderDef.numdrawprim = 0;
 	d3d_RenderDef.numsss = 0;
 	d3d_RenderDef.numlock = 0;
+	d3d_RenderDef.numdlight = 0;
 
 	D3DDraw_End2D ();
+
 	D3DHLSL_EndFrame ();
 	D3DVid_EndRendering ();
 

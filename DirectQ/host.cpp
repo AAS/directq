@@ -24,6 +24,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "pr_class.h"
 
+#include <setjmp.h>
+
+
+jmp_buf host_abortserver;
+
 /*
 
 A server can allways be started, even if the system started out as a client
@@ -40,8 +45,6 @@ bool	host_initialized;		// true if into command execution
 double realtime;				// without any filtering or bounding
 
 client_t	*host_client;			// current client
-
-jmp_buf 	host_abortserver;
 
 cvar_t	sys_ticrate ("sys_ticrate", "0.05");
 
@@ -169,6 +172,7 @@ void Host_EndGame (char *message, ...)
 	longjmp (host_abortserver, 1);
 }
 
+
 /*
 ================
 Host_Error
@@ -206,6 +210,7 @@ void Host_Error (char *error, ...)
 
 	longjmp (host_abortserver, 1);
 }
+
 
 /*
 ================
@@ -636,15 +641,16 @@ void Host_ResetFixedTime (void)
 
 void VID_DefaultMonitorGamma_f (void);
 void IN_ReadDirectInputMessages (void);
+void CL_UpdateParticles (void);
 
 void Host_Frame (DWORD time)
 {
+	// something bad happened, or the server disconnected
+	if (setjmp (host_abortserver)) return;
+
 	static DWORD milliseconds = 0;
 	static double nextframetime = 0;
 	static double oldrealtime = 0;
-
-	// something bad happened, or the server disconnected
-	if (setjmp (host_abortserver)) return;
 
 	// keep the random time dependent
 	// (unless we're in a demo - see srand call in cl_demo - in which case we keep random effects consistent across playbacks)
@@ -731,8 +737,22 @@ void Host_Frame (DWORD time)
 		else CL_UpdateClient (host_frametime, false);
 	}
 
-	// update the display
+	// save conditiion as in SCR_UpdateScreen
+	if (cls.maprunning && cl.worldmodel && cls.signon == SIGNON_CONNECTED)
+	{
+		// unfortunate note - there is fps-dependent code in cl_view - the "smooth out stair step-ups" thing
+		V_RenderView ();
+		CL_PrepEntitiesForRendering ();
+	}
+
 	SCR_UpdateScreen (host_frametime);
+
+	// save conditiion as in SCR_UpdateScreen
+	if (cls.maprunning && cl.worldmodel && cls.signon == SIGNON_CONNECTED)
+	{
+		CL_UpdateParticles ();
+		V_UpdateCShifts ();
+	}
 
 	if (host_fixedtime > 0)
 	{
@@ -815,6 +835,7 @@ void Host_Init (quakeparms_t *parms)
 
 	Con_SafePrintf ("Exe: "__TIME__" "__DATE__"\n");
 
+	// init one time only
 	R_InitTextures ();
 
 	if (!W_LoadPalette ()) Sys_Error ("Could not locate Quake on your computer");

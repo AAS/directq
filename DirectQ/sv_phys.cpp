@@ -95,13 +95,13 @@ void SV_CheckVelocity (edict_t *ent)
 	{
 		if (IS_NAN (ent->v.velocity[i]))
 		{
-			Con_DPrintf ("Got a NaN velocity on %s\n", SVProgs->Strings + ent->v.classname);
+			Con_DPrintf ("Got a NaN velocity on %s\n", SVProgs->GetString (ent->v.classname));
 			ent->v.velocity[i] = 0;
 		}
 
 		if (IS_NAN (ent->v.origin[i]))
 		{
-			Con_DPrintf ("Got a NaN origin on %s\n", SVProgs->Strings + ent->v.classname);
+			Con_DPrintf ("Got a NaN origin on %s\n", SVProgs->GetString (ent->v.classname));
 			ent->v.origin[i] = 0;
 		}
 

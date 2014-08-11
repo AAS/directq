@@ -111,7 +111,7 @@ void NET_Ban_f (void)
 
 	case 2:
 
-		if (!stricmp (Cmd_Argv (1), "off"))
+		if (!_stricmp (Cmd_Argv (1), "off"))
 			banAddr = 0x00000000;
 		else
 			banAddr = inet_addr (Cmd_Argv (1));
@@ -491,12 +491,12 @@ void NET_Stats_f (void)
 	else
 	{
 		for (s = net_activeSockets; s; s = s->next)
-			if (!stricmp (Cmd_Argv (1), s->address))
+			if (!_stricmp (Cmd_Argv (1), s->address))
 				break;
 
 		if (!s)
 			for (s = net_freeSockets; s; s = s->next)
-				if (!stricmp (Cmd_Argv (1), s->address))
+				if (!_stricmp (Cmd_Argv (1), s->address))
 					break;
 
 		if (!s)
@@ -570,7 +570,9 @@ static void Test_Poll (void *blah)
 			break;
 		}
 
-		byte playerNumber = MSG_ReadByte ();
+		// just swallow the player number
+		MSG_ReadByte ();
+
 		strcpy (name, MSG_ReadString());
 		colors = MSG_ReadLong ();
 		frags = MSG_ReadLong ();
@@ -618,7 +620,7 @@ static void Test_f (void)
 	if (host && hostCacheCount)
 	{
 		for (n = 0; n < hostCacheCount; n++)
-			if (!stricmp (host, hostcache[n].name))
+			if (!_stricmp (host, hostcache[n].name))
 			{
 				if (hostcache[n].driver != myDriverLevel)
 					continue;
@@ -785,7 +787,7 @@ static void Test2_f (void)
 	if (host && hostCacheCount)
 	{
 		for (n = 0; n < hostCacheCount; n++)
-			if (!stricmp (host, hostcache[n].name))
+			if (!_stricmp (host, hostcache[n].name))
 			{
 				if (hostcache[n].driver != myDriverLevel)
 					continue;
@@ -947,7 +949,7 @@ static void Rcon_f (void)
 	if (host && hostCacheCount)
 	{
 		for (n = 0; n < hostCacheCount; n++)
-			if (!stricmp (host, hostcache[n].name))
+			if (!_stricmp (host, hostcache[n].name))
 			{
 				if (hostcache[n].driver != myDriverLevel)
 					continue;
@@ -1523,7 +1525,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 			if (i == n)
 				continue;
 
-			if (!stricmp (hostcache[n].name, hostcache[i].name))
+			if (!_stricmp (hostcache[n].name, hostcache[i].name))
 			{
 				i = strlen (hostcache[n].name);
 
@@ -1560,10 +1562,11 @@ static qsocket_t *_Datagram_Connect (char *host)
 	struct qsockaddr sendaddr;
 	struct qsockaddr readaddr;
 	qsocket_t	*sock;
-	int		newsock, ret, len, reps;
+	int		newsock, len, reps;
 	double		start_time;
 	int		control;
 	char		*reason;
+	int		ret = 0;
 
 	// see if we can resolve the host name
 	if (dfunc.GetAddrFromName (host, &sendaddr) == -1)

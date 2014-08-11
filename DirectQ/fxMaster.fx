@@ -35,7 +35,6 @@ Texture tmu7Texture;
 float warptime;
 float warpscale;
 float warpfactor;
-float Overbright;
 float AlphaVal;
 float SkyFog;
 
@@ -80,9 +79,9 @@ float4 GetLumaColor (float4 texcolor, float4 lightmap, float4 lumacolor)
 	// take the highest because sometimes the lit pixels can be brighter than if the fullbright is used
 	// this is valid for both internal native and external textures
 #ifdef hlsl_fog
-	return max (lumacolor, FogCalc (texcolor * lightmap * Overbright, FogPosition));
+	return max (lumacolor, FogCalc (texcolor * lightmap, FogPosition));
 #else
-	return max (lumacolor, (texcolor * lightmap * Overbright));
+	return max (lumacolor, (texcolor * lightmap));
 #endif
 }
 
@@ -185,21 +184,27 @@ float4 PSDrawUnderwater (PSUnderwaterVert Input) : COLOR0
 }
 
 
-PSUnderwaterVert VSDrawUnderwater (VSUnderwaterVert Input)
+float2 UnderwaterTexMult;
+
+PSUnderwaterVert VSDrawUnderwater (DrawVert Input)
 {
 	PSUnderwaterVert Output;
 
-	// correct the half-pixel offset
-	Output.Position = mul (Input.Position - float4 (0.5f, 0.5f, 0.0f, 0.0f), WorldMatrix);
+	// untransformed
+	Output.Position = float4 (Input.Position.x, Input.Position.y, 0, 1);
 
 	Output.Color0 = 1.0f - Input.Color;
 	Output.Color1 = float4 (Input.Color.rgb, 1.0f) * Input.Color.a;
 
+	float2 TexCoord = (Input.Position.xy * 0.5f) + 0.5f;
+
+	TexCoord.y = 1.0f - TexCoord.y;
+
 	// we can't correct the sine warp for view angles as the gun model is drawn in a constant position irrespective of angles
 	// so running the correction turns it into wobbly jelly.  lesser of two evils.
-	Output.Tex0 = Input.Tex0;
-	Output.Tex1 = Input.Tex1;
-	Output.Tex2 = (Input.Tex1 + (warptime * 0.0625f)) * Scale.xy;
+	Output.Tex0 = TexCoord;
+	Output.Tex1 = TexCoord * UnderwaterTexMult;
+	Output.Tex2 = (TexCoord * UnderwaterTexMult + (warptime * 0.0625f)) * Scale.xy;
 
 	return (Output);
 }
@@ -231,7 +236,7 @@ struct VertAliasPS
 	float2 Tex0 : TEXCOORD1;
 
 #ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD2;
+	float4 FogPosition : TEXCOORD7;
 #endif
 };
 
@@ -242,8 +247,8 @@ float4 GetColormapColor (VertAliasPS Input)
 	float4 colormap = tex2D (tmu2Sampler, Input.Tex0);
 
 	return (tex2D (tmu0Sampler, Input.Tex0) * (1.0f - (colormap.r + colormap.a))) +
-		(tex2D (tmu3Sampler, float2 (colormap.g, 0)) * colormap.r) +
-		(tex2D (tmu4Sampler, float2 (colormap.b, 0)) * colormap.a);
+		   (tex2D (tmu3Sampler, float2 (colormap.g, 0)) * colormap.r) +
+		   (tex2D (tmu4Sampler, float2 (colormap.b, 0)) * colormap.a);
 }
 
 
@@ -253,8 +258,8 @@ float4 PSAliasGetShade (float3 Color, float3 Normal, float3 Vector)
 
 	// wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case 
 	if (shadedot < 0)
-		return float4 (Color * (1.0f + shadedot * (13.0f / 44.0f)), 1.0f);
-	return float4 (Color * (1.0f + shadedot), 1.0f);
+		return float4 (Color * (1.0f + shadedot * (13.0f / 44.0f)), 1.0f) * 2.0f;
+	return float4 (Color * (1.0f + shadedot), 1.0f) * 2.0f;
 }
 
 
@@ -278,9 +283,9 @@ float4 PSAliasPlayerNoLuma (VertAliasPS Input) : COLOR0
 	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
-	float4 color = FogCalc (GetColormapColor (Input) * (Shade * Overbright), Input.FogPosition);
+	float4 color = FogCalc (GetColormapColor (Input) * Shade, Input.FogPosition);
 #else
-	float4 color = GetColormapColor (Input) * (Shade * Overbright);
+	float4 color = GetColormapColor (Input) * Shade;
 #endif
 
 	color.a = AlphaVal;
@@ -308,9 +313,9 @@ float4 PSAliasNoLuma (VertAliasPS Input) : COLOR0
 	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
-	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright), Input.FogPosition);
+	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * Shade, Input.FogPosition);
 #else
-	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright);
+	float4 color = tex2D (tmu0Sampler, Input.Tex0) * Shade;
 #endif
 
 	color.a = AlphaVal;
@@ -324,9 +329,9 @@ float4 PSAliasKurok (VertAliasPS Input) : COLOR0
 	float4 Shade = PSAliasGetShade (ShadeLight, Input.Normal, ShadeVector);
 
 #ifdef hlsl_fog
-	float4 color = FogCalc (texcolor * (Shade * Overbright), Input.FogPosition);
+	float4 color = FogCalc (texcolor * Shade, Input.FogPosition);
 #else
-	float4 color = texcolor * (Shade * Overbright);
+	float4 color = texcolor * Shade;
 #endif
 
 	color.a = texcolor.a;
@@ -343,20 +348,19 @@ VertAliasPS VSAliasVSCommon (VertAliasVS Input, float2 blend, float zhack)
 	VertAliasPS Output;
 
 	// retrieve the correct blend lerps to use for this vertex
-	float4 BasePosition = mul (Input.LastPosition * blend.y + Input.CurrPosition * blend.x, EntMatrix);
+	float4 BasePosition = lerp (Input.LastPosition, Input.CurrPosition, blend.x);
 
-	// this is friendlier for preshaders
-	Output.Position = mul (BasePosition, WorldMatrix);
+	Output.Position = mul (mul (BasePosition, EntMatrix), WorldMatrix);
 	Output.Position.z *= zhack;
 
 #ifdef hlsl_fog
-	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
+	Output.FogPosition = mul (mul (BasePosition, EntMatrix), WorldMatrix);
 #endif
 
 	// scale, bias and interpolate the normals in the vertex shader for speed
 	// full range normals overbright/overdark too much so we scale it down by half
 	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
-	Output.Normal = Input.CurrNormal * blend.x + Input.LastNormal * blend.y;
+	Output.Normal = lerp (Input.LastNormal, Input.CurrNormal, blend.x);
 	Output.Tex0 = Input.Tex0.xy;
 
 	return Output;
@@ -396,7 +400,7 @@ struct VertInstancedPS
 	float4 ColorAlpha : TEXCOORD3;
 
 #ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD4;
+	float4 FogPosition : TEXCOORD7;
 #endif
 };
 
@@ -406,9 +410,9 @@ float4 PSAliasInstancedNoLuma (VertInstancedPS Input) : COLOR0
 	float4 Shade = PSAliasGetShade (Input.ColorAlpha.rgb, Input.Normal, Input.SVector);
 
 #ifdef hlsl_fog
-	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright), Input.FogPosition);
+	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * Shade, Input.FogPosition);
 #else
-	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright);
+	float4 color = tex2D (tmu0Sampler, Input.Tex0) * Shade;
 #endif
 
 	color.a = Input.ColorAlpha.a;
@@ -434,21 +438,18 @@ float4 PSAliasInstancedLuma (VertInstancedPS Input) : COLOR0
 VertInstancedPS VSAliasVSInstanced (VertInstancedVS Input)
 {
 	VertInstancedPS Output;
+
 	float4x4 EntMatrixInstanced = float4x4 (Input.MRow1, Input.MRow2, Input.MRow3, Input.MRow4);
+	float4 BasePosition = mul (lerp (Input.LastPosition, Input.CurrPosition, Input.Lerps.x), EntMatrixInstanced);
 
-	float4 BasePosition = mul (Input.LastPosition * Input.Lerps.y + Input.CurrPosition * Input.Lerps.x, EntMatrixInstanced);
-
-	// this is friendlier for preshaders
 	Output.Position = mul (BasePosition, WorldMatrix);
 
 #ifdef hlsl_fog
-	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
+	Output.FogPosition = mul (BasePosition, WorldMatrix);
 #endif
 
 	// scale, bias and interpolate the normals in the vertex shader for speed
-	// full range normals overbright/overdark too much so we scale it down by half
-	// this means that the normals will no longer be normalized, but in practice it doesn't matter - at least for Quake
-	Output.Normal = Input.CurrNormal * Input.Lerps.x + Input.LastNormal * Input.Lerps.y;
+	Output.Normal = lerp (Input.LastNormal, Input.CurrNormal, Input.Lerps.x);
 	Output.Tex0 = Input.Tex0.xy;
 	Output.SVector = Input.SVector;
 	Output.ColorAlpha = Input.ColorAlpha;
@@ -481,18 +482,15 @@ VertShadowPS ShadowVS (VertShadowVS Input)
 {
 	VertShadowPS Output;
 
-	float4 BasePosition = mul (Input.LastPosition * aliaslerp.y + Input.CurrPosition * aliaslerp.x, EntMatrix);
+	float4 BasePosition = mul (lerp (Input.LastPosition, Input.CurrPosition, aliaslerp.x), EntMatrix);
 
 	Output.Position = mul (BasePosition, WorldMatrix);
 
 #ifdef hlsl_fog
-	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
+	Output.FogPosition = mul (BasePosition, WorldMatrix);
 #endif
 
-	Output.Color.r = 0;
-	Output.Color.g = 0;
-	Output.Color.b = 0;
-	Output.Color.a = AlphaVal;
+	Output.Color = float4 (0, 0, 0, AlphaVal);
 
 	return (Output);
 }
@@ -577,7 +575,7 @@ float4 PSParticles (PSParticleVert Input) : COLOR0
 #endif
 
 	// procedurally generate the particle dot for good speed and per-pixel accuracy at any scale
-	color.a = (1.0f - ((Input.Tex0.x * Input.Tex0.x) + (Input.Tex0.y * Input.Tex0.y))) * 1.5f;
+	color.a = (1.0f - dot (Input.Tex0.xy, Input.Tex0.xy)) * 1.5f;
 	return color;
 }
 
@@ -586,11 +584,10 @@ PSParticleVert VSSprite (VertSprite Input)
 {
 	PSParticleVert Output;
 
-	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
 	
 #ifdef hlsl_fog
-	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
+	Output.FogPosition = mul (Input.Position, WorldMatrix);
 #endif
 
 	Output.Color = Input.Color;
@@ -622,7 +619,7 @@ PSParticleVert VSParticles (VertParticle Input)
 	Output.Tex0 = Input.Data.xy;
 
 #ifdef hlsl_fog
-	Output.FogPosition = mul (NewPosition, ModelViewMatrix);
+	Output.FogPosition = mul (NewPosition, WorldMatrix);
 #endif
 
 	return Output;
@@ -648,8 +645,7 @@ struct VSCoronaVert
 float4 PSDrawCorona (PSCoronaVert Input) : COLOR0
 {
 	float4 color = Input.Color;
-	color.a = 1.0f - ((Input.Tex0.x * Input.Tex0.x) + (Input.Tex0.y * Input.Tex0.y));
-	// clip (color.a);
+	color.a = 1.0f - dot (Input.Tex0.xy, Input.Tex0.xy);
 	color.a = pow (color.a, 3.0f);
 	return color;
 }
@@ -668,6 +664,48 @@ PSCoronaVert VSDrawCorona (VSCoronaVert Input)
 	Output.Tex0 = Input.Data.xy;
 
 	return Output;
+}
+
+
+float4 PSDrawParticleEnhanced (PSParticleVert Input) : COLOR0
+{
+#ifdef hlsl_fog
+	return FogCalc (tex2D (tmu0Sampler, Input.Tex0) * Input.Color, Input.FogPosition);
+#else
+	return tex2D (tmu0Sampler, Input.Tex0) * Input.Color;
+#endif
+
+	// return tex2D (tmu0Sampler, Input.Tex0) * Input.Color;
+}
+
+
+// only used for vs_2_0 Shader instancing
+#define NumBatchInstancesEnh 80
+
+float4 PartInstancePositionEnh[NumBatchInstancesEnh] : PARTINSTANCEPOSITION;
+float4 PartInstanceColorEnh[NumBatchInstancesEnh] : PARTINSTANCECOLOR;
+float4 PartInstanceTexCoordEnh[NumBatchInstancesEnh] : PARTINSTANCETEXCOORD;
+
+PSParticleVert VSDrawParticleEnhanced (VertParticle Input)
+{
+	PSParticleVert Output;
+
+	float2 Base = Input.Data.xy *
+		(1 + dot (PartInstancePositionEnh[Input.Data.z].xyz - r_origin, viewforward) *
+		genericscale) * PartInstancePositionEnh[Input.Data.z].w;
+
+	float4 NewPosition = float4 (float3 (PartInstancePositionEnh[Input.Data.z].xyz + viewup * Base.y + viewright * Base.x), 1);
+	float4 texcoords = PartInstanceTexCoordEnh[Input.Data.z];
+
+	Output.Position = mul (NewPosition, WorldMatrix);
+	Output.Color = PartInstanceColorEnh[Input.Data.z];
+	Output.Tex0 = texcoords.xy + texcoords.zw * ((Input.Data.xy * 0.5) + 0.5);
+
+#ifdef hlsl_fog
+	Output.FogPosition = mul (NewPosition, WorldMatrix);
+#endif
+
+	return (Output);
 }
 
 
@@ -715,10 +753,9 @@ PSLiquidVert LiquidVS (VSLiquidVert Input)
 {
 	PSLiquidVert Output;
 
-	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
 #ifdef hlsl_fog
-	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
+	Output.FogPosition = mul (Input.Position, WorldMatrix);
 #endif
 	Output.Texcoord0 = Input.Texcoord;
 
@@ -742,10 +779,9 @@ PSLiquidVert LiquidVSRipple (VSLiquidVert Input)
 		Input.Position.w
 	);
 
-	// this is friendlier for preshaders
 	Output.Position = mul (nv, WorldMatrix);
 #ifdef hlsl_fog
-	Output.FogPosition = mul (nv, ModelViewMatrix);
+	Output.FogPosition = mul (nv, WorldMatrix);
 #endif
 	Output.Texcoord0 = Input.Texcoord;
 
@@ -775,30 +811,39 @@ struct PSWorldVert
 	float4 Position : POSITION0;
 	float2 Tex0 : TEXCOORD0;
 	float2 Tex1 : TEXCOORD1;
+
 #ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD2;
+	float4 FogPosition : TEXCOORD7;
 #endif
 };
+
+
+float4 WorldGetLightmap (PSWorldVert Input)
+{
+	// swap to BGR and decode from HDR
+	float4 light = tex2D (tmu1Sampler, Input.Tex1);
+	return (light.zyxw / light.w);
+}
 
 
 float4 PSWorldNoLuma (PSWorldVert Input) : COLOR0
 {
 #ifdef hlsl_fog
-	return FogCalc (tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright, Input.FogPosition);
+	return FogCalc (tex2D (tmu0Sampler, Input.Tex0) * WorldGetLightmap (Input), Input.FogPosition);
 #else
-	return tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright;
+	return tex2D (tmu0Sampler, Input.Tex0) * WorldGetLightmap (Input);
 #endif
 }
 
 
 float4 PSWorldNoLumaAlpha (PSWorldVert Input) : COLOR0
 {
-	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
+	float4 texcolor = tex2D (tmu0Sampler, Input.Tex0);
 
 #ifdef hlsl_fog
-	float4 color = FogCalc (texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright, Input.FogPosition);
+	float4 color = FogCalc (texcolor * WorldGetLightmap (Input), Input.FogPosition);
 #else
-	float4 color = texcolor * tex2D (tmu0Sampler, Input.Tex1) * Overbright;
+	float4 color = texcolor * WorldGetLightmap (Input);
 #endif
 
 	color.a = AlphaVal * texcolor.a;
@@ -809,21 +854,21 @@ float4 PSWorldNoLumaAlpha (PSWorldVert Input) : COLOR0
 float4 PSWorldLuma (PSWorldVert Input) : COLOR0
 {
 #ifdef hlsl_fog
-	return GetLumaColor (tex2D (tmu1Sampler, Input.Tex0), tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0), Input.FogPosition);
+	return GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), WorldGetLightmap (Input), tex2D (tmu2Sampler, Input.Tex0), Input.FogPosition);
 #else
-	return GetLumaColor (tex2D (tmu1Sampler, Input.Tex0), tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0));
+	return GetLumaColor (tex2D (tmu0Sampler, Input.Tex0), WorldGetLightmap (Input), tex2D (tmu2Sampler, Input.Tex0));
 #endif
 }
 
 
 float4 PSWorldLumaAlpha (PSWorldVert Input) : COLOR0
 {
-	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
+	float4 texcolor = tex2D (tmu0Sampler, Input.Tex0);
 
 #ifdef hlsl_fog
-	float4 color = GetLumaColor (texcolor, tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0), Input.FogPosition);
+	float4 color = GetLumaColor (texcolor, WorldGetLightmap (Input), tex2D (tmu2Sampler, Input.Tex0), Input.FogPosition);
 #else
-	float4 color = GetLumaColor (texcolor, tex2D (tmu0Sampler, Input.Tex1), tex2D (tmu2Sampler, Input.Tex0));
+	float4 color = GetLumaColor (texcolor, WorldGetLightmap (Input), tex2D (tmu2Sampler, Input.Tex0));
 #endif
 
 	color.a = AlphaVal * texcolor.a;
@@ -835,12 +880,15 @@ PSWorldVert VSWorldCommon (VSWorldVert Input)
 {
 	PSWorldVert Output;
 
-	// this is friendlier for preshaders
-	Output.Position = mul (Input.Position, WorldMatrix);
-
 #ifdef hlsl_fog
-	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
+	float4 outpos = mul (Input.Position, WorldMatrix);
+
+	Output.Position = outpos;
+	Output.FogPosition = outpos;
+#else
+	Output.Position = mul (Input.Position, WorldMatrix);
 #endif
+
 	Output.Tex0 = Input.Tex0;
 	Output.Tex1 = Input.Tex1;
 
@@ -866,63 +914,87 @@ struct VSSkyVert
 };
 
 
-float4 SkyWarpPS (PSSkyVert Input) : COLOR0
+float4 SkySetFogging (float4 basecolor)
 {
-	// same as classic Q1 warp but done per-pixel on the GPU instead
-	Input.Texcoord = mul (Input.Texcoord, 6 * 63 / length (Input.Texcoord));
-		
-	float4 solidcolor = tex2D (tmu0Sampler, mul (Input.Texcoord.xy + Scale.x, 0.0078125));
-	float4 alphacolor = tex2D (tmu1Sampler, mul (Input.Texcoord.xy + Scale.y, 0.0078125));
-	alphacolor.a *= AlphaVal;
-
-	float4 color = (alphacolor * alphacolor.a) + (solidcolor * (1.0 - alphacolor.a));
-	color.a = 1.0;
+	basecolor.a = 1.0f;
 
 #ifdef hlsl_fog
 	// to do - use the same fog density but fade it off a little?
 	// something else???
-	return lerp (FogColor, color, SkyFog);
+	return lerp (FogColor, basecolor, SkyFog);
 #else
-	return color;
+	return basecolor;
 #endif
 }
 
 
-PSSkyVert SkyWarpVS (VSSkyVert Input)
+float4 SkyWarpPS (PSSkyVert Input) : COLOR0
 {
-	PSSkyVert Output;
+	// same as classic Q1 warp but done per-pixel on the GPU instead
+	float3 Texcoord = normalize (Input.Texcoord) * Scale.z;
 
-	// this is friendlier for preshaders
-	Output.Position = mul (Input.Position, WorldMatrix);
+	float4 solidcolor = tex2D (tmu0Sampler, Texcoord.xy + Scale.x);
+	float4 alphacolor = tex2D (tmu1Sampler, Texcoord.xy + Scale.y);
+	alphacolor.a *= AlphaVal;
 
-	// use the untranslated input position as the output texcoord, shift by r_origin
-	Output.Texcoord = Input.Position.xyz - r_origin;
-	Output.Texcoord.z *= 3.0;
-	return (Output);
+	return SkySetFogging (lerp (solidcolor, alphacolor, alphacolor.a));
+}
+
+
+float skyspherescaley;
+
+float4 SkySpherePS (PSSkyVert Input) : COLOR0
+{
+	float3 direction = normalize (Input.Texcoord);
+
+	// fixme - texture lookup here...
+	float theta = acos (direction.z); // make sure the direction is normalized!
+	float phi = atan2 (direction.y, direction.x);
+	// float phi = (tex2D (tmu1Sampler, (direction.yx * 0.5f) + 0.5f) * 6.2831853f - 3.1415926f).r;
+	float2 texcoord = float2 (phi / 6.2831853f, ((theta + 3.1415926f) / 3.1415926f - 1.0f) * skyspherescaley);
+
+	return SkySetFogging (tex2D (tmu0Sampler, texcoord));
 }
 
 
 float4 SkyBoxPS (PSSkyVert Input) : COLOR0
 {
-	float4 color = texCUBE (tmu0Sampler, Input.Texcoord);
-	color.a = 1.0;
-#ifdef hlsl_fog
-	return lerp (FogColor, color, SkyFog);
-#else
-	return color;
-#endif
+	return SkySetFogging (texCUBE (tmu0Sampler, Input.Texcoord));
 }
 
 
-PSSkyVert SkyBoxVS (VSSkyVert Input)
+PSSkyVert SkyCommonVS (VSSkyVert Input)
 {
+	// common to all types now
 	PSSkyVert Output;
 
-	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
+	Output.Texcoord = mul (Input.Position, EntMatrix);
 
-	// use the untranslated input position as the output texcoord, shift by r_origin
-	Output.Texcoord = Input.Position.xyz - r_origin;
+	return (Output);
+}
+
+
+/*
+====================
+POLYBLEND
+====================
+*/
+
+float4 PSPolyBlend (DrawVert Input) : COLOR0
+{
+	return Input.Color;
+}
+
+
+DrawVert VSPolyBlend (DrawVert Input)
+{
+	DrawVert Output;
+
+	Output.Position = float4 (Input.Position.x, Input.Position.y, 0, 1);
+	Output.Color = Input.Color;
+	Output.Tex0 = Input.Tex0;	// hack for hlsl compiler...
+
 	return (Output);
 }
 
@@ -973,7 +1045,7 @@ technique MasterRefresh
 
 	pass FX_PASS_SKYWARP
 	{
-		VertexShader = compile vs_2_0 SkyWarpVS ();
+		VertexShader = compile vs_2_0 SkyCommonVS ();
 		PixelShader = compile ps_2_0 SkyWarpPS ();
 	}
 	
@@ -992,7 +1064,7 @@ technique MasterRefresh
 	
 	pass FX_PASS_SKYBOX
 	{
-		VertexShader = compile vs_2_0 SkyBoxVS ();
+		VertexShader = compile vs_2_0 SkyCommonVS ();
 		PixelShader = compile ps_2_0 SkyBoxPS ();
 	}
 
@@ -1090,6 +1162,24 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 VSAliasVS ();
 		PixelShader = compile ps_2_0 PSAliasPlayerLuma ();
+	}
+
+	pass FX_PASS_POLYBLEND
+	{
+		VertexShader = compile vs_2_0 VSPolyBlend ();
+		PixelShader = compile ps_2_0 PSPolyBlend ();
+	}
+	
+	pass FX_PASS_PARTICLE_ENHANCED
+	{
+		VertexShader = compile vs_2_0 VSDrawParticleEnhanced ();
+		PixelShader = compile ps_2_0 PSDrawParticleEnhanced ();
+	}
+
+	pass FX_PASS_SKYSPHERE
+	{
+		VertexShader = compile vs_2_0 SkyCommonVS ();
+		PixelShader = compile ps_2_0 SkySpherePS ();
 	}
 }
 

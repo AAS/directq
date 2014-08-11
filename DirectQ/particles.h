@@ -17,6 +17,13 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+typedef struct particlest_s
+{
+	float stbase[2];
+	float stadd[2];
+} particlest_t;
+
+
 typedef struct particle_s
 {
 	// driver-usable fields
@@ -39,17 +46,12 @@ typedef struct particle_s
 	// remove if < cl.time
 	float		die;
 
-	// behaviour flags
-	int			flags;
-
-	// don't draw if != framecount
-	int			visframe;
-
 	// render adjustable
 	float scale;
 	float alpha;
 	float fade;
 	float growth;
+	particlest_t *st;
 } particle_t;
 
 
