@@ -588,24 +588,18 @@ void Mod_LoadTextures (model_t *mod, byte *mod_base, lump_t *l, lump_t *e)
 			{
 				int texflags = IMAGE_MIPMAP | IMAGE_BSP;
 				int lumaflags = IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA;
-				int nolumaflags = IMAGE_MIPMAP | IMAGE_BSP | IMAGE_NOLUMA;
 
 				// load the luma first so that we know if we have it
 				if ((tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, lumaflags)) != NULL)
 					texflags |= IMAGE_NOCOMPRESS;
 
 				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, texflags);
-
-				if (tx->lumaimage)
-					tx->nolumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, nolumaflags);
-				else tx->nolumaimage = NULL;
 			}
 			else
 			{
 				// no lumas in halflife
 				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, texels, IMAGE_MIPMAP | IMAGE_BSP | IMAGE_HALFLIFE);
 				tx->lumaimage = NULL;
-				tx->nolumaimage = NULL;
 			}
 		}
 
@@ -1967,7 +1961,7 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 	pheader->skins = (aliasskin_t *) MainCache->Alloc (pheader->numskins * sizeof (aliasskin_t));
 	s = pheader->skinwidth * pheader->skinheight;
 
-	image_s *tex, *luma, *noluma;
+	image_s *tex, *luma;
 	byte *texels;
 
 	// don't remove the extension here as Q1 has s_light.mdl and s_light.spr, so we need to differentiate them
@@ -1997,20 +1991,14 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 
 			int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
 			int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
-			int nolumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_NOLUMA;
 
 			if ((luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags)) != NULL)
-			{
 				texflags |= IMAGE_NOCOMPRESS;
-				noluma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, nolumaflags);
-			}
-			else noluma = NULL;
 
 			tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
 
 			// load fullbright
 			pheader->skins[i].lumaimage[0] = pheader->skins[i].lumaimage[1] = pheader->skins[i].lumaimage[2] = pheader->skins[i].lumaimage[3] = luma;
-			pheader->skins[i].nolumaimage[0] = pheader->skins[i].nolumaimage[1] = pheader->skins[i].nolumaimage[2] = pheader->skins[i].nolumaimage[3] = noluma;
 			pheader->skins[i].teximage[0] = pheader->skins[i].teximage[1] = pheader->skins[i].teximage[2] = pheader->skins[i].teximage[3] = tex;
 
 			pskintype = (daliasskintype_t *) ((byte *) (pskintype + 1) + s);
@@ -2044,21 +2032,15 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 
 				int texflags = IMAGE_MIPMAP | IMAGE_ALIAS;
 				int lumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA;
-				int nolumaflags = IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_NOLUMA;
 
 				if ((luma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, lumaflags)) != NULL)
-				{
 					texflags |= IMAGE_NOCOMPRESS;
-					noluma = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, nolumaflags);
-				}
-				else noluma = NULL;
 
 				tex = D3D_LoadTexture (name, pheader->skinwidth, pheader->skinheight, texels, texflags);
 
 				// this tries to catch models with > 4 group skins
 				pheader->skins[i].teximage[j & 3] = tex;
 				pheader->skins[i].lumaimage[j & 3] = luma;
-				pheader->skins[i].nolumaimage[j & 3] = noluma;
 				pskintype = (daliasskintype_t *) ((byte *) (pskintype) + s);
 			}
 
@@ -2069,7 +2051,6 @@ void *Mod_LoadAllSkins (model_t *mod, aliashdr_t *pheader, daliasskintype_t *psk
 			{
 				pheader->skins[i].teximage[j & 3] = pheader->skins[i].teximage[j - k]; 
 				pheader->skins[i].lumaimage[j & 3] = pheader->skins[i].lumaimage[j - k]; 
-				pheader->skins[i].nolumaimage[j & 3] = pheader->skins[i].nolumaimage[j - k]; 
 			}
 		}
 	}

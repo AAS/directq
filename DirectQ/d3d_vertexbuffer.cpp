@@ -24,8 +24,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "d3d_vbo.h"
 
-#define D3D_MAX_VB_SIZE			65534
-#define D3D_MAX_IB_SIZE			262144
+// changed these because they are hardware variable
+int D3D_MAX_VB_SIZE = 65534;
+int D3D_MAX_IB_SIZE = 262144;
+
 #define D3D_COMMONVERT_SIZE		28
 
 typedef struct vbo_statedef_s
@@ -94,6 +96,14 @@ void VBO_InitFrameParams (void)
 
 void VBO_BeginFrame (void)
 {
+	// MaxPrimitiveCount is also the max number of unique verts; since every vert in a draw call
+	// might potentially be unique we clamp to it for the ib size
+	if (D3D_MAX_IB_SIZE >= d3d_DeviceCaps.MaxPrimitiveCount)
+		D3D_MAX_IB_SIZE = d3d_DeviceCaps.MaxPrimitiveCount;
+
+	if (D3D_MAX_VB_SIZE >= d3d_DeviceCaps.MaxVertexIndex)
+		D3D_MAX_VB_SIZE = d3d_DeviceCaps.MaxVertexIndex;
+
 	if (!d3d_GlobalCaps.supportVertexBuffers)
 	{
 		// destroy any buffers that were created

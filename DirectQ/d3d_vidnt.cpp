@@ -1172,12 +1172,12 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	if ((d3d_DeviceCaps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) && (d3d_DeviceCaps.DevCaps & D3DDEVCAPS_PUREDEVICE))
 	{
 		d3d_GlobalCaps.supportHardwareTandL = true;
-		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;// | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
 	}
 	else
 	{
 		d3d_GlobalCaps.supportHardwareTandL = false;
-		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;// | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
 	}
 
 	// now reset the present params as they will have become messed up above
@@ -1263,8 +1263,11 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 	else d3d_GlobalCaps.supportOcclusion = false;
 
-	// assume that vertex buffers are going to work...
-	d3d_GlobalCaps.supportVertexBuffers = true;
+	// assume that vertex buffers are going to work with a hardware t&l device
+	// there are no advantages to vertex buffers with software t&l
+	if (d3d_GlobalCaps.supportHardwareTandL)
+		d3d_GlobalCaps.supportVertexBuffers = true;
+	else d3d_GlobalCaps.supportVertexBuffers = false;
 
 	// set up everything else
 	D3D_Init3DSceneTexture ();
@@ -2031,12 +2034,14 @@ void D3D_CheckPixelShaders (void)
 		if (d3d_GlobalCaps.usingPixelShaders)
 		{
 			// Con_SafePrintf ("Enabled pixel shaders\n");
+			D3D_SetDefaultStates ();
 		}
 		else
 		{
 			// switch shaders off
 			d3d_Device->SetPixelShader (NULL);
 			d3d_Device->SetVertexShader (NULL);
+			D3D_SetDefaultStates ();
 			// Con_SafePrintf ("Disabled pixel shaders\n");
 		}
 
@@ -2068,6 +2073,7 @@ void D3D_CheckD3DXVersion (void)
 		D3D_LoseDeviceResources ();
 		D3D_LoadD3DXVersion (d3dx_version.integer);
 		D3D_RecoverDeviceResources ();
+		D3D_VidRestart_f ();
 		oldversion = d3dx_version.integer;
 	}
 }
@@ -2298,6 +2304,7 @@ void D3D_EndRendering (void)
 	{
 		if (mouseactive)
 		{
+			IN_ActivateMouse ();
 			IN_DeactivateMouse ();
 			if (d3d_CurrentMode.RefreshRate == 0) IN_ShowMouse (TRUE);
 
@@ -2315,7 +2322,9 @@ void D3D_EndRendering (void)
 			GetWindowRect (d3d_Window, &cliprect);
 			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 
+			IN_DeactivateMouse ();
 			IN_ActivateMouse ();
+			IN_ShowMouse (TRUE);
 			IN_ShowMouse (FALSE);
 			mouseactive = true;
 		}

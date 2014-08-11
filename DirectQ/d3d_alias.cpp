@@ -25,8 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include "d3d_vbo.h"
 
-extern cvar_t gl_fullbrights;
-
 void R_LightPoint (entity_t *e, float *c);
 
 // up to 16 color translated skins
@@ -89,6 +87,10 @@ void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangl
 
 	// clamp it so that we can have a known max transfer
 	if (max_mesh > 8192) max_mesh = 8192;
+
+	// clamp further to max supported by hardware
+	if (max_mesh > d3d_DeviceCaps.MaxVertexIndex) max_mesh = d3d_DeviceCaps.MaxVertexIndex;
+	if (max_mesh > d3d_DeviceCaps.MaxPrimitiveCount) max_mesh = d3d_DeviceCaps.MaxPrimitiveCount;
 
 	// set up holding areas for the remapping
 	d3d_RemapTable = (DWORD *) (scratchbuf + sizeof (aliasmesh_t) * max_mesh);
@@ -645,18 +647,6 @@ void D3D_SetupAliasModel (entity_t *ent)
 		ent->shadelight[i] = shadelight[i];
 	}
 
-	if (!gl_fullbrights.integer)
-	{
-		if (!stricmp (ent->model->name, "progs/flame2.mdl") || !stricmp (ent->model->name, "progs/flame.mdl"))
-		{
-			for (int i = 0; i < 3; i++)
-			{
-				shadelight[i] = (r_overbright.integer ? 128 : 256);
-				ent->shadelight[i] = shadelight[i];
-			}
-		}
-	}
-
 	// precomputed and pre-interpolated shading dot products
 	aliasstate->shadedots = r_avertexnormal_dots_lerp[((int) (ent->angles[1] * (SHADEDOT_QUANT_LERP / 360.0))) & (SHADEDOT_QUANT_LERP - 1)];
 
@@ -675,16 +665,6 @@ void D3D_SetupAliasModel (entity_t *ent)
 		aliasstate->teximage = &d3d_PlayerSkins[ent->playerskin];
 		aliasstate->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
 		d3d_PlayerSkins[ent->playerskin].LastUsage = 0;
-	}
-	else if (gl_fullbrights.integer == 2 && hdr->skins[ent->skinnum].nolumaimage[anim])
-	{
-		aliasstate->teximage = hdr->skins[ent->skinnum].nolumaimage[anim];
-		aliasstate->lumaimage = hdr->skins[ent->skinnum].lumaimage[anim];
-	}
-	else if (!gl_fullbrights.integer && hdr->skins[ent->skinnum].nolumaimage[anim])
-	{
-		aliasstate->teximage = hdr->skins[ent->skinnum].nolumaimage[anim];
-		aliasstate->lumaimage = NULL;
 	}
 	else
 	{

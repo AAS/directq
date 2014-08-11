@@ -93,7 +93,12 @@ void Menu_StackPop (void)
 	{
 		// exit the menus entirely
 		menu_StackDepth = 0;
-		key_dest = key_game;
+
+		// set correct key_dest
+		if (cls.state != ca_connected)
+			key_dest = key_console;
+		else key_dest = key_game;
+
 		m_state = m_none;
 		return;
 	}

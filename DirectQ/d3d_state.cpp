@@ -465,6 +465,7 @@ void D3D_SetDefaultStates (void)
 {
 	// init all render states
 	D3D_GetAllStates ();
+	D3D_SetAllStates ();
 
 	// disable lighting
 	for (int l = 0; l < 8; l++) d3d_Device->LightEnable (l, FALSE);

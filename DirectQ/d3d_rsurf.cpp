@@ -31,7 +31,6 @@ void R_MarkLeaves (void);
 void D3D_EmitModelSurfToAlpha (d3d_modelsurf_t *modelsurf);
 
 cvar_t r_lockpvs ("r_lockpvs", "0");
-cvar_t gl_fullbrights ("gl_fullbrights", "1");
 
 void D3D_RotateForEntity (entity_t *e);
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
@@ -90,7 +89,7 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, entity_t *ent)
 		ms->tc[TEXTURECHANGE_LIGHTMAP].tex = NULL;
 	}
 
-	if (tex->lumaimage && gl_fullbrights.integer)
+	if (tex->lumaimage)
 	{
 		// cache the luma texture change
 		ms->tc[TEXTURECHANGE_LUMA].stage = d3d_GlobalCaps.NumTMUs > 2 ? 2 : 0;
@@ -103,30 +102,10 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, entity_t *ent)
 		ms->tc[TEXTURECHANGE_LUMA].tex = NULL;
 	}
 
-	if (tex->nolumaimage && gl_fullbrights.integer == 2)
-	{
-		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
-		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->nolumaimage->d3d_Texture;
-	}
-	else if (tex->teximage && gl_fullbrights.integer)
+	if (tex->teximage)
 	{
 		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
 		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->teximage->d3d_Texture;
-	}
-	else if (tex->nolumaimage && !gl_fullbrights.integer)
-	{
-		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
-		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->nolumaimage->d3d_Texture;
-	}
-	else if (tex->teximage)
-	{
-		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
-		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->teximage->d3d_Texture;
-	}
-	else if (tex->nolumaimage)
-	{
-		ms->tc[TEXTURECHANGE_DIFFUSE].stage = 1;
-		ms->tc[TEXTURECHANGE_DIFFUSE].tex = tex->nolumaimage->d3d_Texture;
 	}
 	else
 	{
@@ -394,7 +373,7 @@ void D3D_AddSurfacesToRender (int alpha)
 		d3d_registeredtexture_t *rt = modelsurf->tex->registration;
 
 		// flag if we're doing lumas here
-		if (rt->texture->lumaimage && gl_fullbrights.integer)
+		if (rt->texture->lumaimage)
 			drawluma = true;
 		else drawnoluma = true;
 

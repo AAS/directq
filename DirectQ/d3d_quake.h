@@ -286,7 +286,6 @@ void D3D_SetViewport (DWORD x, DWORD y, DWORD w, DWORD h, float zn, float zf);
 #define IMAGE_NOCOMPRESS	(1 << 16)
 #define IMAGE_SYSMEM		(1 << 17)
 #define IMAGE_SCRAP			(1 << 18)
-#define IMAGE_NOLUMA		(1 << 19)
 
 int D3D_PowerOf2Size (int size);
 

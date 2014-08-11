@@ -388,10 +388,10 @@ void COM_LoadGame (char *gamename)
 	// -basedir <path>
 	// Overrides the system supplied base directory (under GAMENAME)
 	// this is always active for the entire session
-	int i = COM_CheckParm ("-basedir");
+	int bd = COM_CheckParm ("-basedir");
 
-	if (i && i < com_argc-1)
-		Q_strncpy (basedir, com_argv[i + 1], 127);
+	if (bd && bd < com_argc - 1)
+		Q_strncpy (basedir, com_argv[bd + 1], 127);
 	else Q_strncpy (basedir, host_parms.basedir, 127);
 
 	int j = strlen (basedir);

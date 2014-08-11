@@ -604,7 +604,6 @@ Runs all active servers
 */
 
 void S_FrameCheck (void);
-void IN_DIReadMouse (void);
 void CL_SendLagMove (void);
 
 void Host_Frame (DWORD time)

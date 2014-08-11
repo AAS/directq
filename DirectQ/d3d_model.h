@@ -113,7 +113,6 @@ typedef struct texture_s
 
 	struct image_s *teximage;
 	struct image_s *lumaimage;
-	struct image_s *nolumaimage;
 
 	int			visframe;
 
@@ -433,7 +432,6 @@ typedef struct aliasskin_s
 {
 	struct image_s *teximage[4];
 	struct image_s *lumaimage[4];
-	struct image_s *nolumaimage[4];
 	byte				*texels;
 } aliasskin_t;
 

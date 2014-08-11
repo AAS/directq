@@ -215,7 +215,7 @@ doRTT:;
 
 cvar_t r_waterwarptime ("r_waterwarptime", 2.0f, CVAR_ARCHIVE);
 cvar_t r_waterwarpscale ("r_waterwarpscale", 0.125f, CVAR_ARCHIVE);
-cvar_t r_waterwarptess ("r_waterwarptess", 32.0f, CVAR_ARCHIVE);
+cvar_t r_waterwarptess ("r_waterwarptess", 20.0f, CVAR_ARCHIVE);
 
 void D3DRTT_Callback (void *blah)
 {

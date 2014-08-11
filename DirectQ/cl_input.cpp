@@ -500,6 +500,7 @@ void CL_SendMove (usercmd_t *cmd)
 		in_lastimpulse[0] = in_impulse;
 	}
 
+	// clear the impulse (if any)
 	in_impulse = 0;
 
 	// deliver the message (unless we're playing a demo in which case there is no server to deliver to)
@@ -507,17 +508,18 @@ void CL_SendMove (usercmd_t *cmd)
 
 	// allways dump the first two message, because it may contain leftover inputs
 	// from the last level
-	/*
-	if (++cl.movemessages <= 2) return;
-
-	if (NET_SendUnreliableMessage (cls.netcon, buf) == -1)
+	if (sv.active)
 	{
-		Con_Printf ("CL_SendMove: lost server connection\n");
-		CL_Disconnect ();
-	}
-	*/
+		// if we're playing on a local server we just send the standard move
+		if (++cl.movemessages <= 2) return;
 
-	CL_SendLagMove ();
+		if (NET_SendUnreliableMessage (cls.netcon, buf) == -1)
+		{
+			Con_Printf ("CL_SendMove: lost server connection\n");
+			CL_Disconnect ();
+		}
+	}
+	else CL_SendLagMove ();
 }
 
 

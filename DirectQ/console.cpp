@@ -80,7 +80,7 @@ void Con_RemoveConsole (void)
 	key_linepos = 1;
 	
 	SCR_EndLoadingPlaque ();
-	Q_MemSet (con_times, 0, sizeof(con_times));
+	Q_MemSet (con_times, 0, sizeof (con_times));
 }
 
 
@@ -99,8 +99,7 @@ void Con_ToggleConsole_f (void)
 			M_Menu_Main_f ();
 		}
 	}
-	else
-		key_dest = key_console;
+	else key_dest = key_console;
 	
 	SCR_EndLoadingPlaque ();
 	Q_MemSet (con_times, 0, sizeof(con_times));

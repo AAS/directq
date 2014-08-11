@@ -132,8 +132,20 @@ void D3D_HashTexture (byte *hash, int width, int height, void *data, int flags)
 }
 
 
+// to do - clean this out!
 D3DFORMAT D3D_GetTextureFormat (int flags)
 {
+	if (flags & IMAGE_LUMA)
+	{
+		if (d3d_GlobalCaps.supportDXT1)
+			return D3DFMT_DXT1;
+		else if (d3d_GlobalCaps.supportDXT3)
+			return D3DFMT_DXT3;
+		else if (d3d_GlobalCaps.supportDXT5)
+			return D3DFMT_DXT5;
+		else return D3DFMT_A8R8G8B8;
+	}
+
 	if (flags & IMAGE_ALPHA)
 	{
 		if ((flags & IMAGE_LUMA) || (flags & IMAGE_NOCOMPRESS))
@@ -274,8 +286,6 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	{
 		if (flags & IMAGE_LIQUID)
 			activepal = d3d_QuakePalette.standard;
-		else if (flags & IMAGE_NOLUMA)
-			activepal = d3d_QuakePalette.standard;
 		else if (flags & IMAGE_LUMA)
 			activepal = d3d_QuakePalette.luma;
 		else activepal = d3d_QuakePalette.noluma;
@@ -384,7 +394,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 		if (COM_CheckHash (texhash, d3dtex->texture->hash))
 		{
 			// check for luma match as the incoming luma will get the same hash as it's base
-			if ((flags & (IMAGE_LUMA | IMAGE_NOLUMA)) == (d3dtex->texture->flags & (IMAGE_LUMA | IMAGE_NOLUMA)))
+			if ((flags & IMAGE_LUMA) == (d3dtex->texture->flags & IMAGE_LUMA))
 			{
 				// set last usage to 0
 				d3dtex->texture->LastUsage = 0;

@@ -558,12 +558,9 @@ void AppActivate (BOOL fActive, BOOL minimize)
 	if (fActive)
 	{
 		bWindowActive = true;
-		IN_ActivateMouse ();
-		IN_ShowMouse (FALSE);
-		VID_SetAppGamma ();
-		CDAudio_Resume ();
 		block_drawing = false;
 
+		// do this first as the api calls might affect the other stuff
 		if (modestate == MS_FULLDIB)
 		{
 			if (vid_canalttab && vid_wassuspended)
@@ -576,12 +573,24 @@ void AppActivate (BOOL fActive, BOOL minimize)
 			}
 		}
 
+		// this is needed to force the mouse to be active when alt-tabbing back to a fullscreen display
+		// it occasionally happens with windowed modes too so we always do it anyway
+		IN_DeactivateMouse ();
+		IN_ActivateMouse ();
+
+		IN_ShowMouse (FALSE);
+
+		// restore everything else
+		VID_SetAppGamma ();
+		CDAudio_Resume ();
+
 		// needed to reestablish the correct viewports
 		vid.recalc_refdef = 1;
 	}
 	else
 	{
 		bWindowActive = false;
+		IN_ActivateMouse ();
 		IN_DeactivateMouse ();
 		IN_ShowMouse (TRUE);
 		VID_SetOSGamma ();
@@ -798,6 +807,8 @@ void Host_Frame (DWORD time);
 void D3D_CreateShadeDots (void);
 void VID_DefaultMonitorGamma_f (void);
 
+void GetCrashReason (LPEXCEPTION_POINTERS ep);
+
 // fixme - run shutdown through here (or else consolidate the restoration stuff in a separate function)
 LONG WINAPI TildeDirectQ (LPEXCEPTION_POINTERS toast)
 {
@@ -807,15 +818,8 @@ LONG WINAPI TildeDirectQ (LPEXCEPTION_POINTERS toast)
 	// restore default timer
 	timeEndPeriod (sys_time_period);
 
-#ifdef _DEBUG
-		// prevent an exception in release builds
-		assert (false);
-#else
-	MessageBox (NULL, "Something bad happened and DirectQ is now toast.\n"
-		"Please visit http://mhquake.blogspot.com and report this crash.",
-		"An error has occurred",
-		MB_OK | MB_ICONSTOP);
-#endif
+	// get and display what caused the crash (debug builds only) or display a generic error (release builds)
+	GetCrashReason (toast);
 
 	// down she goes
 	return EXCEPTION_EXECUTE_HANDLER;

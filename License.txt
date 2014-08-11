@@ -5,10 +5,10 @@ DirectQ is published under various licenses.  The primary license is the GNU GPL
 with this download (refer to "gnu.txt").  Other portions of the work are derived from other GPL (and GPL compatible) sources,
 as well as public domain works.  The source is clearly attributed in cases where this applies.
 
-The long term intention with DirectQ is to release as much of my own code into the Public Domain as is possible.  There are
+The intention with DirectQ is to be able to release as much of my own code into the Public Domain as is possible.  There are
 however still people who think that they can take code from a modified Quake engine, incorporate it into their own work,
 and release that work without giving anything back to the community.  In an ideal world these people would just do the decent
 thing, but it seems as though this isn't that world.
 
-In order to protect the community from these people I am retaining the GNU GPL (version 3) for my own code.  This is in
-spite of my personal preference for a public domain release.
+In order to protect the community from these people, the GNU GPL is retained as the license for this code release.
+

@@ -1,0 +1,27 @@
+DirectQ 1.8.666
+Release Candidate 2
+==============
+
+This is Release Candidate 2 of DirectQ 1.8.666; I am holding off on doing a full "stable" release as a LOT of code has
+changed behind the scenes since 1.8.4, and there may be quite a few juicy bugs yet to come out.
+
+This release is intended for anyone who is willing to be at the bleeding edge of technology, happy to take the risk that
+the engine might crash, and agreeable to report such crashes to me (with enough info to enable me to reproduce them) at
+http://mhquake.blogspot.com
+
+Everyone else should just use 1.8.4 and wait a while longer for the "stable" build.
+
+Thanks to Baker and =Peg= for beta-testing this, and everyone else who has made suggestions or provided feedback.
+
+(Technical note: this release is a debug build, meaning that if it crashes, and if you have debugging tools on your
+computer, you may be able to provide me with more information relating to the crash.)
+
+Bugs/etc fixed since RC1:
+
+    * Mouse no longer locks when alt-tabbing back to a fullscreen mode.
+    * Crashes will now give more descriptive info, including the file name and line number on which the crash event occurred (for those of you who've seen the sys_win.cpp, line 812 crash: that was my error handler!)
+    * The Intel 945 "everything is black" bug has now been fixed; this was due to some rogue state changes not being reset properly when switching between HLSL on or off on a software T&L device.
+    * Mouse input sending has been reverted to the old way in single-player games.
+    * Changing the value of d3dx_version now causes a vid_restart to automatically issue, so that the depth buffer is properly recreated.
+    * gl_fullbrights 0 and 2 modes has been removed owing to excessive video RAM usage.
+    * Potential for vertex and index buffer sizes to overflow max allowed by your hardware has been removed.

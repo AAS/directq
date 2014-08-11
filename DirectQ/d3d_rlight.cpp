@@ -981,10 +981,24 @@ CD3DLightmap::CD3DLightmap (msurface_t *surf)
 	D3DLight_CreateLightmapTexture (&this->d3d_MainTexture, this->width, this->height, D3DPOOL_DEFAULT);
 	D3DLight_CreateLightmapTexture (&this->d3d_BackupTexture, this->width, this->height, D3DPOOL_SYSTEMMEM);
 
-	if (!this->d3d_MainTexture || !this->d3d_BackupTexture)
+	if (!this->d3d_MainTexture && !this->d3d_BackupTexture)
 	{
 		// would a host error be enough here as this failure is most likely to be out of memory...
-		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create a Lightmap Texture");
+		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create BOTH Lightmap Textures!!!");
+		return;
+	}
+
+	if (!this->d3d_MainTexture)
+	{
+		// would a host error be enough here as this failure is most likely to be out of memory...
+		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create primary Lightmap Texture");
+		return;
+	}
+
+	if (!this->d3d_BackupTexture)
+	{
+		// would a host error be enough here as this failure is most likely to be out of memory...
+		Sys_Error ("CD3DLightmap::CD3DLightmap: Failed to create backup Lightmap Texture");
 		return;
 	}
 
