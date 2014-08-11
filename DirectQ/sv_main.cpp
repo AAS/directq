@@ -70,7 +70,7 @@ void SV_WriteByteShort (sizebuf_t *sb, int c)
 	if (sv.Protocol == PROTOCOL_VERSION)
 		MSG_WriteByte (sb, c);
 	else
-		MSG_WriteShort (sb, c); // PROTOCOL_VERSION_BJP-3
+		MSG_WriteShort (sb, c); // PROTOCOL_VERSION_BJP-PROTOCOL_VERSION_MH
 
 	if (sb == &sv.signon) sv.signondiff += sv.signon.cursize - (PrevSize + 1); // Track extra bytes due to >256 model support, kludge
 }
@@ -83,7 +83,8 @@ void SV_WriteByteShort (sizebuf_t *sb, int c)
 SV_SetProtocol_f
 ===============
 */
-static int sv_protocol = PROTOCOL_VERSION_BJP3;
+static int sv_protocol = PROTOCOL_VERSION_MH;
+extern char *protolist[];
 
 static void SV_SetProtocol_f (void)
 {
@@ -93,7 +94,24 @@ static void SV_SetProtocol_f (void)
 		return;
 	}
 
-	sv_protocol = atoi (Cmd_Argv (1));
+	char *newprotocol = Cmd_Argv (1);
+
+	for (int i = 0; ; i++)
+	{
+		if (!protolist[i]) break;
+
+		if (!stricmp (protolist[i], newprotocol))
+		{
+			// note - this assumes that new protocols are numbered sequentially from 10000
+			if (!i)
+				sv_protocol = 15;
+			else sv_protocol = 9999 + i;
+
+			return;
+		}
+	}
+
+	sv_protocol = atoi (newprotocol);
 }
 
 cmd_t SV_SetProtocol_Cmd ("sv_protocol", SV_SetProtocol_f);
@@ -707,15 +725,15 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		// transmission (rather than from when spawned) are sent - helps relieve packet overflows!
 		bits = 0;
 
-		// non-breaking change #1 - make the comparison based on what will actually be transmitted
-		if ((int) (ent->v.origin[0] * 8) != (int) (ent->baseline.origin[0] * 8)) bits |= U_ORIGIN1;
-		if ((int) (ent->v.origin[1] * 8) != (int) (ent->baseline.origin[1] * 8)) bits |= U_ORIGIN2;
-		if ((int) (ent->v.origin[2] * 8) != (int) (ent->baseline.origin[2] * 8)) bits |= U_ORIGIN3;
+		// only transmit origin if changed from the baseline
+		if ((int) ent->v.origin[0] != (int) ent->baseline.origin[0]) bits |= U_ORIGIN1;
+		if ((int) ent->v.origin[1] != (int) ent->baseline.origin[1]) bits |= U_ORIGIN2;
+		if ((int) ent->v.origin[2] != (int) ent->baseline.origin[2]) bits |= U_ORIGIN3;
 
-		// non-breaking change #2 - make the comparison based on what will actually be transmitted
-		if ((((int) ent->v.angles[0] * 256 / 360) & 255) != (((int) ent->baseline.angles[0] * 256 / 360) & 255)) bits |= U_ANGLE1;
-		if ((((int) ent->v.angles[1] * 256 / 360) & 255) != (((int) ent->baseline.angles[1] * 256 / 360) & 255)) bits |= U_ANGLE2;
-		if ((((int) ent->v.angles[2] * 256 / 360) & 255) != (((int) ent->baseline.angles[2] * 256 / 360) & 255)) bits |= U_ANGLE3;
+		// only transmit angles if changed from the baseline
+		if ((int) ent->v.angles[0] != (int) ent->baseline.angles[0]) bits |= U_ANGLE1;
+		if ((int) ent->v.angles[1] != (int) ent->baseline.angles[1]) bits |= U_ANGLE2;
+		if ((int) ent->v.angles[2] != (int) ent->baseline.angles[2]) bits |= U_ANGLE3;
 
 		// check everything else
 		if (ent->v.movetype == MOVETYPE_STEP) bits |= U_NOLERP;
@@ -782,6 +800,14 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 			MSG_WriteFloat (msg, 2);
 			MSG_WriteFloat (msg, alpha);
 			MSG_WriteFloat (msg, fullbright);
+		}
+
+		// copy origin and angles back to baseline
+		if (sv.Protocol >= PROTOCOL_VERSION_MH)
+		{
+			// update baseline
+			VectorCopy (ent->v.origin, ent->baseline.origin);
+			VectorCopy (ent->v.angles, ent->baseline.angles);
 		}
 	}
 
@@ -1336,7 +1362,7 @@ void SV_SpawnServer (char *server)
 	sv.edicts = SV_AllocEdicts (128);
 
 	sv.Protocol = sv_protocol;
-	sv_max_datagram = sv.Protocol == PROTOCOL_VERSION ? 1024 : MAX_DATAGRAM; // Limit packet size if old protocol
+	sv_max_datagram = (sv.Protocol == PROTOCOL_VERSION ? 1024 : MAX_DATAGRAM); // Limit packet size if old protocol
 
 	sv.datagram.maxsize = MAX_DATAGRAM2;
 	sv.datagram.cursize = 0;

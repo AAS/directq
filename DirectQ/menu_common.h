@@ -18,6 +18,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+#define MENU_TAG_SIMPLE			666
+#define MENU_TAG_FULL			1313
+
 typedef enum
 {
 	m_sound_none,
@@ -103,9 +106,9 @@ protected:
 	int OptionTag;
 	bool Enabled;
 	bool Visible;
+	class CQMenu *Parent;
 
 private:
-	class CQMenu *Parent;
 	int OptionNum;
 };
 
@@ -213,6 +216,9 @@ private:
 #define TBFLAGS_ALPHANUMERICFLAGS (TBFLAG_ALLOWNUMBERS | TBFLAG_ALLOWLETTERS)
 #define TBFLAGS_FOLDERNAMEFLAGS (TBFLAG_FOLDERPATH | TBFLAG_ALLOWNUMBERS | TBFLAG_ALLOWLETTERS | TBFLAG_FILENAMECHARS)
 
+#define MAX_TBLENGTH	20
+#define MAX_TBPOS		(MAX_TBLENGTH - 1)
+
 class CQMenuCvarTextbox : public CQMenuOption, public CQMenuCvar
 {
 public:
@@ -306,6 +312,19 @@ private:
 };
 
 
+class CQMenuChunkyPic : public CQMenuOption
+{
+public:
+	CQMenuChunkyPic (char *pic);
+	void Draw (int y);
+	int GetYAdvance (void);
+
+private:
+	char *Pic;
+	int Y;
+};
+
+
 class CQMenuTitle : public CQMenuOption
 {
 public:
@@ -343,6 +362,7 @@ public:
 	void DisableOptions (int Tag);
 	void ShowOptions (int Tag);
 	void HideOptions (int Tag);
+	int NumCursorOptions;
 
 private:
 	int NumOptions;
@@ -364,6 +384,23 @@ public:
 
 private:
 	CQMenu *SubMenu;
+};
+
+
+class CQMenuCursorSubMenu : public CQMenuOption
+{
+public:
+	CQMenuCursorSubMenu (CQMenu *submenu);
+	CQMenuCursorSubMenu (menucommand_t command);
+	void Draw (int y);
+	void DrawCurrentOptionHighlight (int y);
+	void Key (int k);
+	int GetYAdvance (void);
+
+private:
+	CQMenu *SubMenu;
+	menucommand_t Command;
+	int Y;
 };
 
 

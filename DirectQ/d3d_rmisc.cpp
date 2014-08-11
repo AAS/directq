@@ -72,22 +72,31 @@ void R_InitTextures (void)
 
 // textures to load from resources
 extern LPDIRECT3DTEXTURE9 particledottexture;
-extern LPDIRECT3DTEXTURE9 particlesmoketexture;
-extern LPDIRECT3DTEXTURE9 particletracertexture;
+extern LPDIRECT3DTEXTURE9 qmbparticleblood;
+extern LPDIRECT3DTEXTURE9 qmbparticlebubble;
+extern LPDIRECT3DTEXTURE9 qmbparticlelightning;
+extern LPDIRECT3DTEXTURE9 qmbparticlelightningold;
+extern LPDIRECT3DTEXTURE9 qmbparticlesmoke;
+extern LPDIRECT3DTEXTURE9 qmbparticlespark;
+extern LPDIRECT3DTEXTURE9 qmbparticletrail;
+
 extern LPDIRECT3DTEXTURE9 R_PaletteTexture;
-extern LPDIRECT3DTEXTURE9 particleblood[];
+
 LPDIRECT3DTEXTURE9 r_blacktexture = NULL;
 LPDIRECT3DTEXTURE9 r_greytexture = NULL;
 
 void R_ReleaseResourceTextures (void)
 {
-	for (int i = 0; i < 8; i++)
-		SAFE_RELEASE (particleblood[i]);
-
 	SAFE_RELEASE (particledottexture);
-	SAFE_RELEASE (particlesmoketexture);
+	SAFE_RELEASE (qmbparticleblood);
+	SAFE_RELEASE (qmbparticlebubble);
+	SAFE_RELEASE (qmbparticlelightning);
+	SAFE_RELEASE (qmbparticlelightningold);
+	SAFE_RELEASE (qmbparticlesmoke);
+	SAFE_RELEASE (qmbparticlespark);
+	SAFE_RELEASE (qmbparticletrail);
+
 	SAFE_RELEASE (crosshairtexture);
-	SAFE_RELEASE (particletracertexture);
 	SAFE_RELEASE (r_blacktexture);
 	SAFE_RELEASE (r_greytexture);
 }
@@ -97,16 +106,16 @@ void R_InitResourceTextures (void)
 {
 	// load any textures contained in exe resources
 	D3D_LoadResourceTexture (&particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particlesmoketexture, IDR_PARTICLESMOKE, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particletracertexture, IDR_PARTICLETRACER, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[0], IDR_PARTICLEBLOOD1, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[1], IDR_PARTICLEBLOOD2, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[2], IDR_PARTICLEBLOOD3, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[3], IDR_PARTICLEBLOOD4, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[4], IDR_PARTICLEBLOOD5, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[5], IDR_PARTICLEBLOOD6, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[6], IDR_PARTICLEBLOOD7, IMAGE_MIPMAP);
-	D3D_LoadResourceTexture (&particleblood[7], IDR_PARTICLEBLOOD8, IMAGE_MIPMAP);
+
+	// QMB particles
+	D3D_LoadResourceTexture (&qmbparticleblood, IDR_QMBBLOOD, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&qmbparticlebubble, IDR_QMBBUBBLE, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&qmbparticlelightning, IDR_QMBLIGHTNING, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&qmbparticlelightningold, IDR_QMBLIGHTNING_OLD, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&qmbparticlesmoke, IDR_QMBSMOKE, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&qmbparticlespark, IDR_QMBSPARK, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&qmbparticletrail, IDR_QMBTRAIL, IMAGE_MIPMAP);
+
 	D3D_LoadResourceTexture (&crosshairtexture, IDR_CROSSHAIR, 0);
 	D3D_LoadResourceTexture (&yahtexture, IDR_YOUAREHERE, 0);
 
@@ -195,16 +204,28 @@ void D3D_TranslatePlayerSkin (int playernum)
 {
 	int		top, bottom;
 	byte	translate[256];
-	unsigned	translate32[256];
 	int		i, j, s;
 	model_t	*model;
 	aliashdr_t *paliashdr;
 	byte	*original;
-	unsigned	*out;
-	unsigned	scaled_width, scaled_height;
-	int			inwidth, inheight;
-	byte		*inrow;
-	unsigned	frac, fracstep;
+
+	// cache to check for changing skins
+	static int skincache[256] = {-1};
+	static int skinsize = -1;
+	static byte *translated = NULL;
+
+	// init the cache to invalid values to force a change first time
+	if (skincache[0] == -1)
+	{
+		for (i = 0; i < 256; i++)
+			skincache[i] = -1;
+	}
+
+	// skin hasn't changed yet (note the check here for the skin having been created)
+	if (skincache[playernum] == cl.scores[playernum].colors && playertextures[playernum]) return;
+
+	// cache it
+	skincache[playernum] = cl.scores[playernum].colors;
 
 	top = cl.scores[playernum].colors & 0xf0;
 	bottom = (cl.scores[playernum].colors & 15) << 4;
@@ -238,26 +259,32 @@ void D3D_TranslatePlayerSkin (int playernum)
 
 	if (d3d_RenderDef.currententity->skinnum < 0 || d3d_RenderDef.currententity->skinnum >= paliashdr->numskins)
 	{
-		Con_Printf("(%d): Invalid player skin #%d\n", playernum, d3d_RenderDef.currententity->skinnum);
+		Con_Printf ("(%d): Invalid player skin #%d\n", playernum, d3d_RenderDef.currententity->skinnum);
 		original = paliashdr->texels[0];
 	}
 	else original = paliashdr->texels[d3d_RenderDef.currententity->skinnum];
 
 	// no texels were saved
-	if (!original)
-	{
-		return;
-	}
+	if (!original) return;
 
 	if (s & 3) Sys_Error ("R_TranslateSkin: s&3");
-
-	inwidth = paliashdr->skinwidth;
-	inheight = paliashdr->skinheight;
 
 	// recreate the texture
 	SAFE_RELEASE (playertextures[playernum]);
 
-	byte *translated = (byte *) Pool_Alloc (POOL_TEMP, paliashdr->skinwidth * paliashdr->skinheight);
+	// check for size change
+	if (skinsize != s)
+	{
+		// cache the size
+		skinsize = s;
+
+		// free the current buffer
+		if (translated) Zone_Free (translated);
+		translated = NULL;
+	}
+
+	// create a new buffer only if required (more optimization)
+	if (!translated) translated = (byte *) Zone_Alloc (s);
 
 	for (i = 0; i < s; i += 4)
 	{
@@ -267,10 +294,15 @@ void D3D_TranslatePlayerSkin (int playernum)
 		translated[i+3] = translate[original[i+3]];
 	}
 
-	// do mipmap these because it only happens when colour changes
-	D3D_LoadTexture (&playertextures[playernum], paliashdr->skinwidth, paliashdr->skinheight, translated, (unsigned int *) d_8to24table, true, false);
-
-	Pool_Free (POOL_TEMP);
+	// don't compress these because it takes too long
+	// we can't lock the texture and modify the texels directly because it may be a non-power-of-2
+	image_t image;
+	image.data = translated;
+	image.flags = IMAGE_MIPMAP | IMAGE_NOCOMPRESS | IMAGE_NOEXTERN;
+	image.height = paliashdr->skinheight;
+	image.width = paliashdr->skinwidth;
+	image.palette = (unsigned int *) d_8to24table;
+	D3D_LoadTexture (&playertextures[playernum], &image);
 }
 
 

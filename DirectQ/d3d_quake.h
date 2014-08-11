@@ -101,6 +101,7 @@ extern D3DDISPLAYMODE d3d_CurrentMode;
 #define IMAGE_LUMA			256
 #define IMAGE_NOCOMPRESS	512
 #define IMAGE_RMQRAIN		1024
+#define IMAGE_NOEXTERN		2048
 
 
 typedef struct image_s

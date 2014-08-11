@@ -94,10 +94,6 @@ void	Cmd_Init (void);
 bool Cmd_Exists (char *cmd_name);
 // used by the cvar code to check for cvar / command name overlap
 
-char 	*Cmd_CompleteCommand (char *partial);
-// attempts to match a partial command for automatic command line completion
-// returns NULL if nothing fits
-
 int		Cmd_Argc (void);
 char	*Cmd_Argv (int arg);
 char	*Cmd_Args (void);

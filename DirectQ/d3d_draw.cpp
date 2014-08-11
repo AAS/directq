@@ -24,9 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_quake.h"
 
-#include <vector>
-#include <algorithm>
-
 #define	DIRECTQ_VERSION		1.6.4
 
 PALETTEENTRY texturepal[256];

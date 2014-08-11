@@ -573,9 +573,6 @@ void CQMenuCvarTextbox::DrawCurrentOptionHighlight (int y)
 }
 
 
-#define MAX_TBLENGTH	20
-#define MAX_TBPOS		(MAX_TBLENGTH - 1)
-
 void CQMenuCvarTextbox::Draw (int y)
 {
 	// update the cvar from the working text
@@ -846,6 +843,63 @@ void CQMenuSubMenu::Key (int k)
 /*
 =====================================================================================================================================
 
+				SUBMENU (CURSOR HIGHLIGHT)
+
+	use with CQMenuChunkyPic for building an old-style Quake menu
+
+=====================================================================================================================================
+*/
+
+CQMenuCursorSubMenu::CQMenuCursorSubMenu (CQMenu *submenu)
+{
+	this->SubMenu = submenu;
+	this->Command = NULL;
+	this->AcceptsInput = true;
+}
+
+
+CQMenuCursorSubMenu::CQMenuCursorSubMenu (menucommand_t command)
+{
+	this->SubMenu = NULL;
+	this->Command = command;
+	this->AcceptsInput = true;
+}
+
+
+void CQMenuCursorSubMenu::Draw (int y)
+{
+	// increment here as the parent doesn't yet exist at construction time
+	this->Parent->NumCursorOptions++;
+}
+
+
+void CQMenuCursorSubMenu::Key (int k)
+{
+	if (k == K_ENTER)
+	{
+		if (this->SubMenu) this->SubMenu->EnterMenu ();
+		if (this->Command) this->Command ();
+	}
+}
+
+
+void CQMenuCursorSubMenu::DrawCurrentOptionHighlight (int y)
+{
+	qpic_t *dot = Draw_CachePic (va ("gfx/menudot%i.lmp", ((int) (host_time * 10) % 6) + 1));
+	Draw_Pic (((vid.width - 240) >> 1) + 5, y, dot);
+}
+
+
+int CQMenuCursorSubMenu::GetYAdvance (void)
+{
+	// menu cursor is 20 high per ID Quake source
+	return 20;
+}
+
+
+/*
+=====================================================================================================================================
+
 				COMMAND
 
 =====================================================================================================================================
@@ -1101,6 +1155,47 @@ void CQMenuBanner::Draw (int y)
 int CQMenuBanner::GetYAdvance (void)
 {
 	return this->Y;
+}
+
+
+/*
+=====================================================================================================================================
+
+				CHUNKY PIC - for simple menus
+
+=====================================================================================================================================
+*/
+
+CQMenuChunkyPic::CQMenuChunkyPic (char *pic)
+{
+	this->Pic = (char *) Zone_Alloc (strlen (pic) + 1);
+	strcpy (this->Pic, pic);
+	this->AcceptsInput = false;
+}
+
+
+void CQMenuChunkyPic::Draw (int y)
+{
+	// per ID Quake each option is 20 high
+	y -= this->Parent->NumCursorOptions * 20;
+
+	// we can't load this on init as the filesystem may not be up yet
+	qpic_t *pic = Draw_CachePic (this->Pic);
+
+	// quake plaque
+	qpic_t *pla = Draw_CachePic ("gfx/qplaque.lmp");
+	Draw_Pic (((vid.width - 240) >> 1) - 35, y - 15, pla);
+
+	// draw centered on screen and offset down
+	Draw_Pic (((vid.width - 240) >> 1) + 25, y, pic);
+	this->Y = pic->height + 10;
+}
+
+
+int CQMenuChunkyPic::GetYAdvance (void)
+{
+	// no advance because this one is non-interactive and we use the cursor submenu to do the actual stuff
+	return 0;
 }
 
 
@@ -1469,6 +1564,7 @@ CQMenu::CQMenu (CQMenu *previous, m_state_t menustate)
 	this->MenuOptions = NULL;
 	this->CurrentOption = NULL;
 	this->NumOptions = 0;
+	this->NumCursorOptions = 0;
 	this->MenuState = menustate;
 	this->InsertedItems = NULL;
 	this->InsertPosition = NULL;
@@ -1645,6 +1741,9 @@ void CQMenu::Draw (void)
 {
 	int y = 25;
 
+	// reset for each draw frame
+	this->NumCursorOptions = 0;
+
 	// no options
 	if (!this->MenuOptions) return;
 
@@ -1695,7 +1794,7 @@ void CQMenu::Draw (void)
 			// draw the highlight bar under it
 			opt->DrawCurrentOptionHighlight (y);
 
-			// the fact that it's current needs special handling in come draw funcs
+			// the fact that it's current needs special handling in some draw funcs
 			opt->Draw (y);
 		}
 		else opt->Draw (y);

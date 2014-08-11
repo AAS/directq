@@ -1123,7 +1123,6 @@ void PR_LoadProgs (void)
 	CRC_Init (&pr_crc);
 
 	HANDLE progshandle = INVALID_HANDLE_VALUE;
-	DWORD rlen;
 	int progslen = COM_FOpenFile ("progs.dat", &progshandle);
 
 	if (progshandle == INVALID_HANDLE_VALUE) Host_Error ("PR_LoadProgs: couldn't load progs.dat");
@@ -1136,7 +1135,7 @@ void PR_LoadProgs (void)
 	progs = (dprograms_t *) Pool_Alloc (POOL_TEMP, progslen);
 
 	// read it all in
-	ReadFile (progshandle, progs, progslen, &rlen, NULL);
+	int rlen = COM_FReadFile (progshandle, progs, progslen);
 
 	// done with the file
 	COM_FCloseFile (&progshandle);
@@ -1173,15 +1172,15 @@ void PR_LoadProgs (void)
 	pr_edict_size = qcprogs.entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
 
 	// byte swap the lumps
-	for (i=0 ; i<qcprogs.numstatements ; i++)
+	for (i = 0; i < qcprogs.numstatements; i++)
 	{
-		pr_statements[i].op = LittleShort(pr_statements[i].op);
-		pr_statements[i].a = LittleShort(pr_statements[i].a);
-		pr_statements[i].b = LittleShort(pr_statements[i].b);
-		pr_statements[i].c = LittleShort(pr_statements[i].c);
+		pr_statements[i].op = LittleShort (pr_statements[i].op);
+		pr_statements[i].a = LittleShort (pr_statements[i].a);
+		pr_statements[i].b = LittleShort (pr_statements[i].b);
+		pr_statements[i].c = LittleShort (pr_statements[i].c);
 	}
 
-	for (i=0 ; i<qcprogs.numfunctions; i++)
+	for (i = 0; i < qcprogs.numfunctions; i++)
 	{
 		pr_functions[i].first_statement = LittleLong (pr_functions[i].first_statement);
 		pr_functions[i].parm_start = LittleLong (pr_functions[i].parm_start);
@@ -1191,7 +1190,7 @@ void PR_LoadProgs (void)
 		pr_functions[i].locals = LittleLong (pr_functions[i].locals);
 	}	
 
-	for (i=0 ; i<qcprogs.numglobaldefs ; i++)
+	for (i = 0; i < qcprogs.numglobaldefs; i++)
 	{
 		pr_globaldefs[i].type = LittleShort (pr_globaldefs[i].type);
 		pr_globaldefs[i].ofs = LittleShort (pr_globaldefs[i].ofs);
@@ -1201,8 +1200,10 @@ void PR_LoadProgs (void)
 	for (i = 0; i < qcprogs.numfielddefs; i++)
 	{
 		pr_fielddefs[i].type = LittleShort (pr_fielddefs[i].type);
+
 		if (pr_fielddefs[i].type & DEF_SAVEGLOBAL)
-			Sys_Error ("PR_LoadProgs: pr_fielddefs[i].type & DEF_SAVEGLOBAL");
+			Host_Error ("PR_LoadProgs: pr_fielddefs[i].type & DEF_SAVEGLOBAL");
+
 		pr_fielddefs[i].ofs = LittleShort (pr_fielddefs[i].ofs);
 		pr_fielddefs[i].s_name = LittleLong (pr_fielddefs[i].s_name);
 	}

@@ -35,7 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void *Pool_Alloc (int pool, int size);
 void Pool_Init (void);
 void Pool_Free (int pool);
-void Pool_Reset (int pool, int newsizebytes);
+void Pool_Reset (int pool, int newsizebytes = -1);
 void *Cache_Check (char *name);
 void *Cache_Alloc (char *name, void *data, int size);
 void *Zone_Alloc (int size);

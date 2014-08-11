@@ -22,8 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_quake.h"
 
-#include <vector>
-
 // r_lightmap 1 uses the grey texture on account of 2 x overbrighting
 extern LPDIRECT3DTEXTURE9 r_greytexture;
 extern cvar_t r_lightmap;

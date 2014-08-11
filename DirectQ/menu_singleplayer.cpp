@@ -67,12 +67,18 @@ void Menu_SPNewGame (void)
 void Menu_InitSPMenu (void)
 {
 	menu_Singleplayer.AddOption (new CQMenuBanner ("gfx/ttl_sgl.lmp"));
-	menu_Singleplayer.AddOption (new CQMenuTitle ("Single Player Options"));
-	menu_Singleplayer.AddOption (new CQMenuCommand ("Start a New Game", Menu_SPNewGame));
-	menu_Singleplayer.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Singleplayer.AddOption (new CQMenuSubMenu ("Load a Previously Saved Game", &menu_Load));
-	menu_Singleplayer.AddOption (new CQMenuSpacer ());
-	menu_Singleplayer.AddOption (new CQMenuSubMenu ("Save the Current Game", &menu_Save));
+	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Single Player Options"));
+	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuCommand ("Start a New Game", Menu_SPNewGame));
+	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Load a Previously Saved Game", &menu_Load));
+	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Singleplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Save the Current Game", &menu_Save));
+
+	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (Menu_SPNewGame));
+	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Load));
+	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Save));
+	menu_Singleplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuChunkyPic ("gfx/sp_menu.lmp"));
 }
 
 

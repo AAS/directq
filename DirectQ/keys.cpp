@@ -153,6 +153,17 @@ keyname_t keynames[] =
 
 ==============================================================================
 */
+// protocol autocomplete list
+char *protolist[] =
+{
+	"15",
+	"BJP",
+	"BJP2",
+	"BJP3",
+	"MH",
+	NULL
+};
+
 int Cmd_Match (char *partial, int matchcycle, bool conout);
 int match_count = 0;
 int match_cycle = 0;
@@ -352,6 +363,11 @@ void Key_Console (int key)
 		else if (!strnicmp (&key_lines[edit_line][1], "game ", 5))
 		{
 			if (gamedirs[0]) Key_ContentMatch (gamedirs, &contentcycle);
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "sv_protocol ", 12))
+		{
+			Key_ContentMatch (protolist, &contentcycle);
 			return;
 		}
 		else contentcycle = 0;

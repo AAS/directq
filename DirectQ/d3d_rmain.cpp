@@ -778,21 +778,28 @@ void D3D_DrawTranslucentEntities (void)
 		}
 	}
 
-	// global state for translucent ents - we're drawing back to front so we can write to Z
-	D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA, false);
-
 	// now draw 'em
 	// we can't state-batch these as they need correct ordering so we'll just live with the state changes...
+	// sprites can have the same z so don't write it
 	for (int i = 0; i < d3d_RenderDef.numtransedicts; i++)
 	{
 		d3d_RenderDef.currententity = d3d_RenderDef.transedicts[i];
 
 		if (d3d_RenderDef.currententity->model->type == mod_sprite)
+		{
+			D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
 			D3D_DrawSpriteModel (d3d_RenderDef.currententity);
+		}
 		else if (d3d_RenderDef.currententity->model->type == mod_alias)
+		{
+			D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA, false);
 			D3D_DrawTranslucentAliasModel (d3d_RenderDef.currententity);
+		}
 		else if (d3d_RenderDef.currententity->model->type == mod_brush)
+		{
+			D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA, false);
 			R_DrawBrushModel (d3d_RenderDef.currententity);
+		}
 		else
 		{
 			// just print a warning

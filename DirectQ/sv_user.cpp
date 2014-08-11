@@ -474,7 +474,7 @@ void SV_ReadClientMove (usercmd_t *move)
 
 // read current angles	
 	for (i=0 ; i<3 ; i++)
-		angle[i] = MSG_ReadAngle ();
+		angle[i] = MSG_ReadServerAngle ();
 
 	VectorCopy (angle, host_client->edict->v.v_angle);
 		

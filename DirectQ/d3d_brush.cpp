@@ -255,7 +255,7 @@ void R_SetInstancedStage0 (entity_t *e)
 R_SetBrushSurfaceStates
 
 Setup states for rendering brush surfaces depending on the requested flags
-Note: someflags are mutually exclusive and should not be used together unless you want weird things to happen
+Note: some flags are mutually exclusive and should not be used together unless you want weird things to happen
 =======================
 */
 void R_SetBrushSurfaceStates (entity_t *e, int flag)

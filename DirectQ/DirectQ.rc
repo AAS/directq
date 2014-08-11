@@ -4,16 +4,15 @@
 // bitmaps and other image types
 IDB_SPLASH				BITMAP		"splash.bmp"
 IDR_PARTICLEDOT			RCDATA		"particledot.png"
-IDR_PARTICLESMOKE			RCDATA		"particlesmoke.png"
-IDR_PARTICLETRACER		RCDATA		"particletracer.png"
-IDR_PARTICLEBLOOD1		RCDATA		"particleblood1.png"
-IDR_PARTICLEBLOOD2		RCDATA		"particleblood2.png"
-IDR_PARTICLEBLOOD3		RCDATA		"particleblood3.png"
-IDR_PARTICLEBLOOD4		RCDATA		"particleblood4.png"
-IDR_PARTICLEBLOOD5		RCDATA		"particleblood5.png"
-IDR_PARTICLEBLOOD6		RCDATA		"particleblood6.png"
-IDR_PARTICLEBLOOD7		RCDATA		"particleblood7.png"
-IDR_PARTICLEBLOOD8		RCDATA		"particleblood8.png"
+
+IDR_QMBBLOOD			RCDATA		"qmbblood.png"
+IDR_QMBBUBBLE			RCDATA		"qmbbubble.png"
+IDR_QMBLIGHTNING			RCDATA		"qmblightning.png"
+IDR_QMBLIGHTNING_OLD		RCDATA		"qmblightning_old.png"
+IDR_QMBSMOKE			RCDATA		"qmbsmoke.png"
+IDR_QMBSPARK			RCDATA		"qmbspark.png"
+IDR_QMBTRAIL			RCDATA		"qmbtrail.png"
+
 IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
 IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
 

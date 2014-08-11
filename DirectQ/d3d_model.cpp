@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
-#include <vector>
 
 void R_InitSky (miptex_t *mt);
 void GL_MakeAliasModelDisplayLists (model_t *m, aliashdr_t *hdr);
@@ -336,7 +335,7 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	}
 
 	// make the full loading pool available for us again
-	Pool_Reset (POOL_LOADFILE, 0);
+	Pool_Reset (POOL_LOADFILE);
 
 	// load the file
 	if (!(buf = (unsigned *) COM_LoadTempFile (mod->name)))
@@ -634,15 +633,14 @@ bad_anim_cleanup:;
 Mod_LoadLighting
 =================
 */
-extern cvar_t r_monolight;
+extern cvar_t r_coloredlight;
 
 bool Mod_LoadLITFile (lump_t *l)
 {
-	if (r_monolight.value) return false;
+	if (!r_coloredlight.value) return false;
 
 	HANDLE lithandle = INVALID_HANDLE_VALUE;
 	char litname[128];
-	DWORD rlen;
 
 	// take a copy to work on
 	strncpy (litname, loadmodel->name, 127);
@@ -674,8 +672,7 @@ bool Mod_LoadLITFile (lump_t *l)
 
 	// read and validate the header
 	int litheader[2];
-
-	ReadFile (lithandle, litheader, sizeof (int) * 2, &rlen, NULL);
+	int rlen = COM_FReadFile (lithandle, litheader, sizeof (int) * 2);
 
 	if (rlen != sizeof (int) * 2)
 	{
@@ -692,9 +689,7 @@ bool Mod_LoadLITFile (lump_t *l)
 	}
 
 	// read from the lit file
-	ReadFile (lithandle, brushmodel->lightdata, l->filelen * 3, &rlen, NULL);
-
-	// done
+	rlen = COM_FReadFile (lithandle, brushmodel->lightdata, l->filelen * 3);
 	COM_FCloseFile (&lithandle);
 
 	// return success or failure
@@ -2090,7 +2085,7 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	Cache_Alloc (mod->name, mod, sizeof (model_t));
 
 	// just reset the pool for now so that we can reuse memory that has already been committed but isn't needed anymore
-	Pool_Reset (POOL_TEMP, 0);
+	Pool_Reset (POOL_TEMP);
 }
 
 

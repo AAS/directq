@@ -945,7 +945,13 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	}
 
 	// get capabilities on the device
-	d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
+	HRESULT hr = d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
+
+	if (FAILED (hr))
+	{
+		Sys_Error ("D3D_InitDirect3D: Failed to retrieve device caps");
+		return;
+	}
 
 	// report on selected ones
 	Con_Printf ("Available Texture Memory: %i MB\n", (d3d_Device->GetAvailableTextureMem ()) / (1024 * 1024));
@@ -966,7 +972,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	LPDIRECT3DTEXTURE9 tex;
 
 	// check for compressed texture formats
-	HRESULT hr = d3d_Device->CreateTexture
+	hr = d3d_Device->CreateTexture
 	(
 		128,
 		128,
@@ -1131,7 +1137,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	(
 		ExWindowStyle,
 		D3D_WINDOW_CLASS_NAME,
-		"DirectQ Version 1.7.2",
+		"DirectQ Version 1.7.3",
 		WindowStyle,
 		rect.left, rect.top,
 		width,
@@ -1970,6 +1976,10 @@ extern cvar_t scr_fovcompat;
 
 #define TAG_VIDMODEAPPLY	1
 
+// if these are changed they need to be changed in menu_other.cpp as well
+#define MENU_TAG_SIMPLE		666
+#define MENU_TAG_FULL		1313
+
 void VID_ApplyModeChange (void)
 {
 	// the value here has already been forced to correct in the draw func so we just set it
@@ -2107,9 +2117,9 @@ void Menu_VideoBuild (void)
 
 	// add the rest of the options to ensure that they;re kept in order
 	menu_Video.AddOption (new CQMenuSpacer ());
-	menu_Video.AddOption (new CQMenuTitle ("Configure Video Options"));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configure Video Options"));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
 
 	if (d3d_DeviceCaps.MaxAnisotropy > 1)
 	{
@@ -2137,13 +2147,13 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
 	}
 
-	menu_Video.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
-	menu_Video.AddOption (new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
-	menu_Video.AddOption (new CQMenuTitle ("Brightness Controls"));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Master Gamma", &v_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Red Gamma", &r_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Green Gamma", &g_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Blue Gamma", &b_gamma, 1.75, 0.25, 0.05));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Brightness Controls"));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Master Gamma", &v_gamma, 1.75, 0.25, 0.05));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Red Gamma", &r_gamma, 1.75, 0.25, 0.05));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Green Gamma", &g_gamma, 1.75, 0.25, 0.05));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Blue Gamma", &b_gamma, 1.75, 0.25, 0.05));
 }
 
 

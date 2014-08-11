@@ -95,8 +95,7 @@ int CL_ReadByteShort2 (bool Compatibility)
 {
 	if (cl.Protocol < PROTOCOL_VERSION_BJP2 || Compatibility && cl.Protocol > PROTOCOL_VERSION_BJP2)
 		return MSG_ReadByte (); // Some progs (Marcher) send sound services, maintain compatibility, kludge
-	else
-		return MSG_ReadShort ();
+	else return MSG_ReadShort ();
 }
 
 
@@ -292,8 +291,8 @@ void CL_ParseServerInfo (void)
 	// parse protocol version number
 	i = MSG_ReadLong ();
 
-	if (i != PROTOCOL_VERSION && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_BJP3))
-		Host_Error ("Server returned version %i, not %i or %i-%i", i, PROTOCOL_VERSION, PROTOCOL_VERSION_BJP, PROTOCOL_VERSION_BJP3);
+	if (i != PROTOCOL_VERSION && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+		Host_Error ("Server returned unknown protocol version %i, (not %i or %i-%i)", i, PROTOCOL_VERSION, PROTOCOL_VERSION_BJP, PROTOCOL_VERSION_MH);
 
 	cl.Protocol = i;
 
@@ -608,6 +607,13 @@ void CL_ParseUpdate (int bits)
 		ent->angles1[0] = ent->angles1[1] = ent->angles1[2] = 0;
 		ent->angles2[0] = ent->angles2[1] = ent->angles2[2] = 0;
 	}
+
+	if (cl.Protocol >= PROTOCOL_VERSION_MH)
+	{
+		// update the baseline
+		VectorCopy (ent->msg_angles[0], ent->baseline.angles);
+		VectorCopy (ent->msg_origins[0], ent->baseline.origin);
+	}
 }
 
 
@@ -765,7 +771,7 @@ void CL_NewTranslation (int slot)
 	D3D_TranslatePlayerSkin (slot);
 
 	// fixme - old winquake?
-	for (i=0 ; i<VID_GRADES ; i++, dest += 256, source+=256)
+	for (i = 0; i < VID_GRADES; i++, dest += 256, source += 256)
 	{
 		if (top < 128)	// the artists made some backwards ranges.  sigh.
 			memcpy (dest + TOP_RANGE, source + top, 16);
@@ -1003,9 +1009,11 @@ void CL_ParseServerMessage (void)
 
 		case svc_version:
 			i = MSG_ReadLong ();
-			if (i != PROTOCOL_VERSION && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_BJP3))
-				Host_Error ("CL_ParseServerMessage: Server is protocol %i instead of %i or %i-%i", i, PROTOCOL_VERSION, PROTOCOL_VERSION_BJP, PROTOCOL_VERSION_BJP3);
+			if (i != PROTOCOL_VERSION && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+				Host_Error ("CL_ParseServerMessage: Server is protocol %i instead of %i or %i-%i", i, PROTOCOL_VERSION, PROTOCOL_VERSION_BJP, PROTOCOL_VERSION_MH);
+
 			cl.Protocol = i;
+
 			break;
 
 		case svc_disconnect:

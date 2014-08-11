@@ -22,6 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // be a little kinder to the CRT in Quake by telling it to act like it's single-threaded
 #define _CRT_DISABLE_PERFCRIT_LOCKS
 
+// let's be able to do assertions everywhere
+#include <assert.h>
+
 //#define	GLTEST			// experimental stuff
 
 // disable unwanted warnings

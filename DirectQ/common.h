@@ -100,6 +100,14 @@ void MSG_WriteString (sizebuf_t *sb, char *s);
 void MSG_WriteCoord (sizebuf_t *sb, float f);
 void MSG_WriteAngle (sizebuf_t *sb, float f);
 
+// these are to prevent crossing client/server boundaries when checking the
+// protocol to decide which data format to use.  in theory the two numbers are
+// the same so it should make no odds, but it just feels cleaner this way.
+// in an ideal world each of client and server would have their own logically
+// separate functions for reading and writing.
+void MSG_WriteClientAngle (sizebuf_t *sb, float f);
+float MSG_ReadServerAngle (void);
+
 extern	int			msg_readcount;
 extern	bool	msg_badread;		// set if a read goes beyond end of message
 

@@ -26,6 +26,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	PROTOCOL_VERSION_BJP2	10001	// Extended protocol (sounds > 256), problems with Marcher
 #define	PROTOCOL_VERSION_BJP3	10002	// Extended protocol (sounds > 256), more compatible, but less functional
 
+// new MH protocol(s)
+// if a new protocol is added, it must also be added to the autocomplete list in keys.cpp
+// new protocols should be numbered sequentially from 10000 to retain compatibility with SV_SetProtocol_f
+// this will of course break if arguiRe ever creates a BJP4 protocol...
+#define	PROTOCOL_VERSION_MH		10003	// Extended protocol, as 10002 but extends coords to full float
+
 // if the high bit of the servercmd is set, the low bits are fast update flags:
 #define	U_MOREBITS		(1<<0)
 #define	U_ORIGIN1		(1<<1)

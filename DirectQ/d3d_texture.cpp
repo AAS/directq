@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_quake.h"
 #include "resource.h"
-#include <assert.h>
 
 
 // leave this at 1 cos texture caching will resolve loading time issues
@@ -269,6 +268,9 @@ bool D3D_LoadPCX (HANDLE fh, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 
 bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags)
 {
+	// allow disabling of check for external replacement (speed)
+	if (flags & IMAGE_NOEXTERN) return false;
+
 	// add 3 for handling links.
 	char workingname[259];
 

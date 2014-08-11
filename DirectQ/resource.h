@@ -20,16 +20,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // particle images
 #define IDR_PARTICLEDOT				200
-#define IDR_PARTICLESMOKE			210
-#define IDR_PARTICLETRACER			220
-#define IDR_PARTICLEBLOOD1			230
-#define IDR_PARTICLEBLOOD2			240
-#define IDR_PARTICLEBLOOD3			250
-#define IDR_PARTICLEBLOOD4			260
-#define IDR_PARTICLEBLOOD5			270
-#define IDR_PARTICLEBLOOD6			280
-#define IDR_PARTICLEBLOOD7			290
-#define IDR_PARTICLEBLOOD8			300
+#define IDR_QMBBLOOD				210
+#define IDR_QMBBUBBLE				220
+#define IDR_QMBLIGHTNING			230
+#define IDR_QMBLIGHTNING_OLD		240
+#define IDR_QMBSMOKE				250
+#define IDR_QMBSPARK				260
+#define IDR_QMBTRAIL				270
 
 // bitmaps and other images
 #define IDB_SPLASH					600

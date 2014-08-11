@@ -23,11 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "menu_common.h"
 #include "winquake.h"
 
-// STL vector and sort need these
-#include <vector>
-#include <algorithm>
-
-void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *filetype);
+int COM_BuildContentList (char ***FileList, char *basedir, char *filetype);
 
 // cvars used
 extern cvar_t xi_usecontroller;
@@ -57,7 +53,7 @@ extern cvar_t ds_musicdir;
 extern cvar_t sound_nominal_clip_dist;
 extern cvar_t ambient_level;
 extern cvar_t ambient_fade;
-extern cvar_t r_monolight;
+extern cvar_t r_coloredlight;
 extern cvar_t r_extradlight;
 extern cvar_t r_rapidfire;
 extern cvar_t hud_defaulthud;
@@ -87,6 +83,7 @@ extern cvar_t r_waterwarptime;
 extern cvar_t r_waterwarpscale;
 extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
+extern cvar_t v_gamma;
 
 CQMenu menu_Main (NULL, m_main);
 CQMenu menu_Singleplayer (&menu_Main, m_other);
@@ -98,11 +95,11 @@ CQMenu menu_TCPIPJoinGame (&menu_Multiplayer, m_lanconfig_joingame);
 CQMenu menu_GameConfig (&menu_TCPIPNewGame, m_gameoptions);
 CQMenu menu_Setup (&menu_Multiplayer, m_setup);
 CQMenu menu_Options (&menu_Main, m_options);
-CQMenu menu_Menu (&menu_Options, m_video);
 CQMenu menu_Video (&menu_Options, m_video);
 CQMenu menu_Sound (&menu_Options, m_other);
 CQMenu menu_Help (&menu_Main, m_help);
 CQMenu menu_Input (&menu_Options, m_other);
+CQMenu menu_Controls (&menu_Options, m_keys);
 CQMenu menu_Keybindings (&menu_Input, m_keys);
 CQMenu menu_Effects (&menu_Options, m_other);
 CQMenu menu_WarpSurf (&menu_Options, m_other);
@@ -125,6 +122,8 @@ char *SkillNames[] =
 	NULL
 };
 
+// for enabling simple menus
+cvar_t menu_advanced ("menu_advanced", "0", CVAR_ARCHIVE);
 
 /*
 ========================================================================================================================
@@ -143,6 +142,52 @@ void Menu_ExitMenus (void)
 	cls.demonum = m_save_demonum;
 
 	if (cls.demonum != -1 && !cls.demoplayback && cls.state != ca_connected) CL_NextDemo ();
+}
+
+
+void Menu_ToggleSimpleMenus (void)
+{
+	if (!menu_advanced.integer)
+	{
+		menu_Main.ShowOptions (MENU_TAG_SIMPLE);
+		menu_Main.HideOptions (MENU_TAG_FULL);
+
+		menu_Singleplayer.ShowOptions (MENU_TAG_SIMPLE);
+		menu_Singleplayer.HideOptions (MENU_TAG_FULL);
+
+		menu_Multiplayer.ShowOptions (MENU_TAG_SIMPLE);
+		menu_Multiplayer.HideOptions (MENU_TAG_FULL);
+
+		menu_Options.ShowOptions (MENU_TAG_SIMPLE);
+		menu_Options.HideOptions (MENU_TAG_FULL);
+
+		menu_Video.ShowOptions (MENU_TAG_SIMPLE);
+		menu_Video.HideOptions (MENU_TAG_FULL);
+	}
+	else
+	{
+		menu_Main.ShowOptions (MENU_TAG_FULL);
+		menu_Main.HideOptions (MENU_TAG_SIMPLE);
+
+		menu_Singleplayer.ShowOptions (MENU_TAG_FULL);
+		menu_Singleplayer.HideOptions (MENU_TAG_SIMPLE);
+
+		menu_Multiplayer.ShowOptions (MENU_TAG_FULL);
+		menu_Multiplayer.HideOptions (MENU_TAG_SIMPLE);
+
+		menu_Options.ShowOptions (MENU_TAG_FULL);
+		menu_Options.HideOptions (MENU_TAG_SIMPLE);
+
+		menu_Video.ShowOptions (MENU_TAG_FULL);
+		menu_Video.HideOptions (MENU_TAG_SIMPLE);
+	}
+}
+
+
+int Menu_MainCustomDraw (int y)
+{
+	Menu_ToggleSimpleMenus ();
+	return y;
 }
 
 
@@ -168,23 +213,31 @@ void Menu_MainExitQuake (void)
 
 void Menu_InitMainMenu (void)
 {
+	menu_Main.AddOption (new CQMenuCustomDraw (Menu_MainCustomDraw));
 	menu_Main.AddOption (new CQMenuBanner ("gfx/ttl_main.lmp"));
-	menu_Main.AddOption (new CQMenuTitle ("Select a Submenu"));
-	menu_Main.AddOption (new CQMenuSubMenu ("Single Player Menu", &menu_Singleplayer));
-	menu_Main.AddOption (new CQMenuSpacer ());
-	menu_Main.AddOption (new CQMenuSubMenu ("Multiplayer Menu", &menu_Multiplayer));
-	menu_Main.AddOption (new CQMenuSpacer ());
-	menu_Main.AddOption (new CQMenuSubMenu ("Configure Game Options", &menu_Options));
-	menu_Main.AddOption (new CQMenuSpacer ());
-	menu_Main.AddOption (new CQMenuSubMenu ("Select Game Directories", &menu_Game));
-	menu_Main.AddOption (new CQMenuSpacer ());
-	menu_Main.AddOption (new CQMenuSubMenu ("Load a Map", &menu_Maps));
-	menu_Main.AddOption (new CQMenuSpacer ());
-	menu_Main.AddOption (new CQMenuSubMenu ("Run or Record a Demo", &menu_Demo));
-	menu_Main.AddOption (new CQMenuSpacer ());
-	menu_Main.AddOption (new CQMenuSubMenu ("Help/Ordering", &menu_Help));
-	menu_Main.AddOption (new CQMenuSpacer ());
-	menu_Main.AddOption (new CQMenuCommand ("Exit Quake", Menu_MainExitQuake));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Select a Submenu"));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Single Player Menu", &menu_Singleplayer));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Multiplayer Menu", &menu_Multiplayer));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Configure Game Options", &menu_Options));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Select Game Directories", &menu_Game));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Load a Map", &menu_Maps));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Run or Record a Demo", &menu_Demo));
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Main.AddOption (MENU_TAG_FULL, new CQMenuCommand ("Exit Quake", Menu_MainExitQuake));
+
+	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Singleplayer));
+	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Multiplayer));
+	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Options));
+	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Help));
+	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (Menu_MainExitQuake));
+	menu_Main.AddOption (MENU_TAG_SIMPLE, new CQMenuChunkyPic ("gfx/mainmenu.lmp"));
+
 	menu_Main.AddOption (new CQMenuCustomEnter (Menu_MainCustomEnter));
 	menu_Main.AddOption (new CQMenuCustomKey (K_ESCAPE, Menu_ExitMenus));
 }
@@ -673,7 +726,8 @@ int old_skybox_menunumber = 0;
 void Menu_LoadAvailableSkyboxes (void)
 {
 	skybox_menulist = NULL;
-	std::vector<char *> SkyboxList;
+	int listlen = 0;
+	char **SkyboxList = NULL;
 
 	for (int i = 0; ; i++)
 	{
@@ -686,17 +740,17 @@ void Menu_LoadAvailableSkyboxes (void)
 			// because we allow skyboxes components to be missing (crazy modders!) we need to check all 6 suffixes
 			for (int s = 0; s < 6; s++)
 			{
-				COM_BuildContentList (SkyboxList, va ("%s/", sbdir[i]), va ("%s.%s", suf[s], TextureExtensions[j]));
+				listlen = COM_BuildContentList (&SkyboxList, va ("%s/", sbdir[i]), va ("%s.%s", suf[s], TextureExtensions[j]));
 			}
 		}
 	}
 
-	// set up the array for use
-	int listlen = SkyboxList.size ();
-
 	// because we added each skybox component (to cover for crazy modders who leave one out) we now go
 	// through the list and remove duplicates, copying it into a second list as we go.  this is what we're reduced to. :(
-	std::vector<char *> NewSkyboxList;
+	// add 1 for NULL termination
+	char **NewSkyboxList = (char **) Zone_Alloc ((listlen + 1) * sizeof (char *));
+	NewSkyboxList[0] = NULL;
+	int newboxes = 0;
 
 	for (int i = 0; i < listlen; i++)
 	{
@@ -712,11 +766,12 @@ void Menu_LoadAvailableSkyboxes (void)
 			}
 		}
 
-		int newlen = NewSkyboxList.size ();
 		bool present = false;
 
-		for (int j = 0; j < newlen; j++)
+		for (int j = 0; ; j++)
 		{
+			if (!NewSkyboxList[j]) break;
+
 			if (!stricmp (NewSkyboxList[j], SkyboxList[i]))
 			{
 				present = true;
@@ -726,16 +781,16 @@ void Menu_LoadAvailableSkyboxes (void)
 
 		if (!present)
 		{
-			char *addbox = (char *) Zone_Alloc (strlen (SkyboxList[i]) + 1);
-			strcpy (addbox, SkyboxList[i]);
-			NewSkyboxList.push_back (addbox);
+			NewSkyboxList[newboxes] = (char *) Zone_Alloc (strlen (SkyboxList[i]) + 1);
+			strcpy (NewSkyboxList[newboxes], SkyboxList[i]);
+			newboxes++;
+			NewSkyboxList[newboxes] = NULL;
 		}
 
 		Zone_Free (SkyboxList[i]);
 	}
 
-	SkyboxList.clear ();
-	listlen = NewSkyboxList.size ();
+	listlen = newboxes;
 
 	// alloc a buffer for the menu list (add 1 to null term the list)
 	// and a second for the first item, which will be "no skybox"
@@ -756,7 +811,7 @@ void Menu_LoadAvailableSkyboxes (void)
 		skybox_menulist[i + 2] = NULL;
 	}
 
-	NewSkyboxList.clear ();
+	Zone_Free (NewSkyboxList);
 
 	// set up item 0 (ensure that it's name can't conflict with a valid name)
 	skybox_menulist[0] = (char *) Pool_Alloc (POOL_GAME, 20);
@@ -837,10 +892,13 @@ void Menu_WarpSkyBoxApply (void)
 }
 
 
-int Menu_MenuCustomDraw (int y)
+int Menu_OptionsCustomDraw (int y)
 {
 	// save out menu highlight colour
 	Cvar_Set (&menu_fillcolor, menu_fillcolor.integer);
+
+	// toggle simplemenus option
+	Menu_ToggleSimpleMenus ();
 
 	return y;
 }
@@ -975,28 +1033,39 @@ int Menu_FogColourBox (int y)
 void Menu_InitOptionsMenu (void)
 {
 	// options
+	menu_Options.AddOption (new CQMenuCustomDraw (Menu_OptionsCustomDraw));
 	menu_Options.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
-	menu_Options.AddOption (new CQMenuTitle ("Configuration Management"));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuTitle ("Configure Game Options"));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configuration Management"));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Customize Controls", &menu_Controls));
 	menu_Options.AddOption (new CQMenuCommand ("Go to Console", Menu_OptionsGoToConsole));
 	menu_Options.AddOption (new CQMenuCommand ("Reset to Defaults", Menu_OptionsResetToDefaults));
 	menu_Options.AddOption (new CQMenuCommand ("Save Current Configuration", Host_WriteConfiguration));
-	menu_Options.AddOption (new CQMenuTitle ("Options"));
-	menu_Options.AddOption (new CQMenuSubMenu ("Video and View Options", &menu_Video));
-	menu_Options.AddOption (new CQMenuSubMenu ("Special Effects Options", &menu_Effects));
-	menu_Options.AddOption (new CQMenuSubMenu ("Warp Surfaces Options", &menu_WarpSurf));
-	menu_Options.AddOption (new CQMenuSubMenu ("Fog Options", &menu_Fog));
-	menu_Options.AddOption (new CQMenuSubMenu ("Sound Options", &menu_Sound));
-	menu_Options.AddOption (new CQMenuSubMenu ("Movement and Input Options", &menu_Input));
-	menu_Options.AddOption (new CQMenuSubMenu ("Chase Camera Options", &menu_Chase));
-	menu_Options.AddOption (new CQMenuSubMenu ("Menu Layout and Configuration", &menu_Menu));
-	menu_Options.AddOption (new CQMenuSubMenu ("HUD Layout and Configuration", &menu_HUD));
-	menu_Options.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Options.AddOption (new CQMenuSubMenu ("Content Options", &menu_ContentDir));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Options"));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Video and View Options", &menu_Video));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Special Effects Options", &menu_Effects));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Warp Surfaces Options", &menu_WarpSurf));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Fog Options", &menu_Fog));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Sound Options", &menu_Sound));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Movement and Input Options", &menu_Input));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Chase Camera Options", &menu_Chase));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("HUD Layout and Configuration", &menu_HUD));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Content Options", &menu_ContentDir));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarSlider ("Brightness", &v_gamma, 1.75, 0.25, 0.05));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarSlider ("Mouse Speed", &sensitivity, 1, 21, 1));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarSlider ("Music Volume", &bgmvolume, 0, 1, 0.05));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarSlider ("Sound Volume", &volume, 0, 1, 0.05));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarToggle ("Always Run", &cl_forwardspeed, 200, 400));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarToggle ("Mouse Look", &m_look, 0, 1));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarToggle ("Invert Mouse", &m_pitch, 0.022, -0.022));
 
-	menu_Menu.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
-	menu_Menu.AddOption (new CQMenuCustomDraw (Menu_MenuCustomDraw));
-	menu_Menu.AddOption (new CQMenuTitle ("Menu Layout and Configuration"));
-	menu_Menu.AddOption (new CQMenuColourBar ("Highlight Colour", &menu_fillcolor.integer));
+	// lay it out like this so that the simple menus toggle will remain active when used
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Menu Configuration"));
+	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuColourBar ("Highlight Colour", &menu_fillcolor.integer));
+	menu_Options.AddOption (new CQMenuCvarToggle ("Advanced Options", &menu_advanced, 0, 1));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Video Options", &menu_Video));
 
 	// fog
 	menu_Fog.AddOption (new CQMenuCustomEnter (Menu_FogCustomEnter));
@@ -1094,7 +1163,7 @@ void Menu_InitOptionsMenu (void)
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Frame", &r_lerpframe, 0, 1));
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Light Style", &r_lerplightstyle, 0, 1));
 	menu_Effects.AddOption (new CQMenuTitle ("Lighting"));
-	menu_Effects.AddOption (new CQMenuCvarToggle ("Coloured Light", &r_monolight, 1, 0));
+	menu_Effects.AddOption (new CQMenuCvarToggle ("Coloured Light", &r_coloredlight, 0, 1));
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Extra DLights", &r_extradlight, 0, 1));
 	menu_Effects.AddOption (new CQMenuCvarToggle ("Rapid Fire Effect", &r_rapidfire, 0, 1));
 	menu_Effects.AddOption (new CQMenuTitle ("Other Effects"));
@@ -1129,6 +1198,13 @@ void Menu_InitOptionsMenu (void)
 	// grab every key for these actions
 	for (int i = 0; i < 256; i++)
 		menu_Keybindings.AddOption (new CQMenuCustomKey (i, Menu_KeybindingsCustomKey));
+
+	menu_Controls.AddOption (new CQMenuBanner ("gfx/ttl_cstm.lmp"));
+	menu_Controls.AddOption (new CQMenuCustomDraw (Menu_KeybindingsCustomDraw));
+
+	// grab every key for these actions
+	for (int i = 0; i < 256; i++)
+		menu_Controls.AddOption (new CQMenuCustomKey (i, Menu_KeybindingsCustomKey));
 
 	// video menu - the rest of the options are deferred until the menu is up!
 	// note - the new char *** spinbox style means this isn't actually required any more,
@@ -1460,7 +1536,6 @@ void Menu_MapsOnEnter (int itemnum)
 bool ValidateMap (char *mapname, int itemnum)
 {
 	HANDLE fh = INVALID_HANDLE_VALUE;
-	DWORD rlen;
 	char fullmapname[MAX_PATH];
 
 	_snprintf (fullmapname, 260, "maps/%s", mapname);
@@ -1473,7 +1548,7 @@ bool ValidateMap (char *mapname, int itemnum)
 	int basepos = SetFilePointer (fh, 0, NULL, FILE_CURRENT);
 	dheader_t bsphead;
 
-	ReadFile (fh, &bsphead, sizeof (dheader_t), &rlen, NULL);
+	int rlen = COM_FReadFile (fh, &bsphead, sizeof (dheader_t));
 
 	if (rlen != sizeof (dheader_t))
 	{
@@ -1493,9 +1568,7 @@ bool ValidateMap (char *mapname, int itemnum)
 
 	// read it all in
 	char *entlump = (char *) Pool_Alloc (POOL_TEMP, bsphead.lumps[LUMP_ENTITIES].filelen);
-	ReadFile (fh, entlump, bsphead.lumps[LUMP_ENTITIES].filelen, &rlen, NULL);
-
-	// done with the file now
+	rlen = COM_FReadFile (fh, entlump, bsphead.lumps[LUMP_ENTITIES].filelen);
 	COM_FCloseFile (&fh);
 
 	// not enough data
@@ -1541,14 +1614,11 @@ void Menu_MapsPopulate (void)
 
 	if (MapListScrollBox) delete MapListScrollBox;
 
-	std::vector<char *> MapList;
-
-	COM_BuildContentList (MapList, "maps/", ".bsp");
+	char **MapList = NULL;
+	int listlen = COM_BuildContentList (&MapList, "maps/", ".bsp");
 
 	// set up the array for use
-	int listlen = MapList.size ();
 	int maplistlen = 0;
-
 	menu_mapslist = (mapinfo_t *) Pool_Alloc (POOL_GAME, listlen * sizeof (mapinfo_t));
 
 	// fill it in
@@ -1557,12 +1627,9 @@ void Menu_MapsPopulate (void)
 		// if the map doesn't have an info_player entity in it, don't add it to the list
 		if (ValidateMap (MapList[i], maplistlen)) maplistlen++;
 
-		// clear down the source vector item as we don't need it any more
+		// clear down the source item as we don't need it any more
 		Zone_Free (MapList[i]);
 	}
-
-	// release the vector
-	MapList.clear ();
 
 	if (!maplistlen)
 	{
@@ -1640,22 +1707,18 @@ void Menu_DemoPopulate (void)
 	// because there might be no demos we should NULL the list too
 	demolist = NULL;
 
-	std::vector<char *> demovector;
-	COM_BuildContentList (demovector, "", ".dem");
-
-	// by now it should be obvious what we're doing here...
-	int numdemos = demovector.size ();
-
+	char **alldemos = NULL;
+	int numdemos = COM_BuildContentList (&alldemos, "", ".dem");
 	demolist = (char **) Pool_Alloc (POOL_GAME, (numdemos + 1) * sizeof (char *));
 
 	if (numdemos)
 	{
 		for (int i = 0; i < numdemos; i++)
 		{
-			int thisdemolen = strlen (demovector[i]);
+			int thisdemolen = strlen (alldemos[i]);
 
 			demolist[i] = (char *) Pool_Alloc (POOL_GAME, thisdemolen + 1);
-			strcpy (demolist[i], demovector[i]);
+			strcpy (demolist[i], alldemos[i]);
 
 			for (int j = thisdemolen; j; j--)
 			{
@@ -1667,7 +1730,7 @@ void Menu_DemoPopulate (void)
 			}
 
 			demolist[i + 1] = NULL;
-			Zone_Free (demovector[i]);
+			Zone_Free (alldemos[i]);
 		}
 	}
 	else demolist[0] = NULL;
@@ -1755,7 +1818,7 @@ demo_serverinfo_t dsi = {15, 1, 0, "", NULL, NULL, NULL, 0};
 bool M_Menu_Demo_Info (char *demofile)
 {
 	HANDLE fh = INVALID_HANDLE_VALUE;
-	DWORD rlen;
+	int rlen;
 	int msg;
 	int msgsize;
 	float viewangs[3];
@@ -1778,7 +1841,7 @@ bool M_Menu_Demo_Info (char *demofile)
 		{
 			char cmsg;
 
-			ReadFile (fh, &cmsg, 1, &rlen, NULL);
+			rlen = COM_FReadFile (fh, &cmsg, 1);
 
 			if (cmsg == '\n') break;
 
@@ -1795,14 +1858,14 @@ bool M_Menu_Demo_Info (char *demofile)
 		while (1)
 		{
 			// get the size of the message
-			ReadFile (fh, &msgsize, 4, &rlen, NULL);
+			rlen = COM_FReadFile (fh, &msgsize, 4);
 
 			// read viewangles
-			ReadFile (fh, viewangs, sizeof (float) * 3, &rlen, NULL);
+			rlen = COM_FReadFile (fh, viewangs, sizeof (float) * 3);
 
 			// read in the message
 			byte *msgdata = (byte *) Zone_Alloc (msgsize);
-			ReadFile (fh, msgdata, msgsize, &rlen, NULL);
+			rlen = COM_FReadFile (fh, msgdata, msgsize);
 
 			// parse the message
 			for (int msgpos = 0;;)

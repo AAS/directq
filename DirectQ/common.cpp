@@ -21,8 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "unzip.h"
-#include <vector>
-#include <algorithm>
 
 
 // used for generating md5 hashes
@@ -355,12 +353,29 @@ void MSG_WriteString (sizebuf_t *sb, char *s)
 
 void MSG_WriteCoord (sizebuf_t *sb, float f)
 {
-	MSG_WriteShort (sb, (int)(f*8));
+	// always happens on the server
+	if (sv.Protocol >= PROTOCOL_VERSION_MH)
+		MSG_WriteFloat (sb, f);
+	else MSG_WriteShort (sb, (int)(f*8));
+}
+
+
+void MSG_WriteAngleCommon (sizebuf_t *sb, float f, int proto)
+{
+	if (proto >= PROTOCOL_VERSION_MH)
+		MSG_WriteShort (sb, ((int) ((f * 65536) / 360)) & 65535);
+	else MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
+}
+
+
+void MSG_WriteClientAngle (sizebuf_t *sb, float f)
+{
+	MSG_WriteAngleCommon (sb, f, cl.Protocol);
 }
 
 void MSG_WriteAngle (sizebuf_t *sb, float f)
 {
-	MSG_WriteByte (sb, ((int)f*256/360) & 255);
+	MSG_WriteAngleCommon (sb, f, sv.Protocol);
 }
 
 //
@@ -488,14 +503,32 @@ char *MSG_ReadString (void)
 
 float MSG_ReadCoord (void)
 {
-	return MSG_ReadShort() * (1.0/8);
+	if (cl.Protocol >= PROTOCOL_VERSION_MH)
+		return MSG_ReadFloat ();
+
+	return MSG_ReadShort() * (1.0 / 8);
 }
+
+
+float MSG_ReadAngleCommon (int proto)
+{
+	if (proto >= PROTOCOL_VERSION_MH)
+		return MSG_ReadShort () * (360.0 / 65536);
+
+	return MSG_ReadChar () * (360.0 / 256);
+}
+
+
+float MSG_ReadServerAngle (void)
+{
+	return MSG_ReadAngleCommon (sv.Protocol);
+}
+
 
 float MSG_ReadAngle (void)
 {
-	return MSG_ReadChar() * (360.0/256);
+	return MSG_ReadAngleCommon (cl.Protocol);
 }
-
 
 
 //===========================================================================
@@ -535,7 +568,7 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 	data = buf->data + buf->cursize;
 	buf->cursize += length;
-	
+
 	return data;
 }
 
@@ -550,7 +583,7 @@ void SZ_Print (sizebuf_t *buf, char *data)
 	
 	len = strlen(data)+1;
 
-// byte * cast to keep VC++ happy
+	// byte * cast to keep VC++ happy
 	if (buf->data[buf->cursize-1])
 		memcpy ((byte *)SZ_GetSpace(buf, len),data,len); // no trailing 0
 	else
@@ -857,9 +890,8 @@ void COM_CheckRegistered (void)
 		return;
 	}
 
-	DWORD rcheck;
+	int rcheck = COM_FReadFile (fh, check, sizeof (check));
 
-	ReadFile (fh, check, sizeof (check), &rcheck, NULL);
 	COM_FCloseFile (&fh);
 
 	if (rcheck != sizeof (check))
@@ -1126,14 +1158,13 @@ COM_CreatePath
 Only used for CopyFile
 ============
 */
-void    COM_CreatePath (char *path)
+void COM_CreatePath (char *path)
 {
-	char    *ofs;
-	
-	for (ofs = path+1 ; *ofs ; ofs++)
+	for (char *ofs = path + 1; *ofs; ofs++)
 	{
 		if (*ofs == '/')
-		{       // create the directory
+		{
+			// create the directory
 			*ofs = 0;
 			Sys_mkdir (path);
 			*ofs = '/';
@@ -1150,41 +1181,58 @@ bool SortCompare (char *left, char *right)
 }
 
 
-bool CheckExists (std::vector<char *> &FileList, char *mapname)
+bool CheckExists (char **fl, char *mapname)
 {
-	int ListLen = FileList.size ();
+	for (int i = 0; ; i++)
+	{
+		// end of list
+		if (!fl[i]) return false;
 
-	// look for a match
-	for (int i = 0; i < ListLen; i++)
-		if (!stricmp (FileList[i], mapname))
-			return true;
+		if (!stricmp (fl[i], mapname)) return true;
+	}
 
-	// no match found
+	// never reached
 	return false;
 }
 
 
-void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *filetype)
+int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 {
-	/*
-	initial clear down breaks skybox menu loading
-	if (FileList.size () > 0)
+	char **fl = FileList[0];
+	int len = 0;
+
+	if (!fl)
 	{
-		// clear down previous
-		int size = FileList.size ();
+		// be careful where you call this from as it frees the temp pool!!!
+		Pool_Reset (POOL_TEMP);
 
-		for (int i = 0; i < size; i++)
-			Zone_Free (FileList[i]);
+		// we never know how much we need, so alloc enough for 256k items
+		// at this stage they're only pointers so we can afford to do this.  if it becomes a problem
+		// we might make a linked list then copy from that into an array and do it all in the Zone.
+		FileList[0] = (char **) Pool_Alloc (POOL_TEMP, sizeof (char *) * 0x40000);
 
-		FileList.clear ();
+		// need to reset the pointer as it will have changed (fl is no longer NULL)
+		fl = FileList[0];
+		fl[0] = NULL;
 	}
-	*/
+	else
+	{
+		// appending to a list so find the current length and build from there
+		for (int i = 0; ; i++)
+		{
+			if (!fl[i]) break;
+			len++;
+		}
+	}
 
 	int dirlen = strlen (basedir);
 	int typelen = strlen (filetype);
 
 	for (searchpath_t *search = com_searchpaths; search; search = search->next)
 	{
+		// prevent overflow
+		if ((len + 1) == 0x40000) break;
+
 		if (search->pack)
 		{
 			pack_t *pak = search->pack;
@@ -1196,11 +1244,11 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 				if (filelen < typelen + dirlen) continue;
 				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
 				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
-				if (CheckExists (FileList, &pak->files[i].name[dirlen])) continue;
+				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
-				char *filename = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
-				strcpy (filename, &pak->files[i].name[dirlen]);
-				FileList.push_back (filename);
+				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
+				strcpy (fl[len++], &pak->files[i].name[dirlen]);
+				fl[len] = NULL;
 			}
 		}
 		else if (search->pk3)
@@ -1214,11 +1262,11 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 				if (filelen < typelen + dirlen) continue;
 				if (strnicmp (pak->files[i].name, basedir, dirlen)) continue;
 				if (stricmp (&pak->files[i].name[filelen - typelen], filetype)) continue;
-				if (CheckExists (FileList, &pak->files[i].name[dirlen])) continue;
+				if (CheckExists (fl, &pak->files[i].name[dirlen])) continue;
 
-				char *filename = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
-				strcpy (filename, &pak->files[i].name[dirlen]);
-				FileList.push_back (filename);
+				fl[len] = (char *) Zone_Alloc (strlen (&pak->files[i].name[dirlen]) + 1);
+				strcpy (fl[len++], &pak->files[i].name[dirlen]);
+				fl[len] = NULL;
 			}
 		}
 		else
@@ -1252,11 +1300,11 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
 				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
-				if (CheckExists (FileList, FindFileData.cFileName)) continue;
+				if (CheckExists (fl, FindFileData.cFileName)) continue;
 
-				char *filename = (char *) Zone_Alloc (strlen (FindFileData.cFileName) + 1);
-				strcpy (filename, FindFileData.cFileName);
-				FileList.push_back (filename);
+				fl[len] = (char *) Zone_Alloc (strlen (FindFileData.cFileName) + 1);
+				strcpy (fl[len++], FindFileData.cFileName);
+				fl[len] = NULL;
 			} while (FindNextFile (hFind, &FindFileData));
 
 			// done
@@ -1265,7 +1313,10 @@ void COM_BuildContentList (std::vector<char *> &FileList, char *basedir, char *f
 	}
 
 	// sort the list
-	std::sort (FileList.begin (), FileList.end (), SortCompare);
+	qsort (fl, len, sizeof (char *), COM_ListSortFunc);
+
+	// return how many we got
+	return len;
 }
 
 
@@ -1274,68 +1325,37 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 	char fpath1[MAX_PATH];
 	char fpath2[MAX_PATH];
 
+	// get the path to the user's temp folder; normally %USERPROFILE%\Local Settings\temp
 	if (!GetTempPath (MAX_PATH, fpath1))
 	{
 		// oh crap
-		return NULL;
+		return INVALID_HANDLE_VALUE;
 	}
 
 	// ensure it exists
 	CreateDirectory (fpath1, NULL);
 
-	// for convenience we keep all temp files under a "DirectQ" subdir
-	_snprintf (fpath2, MAX_PATH, "%s\\DirectQ", fpath1);
-	CreateDirectory (fpath2, NULL);
+	// build the second part of the path
+	_snprintf (fpath2, MAX_PATH, "\\DirectQ\\%s", tmpfile);
 
-	// copy out the full new path to the directory and replace any '/' with '\\'
-	_snprintf (fpath1, MAX_PATH, "%s\\%s", fpath2, tmpfile);
-
-	for (int i = 0; ; i++)
+	// replace path delims with _ so that files are created directly under %USERPROFILE%\Local Settings\temp
+	// skip the first cos we wanna keep that one
+	for (int i = 1; ; i++)
 	{
-		if (fpath1[i] == 0) break;
-		if (fpath1[i] == '/') fpath1[i] = '\\';
+		if (fpath2[i] == 0) break;
+		if (fpath2[i] == '/') fpath2[i] = '_';
+		if (fpath2[i] == '\\') fpath2[i] = '_';
 	}
 
-	// remove the file name
-	for (int i = strlen (fpath1) - 1; i; i--)
-	{
-		if (fpath1[i] == '\\')
-		{
-			fpath1[i] = 0;
-			break;
-		}
-	}
-
-	// create the full path
-	for (int i = strlen (fpath2) + 1; ; i++)
-	{
-		if (fpath1[i] == 0) break;
-
-		if (fpath1[i] == '\\')
-		{
-			fpath1[i] = 0;
-			CreateDirectory (fpath1, NULL);
-			fpath1[i] = '\\';
-		}
-	}
-
-	// the above doesn't create the last item in the path so do it here
-	CreateDirectory (fpath1, NULL);
-
-	// because we modified the full filename buffer above we need to reconstruct it before going any further
-	_snprintf (fpath1, MAX_PATH, "%s\\%s", fpath2, tmpfile);
+	// now build the final name
+	strcat (fpath1, fpath2);
 
 	// create the file - see http://blogs.msdn.com/larryosterman/archive/2004/04/19/116084.aspx for
-	// further info on the flags chosen here.  while researching this I came across this beautiful quote:
-	// "in linux i can simply mount \\straw\gambler to /home/gambler after a reinstall and all my files 
-	// and settings are there".  this is an affliction that seems to plague Linux bois everywhere - a 
-	// tendency to only focus on what *they* want, to the exclusion of the rest of the world.  in a proper
-	// modern and rational OS your aunt Mabel and a Business Studies student with no IT aptitude should be
-	// able to do these things too... so do grow up.
+	// further info on the flags chosen here.
 	HANDLE hf = CreateFile
 	(
 		fpath1,
-		GENERIC_READ | GENERIC_WRITE,
+		GENERIC_WRITE | GENERIC_READ,
 		FILE_SHARE_READ,
 		NULL,
 		CREATE_ALWAYS,
@@ -1343,12 +1363,7 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 		NULL
 	);
 
-	if (hf == INVALID_HANDLE_VALUE)
-	{
-		//printf ("hf == INVALID_HANDLE_VALUE\n");
-		return NULL;
-	}
-
+	// either good or INVALID_HANDLE_VALUE
 	return hf;
 }
 
@@ -1357,74 +1372,89 @@ HANDLE COM_UnzipPK3FileToTemp (pk3_t *pk3, char *filename)
 {
 	// initial scan ensures the file is present before opening the zip (perf)
 	for (int i = 0; i < pk3->numfiles; i++)
-		if (!stricmp (pk3->files[i].name, filename))
-			goto unzOK;
-
-	// not present
-	return INVALID_HANDLE_VALUE;
-
-unzOK:;
-	unzFile			uf = NULL;
-	int				err;
-	unz_global_info gi;
-	unz_file_info	file_info;
-
-	uf = unzOpen (pk3->filename);
-	err = unzGetGlobalInfo (uf, &gi);
-
-	if (err == UNZ_OK)
 	{
-		char filename_inzip[64];
-
-		unzGoToFirstFile (uf);
-
-		for (int i = 0; i < gi.number_entry; i++)
+		if (!stricmp (pk3->files[i].name, filename))
 		{
-			err = unzOpenCurrentFile (uf);
+			unzFile			uf = NULL;
+			int				err;
+			unz_global_info gi;
+			unz_file_info	file_info;
 
-			if (err != UNZ_OK) goto unzError;
-
-			err = unzGetCurrentFileInfo (uf, &file_info, filename_inzip, sizeof (filename_inzip), NULL, 0, NULL, 0);
+			uf = unzOpen (pk3->filename);
+			err = unzGetGlobalInfo (uf, &gi);
 
 			if (err == UNZ_OK)
 			{
-				if (!stricmp (filename_inzip, filename))
+				char filename_inzip[64];
+
+				unzGoToFirstFile (uf);
+
+				for (int i = 0; i < gi.number_entry; i++)
 				{
-					// got it, so unzip it to the temp folder
-					byte unztemp[1024];
-					DWORD byteswritten;
+					err = unzOpenCurrentFile (uf);
 
-					HANDLE pk3handle = COM_MakeTempFile (filename);
-
-					for (;;)
+					if (err != UNZ_OK)
 					{
-						int bytesread = unzReadCurrentFile (uf, unztemp, 1024);
-
-						if (bytesread < 0)
-						{
-							unzCloseCurrentFile (uf);
-							COM_FCloseFile (&pk3handle);
-							goto unzError;
-						}
-
-						if (bytesread == 0) break;
-
-						WriteFile (pk3handle, unztemp, bytesread, &byteswritten, NULL);
+						// something bad happened
+						unzClose (uf);
+						return INVALID_HANDLE_VALUE;
 					}
 
-					unzCloseCurrentFile (uf);
-					unzClose (uf);
-					return pk3handle;
+					err = unzGetCurrentFileInfo (uf, &file_info, filename_inzip, sizeof (filename_inzip), NULL, 0, NULL, 0);
+
+					if (err == UNZ_OK)
+					{
+						if (!stricmp (filename_inzip, filename))
+						{
+							// got it, so unzip it to the temp folder
+							byte unztemp[1024];
+							DWORD byteswritten;
+
+							HANDLE pk3handle = COM_MakeTempFile (filename);
+
+							// didn't create it successfully
+							if (pk3handle == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
+
+							for (;;)
+							{
+								int bytesread = unzReadCurrentFile (uf, unztemp, 1024);
+
+								if (bytesread < 0)
+								{
+									// something bad happened
+									unzCloseCurrentFile (uf);
+									COM_FCloseFile (&pk3handle);
+									unzClose (uf);
+									return INVALID_HANDLE_VALUE;
+								}
+
+								if (bytesread == 0) break;
+
+								if (!COM_FWriteFile (pk3handle, unztemp, bytesread))
+								{
+									COM_FCloseFile (&pk3handle);
+									pk3handle = INVALID_HANDLE_VALUE;
+									break;
+								}
+							}
+
+							unzCloseCurrentFile (uf);
+							unzClose (uf);
+							return pk3handle;
+						}
+					}
+
+					unzGoToNextFile (uf);
 				}
 			}
 
-			unzGoToNextFile (uf);
+			// didn't find it
+			unzClose (uf);
+			return INVALID_HANDLE_VALUE;
 		}
 	}
 
-unzError:;
-	// didn't find it
-	unzClose (uf);
+	// not present
 	return INVALID_HANDLE_VALUE;
 }
 
@@ -1533,8 +1563,10 @@ int COM_FOpenFile (char *filename, void *hf)
 			if (pk3handle != INVALID_HANDLE_VALUE)
 			{
 				*hFile = pk3handle;
-				SetFilePointer (*hFile, 0, NULL, FILE_BEGIN);
+
+				// need to reset the file pointer as it will be at eof owing to the file just having been created
 				com_filesize = GetFileSize (*hFile, NULL);
+				SetFilePointer (*hFile, 0, NULL, FILE_BEGIN);
 				return com_filesize;
 			}
 		}
@@ -1616,10 +1648,10 @@ static byte *COM_LoadFile (char *path, int usehunk)
 	}
 
 	((byte *) buf)[len] = 0;
-	DWORD rlen = 0;
-
-	ReadFile (fh, buf, len, &rlen, NULL);
+	int Success = COM_FReadFile (fh, buf, len);
 	COM_FCloseFile (&fh);
+
+	if (Success == -1) return NULL;
 
 	return buf;
 }
@@ -1795,9 +1827,9 @@ void COM_AddGameDirectory (char *dir)
 
 						if (err == UNZ_OK)
 						{
-							// length and pos are unused
+							// pos is unused
 							strncpy (pk3->files[i].name, filename_inzip, 63);
-							pk3->files[i].filelen = 0;
+							pk3->files[i].filelen = file_info.uncompressed_size;
 							pk3->files[i].filepos = 0;
 
 							// flag a good file here

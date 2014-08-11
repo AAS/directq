@@ -68,11 +68,17 @@ typedef struct particle_s
 } particle_t;
 
 
-// note - unused for now... the textures are loaded, but the system is still fully classic...
+// default particle texture
 LPDIRECT3DTEXTURE9 particledottexture = NULL;
-LPDIRECT3DTEXTURE9 particlesmoketexture = NULL;
-LPDIRECT3DTEXTURE9 particletracertexture = NULL;
-LPDIRECT3DTEXTURE9 particleblood[8] = {NULL};
+
+// QMB particle textures
+LPDIRECT3DTEXTURE9 qmbparticleblood = NULL;
+LPDIRECT3DTEXTURE9 qmbparticlebubble = NULL;
+LPDIRECT3DTEXTURE9 qmbparticlelightning = NULL;
+LPDIRECT3DTEXTURE9 qmbparticlelightningold = NULL;
+LPDIRECT3DTEXTURE9 qmbparticlesmoke = NULL;
+LPDIRECT3DTEXTURE9 qmbparticlespark = NULL;
+LPDIRECT3DTEXTURE9 qmbparticletrail = NULL;
 
 // initially allocated batch - demo1 requires this number of particles,
 // demo2 requires 2048, demo3 requires 3072 (rounding up to the nearest 1024 in each case)

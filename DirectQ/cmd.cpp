@@ -21,83 +21,107 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-// possible commands to execute
-static cmd_t *cmd_functions;
+// forward declaration of alias types for addition to completion lists
+typedef struct cmdalias_s
+{
+	struct cmdalias_s	*next;
+	char	*name;
+	char	*value;
+} cmdalias_t;
 
+cmdalias_t	*cmd_alias = NULL;
+
+
+// possible commands to execute
+static cmd_t *cmd_functions = NULL;
 
 /*
 =============================================================================
 
 						COMMAND AUTOCOMPLETION
 
+		This is now used for actual command execution too...
+
 =============================================================================
 */
 
 typedef struct complist_s
 {
-	char type[10];
-	char name[128];
+	// note - !!!if the order here is changed then the struct inits below also need to be changed!!!
+	// search for every occurance of bsearch and do the necessary...
+	char *name;
+	cmdalias_t *als;
+	cmd_t *cmd;
+	cvar_t *var;
 } complist_t;
 
 complist_t *complist = NULL;
 
+// numbers of cvars and cmds
+int numcomplist = 0;
+
+int CmdCvarCompareFunc (const void *a, const void *b)
+{
+	complist_t *cc1 = (complist_t *) a;
+	complist_t *cc2 = (complist_t *) b;
+
+	return stricmp (cc1->name, cc2->name);
+}
+
 
 void Cmd_BuildCompletionList (void)
 {
-	// numbers of cvars and cmds
-	int numcomplist;
-
-	// cvars and cmds
-	cvar_t *var;
-	cmd_t *cmd;
+	// nothing to start with
+	numcomplist = 0;
 
 	// count the number of cvars and cmds we have
-	for (var = cvar_vars, numcomplist = 0; var; var = var->next) numcomplist++;
-	for (cmd = cmd_functions; cmd; cmd = cmd->next) numcomplist++;
+	for (cvar_t *var = cvar_vars; var; var = var->next) numcomplist++;
+	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next) numcomplist++;
+	for (cmdalias_t *ali = cmd_alias; ali; ali = ali->next) numcomplist++;
 
 	// alloc space for the completion list (add some overshoot here; we need 1 to NULL terminate the list)
-	complist = (complist_t *) Pool_Alloc (POOL_PERMANENT, (numcomplist + 1) * sizeof (complist_t));
+	// place in zone so that we can rebuild the list if we ever need to.
+	if (complist) Zone_Free (complist);
+	complist = (complist_t *) Zone_Alloc ((numcomplist + 1) * sizeof (complist_t));
 
 	// current item we're working on
 	complist_t *complistcurrent = complist;
 
 	// write in cvars
-	for (var = cvar_vars; var; var = var->next, complistcurrent++)
+	for (cvar_t *var = cvar_vars; var; var = var->next, complistcurrent++)
 	{
-		strncpy (complistcurrent->type, "(cvar)", 9);
-		strncpy (complistcurrent->name, var->name, 127);
+		complistcurrent->name = var->name;
+		complistcurrent->als = NULL;
+		complistcurrent->cmd = NULL;
+		complistcurrent->var = var;
 	}
 
 	// write in cmds
-	for (cmd = cmd_functions; cmd; cmd = cmd->next, complistcurrent++)
+	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next, complistcurrent++)
 	{
-		strncpy (complistcurrent->type, "(cmd) ", 9);
-		strncpy (complistcurrent->name, cmd->name, 127);
+		complistcurrent->name = cmd->name;
+		complistcurrent->als = NULL;
+		complistcurrent->cmd = cmd;
+		complistcurrent->var = NULL;
+	}
+
+	// write in aliases
+	for (cmdalias_t *als = cmd_alias; als; als = als->next, complistcurrent++)
+	{
+		complistcurrent->name = als->name;
+		complistcurrent->als = als;
+		complistcurrent->cmd = NULL;
+		complistcurrent->var = NULL;
 	}
 
 	// sort before termination
-	if (numcomplist > 0)
-	{
-		int	i, j;
-		complist_t temp;
-
-		for (i = 0; i < numcomplist; i++)
-		{
-			for (j = i + 1; j < numcomplist; j++)
-			{
-				if (strcmp (complist[j].name, complist[i].name) < 0)
-				{
-					memcpy (&temp, &complist[j], sizeof (complist_t));
-					memcpy (&complist[j], &complist[i], sizeof (complist_t));
-					memcpy (&complist[i], &temp, sizeof (complist_t));
-				}
-			}
-		}
-	}
+	qsort ((void *) complist, numcomplist, sizeof (complist_t), CmdCvarCompareFunc);
 
 	// terminate the list
-	complistcurrent->name[0] = 0;
-	complistcurrent->type[0] = 0;
+	complistcurrent->name = NULL;
+	complistcurrent->als = NULL;
+	complistcurrent->cmd = NULL;
+	complistcurrent->var = NULL;
 }
 
 
@@ -114,11 +138,28 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 
 	if (conout) Con_Printf ("]%s\n", partial);
 
-	for (cl = complist, nummatches = 0; cl->name[0] && cl->type[0]; cl++)
+	for (cl = complist, nummatches = 0; cl->name && (cl->cmd || cl->var || cl->als); cl++)
 	{
+		// skip nehahra if we're not running nehahra
+		if (cl->var && !nehahra && (cl->var->usage & CVAR_NEHAHRA)) continue;
+
+		assert (cl->name);
+		assert ((cl->als || cl->cmd || cl->var));
+
 		if (!strnicmp (partial, cl->name, len))
 		{
-			if (conout) Con_Printf ("%s %s\n", cl->type, cl->name);
+			if (conout)
+			{
+				if (cl->cmd)
+					Con_Printf ("  (cmd) ");
+				else if (cl->var)
+					Con_Printf (" (cvar) ");
+				else if (cl->als)
+					Con_Printf ("(alias) ");
+				else Con_Printf ("  (bad) ");
+
+				Con_Printf ("%s\n", cl->name);
+			}
 
 			// copy to the current position in the cycle
 			if (nummatches == matchcycle)
@@ -142,26 +183,31 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 	return nummatches;
 }
 
+
+cvar_t *Cmd_FindCvar (char *name)
+{
+	complist_t key = {name, NULL, NULL, NULL};
+	complist_t *cl = (complist_t *) bsearch (&key, complist, numcomplist, sizeof (complist_t), CmdCvarCompareFunc);
+
+	if (!cl)
+		return NULL;
+	else if (cl->var)
+	{
+		// skip nehahra cvars if we're not running nehahra
+		if (!nehahra && (cl->var->usage & CVAR_NEHAHRA)) return NULL;
+
+		return cl->var;
+	}
+	else return NULL;
+}
+
+
 //=============================================================================
 
 void Cmd_ForwardToServer (void);
 
 // if this is false we suppress all commands (except "exec") and all output
 extern bool full_initialized;
-
-#define	MAX_ALIAS_NAME	32
-
-typedef struct cmdalias_s
-{
-	struct cmdalias_s	*next;
-	char	name[MAX_ALIAS_NAME];
-	char	*value;
-} cmdalias_t;
-
-cmdalias_t	*cmd_alias;
-
-int trashtest;
-int *trashspot;
 
 bool	cmd_wait;
 
@@ -181,6 +227,7 @@ void Cmd_Wait_f (void)
 	cmd_wait = true;
 }
 
+
 /*
 =============================================================================
 
@@ -199,7 +246,8 @@ Cbuf_Init
 void Cbuf_Init (void)
 {
 	// space for commands and script files
-	SZ_Alloc (&cmd_text, 262144);
+	// take 1 MB
+	SZ_Alloc (&cmd_text, 0x100000);
 }
 
 
@@ -235,14 +283,8 @@ FIXME: actually change the command buffer to do less copying
 */
 void Cbuf_InsertText (char *text)
 {
-	char	*temp;
-	int		templen;
-
-	if (!strnicmp (text, "crosshair 0", 11))
-	{
-		int xxx = 0;
-		xxx = 1;
-	}
+	char	*temp = NULL;
+	int		templen = 0;
 
 	// copy off any commands still remaining in the exec buffer
 	templen = cmd_text.cursize;
@@ -253,8 +295,6 @@ void Cbuf_InsertText (char *text)
 		memcpy (temp, cmd_text.data, templen);
 		SZ_Clear (&cmd_text);
 	}
-	else
-		temp = NULL;	// shut up compiler
 
 	// add the entire text of the file
 	Cbuf_AddText (text);
@@ -266,6 +306,7 @@ void Cbuf_InsertText (char *text)
 		Zone_Free (temp);
 	}
 }
+
 
 /*
 ============
@@ -282,17 +323,17 @@ void Cbuf_Execute (void)
 	while (cmd_text.cursize)
 	{
 		// find a \n or ; line break
-		text = (char *)cmd_text.data;
+		text = (char *) cmd_text.data;
 
 		quotes = 0;
-		for (i=0 ; i< cmd_text.cursize ; i++)
+
+		for (i = 0; i < cmd_text.cursize; i++)
 		{
-			if (text[i] == '"')
-				quotes++;
-			if ( !(quotes&1) &&  text[i] == ';')
-				break;	// don't break if inside a quoted string
-			if (text[i] == '\n')
-				break;
+			if (text[i] == '"') quotes++;
+
+			// don't break if inside a quoted string
+			if (!(quotes & 1) &&  text[i] == ';') break;
+			if (text[i] == '\n') break;
 		}
 
 		memcpy (line, text, i);
@@ -307,20 +348,22 @@ void Cbuf_Execute (void)
 		{
 			i++;
 			cmd_text.cursize -= i;
-			memcpy (text, text+i, cmd_text.cursize);
+			memcpy (text, text + i, cmd_text.cursize);
 		}
 
 		// execute the command line
 		Cmd_ExecuteString (line, src_command);
 
 		if (cmd_wait)
-		{	// skip out while text still remains in buffer, leaving it
+		{
+			// skip out while text still remains in buffer, leaving it
 			// for next frame
 			cmd_wait = false;
 			break;
 		}
 	}
 }
+
 
 /*
 ==============================================================================
@@ -357,8 +400,9 @@ void Cmd_StuffCmds_f (void)
 
 	for (i = 1; i < com_argc; i++)
 	{
-		if (!com_argv[i])
-			continue;		// NEXTSTEP nulls out -NXHost
+		// NEXTSTEP nulls out -NXHost
+		if (!com_argv[i]) continue;
+
 		s += strlen (com_argv[i]) + 1;
 	}
 
@@ -369,14 +413,15 @@ void Cmd_StuffCmds_f (void)
 
 	for (i = 1; i < com_argc; i++)
 	{
-		if (!com_argv[i])
-			continue;		// NEXTSTEP nulls out -NXHost
-		strcat (text,com_argv[i]);
+		// NEXTSTEP nulls out -NXHost
+		if (!com_argv[i]) continue;
+
+		strcat (text, com_argv[i]);
 		if (i != com_argc - 1) strcat (text, " ");
 	}
 
 	// pull out the commands
-	build = (char *) Zone_Alloc (s+1);
+	build = (char *) Zone_Alloc (s + 1);
 	build[0] = 0;
 
 	for (i = 0; i < s - 1; i++)
@@ -411,9 +456,6 @@ Cmd_Exec_f
 */
 void Cmd_Exec_f (void)
 {
-	char	*f;
-	int		mark;
-
 	if (Cmd_Argc () != 2)
 	{
 		Con_Printf ("exec <filename> : execute a script file\n");
@@ -421,17 +463,20 @@ void Cmd_Exec_f (void)
 	}
 
 	char cfgfile[128];
-
-	// i hate it when i forget to add ".cfg" to an exec command, so i fixed it
 	strncpy (cfgfile, Cmd_Argv (1), 127);
-	COM_DefaultExtension (cfgfile, ".cfg");
-
-	f = (char *) COM_LoadTempFile (cfgfile);
+	char *f = (char *) COM_LoadTempFile (cfgfile);
 
 	if (!f)
 	{
-		Con_Printf ("couldn't exec \"%s\"\n", cfgfile);
-		return;
+		// i hate it when i forget to add ".cfg" to an exec command, so i fixed it
+		COM_DefaultExtension (cfgfile, ".cfg");
+		f = (char *) COM_LoadTempFile (cfgfile);
+
+		if (!f)
+		{
+			Con_Printf ("couldn't exec \"%s\"\n", cfgfile);
+			return;
+		}
 	}
 
 	Con_Printf ("execing \"%s\"\n", cfgfile);
@@ -452,9 +497,10 @@ Just prints the rest of the line to the console
 void Cmd_Echo_f (void)
 {
 	int		i;
-	
-	for (i=1 ; i<Cmd_Argc() ; i++)
-		Con_Printf ("%s ",Cmd_Argv(i));
+
+	for (i = 1; i < Cmd_Argc (); i++)
+		Con_Printf ("%s ",Cmd_Argv (i));
+
 	Con_Printf ("\n");
 }
 
@@ -466,16 +512,6 @@ Creates a new command that executes a command string (possibly ; seperated)
 ===============
 */
 
-char *CopyString (char *in)
-{
-	char	*out;
-
-	out = (char *) Zone_Alloc (strlen(in)+1);
-	strcpy (out, in);
-	return out;
-}
-
-
 void Cmd_Alias_f (void)
 {
 	cmdalias_t	*a;
@@ -483,53 +519,106 @@ void Cmd_Alias_f (void)
 	int			i, c;
 	char		*s;
 
-	if (Cmd_Argc() == 1)
+	if (Cmd_Argc () == 1)
 	{
 		Con_Printf ("Current alias commands:\n");
-		for (a = cmd_alias ; a ; a=a->next)
-			Con_Printf ("%s : %s\n", a->name, a->value);
+
+		for (a = cmd_alias; a; a = a->next)
+			Con_Printf ("\"%s\" : \"%s\"\n", a->name, a->value);
+
 		return;
 	}
 
-	s = Cmd_Argv(1);
-	if (strlen(s) >= MAX_ALIAS_NAME)
-	{
-		Con_Printf ("Alias name is too long\n");
-		return;
-	}
+	s = Cmd_Argv (1);
 
-	// if the alias allready exists, reuse it
-	for (a = cmd_alias ; a ; a=a->next)
+	// try to find it first so that we can access it quickly for printing/etc
+	complist_t key = {s, NULL, NULL, NULL};
+	complist_t *cl = (complist_t *) bsearch (&key, complist, numcomplist, sizeof (complist_t), CmdCvarCompareFunc);
+
+	if (Cmd_Argc () == 2)
 	{
-		if (!strcmp(s, a->name))
+		if (cl)
 		{
-			Zone_Free (a->value);
-			break;
+			// protect us oh lord from stupid programmer errors
+			assert (cl->name);
+			assert ((cl->als || cl->cmd || cl->var));
+
+			if (cl->als)
+				Con_Printf ("\"%s\" : \"%s\"\n", cl->als->name, cl->als->value);
+			else if (cl->cmd)
+				Con_Printf ("\"%s\" is a command\n", s);
+			else if (cl->var)
+				Con_Printf ("\"%s\" is a cvar\n", s);
+		}
+		else Con_Printf ("alias \"%s\" is not found\n", s);
+
+		return;
+	}
+
+	if (cl)
+	{
+		// protect us oh lord from stupid programmer errors
+		assert (cl->name);
+		assert ((cl->als || cl->cmd || cl->var));
+
+		if (cl->als)
+		{
+			// if the alias already exists we reuse it, just free the value
+			Zone_Free (cl->als->value);
+			cl->als->value = NULL;
+			a = cl->als;
+		}
+		else if (cl->cmd)
+		{
+			Con_Printf ("\"%s\" is already a command\n", s);
+			return;
+		}
+		else if (cl->var)
+		{
+			Con_Printf ("\"%s\" is already a cvar\n", s);
+			return;
 		}
 	}
-
-	if (!a)
+	else
 	{
+		// create a new alias
 		a = (cmdalias_t *) Zone_Alloc (sizeof (cmdalias_t));
+
+		// this is a safe strcpy cos we define the dest size ourselves
+		a->name = (char *) Zone_Alloc (strlen (s) + 1);
+		strcpy (a->name, s);
+
+		// link it into the alias list
 		a->next = cmd_alias;
 		cmd_alias = a;
 	}
 
-	strncpy (a->name, s, 31);	
+	// ensure that we haven't missed anything or been stomped
+	assert (a);
+
+	// start out with a null string
+	cmd[0] = 0;
 
 	// copy the rest of the command line
-	cmd[0] = 0;		// start out with a null string
-	c = Cmd_Argc();
-	for (i=2 ; i< c ; i++)
+	c = Cmd_Argc ();
+
+	for (i = 2; i < c; i++)
 	{
-		strcat (cmd, Cmd_Argv(i));
+		strcat (cmd, Cmd_Argv (i));
+
 		if (i != c)
 			strcat (cmd, " ");
 	}
+
 	strcat (cmd, "\n");
 
-	a->value = CopyString (cmd);
+	a->value = (char *) Zone_Alloc (strlen (cmd) + 1);
+	strcpy (a->value, cmd);
+
+	// rebuild the autocomplete list
+	Cmd_BuildCompletionList ();
 }
+
 
 /*
 =============================================================================
@@ -564,15 +653,17 @@ cmd_t Cmd_Wait_Cmd ("wait", Cmd_Wait_f);
 void Cmd_Init (void)
 {
 	// all our cvars and cmds are up now, so we build the sorted autocomplete list
+	// this can be dynamically rebuilt at run time; e.g. if a new alias is added
 	Cmd_BuildCompletionList ();
 }
+
 
 /*
 ============
 Cmd_Argc
 ============
 */
-int		Cmd_Argc (void)
+int Cmd_Argc (void)
 {
 	return cmd_argc;
 }
@@ -584,7 +675,7 @@ Cmd_Argv
 */
 char *Cmd_Argv (int arg)
 {
-	if ((unsigned)arg >= cmd_argc)
+	if ((unsigned) arg >= cmd_argc)
 		return cmd_null_string;
 
 	return cmd_argv[arg];	
@@ -697,30 +788,6 @@ bool Cmd_Exists (char *cmd_name)
 
 /*
 ============
-Cmd_CompleteCommand
-============
-*/
-char *Cmd_CompleteCommand (char *partial)
-{
-	cmd_t	*cmd;
-	int				len;
-	
-	len = strlen(partial);
-	
-	if (!len)
-		return NULL;
-
-	// check functions
-	for (cmd=cmd_functions ; cmd ; cmd=cmd->next)
-		if (!strncmp (partial,cmd->name, len))
-			return cmd->name;
-
-	return NULL;
-}
-
-
-/*
-============
 Cmd_ExecuteString
 
 A complete command line has been parsed, so try to execute it
@@ -729,60 +796,69 @@ FIXME: lookupnoadd the token to speed search?
 */
 void Cmd_ExecuteString (char *text, cmd_source_t src)
 {
-	cmd_t	*cmd;
-	cmdalias_t		*a;
-
 	cmd_source = src;
 	Cmd_TokenizeString (text);
 
 	// execute the command line
-	if (!Cmd_Argc())
-		return;		// no tokens
+	// check for tokens
+	if (!Cmd_Argc ()) return;
 
-	// check functions
-	for (cmd = cmd_functions; cmd; cmd = cmd->next)
+	// run a binary search for faster comparison
+	// reuse the autocomplete list for this as it's already a sorted array
+	complist_t key = {cmd_argv[0], NULL, NULL, NULL};
+	complist_t *cl = (complist_t *) bsearch (&key, complist, numcomplist, sizeof (complist_t), CmdCvarCompareFunc);
+
+	if (!cl)
 	{
-		if (!stricmp (cmd_argv[0], cmd->name))
+		// only complain if we're up fully
+		if (full_initialized)
+			Con_Printf ("Unknown command \"%s\"\n", Cmd_Argv (0));
+
+		return;
+	}
+	else
+	{
+		assert (cl->name);
+		assert ((cl->als || cl->cmd || cl->var));
+
+		if (cl->cmd)
 		{
 			if (full_initialized)
 			{
 				// execute normally
-				cmd->function ();
+				cl->cmd->function ();
 				return;
 			}
 			else
 			{
-				if (!stricmp (cmd->name, "exec"))
+				if (!stricmp (cl->cmd->name, "exec"))
 				{
 					// allow exec commands before everything comes up as they can call
 					// into other configs which also store cvars
-					cmd->function ();
-					return;
-				}
-				else 
-				{
-					// we found it anyway but we're not really interested in it just yet
+					cl->cmd->function ();
 					return;
 				}
 			}
 		}
-	}
-
-	// check alias
-	for (a = cmd_alias; a; a = a->next)
-	{
-		if (!stricmp (cmd_argv[0], a->name))
+		else if (cl->als)
 		{
-			Cbuf_InsertText (a->value);
+			Cbuf_InsertText (cl->als->value);
 			return;
 		}
-	}
+		else if (cl->var)
+		{
+			// skip nehahra cvars if we're not running nehahra
+			if (!nehahra && (cl->var->usage & CVAR_NEHAHRA))
+			{
+				Con_Printf ("Unknown command \"%s\"\n", cl->var->name);
+				return;
+			}
 
-	// check cvars
-	if (!Cvar_Command ())
-	{
-		// suppress all output until we're fully up
-		if (full_initialized) Con_Printf ("Unknown command \"%s\"\n", Cmd_Argv(0));
+			// perform a variable print or set
+			if (Cmd_Argc () == 1)
+				Con_Printf ("\"%s\" is \"%s\"\n", cl->var->name, cl->var->string);
+			else Cvar_Set (cl->var, Cmd_Argv (1));
+		}
 	}
 }
 
@@ -798,23 +874,24 @@ void Cmd_ForwardToServer (void)
 {
 	if (cls.state != ca_connected)
 	{
-		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));
+		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv (0));
 		return;
 	}
-	
-	if (cls.demoplayback)
-		return;		// not really connected
+
+	// not really connected
+	if (cls.demoplayback) return;
 
 	MSG_WriteByte (&cls.message, clc_stringcmd);
-	if (stricmp(Cmd_Argv(0), "cmd") != 0)
+
+	if (stricmp (Cmd_Argv(0), "cmd") != 0)
 	{
-		SZ_Print (&cls.message, Cmd_Argv(0));
+		SZ_Print (&cls.message, Cmd_Argv (0));
 		SZ_Print (&cls.message, " ");
 	}
-	if (Cmd_Argc() > 1)
-		SZ_Print (&cls.message, Cmd_Args());
-	else
-		SZ_Print (&cls.message, "\n");
+
+	if (Cmd_Argc () > 1)
+		SZ_Print (&cls.message, Cmd_Args ());
+	else SZ_Print (&cls.message, "\n");
 }
 
 
@@ -829,18 +906,16 @@ where the given parameter apears, or 0 if not present
 
 int Cmd_CheckParm (char *parm)
 {
-	int i;
-	
 	if (!parm)
 	{
 		Con_DPrintf ("Cmd_CheckParm: NULL\n");
 		return 0;
 	}
 
-	for (i = 1; i < Cmd_Argc (); i++)
-		if (! stricmp (parm, Cmd_Argv (i)))
+	for (int i = 1; i < Cmd_Argc (); i++)
+		if (!stricmp (parm, Cmd_Argv (i)))
 			return i;
-			
+
 	return 0;
 }
 

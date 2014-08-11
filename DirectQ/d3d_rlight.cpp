@@ -25,7 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define LIGHTMAP_BYTES	4
 
 cvar_t r_lerplightstyle ("r_lerplightstyle", "1", CVAR_ARCHIVE);
-cvar_t r_monolight ("r_monolight", "1", CVAR_ARCHIVE);
+cvar_t r_coloredlight ("r_coloredlight", "1", CVAR_ARCHIVE);
 cvar_t gl_flashblend ("gl_flashblend", "0", CVAR_ARCHIVE);
 
 void AddLightBlend (float r, float g, float b, float a2)
@@ -204,7 +204,6 @@ void D3D_CreateLightmapTexture (d3d_lightmap_t *lm)
 {
 	// attempt to create the lightmap texture
 	// (fixme - allow single component here where the source data is also single component)
-	// (fixme - this needs to work with the r_monolightmap cvar too...)
 	HRESULT hr = d3d_Device->CreateTexture
 	(
 		lm->size,
@@ -719,7 +718,7 @@ void R_AnimateLight (void)
 void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b)
 {
 	// leave dlight with white value it had at allocation
-	if (r_monolight.value) return;
+	if (!r_coloredlight.value) return;
 
 	dl->rgb[0] = r;
 	dl->rgb[1] = g;

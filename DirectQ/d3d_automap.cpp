@@ -29,8 +29,6 @@ to do - highlight player position better + move to rmain
 #include "quakedef.h"
 #include "d3d_quake.h"
 
-#include <vector>
-
 
 // use unit scales that are also used in most map editors
 cvar_t r_automapscroll_x ("r_automapscroll_x", -64.0f, CVAR_ARCHIVE);

@@ -543,14 +543,32 @@ void Menu_TCPIPJoinGameCommand (void)
 
 
 // don't initialize to character 0 as it's NULL and will end the string
+char funname[1024] = {0};
 int custnamecol = 1;
 int custnamerow = 0;
 bool custnamechanged = false;
 
+
 int Menu_CustomNameCustomDraw (int y)
 {
-	Draw_TextBox (((vid.width / 2) - 256) - 16, y - 5, 520, 128);
+	// add 2 because we're going to back up a little for the textbox
+	y += 2;
 
+	// prompt and textbox - these replicate the code in CQMenuCvarTextbox::Draw
+	Menu_Print (148 - strlen ("Player Name") * 8, y, "Player Name");
+	Draw_Fill (vid.width / 2 - 160 + 168, y - 1, MAX_TBLENGTH * 8 + 4, 10, 20, 255);
+	Draw_Fill (vid.width / 2 - 160 + 169, y, MAX_TBLENGTH * 8 + 2, 8, 0, 192);
+
+	// name - use white print to avoid adding 128
+	Menu_PrintWhite (170, y, funname);
+
+	// add another 2 cos the tb comes down a little
+	y += 17;
+
+	Menu_PrintCenter (y, DIVIDER_LINE);
+	y += 15;
+
+	Draw_TextBox (((vid.width / 2) - 256) - 16, y - 5, 520, 128);
 	y += 10;
 
 	for (int cy = 0, cc = 0; cy < 8; cy++)
@@ -583,14 +601,14 @@ int Menu_CustomNameCustomDraw (int y)
 
 void Menu_CustomNameCustomKey (int k)
 {
-	int len = strlen (dummy_name.string);
+	int len = strlen (funname);
 
 	if (k == K_ENTER)
 	{
 		if (custnamerow == 9)
 		{
 			// execute this immediately so that when we go back to the setup menu it's updated properly
-			Cbuf_AddText (va ("name \"%s\"\n", dummy_name.string));
+			Cbuf_AddText (va ("name \"%s\"\n", funname));
 			Cbuf_Execute ();
 
 			// return to the setup menu
@@ -600,7 +618,7 @@ void Menu_CustomNameCustomKey (int k)
 		else if (custnamerow == 8)
 		{
 			// clear name
-			dummy_name.string[0] = 0;
+			funname[0] = 0;
 
 			// prevent selection of empty names
 			custnamechanged = false;
@@ -617,10 +635,10 @@ void Menu_CustomNameCustomKey (int k)
 			if (len > 1000) return;
 
 			// append it
-			dummy_name.string[len] = cc;
-			dummy_name.string[len + 1] = 0;
+			funname[len] = cc;
+			funname[len + 1] = 0;
 
-			if (!strcmp (dummy_name.string, cl_name.string))
+			if (!strcmp (funname, cl_name.string))
 				custnamechanged = false;
 			else custnamechanged = true;
 		}
@@ -630,7 +648,7 @@ void Menu_CustomNameCustomKey (int k)
 
 	if (k == K_BACKSPACE)
 	{
-		if (dummy_name.string[0] == 0)
+		if (funname[0] == 0)
 		{
 			// can't backspace
 			menu_soundlevel = m_sound_deny;
@@ -639,11 +657,11 @@ void Menu_CustomNameCustomKey (int k)
 
 		menu_soundlevel = m_sound_option;
 
-		dummy_name.string[len - 1] = 0;
+		funname[len - 1] = 0;
 
-		if (dummy_name.string[0] != 0)
+		if (funname[0] != 0)
 		{
-			if (!strcmp (dummy_name.string, cl_name.string))
+			if (!strcmp (funname, cl_name.string))
 				custnamechanged = false;
 			else custnamechanged = true;
 		}
@@ -704,7 +722,7 @@ void Menu_CustomNameCustomEnter (void)
 	menu_soundlevel = m_sound_enter;
 
 	// copy cvars out
-	Cvar_Set (&dummy_name, cl_name.string);
+	strncpy (funname, cl_name.string, 1023);
 
 	custnamechanged = false;
 	if (custnamerow == 9) custnamerow = 8;
@@ -715,19 +733,24 @@ void Menu_InitMultiplayerMenu (void)
 {
 	// top level menu
 	menu_Multiplayer.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
-	menu_Multiplayer.AddOption (new CQMenuTitle ("Configure Multiplayer Game Options"));
-	menu_Multiplayer.AddOption (new CQMenuSubMenu ("Join an Existing Multiplayer Game", &menu_TCPIPJoinGame));
-	menu_Multiplayer.AddOption (new CQMenuSpacer ());
-	menu_Multiplayer.AddOption (new CQMenuSubMenu ("Start a New Multiplayer Game", &menu_TCPIPNewGame));
-	menu_Multiplayer.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Multiplayer.AddOption (new CQMenuSubMenu ("Setup Player Options", &menu_Setup));
+	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configure Multiplayer Game Options"));
+	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Join an Existing Multiplayer Game", &menu_TCPIPJoinGame));
+	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer ());
+	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Start a New Multiplayer Game", &menu_TCPIPNewGame));
+	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Multiplayer.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Setup Player Options", &menu_Setup));
+
+	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_TCPIPJoinGame));
+	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_TCPIPNewGame));
+	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuCursorSubMenu (&menu_Setup));
+	menu_Multiplayer.AddOption (MENU_TAG_SIMPLE, new CQMenuChunkyPic ("gfx/mp_menu.lmp"));
+
 	menu_Multiplayer.AddOption (new CQMenuCustomDraw (Menu_MultiplayerCustomDraw));
 
 	menu_FunName.AddOption (new CQMenuBanner ("gfx/p_multi.lmp"));
 	menu_FunName.AddOption (new CQMenuTitle ("Quake Name Generator"));
 	menu_FunName.AddOption (new CQMenuCustomEnter (Menu_CustomNameCustomEnter));
-	menu_FunName.AddOption (new CQMenuCvarTextbox ("Player Name", &dummy_name, TBFLAG_READONLY));
-	menu_FunName.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_FunName.AddOption (new CQMenuCustomDraw (Menu_CustomNameCustomDraw));
 	menu_FunName.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_FunName.AddOption (new CQMenuCustomKey (K_UPARROW, Menu_CustomNameCustomKey));
@@ -746,7 +769,7 @@ void Menu_InitMultiplayerMenu (void)
 	menu_Setup.AddOption (new CQMenuTitle ("Setup Player Options"));
 	menu_Setup.AddOption (new CQMenuCustomEnter (Menu_SetupCustomEnter));
 	menu_Setup.AddOption (new CQMenuCvarTextbox ("Player Name", &dummy_name));
-	//menu_Setup.AddOption (new CQMenuSubMenu ("Generate Custom Name", &menu_FunName));
+	menu_Setup.AddOption (new CQMenuSubMenu ("Generate Custom Name", &menu_FunName));
 	menu_Setup.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Setup.AddOption (new CQMenuCvarTextbox ("Host Name", &dummy_hostname, TBFLAGS_ALPHANUMERICFLAGS));
 	menu_Setup.AddOption (new CQMenuSpacer (DIVIDER_LINE));

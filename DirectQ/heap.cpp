@@ -197,7 +197,7 @@ void *Pool_Alloc (int pool, int size)
 	// if temp file loading overflows we just reset it
 	if (pool == POOL_TEMP && (vp->lowmark + size) >= vp->maxmem)
 	{
-		// if the temp file pool is too small to hold this allocation we just reset it
+		// if the temp pool is too small to hold this allocation we just reset it
 		if (size > vp->maxmem)
 			Pool_Reset (pool, size);
 		else vp->lowmark = 0;
@@ -242,17 +242,18 @@ void Pool_Reset (int pool, int newsizebytes)
 	// easier access
 	vpool_t *vp = &virtualpools[pool];
 
-	// fully release the memory
-	if (newsizebytes <= 1)
+	if (newsizebytes < 1)
 	{
 		// do a "fast reset", i.e. just switch the lowmark back to 0
 		// this is used for stuff like file loading where we want to avoid a full reset/realloc
-		// NOTE - if you do reallocations from this pool after a reset, and if Quake expects the data to be memset
-		// to 0, you will need to memset it yourself!!!
 		vp->lowmark = 0;
+
+		// reset to 0 as much of the loading code will expect this
+		memset (vp->membase, 0, vp->highmark);
 		return;
 	}
 
+	// fully release the memory
 	if (vp->membase) VirtualFree (vp->membase, 0, MEM_RELEASE);
 
 	// fill in
@@ -410,7 +411,7 @@ void Zone_Free (void *ptr)
 	HeapFree (zoneheap, 0, zptr);
 
 	// compact ever few frees so as to keep the zone from getting too fragmented
-	if (!(zoneblocks % 8)) HeapCompact (zoneheap, 0);
+	if (!(zoneblocks % 32)) HeapCompact (zoneheap, 0);
 }
 
 
