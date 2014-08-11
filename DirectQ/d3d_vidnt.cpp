@@ -1062,7 +1062,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	(
 		ExWindowStyle,
 		D3D_WINDOW_CLASS_NAME,
-		"DirectQ Version 1.6",
+		"DirectQ Version 1.6.1",
 		WindowStyle,
 		rect.left, rect.top,
 		width,

@@ -1568,9 +1568,6 @@ void HUD_DrawHUD (void)
 		con_initialized = true;
 	}
 
-	// clear any areas that we need to clear
-	if (sb_lines && vid.width > 320) Draw_TileClear (0, vid.height - sb_lines, vid.width, sb_lines);
-
 	// don't confuse things if we're customizing the HUD
 	// (deferred to here as gl_clear 1 will mean that the bottom portion of the screen won't get drawn this frame)
 	if (m_state == m_hudoptions) return;
@@ -1676,8 +1673,8 @@ void HUD_BuildHUDOptions (void)
 	HUD_Options[0] = new CQMenu (NULL, m_other);
 	HUD_Options[0]->AddOption (new CQMenuCvarToggle ("Show this Item", &hud_drawsbar));
 	HUD_Options[0]->AddOption (new CQMenuCvarSlider ("Alpha", &hud_sbaralpha, 0, 1, 0.1));
-	HUD_Options[0]->AddOption (new CQMenuSpinControl ("X Position", &hud_sbar_x, -300, 300, 4));
-	HUD_Options[0]->AddOption (new CQMenuSpinControl ("Y Position", &hud_sbar_y, -300, 300, 4));
+	HUD_Options[0]->AddOption (new CQMenuSpinControl ("X Position", &hud_sbar_x, -1280, 1280, 4));
+	HUD_Options[0]->AddOption (new CQMenuSpinControl ("Y Position", &hud_sbar_y, -1280, 1280, 4));
 	HUD_Options[0]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_sbar_cx));
 	HUD_Options[0]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_sbar_cy));
 
@@ -1685,59 +1682,59 @@ void HUD_BuildHUDOptions (void)
 	HUD_Options[1] = new CQMenu (NULL, m_other);
 	HUD_Options[1]->AddOption (new CQMenuCvarToggle ("Show this Item", &hud_drawibar));
 	HUD_Options[1]->AddOption (new CQMenuCvarSlider ("Alpha", &hud_sbaralpha, 0, 1, 0.1));
-	HUD_Options[1]->AddOption (new CQMenuSpinControl ("X Position", &hud_ibar_x, -300, 300, 4));
-	HUD_Options[1]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ibar_y, -300, 300, 4));
+	HUD_Options[1]->AddOption (new CQMenuSpinControl ("X Position", &hud_ibar_x, -1280, 1280, 4));
+	HUD_Options[1]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ibar_y, -1280, 1280, 4));
 	HUD_Options[1]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_ibar_cx));
 	HUD_Options[1]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_ibar_cy));
 
 	// face picture
 	HUD_Options[2] = new CQMenu (NULL, m_other);
-	HUD_Options[2]->AddOption (new CQMenuSpinControl ("X Position", &hud_facepic_x, -300, 300, 4));
-	HUD_Options[2]->AddOption (new CQMenuSpinControl ("Y Position", &hud_facepic_y, -300, 300, 4));
+	HUD_Options[2]->AddOption (new CQMenuSpinControl ("X Position", &hud_facepic_x, -1280, 1280, 4));
+	HUD_Options[2]->AddOption (new CQMenuSpinControl ("Y Position", &hud_facepic_y, -1280, 1280, 4));
 	HUD_Options[2]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_facepic_cx));
 	HUD_Options[2]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_facepic_cy));
 
 	// health
 	HUD_Options[3] = new CQMenu (NULL, m_other);
-	HUD_Options[3]->AddOption (new CQMenuSpinControl ("X Position", &hud_faceval_x, -300, 300, 4));
-	HUD_Options[3]->AddOption (new CQMenuSpinControl ("Y Position", &hud_faceval_y, -300, 300, 4));
+	HUD_Options[3]->AddOption (new CQMenuSpinControl ("X Position", &hud_faceval_x, -1280, 1280, 4));
+	HUD_Options[3]->AddOption (new CQMenuSpinControl ("Y Position", &hud_faceval_y, -1280, 1280, 4));
 	HUD_Options[3]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_faceval_cx));
 	HUD_Options[3]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_faceval_cy));
 
 	// armor picture
 	HUD_Options[4] = new CQMenu (NULL, m_other);
-	HUD_Options[4]->AddOption (new CQMenuSpinControl ("X Position", &hud_armorpic_x, -300, 300, 4));
-	HUD_Options[4]->AddOption (new CQMenuSpinControl ("Y Position", &hud_armorpic_y, -300, 300, 4));
+	HUD_Options[4]->AddOption (new CQMenuSpinControl ("X Position", &hud_armorpic_x, -1280, 1280, 4));
+	HUD_Options[4]->AddOption (new CQMenuSpinControl ("Y Position", &hud_armorpic_y, -1280, 1280, 4));
 	HUD_Options[4]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_armorpic_cx));
 	HUD_Options[4]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_armorpic_cy));
 
 	// armor value
 	HUD_Options[5] = new CQMenu (NULL, m_other);
-	HUD_Options[5]->AddOption (new CQMenuSpinControl ("X Position", &hud_armorval_x, -300, 300, 4));
-	HUD_Options[5]->AddOption (new CQMenuSpinControl ("Y Position", &hud_armorval_y, -300, 300, 4));
+	HUD_Options[5]->AddOption (new CQMenuSpinControl ("X Position", &hud_armorval_x, -1280, 1280, 4));
+	HUD_Options[5]->AddOption (new CQMenuSpinControl ("Y Position", &hud_armorval_y, -1280, 1280, 4));
 	HUD_Options[5]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_armorval_cx));
 	HUD_Options[5]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_armorval_cy));
 	HUD_Options[5]->AddOption (new CQMenuCvarToggle ("Hide if 0", &hud_armorval_no0));
 
 	// ammo picture
 	HUD_Options[6] = new CQMenu (NULL, m_other);
-	HUD_Options[6]->AddOption (new CQMenuSpinControl ("X Position", &hud_ammopic_x, -300, 300, 4));
-	HUD_Options[6]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ammopic_y, -300, 300, 4));
+	HUD_Options[6]->AddOption (new CQMenuSpinControl ("X Position", &hud_ammopic_x, -1280, 1280, 4));
+	HUD_Options[6]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ammopic_y, -1280, 1280, 4));
 	HUD_Options[6]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_ammopic_cx));
 	HUD_Options[6]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_ammopic_cy));
 
 	// ammo value
 	HUD_Options[7] = new CQMenu (NULL, m_other);
-	HUD_Options[7]->AddOption (new CQMenuSpinControl ("X Position", &hud_ammoval_x, -300, 300, 4));
-	HUD_Options[7]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ammoval_y, -300, 300, 4));
+	HUD_Options[7]->AddOption (new CQMenuSpinControl ("X Position", &hud_ammoval_x, -1280, 1280, 4));
+	HUD_Options[7]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ammoval_y, -1280, 1280, 4));
 	HUD_Options[7]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_ammoval_cx));
 	HUD_Options[7]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_ammoval_cy));
 	HUD_Options[7]->AddOption (new CQMenuCvarToggle ("Hide if 0", &hud_ammoval_no0));
 
 	// sigils
 	HUD_Options[8] = new CQMenu (NULL, m_other);
-	HUD_Options[8]->AddOption (new CQMenuSpinControl ("X Position", &hud_sigils_x, -300, 300, 4));
-	HUD_Options[8]->AddOption (new CQMenuSpinControl ("Y Position", &hud_sigils_y, -300, 300, 4));
+	HUD_Options[8]->AddOption (new CQMenuSpinControl ("X Position", &hud_sigils_x, -1280, 1280, 4));
+	HUD_Options[8]->AddOption (new CQMenuSpinControl ("Y Position", &hud_sigils_y, -1280, 1280, 4));
 	HUD_Options[8]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_sigils_cx));
 	HUD_Options[8]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_sigils_cy));
 	HUD_Options[8]->AddOption (new CQMenuCvarToggle ("Horizontal Align", &hud_sigils_h));
@@ -1747,8 +1744,8 @@ void HUD_BuildHUDOptions (void)
 
 	// keys
 	HUD_Options[9] = new CQMenu (NULL, m_other);
-	HUD_Options[9]->AddOption (new CQMenuSpinControl ("X Position", &hud_keys_x, -300, 300, 4));
-	HUD_Options[9]->AddOption (new CQMenuSpinControl ("Y Position", &hud_keys_y, -300, 300, 4));
+	HUD_Options[9]->AddOption (new CQMenuSpinControl ("X Position", &hud_keys_x, -1280, 1280, 4));
+	HUD_Options[9]->AddOption (new CQMenuSpinControl ("Y Position", &hud_keys_y, -1280, 1280, 4));
 	HUD_Options[9]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_keys_cx));
 	HUD_Options[9]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_keys_cy));
 	HUD_Options[9]->AddOption (new CQMenuCvarToggle ("Horizontal Align", &hud_keys_h));
@@ -1758,8 +1755,8 @@ void HUD_BuildHUDOptions (void)
 
 	// items
 	HUD_Options[10] = new CQMenu (NULL, m_other);
-	HUD_Options[10]->AddOption (new CQMenuSpinControl ("X Position", &hud_items_x, -300, 300, 4));
-	HUD_Options[10]->AddOption (new CQMenuSpinControl ("Y Position", &hud_items_y, -300, 300, 4));
+	HUD_Options[10]->AddOption (new CQMenuSpinControl ("X Position", &hud_items_x, -1280, 1280, 4));
+	HUD_Options[10]->AddOption (new CQMenuSpinControl ("Y Position", &hud_items_y, -1280, 1280, 4));
 	HUD_Options[10]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_items_cx));
 	HUD_Options[10]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_items_cy));
 	HUD_Options[10]->AddOption (new CQMenuCvarToggle ("Horizontal Align", &hud_items_h));
@@ -1769,8 +1766,8 @@ void HUD_BuildHUDOptions (void)
 
 	// weapons
 	HUD_Options[11] = new CQMenu (NULL, m_other);
-	HUD_Options[11]->AddOption (new CQMenuSpinControl ("X Position", &hud_weapons_x, -300, 300, 4));
-	HUD_Options[11]->AddOption (new CQMenuSpinControl ("Y Position", &hud_weapons_y, -300, 300, 4));
+	HUD_Options[11]->AddOption (new CQMenuSpinControl ("X Position", &hud_weapons_x, -1280, 1280, 4));
+	HUD_Options[11]->AddOption (new CQMenuSpinControl ("Y Position", &hud_weapons_y, -1280, 1280, 4));
 	HUD_Options[11]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_weapons_cx));
 	HUD_Options[11]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_weapons_cy));
 	HUD_Options[11]->AddOption (new CQMenuCvarToggle ("Horizontal Align", &hud_weapons_h));
@@ -1780,32 +1777,32 @@ void HUD_BuildHUDOptions (void)
 
 	// ammo counts
 	HUD_Options[12] = new CQMenu (NULL, m_other);
-	HUD_Options[12]->AddOption (new CQMenuSpinControl ("X Position", &hud_ammocount_x, -300, 300, 4));
-	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ammocount_y, -300, 300, 4));
+	HUD_Options[12]->AddOption (new CQMenuSpinControl ("X Position", &hud_ammocount_x, -1280, 1280, 4));
+	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Y Position", &hud_ammocount_y, -1280, 1280, 4));
 	HUD_Options[12]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_ammocount_cx));
 	HUD_Options[12]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_ammocount_cy));
-	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Horizontal Spacing", &hud_ammocount_hs, -32, 32, 1));
-	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Vertical Spacing", &hud_ammocount_vs, -32, 32, 1));
+	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Horizontal Spacing", &hud_ammocount_hs, -128, 128, 1));
+	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Vertical Spacing", &hud_ammocount_vs, -128, 128, 1));
 	HUD_Options[12]->AddOption (new CQMenuCvarToggle ("Show Ammo Boxes", &hud_ammobox_show));
 	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Ammo Box X Offset", &hud_ammobox_x, -128, 128, 1));
 	HUD_Options[12]->AddOption (new CQMenuSpinControl ("Ammo Box Y Offset", &hud_ammobox_y, -128, 128, 1));
 
 	// team colors (rogue only)
 	HUD_Options[13] = new CQMenu (NULL, m_other);
-	HUD_Options[13]->AddOption (new CQMenuSpinControl ("X Position", &hud_teamcolor_x, -300, 300, 4));
-	HUD_Options[13]->AddOption (new CQMenuSpinControl ("Y Position", &hud_teamcolor_y, -300, 300, 4));
+	HUD_Options[13]->AddOption (new CQMenuSpinControl ("X Position", &hud_teamcolor_x, -1280, 1280, 4));
+	HUD_Options[13]->AddOption (new CQMenuSpinControl ("Y Position", &hud_teamcolor_y, -1280, 1280, 4));
 	HUD_Options[13]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_teamcolor_cx));
 	HUD_Options[13]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_teamcolor_cy));
 
 	// OSD Items
 	HUD_Options[14] = new CQMenu (NULL, m_other);
 	HUD_Options[14]->AddOption (new CQMenuCvarToggle ("Show FPS", &scr_showfps));
-	HUD_Options[14]->AddOption (new CQMenuSpinControl ("X Position", &hud_fps_x, -300, 300, 4));
-	HUD_Options[14]->AddOption (new CQMenuSpinControl ("Y Position", &hud_fps_y, -300, 300, 4));
+	HUD_Options[14]->AddOption (new CQMenuSpinControl ("X Position", &hud_fps_x, -1280, 1280, 4));
+	HUD_Options[14]->AddOption (new CQMenuSpinControl ("Y Position", &hud_fps_y, -1280, 1280, 4));
 	HUD_Options[14]->AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	HUD_Options[14]->AddOption (new CQMenuCvarToggle ("Show Clock", &scr_clock));
-	HUD_Options[14]->AddOption (new CQMenuSpinControl ("X Position", &hud_clock_x, -300, 300, 4));
-	HUD_Options[14]->AddOption (new CQMenuSpinControl ("Y Position", &hud_clock_y, -300, 300, 4));
+	HUD_Options[14]->AddOption (new CQMenuSpinControl ("X Position", &hud_clock_x, -1280, 1280, 4));
+	HUD_Options[14]->AddOption (new CQMenuSpinControl ("Y Position", &hud_clock_y, -1280, 1280, 4));
 
 	// crosshair
 	HUD_Options[15] = new CQMenu (NULL, m_other);
@@ -1819,13 +1816,13 @@ void HUD_BuildHUDOptions (void)
 
 	// deathmatch overlay
 	HUD_Options[16] = new CQMenu (NULL, m_other);
-	HUD_Options[16]->AddOption (new CQMenuSpinControl ("X Position", &hud_dmoverlay_x, -300, 300, 4));
-	HUD_Options[16]->AddOption (new CQMenuSpinControl ("Y Position", &hud_dmoverlay_y, -300, 300, 4));
+	HUD_Options[16]->AddOption (new CQMenuSpinControl ("X Position", &hud_dmoverlay_x, -1280, 1280, 4));
+	HUD_Options[16]->AddOption (new CQMenuSpinControl ("Y Position", &hud_dmoverlay_y, -1280, 1280, 4));
 
 	// hipnotic keys
 	HUD_Options[19] = new CQMenu (NULL, m_other);
-	HUD_Options[19]->AddOption (new CQMenuSpinControl ("X Position", &hud_hipnokeys_x, -300, 300, 4));
-	HUD_Options[19]->AddOption (new CQMenuSpinControl ("Y Position", &hud_hipnokeys_y, -300, 300, 4));
+	HUD_Options[19]->AddOption (new CQMenuSpinControl ("X Position", &hud_hipnokeys_x, -1280, 1280, 4));
+	HUD_Options[19]->AddOption (new CQMenuSpinControl ("Y Position", &hud_hipnokeys_y, -1280, 1280, 4));
 	HUD_Options[19]->AddOption (new CQMenuCvarToggle ("Center Align X", &hud_hipnokeys_cx));
 	HUD_Options[19]->AddOption (new CQMenuCvarToggle ("Center Align Y", &hud_hipnokeys_cy));
 	HUD_Options[19]->AddOption (new CQMenuCvarToggle ("Horizontal Align", &hud_hipnokeys_h));
@@ -1958,9 +1955,9 @@ int Menu_HUDDrawHUD (int y)
 	// draw all of the hud elements
 	if (!hud_overlay.value) Draw_TileClear (0, vid.height - 48, vid.width, 48);
 	HUD_DrawSBar ();
-	HUD_DrawFace (0, 100);
+	HUD_DrawFace (0, 200);
 	if (rogue) HUD_DrawTeamBorder ();
-	HUD_DrawArmor (IT_ARMOR1 | RIT_ARMOR1, 100);
+	HUD_DrawArmor (IT_ARMOR1 | RIT_ARMOR1, 200);
 	HUD_DrawAmmo (IT_NAILS | RIT_NAILS, 200);
 	HUD_DrawIBar (IT_SHOTGUN, false);
 	HUD_DrawSigils (0xffffffff);

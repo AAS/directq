@@ -9,6 +9,13 @@ sampler baseMap = sampler_state
 	addressv = CLAMP;
 };
 
+sampler baseMapWrap = sampler_state
+{
+	texture = baseTexture;
+	addressu = WRAP;
+	addressv = WRAP;
+};
+
 float4 BaseColor;
 
 struct VS_INPUTOUTPUTTEXTURED
@@ -26,6 +33,12 @@ struct VS_INPUTOUTPUTUNTEXTURED
 float4 PSFlat2DTextured (VS_INPUTOUTPUTTEXTURED Input) : COLOR0
 {
 	return tex2D (baseMap, Input.Texcoord);
+}
+
+
+float4 PSFlat2DTexturedWrap (VS_INPUTOUTPUTTEXTURED Input) : COLOR0
+{
+	return tex2D (baseMapWrap, Input.Texcoord);
 }
 
 
@@ -80,5 +93,11 @@ technique Flat2D
 	{
 		VertexShader = compile vs_2_0 VSFlat2DTextured ();
 		PixelShader = compile ps_2_0 PSFlat2DTexturedWithColor ();
+	}
+
+	pass TexturedWrap
+	{
+		VertexShader = compile vs_2_0 VSFlat2DTextured ();
+		PixelShader = compile ps_2_0 PSFlat2DTexturedWrap ();
 	}
 }

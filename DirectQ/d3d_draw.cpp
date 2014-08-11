@@ -915,6 +915,7 @@ void Draw_TileClear (int x, int y, int w, int h)
 {
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
 
+	d3d_Flat2DFX.SwitchToPass (3);
 	d3d_Flat2DFX.SetTexture (gl->tex);
 
 	vert_2d_t verts[] =

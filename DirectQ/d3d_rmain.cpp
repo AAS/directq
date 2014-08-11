@@ -249,17 +249,8 @@ void R_SetupD3D (void)
 	if (gl_clear.value) d3d_ClearFlags |= D3DCLEAR_TARGET;
 	if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8) d3d_ClearFlags |= D3DCLEAR_STENCIL;
 
-	// we only need to clear if we're rendering 3D
-	d3d_Device->Clear (0, NULL, d3d_ClearFlags, 0x00000000, 1.0f, 0);
-
-	d3d_Device->BeginScene ();
-
-	// load identity onto the view matrix (it seems as though some cards don't like it being set one time only)
-	// we can get rid of this when we complete the transition from FVF to shaders
-	D3DXMatrixIdentity (&d3d_ViewMatrix);
-	d3d_Device->SetTransform (D3DTS_VIEW, &d3d_ViewMatrix);
-
 	// get dimensions of viewport
+	// we do this here so that we can set up the clear rectangle properly
 	d3d_3DViewport.X = r_refdef.vrect.x * d3d_CurrentMode.Width / vid.width;
 	d3d_3DViewport.Width = r_refdef.vrect.width * d3d_CurrentMode.Width / vid.width;
 	d3d_3DViewport.Y = r_refdef.vrect.y * d3d_CurrentMode.Height / vid.height;
@@ -271,6 +262,31 @@ void R_SetupD3D (void)
 	if (d3d_3DViewport.Y > 0) d3d_3DViewport.Y--;
 	if (d3d_3DViewport.Width < d3d_CurrentMode.Width) d3d_3DViewport.Width++;
 	if (d3d_3DViewport.Height < d3d_CurrentMode.Height) d3d_3DViewport.Height++;
+
+#if 0
+	// Only clear the 3D refresh area
+	// note - this is slower than clearing the full screen, as the driver can optimise a fullscreen
+	// clear better.  i've left it in but #if'ed out as a warning to myself not to do it again. ;)
+	D3DRECT ClearRect;
+
+	ClearRect.x1 = d3d_3DViewport.X;
+	ClearRect.y1 = d3d_3DViewport.Y;
+	ClearRect.x2 = d3d_3DViewport.X + d3d_3DViewport.Width;
+	ClearRect.y2 = d3d_3DViewport.Y + d3d_3DViewport.Height;
+
+	// we only need to clear if we're rendering 3D
+	d3d_Device->Clear (1, &ClearRect, d3d_ClearFlags, 0x00000000, 1.0f, 0);
+#else
+	// we only need to clear if we're rendering 3D
+	d3d_Device->Clear (0, NULL, d3d_ClearFlags, 0x00000000, 1.0f, 0);
+#endif
+
+	d3d_Device->BeginScene ();
+
+	// load identity onto the view matrix (it seems as though some cards don't like it being set one time only)
+	// we can get rid of this when we complete the transition from FVF to shaders
+	D3DXMatrixIdentity (&d3d_ViewMatrix);
+	d3d_Device->SetTransform (D3DTS_VIEW, &d3d_ViewMatrix);
 
 	// set z range
 	d3d_3DViewport.MinZ = 0.0f;

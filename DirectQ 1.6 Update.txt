@@ -53,7 +53,6 @@ Release 1.6 updates.
 * Cleaned up water "lock alpha sliders" option a little.
 * Made SCR_ModalMessage look less "1996".
 * Removed all remaining hard limits from alias model mesh system.
-* Fixed shader floating point precision made water look ugly on NVIDIA cards.
 * Added ability to switch between full and partial precision when loading shaders.
 * Added r_64bitlightmaps cvar for switching 64 bit lightmaps off (on platforms that support it).
 * Removed automap code.

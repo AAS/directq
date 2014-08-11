@@ -1208,10 +1208,60 @@ void SCR_BringDownConsole (void)
 	VID_SetPalette (host_basepal);
 }
 
-void SCR_TileClear (void)
+void SCR_SetupToDrawHUD (void)
 {
+	bool undoclear = false;
+
+	// clear any areas that we need to clear
+	// moved here from HUD.cpp so that we can batch up the state change required for it
+	// these are the same conditions as on drawing the HUD itself so we don't draw this when we shouldn't
+	if (sb_lines && vid.width > 320 && scr_con_current != vid.height && scr_viewsize.value < 120)
+	{
+		undoclear = true;
+
+		extern cvar_t hud_drawsbar;
+		extern cvar_t hud_drawibar;
+
+		if (hud_drawsbar.integer && hud_drawibar.integer)
+		{
+			// if we're drawing both sbar and ibar we only need to clear to the left and right of them
+			Draw_TileClear (0, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
+			Draw_TileClear ((vid.width - 320) / 2 + 320, vid.height - sb_lines, (vid.width - 320) / 2, sb_lines);
+		}
+		else
+		{
+			// clear the whole sbar area
+			Draw_TileClear (0, vid.height - sb_lines, vid.width, sb_lines);
+		}
+	}
+
+	if (r_refdef.vrect.y > 0)
+	{
+		undoclear = true;
+
+		// top
+		Draw_TileClear
+		(
+			r_refdef.vrect.x,
+			0, 
+			r_refdef.vrect.x + r_refdef.vrect.width, 
+			r_refdef.vrect.y
+		);
+
+		// bottom
+		Draw_TileClear
+		(
+			r_refdef.vrect.x,
+			r_refdef.vrect.y + r_refdef.vrect.height, 
+			r_refdef.vrect.width, 
+			vid.height - sb_lines - (r_refdef.vrect.height + r_refdef.vrect.y)
+		);
+	}
+
 	if (r_refdef.vrect.x > 0)
 	{
+		undoclear = true;
+
 		// left
 		Draw_TileClear
 		(
@@ -1231,26 +1281,8 @@ void SCR_TileClear (void)
 		);
 	}
 
-	if (r_refdef.vrect.y > 0)
-	{
-		// top
-		Draw_TileClear
-		(
-			r_refdef.vrect.x,
-			0, 
-			r_refdef.vrect.x + r_refdef.vrect.width, 
-			r_refdef.vrect.y
-		);
-
-		// bottom
-		Draw_TileClear
-		(
-			r_refdef.vrect.x,
-			r_refdef.vrect.y + r_refdef.vrect.height, 
-			r_refdef.vrect.width, 
-			vid.height - sb_lines - (r_refdef.vrect.height + r_refdef.vrect.y)
-		);
-	}
+	// revert from the wrapping pass
+	if (undoclear) d3d_Flat2DFX.SwitchToPass (0);
 }
 
 /*
@@ -1330,7 +1362,7 @@ void SCR_UpdateScreen (void)
 	D3D_Set2D ();
 
 	// draw any areas not covered by the refresh
-	SCR_TileClear ();
+	SCR_SetupToDrawHUD ();
 
 	if (scr_drawloading)
 	{
