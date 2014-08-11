@@ -26,10 +26,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define WINVER 0x0500
 #define _WIN32_WINNT 0x0500
 
+#define DIRECTQ_VERSION "1.8.1"
+
 // let's be able to do assertions everywhere
 #include <assert.h>
 
-//#define	GLTEST			// experimental stuff
+#include <windows.h>
+#include <d3d9.h>
+#include <d3dx9.h>
+
 
 // disable unwanted warnings
 #pragma warning (disable: 4305)
@@ -249,14 +254,6 @@ typedef struct
 #include "client.h"
 #include "progs.h"
 #include "server.h"
-
-#ifdef GLQUAKE
-#include "gl_model.h"
-#else
-#include "model.h"
-#include "d_iface.h"
-#endif
-
 #include "input.h"
 #include "world.h"
 #include "keys.h"
@@ -265,7 +262,6 @@ typedef struct
 #include "crc.h"
 #include "cdaudio.h"
 #include "dshow_mp3.h"
-#include "glquake.h"
 
 
 //=============================================================================
@@ -301,6 +297,7 @@ extern	cvar_t		developer;
 
 extern	bool	host_initialized;		// true if into command execution
 extern	float		host_frametime;
+extern	DWORD		dwHostFrameTime;
 extern	byte		*host_basepal;
 extern	byte		*host_colormap;
 extern	int			host_framecount;	// incremented every frame, never reset
@@ -314,7 +311,6 @@ void Host_Init (quakeparms_t *parms);
 void Host_Shutdown(void);
 void Host_Error (char *error, ...);
 void Host_EndGame (char *message, ...);
-void Host_Frame (float time);
 void Host_Quit_f (void);
 void Host_ClientCommands (char *fmt, ...);
 void Host_ShutdownServer (bool crash);
@@ -368,4 +364,7 @@ float CastRay (float *p1, float *p2);
 // using byte colours and having the macros wrap may have seemed like a good idea to someone somewhere sometime
 // say in 1996, when every single byte or cpu cycle was precious...
 #define BYTE_CLAMP(i) (int) ((((i) > 255) ? 255 : (((i) < 0) ? 0 : (i))))
+
+// generic useful stuff
+int Sys_LoadResourceData (int resourceid, void **resbuf);
 

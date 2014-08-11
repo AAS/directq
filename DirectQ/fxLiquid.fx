@@ -1,14 +1,13 @@
 
 float4x4 WorldMatrix;
 float4x4 ProjMatrix;
-float4x4 ViewMatrix;
 
 texture baseTexture;
 
 
 sampler baseMap = sampler_state
 {
-	texture = baseTexture;
+	texture = <baseTexture>;
 	addressu = WRAP;
 	addressv = WRAP;
 };
@@ -20,24 +19,14 @@ float warpfactor;
 float Alpha;
 
 
-// this needs to mirror the layout of glwarpvert_t in gl_warp.cpp
-struct VS_INPUT 
-{
-	float4 Position1 : POSITION0;
-	float2 Texcoord1 : TEXCOORD0;
-	float4 Position2 : POSITION1;
-	float2 Texcoord2 : TEXCOORD1;
-};
-
-
-struct VS_OUTPUT 
+struct VS_INPUT_OUTPUT 
 {
 	float4 Position : POSITION0;
 	float2 Texcoord : TEXCOORD0;
 };
 
 
-float4 LiquidPS (VS_OUTPUT Input) : COLOR0
+float4 LiquidPS (VS_INPUT_OUTPUT Input) : COLOR0
 {
 	float2 stwarp = Input.Texcoord;
 	float4 color;
@@ -55,14 +44,13 @@ float4 LiquidPS (VS_OUTPUT Input) : COLOR0
 }
 
 
-VS_OUTPUT LiquidVS (VS_INPUT Input)
+VS_INPUT_OUTPUT LiquidVS (VS_INPUT_OUTPUT Input)
 {
-	VS_OUTPUT Output;
+	VS_INPUT_OUTPUT Output;
 
-	Output.Position = mul (Input.Position1, WorldMatrix);
-	Output.Position = mul (Output.Position, ViewMatrix);
-	Output.Position = mul (Output.Position, ProjMatrix);
-	Output.Texcoord = Input.Texcoord1;
+	// this is friendlier for preshaders
+	Output.Position = mul (Input.Position, mul (WorldMatrix, ProjMatrix));
+	Output.Texcoord = Input.Texcoord;
 
 	return (Output);
 }

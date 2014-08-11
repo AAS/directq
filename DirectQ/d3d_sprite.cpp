@@ -19,8 +19,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
-
 
 /*
 =============================================================
@@ -37,14 +37,12 @@ typedef struct sprverts_s
 	float s, t;
 } sprverts_t;
 
-sprverts_t sprverts[4];
-
 /*
 ================
 R_GetSpriteFrame
 ================
 */
-mspriteframe_t *R_GetSpriteFrame (entity_t *e)
+mspriteframe_t *R_GetSpriteFrame (entity_t *ent)
 {
 	msprite_t		*psprite;
 	mspritegroup_t	*pspritegroup;
@@ -52,8 +50,8 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *e)
 	int				i, numframes, frame;
 	float			*pintervals, fullinterval, targettime, time;
 
-	psprite = e->model->sh;
-	frame = e->frame;
+	psprite = ent->model->spritehdr;
+	frame = ent->frame;
 
 	if ((frame >= psprite->numframes) || (frame < 0))
 	{
@@ -62,27 +60,23 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *e)
 	}
 
 	if (psprite->frames[frame].type == SPR_SINGLE)
-	{
 		pspriteframe = psprite->frames[frame].frameptr;
-	}
 	else
 	{
-		pspritegroup = (mspritegroup_t *)psprite->frames[frame].frameptr;
+		pspritegroup = (mspritegroup_t *) psprite->frames[frame].frameptr;
 		pintervals = pspritegroup->intervals;
 		numframes = pspritegroup->numframes;
-		fullinterval = pintervals[numframes-1];
+		fullinterval = pintervals[numframes - 1];
 
-		time = cl.time + e->syncbase;
+		time = cl.time + ent->syncbase;
 
 		// when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
 		// are positive, so we don't have to worry about division by 0
-		targettime = time - ((int)(time / fullinterval)) * fullinterval;
+		targettime = time - ((int) (time / fullinterval)) * fullinterval;
 
-		for (i=0 ; i<(numframes-1) ; i++)
-		{
+		for (i = 0; i < (numframes - 1); i++)
 			if (pintervals[i] > targettime)
 				break;
-		}
 
 		pspriteframe = pspritegroup->frames[i];
 	}
@@ -93,13 +87,32 @@ mspriteframe_t *R_GetSpriteFrame (entity_t *e)
 
 /*
 =================
-D3D_DrawSpriteModel
+D3D_SetupSpriteModel
 
 =================
 */
-#define VectorScalarMult(a,b,c) {(c)[0] = (a)[0] * (b); (c)[1] = (a)[1] * (b); (c)[2] = (a)[2] * (b);}
 
-void D3D_DrawSpriteModel (entity_t *e)
+sprverts_t sprverts[4];
+
+__inline void R_MakeSpriteVert (int v, vec3_t origin, float f1, vec3_t p1, float f2, vec3_t p2, float s, float t, float alphaval)
+{
+	vec3_t point;
+
+	VectorMA (origin, f1, p1, point);
+	VectorMA (point, f2, p2, point);
+
+	sprverts[v].x = point[0];
+	sprverts[v].y = point[1];
+	sprverts[v].z = point[2];
+
+	sprverts[v].c = D3DCOLOR_ARGB (BYTE_CLAMP (alphaval), 255, 255, 255);
+
+	sprverts[v].s = s;
+	sprverts[v].t = t;
+}
+
+
+void D3D_SetupSpriteModel (entity_t *ent)
 {
 	vec3_t	point;
 	mspriteframe_t	*frame;
@@ -115,6 +128,7 @@ void D3D_DrawSpriteModel (entity_t *e)
 
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+	D3D_SetTexCoordIndexes (0);
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
@@ -122,23 +136,20 @@ void D3D_DrawSpriteModel (entity_t *e)
 	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
 	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
 
-	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
-
 	// don't even bother culling, because it's just a single
 	// polygon without a surface cache
-	frame = R_GetSpriteFrame (e);
-	psprite = e->model->sh;
+	frame = R_GetSpriteFrame (ent);
+	psprite = ent->model->spritehdr;
 
-	VectorCopy (e->origin, fixed_origin);
+	VectorCopy (ent->origin, fixed_origin);
 
 	switch (psprite->type)
 	{
 	case SPR_ORIENTED:
 		// bullet marks on walls
-		AngleVectors (e->angles, v_forward, v_right, v_up);
+		AngleVectors (ent->angles, v_forward, v_right, v_up);
 
-		VectorScalarMult (v_forward, -2, temp);
+		VectorScale (v_forward, -2, temp);
 		VectorAdd (temp, fixed_origin, fixed_origin);
 
 		up = v_up;
@@ -155,7 +166,7 @@ void D3D_DrawSpriteModel (entity_t *e)
 		break;
 
 	case SPR_FACING_UPRIGHT:
-		VectorSubtract (e->origin, r_origin, v_forward);
+		VectorSubtract (ent->origin, r_origin, v_forward);
 		v_forward[2] = 0;
 		VectorNormalize (v_forward);
 
@@ -178,7 +189,7 @@ void D3D_DrawSpriteModel (entity_t *e)
 		break;
 
 	case SPR_VP_PARALLEL_ORIENTED:
-		angle = e->angles[ROLL] * (M_PI / 180.0);
+		angle = ent->angles[ROLL] * (M_PI / 180.0);
 		sr = sin (angle);
 		cr = cos (angle);
 
@@ -198,34 +209,19 @@ void D3D_DrawSpriteModel (entity_t *e)
 		// unknown type - just assume it's normal and Con_DPrintf it
 		up = vup;
 		right = vright;
-		Con_DPrintf ("D3D_DrawSpriteModel - Unknown Sprite Type %i\n", psprite->type);
+		Con_DPrintf ("D3D_SetupSpriteModel - Unknown Sprite Type %i\n", psprite->type);
 		break;
 	}
 
-	// set texture
-	D3D_SetTexture (0, (LPDIRECT3DTEXTURE9) frame->texture);
+	// set texture and begin vertex
+	D3D_SetTexture (0, frame->texture->d3d_Texture);
 
-	VectorMA (fixed_origin, frame->down, up, point);
-	VectorMA (point, frame->left, right, point);
-	sprverts[0].x = point[0]; sprverts[0].y = point[1]; sprverts[0].z = point[2]; sprverts[0].s = 0; sprverts[0].t = 1;
-	sprverts[0].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
+	R_MakeSpriteVert (0, fixed_origin, frame->down, up, frame->left, right, 0, 1, ent->alphaval);
+	R_MakeSpriteVert (1, fixed_origin, frame->up, up, frame->left, right, 0, 0, ent->alphaval);
+	R_MakeSpriteVert (2, fixed_origin, frame->up, up, frame->right, right, 1, 0, ent->alphaval);
+	R_MakeSpriteVert (3, fixed_origin, frame->down, up, frame->right, right, 1, 1, ent->alphaval);
 
-	VectorMA (fixed_origin, frame->up, up, point);
-	VectorMA (point, frame->left, right, point);
-	sprverts[1].x = point[0]; sprverts[1].y = point[1]; sprverts[1].z = point[2]; sprverts[1].s = 0; sprverts[1].t = 0;
-	sprverts[1].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
-
-	VectorMA (fixed_origin, frame->up, up, point);
-	VectorMA (point, frame->right, right, point);
-	sprverts[2].x = point[0]; sprverts[2].y = point[1]; sprverts[2].z = point[2]; sprverts[2].s = 1; sprverts[2].t = 0;
-	sprverts[2].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
-
-	VectorMA (fixed_origin, frame->down, up, point);
-	VectorMA (point, frame->right, right, point);
-	sprverts[3].x = point[0]; sprverts[3].y = point[1]; sprverts[3].z = point[2]; sprverts[3].s = 1; sprverts[3].t = 1;
-	sprverts[3].c = D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255);
-
-	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, sprverts, sizeof (sprverts_t));
+	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, sprverts, sizeof (sprverts_t));
 }
 
 

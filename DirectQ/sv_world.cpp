@@ -20,6 +20,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // world.c -- world query functions
 
 #include "quakedef.h"
+#include "d3d_model.h"
+#include "pr_class.h"
 
 /*
 
@@ -147,26 +149,26 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 
 		VectorSubtract (maxs, mins, size);
 
-		if (model->bh->bspversion == Q1_BSPVERSION)
+		if (model->brushhdr->bspversion == Q1_BSPVERSION)
 		{
 			if (size[0] < 3)
-				hull = &model->bh->hulls[0];
+				hull = &model->brushhdr->hulls[0];
 			else if (size[0] <= 32)
-				hull = &model->bh->hulls[1];
-			else hull = &model->bh->hulls[2];
+				hull = &model->brushhdr->hulls[1];
+			else hull = &model->brushhdr->hulls[2];
 		}
 		else
 		{
 			if (size[0] < 3)
-				hull = &model->bh->hulls[0]; // 0x0x0
+				hull = &model->brushhdr->hulls[0]; // 0x0x0
 			else if (size[0] <= 32)
 			{
 				// pick the nearest of 36 or 72
 				if (size[2] < 54)
-					hull = &model->bh->hulls[3]; // 32x32x36
-				else hull = &model->bh->hulls[1]; // 32x32x72
+					hull = &model->brushhdr->hulls[3]; // 32x32x36
+				else hull = &model->brushhdr->hulls[1]; // 32x32x72
 			}
-			else hull = &model->bh->hulls[2]; // 64x64x64
+			else hull = &model->brushhdr->hulls[2]; // 64x64x64
 		}
 
 		// calculate an offset value to center the origin
@@ -309,7 +311,7 @@ void SV_TouchLinks ( edict_t *ent, areanode_t *node )
 	if (!list)
 	{
 		// alloc first time (to keep it off the stack - 256K - ouch!)
-		list = (edict_t **) Pool_Alloc (POOL_PERMANENT, MAX_EDICTS * sizeof (edict_t *));
+		list = (edict_t **) Pool_Permanent->Alloc (MAX_EDICTS * sizeof (edict_t *));
 	}
 
 loc0:;
@@ -346,18 +348,18 @@ loc0:;
 
 		touch = list[i];
 
-		ednum = NUM_FOR_EDICT(touch);
+		ednum = GetNumberForEdict(touch);
 
-		old_self = pr_global_struct->self;
-		old_other = pr_global_struct->other;
+		old_self = SVProgs->GlobalStruct->self;
+		old_other = SVProgs->GlobalStruct->other;
 
-		pr_global_struct->self = EDICT_TO_PROG(touch);
-		pr_global_struct->other = EDICT_TO_PROG(ent);
-		pr_global_struct->time = sv.time;
-		PR_ExecuteProgram (touch->v.touch);
+		SVProgs->GlobalStruct->self = EDICT_TO_PROG(touch);
+		SVProgs->GlobalStruct->other = EDICT_TO_PROG(ent);
+		SVProgs->GlobalStruct->time = SV_TIME;
+		SVProgs->ExecuteProgram (touch->v.touch);
 
-		pr_global_struct->self = old_self;
-		pr_global_struct->other = old_other;
+		SVProgs->GlobalStruct->self = old_self;
+		SVProgs->GlobalStruct->other = old_other;
 	}
 
 	// recurse down both sides
@@ -395,28 +397,37 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 	if (ent->area.prev)
 		SV_UnlinkEdict (ent);	// unlink from old position
 		
-	if (ent == sv.edicts)
+	if (ent == SVProgs->Edicts)
 		return;		// don't add the world
 
 	if (ent->free)
 		return;
 
 	// set the abs box (omit the world from this...!)
-	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != sv.edicts)
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->Edicts)
 	{
 		// expand for rotation
 		float		max, v;
 		int			i;
 
+#if 1
+		max = DotProduct (ent->v.mins, ent->v.mins);
+		v = DotProduct (ent->v.maxs, ent->v.maxs);
+
+		if (max < v) max = v;
+
+		max = sqrt (max);
+#else
 		max = 0;
 
 		for (i = 0; i < 3; i++)
 		{
 			v = fabs (ent->v.mins[i]);
 			if (v > max) max = v;
-			v =fabs (ent->v.maxs[i]);
+			v = fabs (ent->v.maxs[i]);
 			if (v > max) max = v;
 		}
+#endif
 
 		for (i = 0; i < 3; i++)
 		{
@@ -541,7 +552,7 @@ int SV_PointContents (vec3_t p)
 {
 	int		cont;
 
-	cont = SV_HullPointContents (&sv.worldmodel->bh->hulls[0], 0, p);
+	cont = SV_HullPointContents (&sv.worldmodel->brushhdr->hulls[0], 0, p);
 	if (cont <= CONTENTS_CURRENT_0 && cont >= CONTENTS_CURRENT_DOWN)
 		cont = CONTENTS_WATER;
 	return cont;
@@ -549,7 +560,7 @@ int SV_PointContents (vec3_t p)
 
 int SV_TruePointContents (vec3_t p)
 {
-	return SV_HullPointContents (&sv.worldmodel->bh->hulls[0], 0, p);
+	return SV_HullPointContents (&sv.worldmodel->brushhdr->hulls[0], 0, p);
 }
 
 //===========================================================================
@@ -568,7 +579,7 @@ edict_t	*SV_TestEntityPosition (edict_t *ent)
 	trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, ent->v.origin, 0, ent);
 	
 	if (trace.startsolid)
-		return sv.edicts;
+		return SVProgs->Edicts;
 		
 	return NULL;
 }
@@ -719,13 +730,13 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	vec3_t		start_l, end_l;
 	hull_t		*hull;
 
-// fill in a default trace
+	// fill in a default trace
 	memset (&trace, 0, sizeof(trace_t));
 	trace.fraction = 1;
 	trace.allsolid = true;
 	VectorCopy (end, trace.endpos);
 
-// get the clipping hull
+	// get the clipping hull
 	hull = SV_HullForEntity (ent, mins, maxs, offset);
 
 	VectorSubtract (start, offset, start_l);
@@ -733,7 +744,7 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 
 	// rotate start and end into the models frame of reference - e3m3 has angles[1] == 180 so
 	// don't assume that the world will always have angles 0
-	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != sv.edicts)
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->Edicts)
 	{
 		vec3_t	a;
 		vec3_t	forward, right, up;
@@ -757,7 +768,7 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 		SV_RecursiveHullCheck (hull, hull->firstclipnode, 0, 1, start_l, end_l, &trace);
 
 	// rotate endpos back to world frame of reference - e3m3 has angles[1] == 180
-	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != sv.edicts)
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != SVProgs->Edicts)
 	{
 		vec3_t	a;
 		vec3_t	forward, right, up;
@@ -780,13 +791,11 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 		}
 	}
 
-// fix trace up by the offset
-	if (trace.fraction != 1)
-		VectorAdd (trace.endpos, offset, trace.endpos);
+	// fix trace up by the offset
+	if (trace.fraction != 1) VectorAdd (trace.endpos, offset, trace.endpos);
 
-// did we clip the move?
-	if (trace.fraction < 1 || trace.startsolid  )
-		trace.ent = ent;
+	// did we clip the move?
+	if (trace.fraction < 1 || trace.startsolid) trace.ent = ent;
 
 	return trace;
 }
@@ -937,7 +946,7 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 	memset ( &clip, 0, sizeof ( moveclip_t ) );
 
 // clip to world
-	clip.trace = SV_ClipMoveToEntity ( sv.edicts, start, mins, maxs, end );
+	clip.trace = SV_ClipMoveToEntity ( SVProgs->Edicts, start, mins, maxs, end );
 
 	clip.start = start;
 	clip.end = end;

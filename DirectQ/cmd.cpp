@@ -546,7 +546,7 @@ void Cmd_Exec_f (void)
 {
 	if (Cmd_Argc () != 2)
 	{
-		Con_Printf ("exec <filename> : execute a script file\n");
+		Con_SafePrintf ("exec <filename> : execute a script file\n");
 		return;
 	}
 
@@ -562,12 +562,12 @@ void Cmd_Exec_f (void)
 
 		if (!f)
 		{
-			Con_Printf ("couldn't exec \"%s\"\n", cfgfile);
+			Con_SafePrintf ("couldn't exec \"%s\"\n", cfgfile);
 			return;
 		}
 	}
 
-	Con_Printf ("execing \"%s\"\n", cfgfile);
+	Con_SafePrintf ("execing \"%s\"\n", cfgfile);
 
 	// fix if a config file isn't \n terminated
 	Cbuf_InsertText (f);
@@ -796,10 +796,10 @@ void Cmd_TokenizeString (char *text)
 	{
 		// because these are reused every frame as commands are executed,
 		// we put them in a large one-time-only block instead of dynamically allocating
-		cmd_argv = (char **) Pool_Alloc (POOL_PERMANENT, 80 * sizeof (char *));
+		cmd_argv = (char **) Pool_Permanent->Alloc (80 * sizeof (char *));
 
 		for (i = 0; i < MAX_ARGS; i++)
-			cmd_argv[i] = (char *) Pool_Alloc (POOL_PERMANENT, 1024);
+			cmd_argv[i] = (char *) Pool_Permanent->Alloc (1024);
 	}
 
 	cmd_argc = 0;

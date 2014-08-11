@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define __WINQUAKE_H
 #pragma warning( disable : 4229 )  // mgraph gets this
 
-#include <windows.h>
 #define WM_MOUSEWHEEL                   0x020A
 
 extern HRESULT hr;
@@ -57,9 +56,6 @@ void IN_MouseEvent (int mstate, int numbuttons, bool dinput);
 
 extern bool	winsock_lib_initialized;
 
-extern int		window_center_x, window_center_y;
-extern RECT		window_rect;
-
 extern bool	mouseinitialized;
 
 extern HANDLE	hinput, houtput;
@@ -70,6 +66,6 @@ void VID_SetDefaultMode (void);
 
 // these are needed in vidnt and sys_win
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
-#define D3D_WINDOW_CLASS_NAME "D3DQuake Window Class"
+#define D3D_WINDOW_CLASS_NAME "SATAN!SATAN!SATAN!fwuffybunnywabbit!SATAN!SATAN!SATAN!"
 
 #endif

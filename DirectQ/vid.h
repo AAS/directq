@@ -41,8 +41,6 @@ typedef struct
 	unsigned		height;
 	float			aspect;		// width / height -- < 0 is taller than wide
 	int				recalc_refdef;	// if true, recalc vid-based stuff
-	unsigned		conwidth;
-	unsigned		conheight;
 } viddef_t;
 
 extern	viddef_t	vid;				// global video state

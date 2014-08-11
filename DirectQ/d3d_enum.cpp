@@ -19,8 +19,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
-#include <windows.h>
-#include <d3d9.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
@@ -205,8 +203,6 @@ char *D3DTypeToString (D3DBLEND enumval)
 		case D3DBLEND_BOTHINVSRCALPHA: pstr = "D3DBLEND_BOTHINVSRCALPHA"; break;
 		case D3DBLEND_BLENDFACTOR: pstr = "D3DBLEND_BLENDFACTOR"; break;
 		case D3DBLEND_INVBLENDFACTOR: pstr = "D3DBLEND_INVBLENDFACTOR"; break;
-		case D3DBLEND_SRCCOLOR2: pstr = "D3DBLEND_SRCCOLOR2"; break;
-		case D3DBLEND_INVSRCCOLOR2: pstr = "D3DBLEND_INVSRCCOLOR2"; break;
 		default: pstr = "Unknown"; break;
 	}
 
@@ -246,23 +242,6 @@ char *D3DTypeToString (D3DCMPFUNC enumval)
 		case D3DCMP_NOTEQUAL: pstr = "D3DCMP_NOTEQUAL"; break;
 		case D3DCMP_GREATEREQUAL: pstr = "D3DCMP_GREATEREQUAL"; break;
 		case D3DCMP_ALWAYS: pstr = "D3DCMP_ALWAYS"; break;
-		default: pstr = "Unknown"; break;
-	}
-
-	return pstr;
-}
-
-
-char *D3DTypeToString (D3DCOMPOSERECTSOP enumval)
-{
-	static char *pstr = NULL;
-
-	switch (enumval)
-	{
-		case D3DCOMPOSERECTS_COPY: pstr = "D3DCOMPOSERECTS_COPY"; break;
-		case D3DCOMPOSERECTS_OR: pstr = "D3DCOMPOSERECTS_OR"; break;
-		case D3DCOMPOSERECTS_AND: pstr = "D3DCOMPOSERECTS_AND"; break;
-		case D3DCOMPOSERECTS_NEG: pstr = "D3DCOMPOSERECTS_NEG"; break;
 		default: pstr = "Unknown"; break;
 	}
 
@@ -423,23 +402,6 @@ char *D3DTypeToString (D3DDEVTYPE enumval)
 		case D3DDEVTYPE_NULLREF: pstr = "D3DDEVTYPE_NULLREF"; break;
 		case D3DDEVTYPE_REF: pstr = "D3DDEVTYPE_REF"; break;
 		case D3DDEVTYPE_SW: pstr = "D3DDEVTYPE_SW"; break;
-		default: pstr = "Unknown"; break;
-	}
-
-	return pstr;
-}
-
-
-char *D3DTypeToString (D3DDISPLAYROTATION enumval)
-{
-	static char *pstr = NULL;
-
-	switch (enumval)
-	{
-		case D3DDISPLAYROTATION_IDENTITY: pstr = "D3DDISPLAYROTATION_IDENTITY"; break;
-		case D3DDISPLAYROTATION_90: pstr = "D3DDISPLAYROTATION_90"; break;
-		case D3DDISPLAYROTATION_180: pstr = "D3DDISPLAYROTATION_180"; break;
-		case D3DDISPLAYROTATION_270: pstr = "D3DDISPLAYROTATION_270"; break;
 		default: pstr = "Unknown"; break;
 	}
 
@@ -769,21 +731,6 @@ char *D3DTypeToString (D3DSAMPLERSTATETYPE enumval)
 }
 
 
-char *D3DTypeToString (D3DSCANLINEORDERING enumval)
-{
-	static char *pstr = NULL;
-
-	switch (enumval)
-	{
-		case D3DSCANLINEORDERING_PROGRESSIVE: pstr = "D3DSCANLINEORDERING_PROGRESSIVE"; break;
-		case D3DSCANLINEORDERING_INTERLACED: pstr = "D3DSCANLINEORDERING_INTERLACED"; break;
-		default: pstr = "Unknown"; break;
-	}
-
-	return pstr;
-}
-
-
 char *D3DTypeToString (D3DSHADEMODE enumval)
 {
 	static char *pstr = NULL;
@@ -883,7 +830,6 @@ char *D3DTypeToString (D3DTEXTUREFILTERTYPE enumval)
 		case D3DTEXF_ANISOTROPIC: pstr = "D3DTEXF_ANISOTROPIC"; break;
 		case D3DTEXF_PYRAMIDALQUAD: pstr = "D3DTEXF_PYRAMIDALQUAD"; break;
 		case D3DTEXF_GAUSSIANQUAD: pstr = "D3DTEXF_GAUSSIANQUAD"; break;
-		case D3DTEXF_CONVOLUTIONMONO: pstr = "D3DTEXF_CONVOLUTIONMONO"; break;
 		default: pstr = "Unknown"; break;
 	}
 

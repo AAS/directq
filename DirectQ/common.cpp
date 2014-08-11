@@ -147,16 +147,14 @@ cvar_t com_rogue ("com_rogue", 0.0f);
 cvar_t com_quoth ("com_quoth", 0.0f);
 cvar_t com_nehahra ("com_nehahra", 0.0f);
 
-bool IsTimeout (float *PrevTime, float WaitTime)
+bool IsTimeout (DWORD *PrevTime, DWORD WaitTime)
 {
-	float CurrTime;
+	DWORD CurrTime = Sys_DWORDTime ();
 
-	CurrTime = Sys_FloatTime ();
-
-	if (*PrevTime && CurrTime - *PrevTime < WaitTime)
+	if (PrevTime[0] && CurrTime - PrevTime[0] < WaitTime)
 		return false;
 
-	*PrevTime = CurrTime;
+	PrevTime[0] = CurrTime;
 
 	return true;
 }
@@ -335,11 +333,10 @@ void MSG_WriteFloat (sizebuf_t *sb, float f)
 		float   f;
 		int     l;
 	} dat;
-	
-	
+
 	dat.f = f;
 	dat.l = LittleLong (dat.l);
-	
+
 	SZ_Write (sb, &dat.l, 4);
 }
 
@@ -347,9 +344,9 @@ void MSG_WriteString (sizebuf_t *sb, char *s)
 {
 	if (!s)
 		SZ_Write (sb, "", 1);
-	else
-		SZ_Write (sb, s, strlen(s)+1);
+	else SZ_Write (sb, s, strlen(s)+1);
 }
+
 
 void MSG_WriteCoord (sizebuf_t *sb, float f)
 {
@@ -365,7 +362,7 @@ void MSG_WriteAngleCommon (sizebuf_t *sb, float f, int proto, bool fitzhack)
 	if (proto >= PROTOCOL_VERSION_MH)
 		MSG_WriteShort (sb, ((int) ((f * 65536) / 360)) & 65535);
 	else if (proto == PROTOCOL_VERSION_FITZ && fitzhack)
-		MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
+		MSG_WriteByte (sb, ((int) ((f * 256.0) / 360)) & 255);
 	else if (proto == PROTOCOL_VERSION_FITZ)
 		MSG_WriteShort (sb, Q_rint (f * 65536.0 / 360.0) & 65535);
 	else MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
@@ -559,7 +556,7 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	if (startsize < 256)
 		startsize = 256;
 
-	buf->data = (byte *) Pool_Alloc (POOL_PERMANENT, startsize);
+	buf->data = (byte *) Pool_Permanent->Alloc (startsize);
 	buf->maxsize = startsize;
 	buf->cursize = 0;
 }
@@ -578,10 +575,10 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 	{
 		if (!buf->allowoverflow)
 			Sys_Error ("SZ_GetSpace: overflow without allowoverflow set");
-		
+
 		if (length > buf->maxsize)
 			Sys_Error ("SZ_GetSpace: %i is > full buffer size", length);
-			
+
 		buf->overflowed = true;
 		Con_Printf ("SZ_GetSpace: overflow");
 		SZ_Clear (buf); 
@@ -980,11 +977,11 @@ char *va (char *format, ...)
 
 	if (!string)
 	{
-		string = (char **) Pool_Alloc (POOL_PERMANENT, 16 * sizeof (char *));
+		string = (char **) Pool_Permanent->Alloc (16 * sizeof (char *));
 
 		// we can reduce to 1024 now that we're using the safe(r) version
 		for (int i = 0; i < 16; i++)
-			string[i] = (char *) Pool_Alloc (POOL_PERMANENT, 1024 * sizeof (char));
+			string[i] = (char *) Pool_Permanent->Alloc (1024 * sizeof (char));
 	}
 
 	bufnum++;
@@ -1068,6 +1065,7 @@ typedef struct
 #define MAX_FILES_IN_PACK       2048
 
 char    com_gamedir[MAX_PATH];
+char	com_gamename[MAX_PATH];
 
 typedef struct searchpath_s
 {
@@ -1094,9 +1092,7 @@ void COM_Path_f (void)
 	for (s = com_searchpaths; s; s = s->next)
 	{
 		if (s->pack)
-		{
 			Con_Printf ("%s (%i files)\n", s->pack->filename, s->pack->numfiles);
-		}
 		else Con_Printf ("%s\n", s->filename);
 	}
 }
@@ -1155,12 +1151,12 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 	if (!fl)
 	{
 		// be careful where you call this from as it frees the temp pool!!!
-		Pool_Reset (POOL_TEMP);
+		Pool_Temp->Rewind ();
 
 		// we never know how much we need, so alloc enough for 256k items
 		// at this stage they're only pointers so we can afford to do this.  if it becomes a problem
 		// we might make a linked list then copy from that into an array and do it all in the Zone.
-		FileList[0] = (char **) Pool_Alloc (POOL_TEMP, sizeof (char *) * 0x40000);
+		FileList[0] = (char **) Pool_Temp->Alloc (sizeof (char *) * 0x40000);
 
 		// need to reset the pointer as it will have changed (fl is no longer NULL)
 		fl = FileList[0];
@@ -1452,7 +1448,7 @@ int COM_FOpenFile (char *filename, void *hf)
 	// don't error out here
 	if (!hf)
 	{
-		Con_Printf ("COM_FOpenFile: hFile not set");
+		Con_SafePrintf ("COM_FOpenFile: hFile not set");
 		com_filesize = -1;
 		return -1;
 	}
@@ -1581,9 +1577,9 @@ static byte *COM_LoadFile (char *path, int usehunk)
 	if (fh == INVALID_HANDLE_VALUE) return NULL;
 
 	if (usehunk == 1)
-		buf = (byte *) Pool_Alloc (POOL_GAME, len + 1);
+		buf = (byte *) Pool_Game->Alloc (len + 1);
 	else if (usehunk == 2)
-		buf = (byte *) Pool_Alloc (POOL_LOADFILE, len + 1);
+		buf = (byte *) Pool_FileLoad->Alloc (len + 1);
 	else
 	{
 		Con_DPrintf ("COM_LoadFile: bad usehunk\n");
@@ -1646,7 +1642,7 @@ pack_t *COM_LoadPackFile (char *packfile)
 
 	if (header.id[0] != 'P' || header.id[1] != 'A' || header.id[2] != 'C' || header.id[3] != 'K')
 	{
-		Con_Printf ("%s is not a packfile", packfile);
+		Con_SafePrintf ("%s is not a packfile", packfile);
 		fclose (packfp);
 		return NULL;
 	}
@@ -1656,8 +1652,8 @@ pack_t *COM_LoadPackFile (char *packfile)
 
 	numpackfiles = header.dirlen / sizeof (dpackfile_t);
 
-	newfiles = (packfile_t *) Pool_Alloc (POOL_GAME, numpackfiles * sizeof (packfile_t));
-	info = (dpackfile_t *) Pool_Alloc (POOL_TEMP, numpackfiles * sizeof (dpackfile_t));
+	newfiles = (packfile_t *) Pool_Game->Alloc (numpackfiles * sizeof (packfile_t));
+	info = (dpackfile_t *) Pool_Temp->Alloc (numpackfiles * sizeof (dpackfile_t));
 
 	fseek (packfp, header.dirofs, SEEK_SET);
 	fread (info, header.dirlen, 1, packfp);
@@ -1671,12 +1667,12 @@ pack_t *COM_LoadPackFile (char *packfile)
 		newfiles[i].filelen = LittleLong (info[i].filelen);
 	}
 
-	pack = (pack_t *) Pool_Alloc (POOL_GAME, sizeof (pack_t));
+	pack = (pack_t *) Pool_Game->Alloc (sizeof (pack_t));
 	strncpy (pack->filename, packfile, 127);
 	pack->numfiles = numpackfiles;
 	pack->files = newfiles;
 
-	Con_Printf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
+	Con_SafePrintf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
 	return pack;
 }
 
@@ -1713,8 +1709,40 @@ void COM_AddGameDirectory (char *dir)
 
 	// copy to com_gamedir so that the last gamedir added will be the one used
 	strncpy (com_gamedir, dir, 127);
+	strncpy (com_gamename, dir, 127);
+
+	for (int i = strlen (com_gamedir); i; i--)
+	{
+		if (com_gamedir[i] == '/' || com_gamedir[i] == '\\')
+		{
+			strcpy (com_gamename, &com_gamedir[i + 1]);
+			break;
+		}
+	}
+
+	// update the window titlebar
+	extern HWND d3d_Window;
+	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s", DIRECTQ_VERSION, com_gamename));
 
 	// add any pak files in the format pak0.pak pak1.pak, ...
+	for (int i = 0; i < 10; i++)
+	{
+		_snprintf (pakfile, 128, "%s/pak%i.pak", dir, i);
+		pack_t *pak = COM_LoadPackFile (pakfile);
+
+		if (pak)
+		{
+			// link it in
+			search = (searchpath_t *) Pool_Game->Alloc (sizeof (searchpath_t));
+			search->pack = pak;
+			search->pk3 = NULL;
+			search->next = com_searchpaths;
+			com_searchpaths = search;
+		}
+		else break;
+	}
+
+	// add any other pak files, zip files or PK3 files in strict alphabetical order
 	WIN32_FIND_DATA FindFileData;
 	HANDLE hFind = INVALID_HANDLE_VALUE;
 
@@ -1732,6 +1760,19 @@ void COM_AddGameDirectory (char *dir)
 		// add all the pak files
 		do
 		{
+			// skip over PAK files already loaded
+			if (!stricmp (FindFileData.cFileName, "pak0.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak1.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak2.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak3.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak4.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak5.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak6.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak7.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak8.pak")) continue;
+			if (!stricmp (FindFileData.cFileName, "pak9.pak")) continue;
+
+			// send through the appropriate loader
 			if (COM_FindExtension (FindFileData.cFileName, ".pak"))
 			{
 				// load the pak file
@@ -1741,7 +1782,7 @@ void COM_AddGameDirectory (char *dir)
 				if (pak)
 				{
 					// link it in
-					search = (searchpath_t *) Pool_Alloc (POOL_GAME, sizeof (searchpath_t));
+					search = (searchpath_t *) Pool_Game->Alloc (sizeof (searchpath_t));
 					search->pack = pak;
 					search->pk3 = NULL;
 					search->next = com_searchpaths;
@@ -1762,13 +1803,13 @@ void COM_AddGameDirectory (char *dir)
 
 				if (err == UNZ_OK)
 				{
-					pk3_t *pk3 = (pk3_t *) Pool_Alloc (POOL_GAME, sizeof (pk3_t));
+					pk3_t *pk3 = (pk3_t *) Pool_Game->Alloc (sizeof (pk3_t));
 					char filename_inzip[64];
 					int good_files = 0;
 
 					pk3->numfiles = gi.number_entry;
 					strncpy (pk3->filename, pakfile, 127);
-					pk3->files = (packfile_t *) Pool_Alloc (POOL_GAME, sizeof (packfile_t) * pk3->numfiles);
+					pk3->files = (packfile_t *) Pool_Game->Alloc (sizeof (packfile_t) * pk3->numfiles);
 
 					unzGoToFirstFile (uf);
 
@@ -1800,12 +1841,12 @@ void COM_AddGameDirectory (char *dir)
 					if (good_files)
 					{
 						// link it in
-						search = (searchpath_t *) Pool_Alloc (POOL_GAME, sizeof (searchpath_t));
+						search = (searchpath_t *) Pool_Game->Alloc (sizeof (searchpath_t));
 						search->pack = NULL;
 						search->pk3 = pk3;
 						search->next = com_searchpaths;
 						com_searchpaths = search;
-						Con_Printf ("Added packfile %s (%i files)\n", pk3->filename, pk3->numfiles);
+						Con_SafePrintf ("Added packfile %s (%i files)\n", pk3->filename, pk3->numfiles);
 					}
 				}
 
@@ -1820,7 +1861,7 @@ void COM_AddGameDirectory (char *dir)
 	// add the directory to the search path
 	// this is done last as using a linked list will search in the reverse order to which they
 	// are added, so we ensure that the filesystem overrides pak files
-	search = (searchpath_t *) Pool_Alloc (POOL_GAME, sizeof(searchpath_t));
+	search = (searchpath_t *) Pool_Game->Alloc (sizeof(searchpath_t));
 	strncpy (search->filename, dir, 127);
 	search->next = com_searchpaths;
 	search->pack = NULL;
@@ -1861,6 +1902,7 @@ void Menu_LoadAvailableSkyboxes (void);
 void SHOWLMP_newgame (void);
 void D3D_VidRestart_f (void);
 void D3D_InitHLSL (void);
+void R_UnloadSkybox (void);
 
 bool COM_StringContains (char *str1, char *str2)
 {
@@ -1892,10 +1934,10 @@ void COM_UnloadAllStuff (void)
 	com_searchpaths = NULL;
 
 	// drop everything we need to drop
-	Pool_Free (POOL_GAME);
-	Pool_Free (POOL_CACHE);
+	FreeSpaceBuffers (POOL_GAME | POOL_CACHE);
 	SHOWLMP_newgame ();
 	CL_Disconnect_f ();
+	R_UnloadSkybox ();
 	D3D_ReleaseTextures ();
 
 	// clear everything else
@@ -1924,9 +1966,6 @@ void COM_LoadAllStuff (void)
 	Menu_MapsPopulate ();
 	Menu_DemoPopulate ();
 	Menu_LoadAvailableSkyboxes ();
-
-	// restart video
-	D3D_VidRestart_f ();
 }
 
 
@@ -2047,7 +2086,7 @@ void COM_LoadGame (char *gamename)
 		if (loadgame)
 		{
 			// do something interesting with thisgame
-			Con_Printf ("Loading Game: \"%s\"...\n", thisgame);
+			Con_SafePrintf ("Loading Game: \"%s\"...\n", thisgame);
 			COM_AddGameDirectory (va ("%s/%s", basedir, thisgame));
 		}
 
@@ -2056,15 +2095,20 @@ void COM_LoadGame (char *gamename)
 	}
 
 	// if the host isn't already up, don't bring anything up yet
+	// (fixme - bring the host loader through here as well)
 	if (!host_initialized) return;
 
 	// reload everything that needs to be reloaded
 	COM_LoadAllStuff ();
 
-	Con_Printf ("\n");
+	Con_SafePrintf ("\n");
 
 	// reload the configs as they may have changed
-	Cbuf_InsertText ("exec quake.rc\n");
+	Cbuf_InsertText ("togglemenu\n");
+	Cbuf_InsertText ("exec autoexec.cfg\n");
+	Cbuf_InsertText ("exec directq.cfg\n");
+	Cbuf_InsertText ("exec config.cfg\n");
+	Cbuf_InsertText ("exec default.cfg\n");
 	Cbuf_Execute ();
 
 	// not disabled any more

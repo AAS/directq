@@ -39,7 +39,8 @@ typedef enum {ev_void, ev_string, ev_float, ev_vector, ev_entity, ev_field, ev_f
 #define	RESERVED_OFS	28
 
 
-enum {
+enum
+{
 	OP_DONE,
 	OP_MUL_F,
 	OP_MUL_V,
@@ -124,7 +125,7 @@ typedef struct statement_s
 	short	a,b,c;
 } dstatement_t;
 
-typedef struct
+typedef struct ddef_s
 {
 	unsigned short	type;		// if DEF_SAVEGLOBGAL bit is set
 								// the variable needs to be saved in savegames
@@ -135,7 +136,7 @@ typedef struct
 
 #define	MAX_PARMS	8
 
-typedef struct
+typedef struct dfunction_s
 {
 	int		first_statement;	// negative numbers are builtins
 	int		parm_start;
@@ -152,7 +153,7 @@ typedef struct
 
 
 #define	PROG_VERSION	6
-typedef struct
+typedef struct dprograms_s
 {
 	int		version;
 	int		crc;			// check of header file

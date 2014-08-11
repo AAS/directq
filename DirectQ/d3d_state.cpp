@@ -19,16 +19,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
 #include "winquake.h"
-
-void D3D_CheckDirtyMatrixes (void)
-{
-	d3d_ViewMatrixStack->CheckDirtyState ();
-	d3d_ProjMatrixStack->CheckDirtyState ();
-	d3d_WorldMatrixStack->CheckDirtyState ();
-}
 
 
 /*
@@ -45,9 +39,6 @@ void D3D_CheckDirtyMatrixes (void)
 ===================================================================================================================
 */
 
-int NumFilteredStates = 0;
-int NumChangedStates = 0;
-
 
 DWORD d3d_RenderStates[256];
 
@@ -56,14 +47,12 @@ void D3D_SetRenderState (D3DRENDERSTATETYPE State, DWORD Value)
 	if (d3d_RenderStates[(int) State] == Value)
 	{
 		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
 		return;
 	}
 	else
 	{
 		d3d_Device->SetRenderState (State, Value);
 		d3d_RenderStates[(int) State] = Value;
-		NumChangedStates++;
 	}
 }
 
@@ -77,27 +66,25 @@ void D3D_SetRenderStatef (D3DRENDERSTATETYPE State, float Value)
 
 DWORD d3d_TextureStageStates[8][64];
 
-void D3D_SetTextureStageState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)
+void D3D_SetTextureState (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)
 {
 	if (d3d_TextureStageStates[Stage][(int) Type] == Value)
 	{
 		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
 		return;
 	}
 	else
 	{
 		d3d_Device->SetTextureStageState (Stage, Type, Value);
 		d3d_TextureStageStates[Stage][(int) Type] = Value;
-		NumChangedStates++;
 	}
 }
 
 
-void D3D_SetTextureStageStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Value)
+void D3D_SetTextureStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Value)
 {
 	// some states require float input
-	D3D_SetTextureStageState (Stage, Type, ((DWORD *) &Value)[0]);
+	D3D_SetTextureState (Stage, Type, ((DWORD *) &Value)[0]);
 }
 
 
@@ -108,14 +95,12 @@ void D3D_SetSamplerState (DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value)
 	if (d3d_SamplerStates[Stage][(int) Type] == Value)
 	{
 		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
 		return;
 	}
 	else
 	{
 		d3d_Device->SetSamplerState (Stage, Type, Value);
 		d3d_SamplerStates[Stage][(int) Type] = Value;
-		NumChangedStates++;
 	}
 }
 
@@ -127,23 +112,21 @@ void D3D_SetSamplerStatef (DWORD Stage, D3DSAMPLERSTATETYPE Type, float Value)
 }
 
 
-LPDIRECT3DTEXTURE9 d3d_Textures[8];
+LPDIRECT3DBASETEXTURE9 d3d_StageTextures[8];
 
-void D3D_SetTexture (DWORD Sampler, LPDIRECT3DTEXTURE9 pTexture)
+void D3D_SetTexture (DWORD Sampler, LPDIRECT3DBASETEXTURE9 pTexture)
 {
 	if (Sampler > d3d_DeviceCaps.MaxTextureBlendStages) return;
 
-	if (d3d_Textures[Sampler] == pTexture)
+	if (d3d_StageTextures[Sampler] == pTexture)
 	{
 		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
 		return;
 	}
 	else
 	{
 		d3d_Device->SetTexture (Sampler, pTexture);
-		d3d_Textures[Sampler] = pTexture;
-		NumChangedStates++;
+		d3d_StageTextures[Sampler] = pTexture;
 	}
 }
 
@@ -155,14 +138,12 @@ void D3D_SetFVF (DWORD FVF)
 	if (d3d_FVF == FVF)
 	{
 		// filter out rendundant changes before they go to the API
-		NumFilteredStates++;
 		return;
 	}
 	else
 	{
 		d3d_Device->SetFVF (FVF);
 		d3d_FVF = FVF;
-		NumChangedStates++;
 	}
 }
 
@@ -308,7 +289,7 @@ void D3D_SetAllStates (void)
 		d3d_Device->SetTextureStageState (s, D3DTSS_ALPHAARG0, d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG0]);
 		d3d_Device->SetTextureStageState (s, D3DTSS_RESULTARG, d3d_TextureStageStates[s][(int) D3DTSS_RESULTARG]);
 
-		d3d_Textures[s] = NULL;
+		d3d_StageTextures[s] = NULL;
 	}
 
 	d3d_FVF = D3DFVF_XYZ | D3DFVF_XYZRHW;
@@ -455,7 +436,7 @@ void D3D_GetAllStates (void)
 		d3d_Device->GetTextureStageState (s, D3DTSS_ALPHAARG0, &d3d_TextureStageStates[s][(int) D3DTSS_ALPHAARG0]);
 		d3d_Device->GetTextureStageState (s, D3DTSS_RESULTARG, &d3d_TextureStageStates[s][(int) D3DTSS_RESULTARG]);
 
-		d3d_Textures[s] = NULL;
+		d3d_StageTextures[s] = NULL;
 	}
 
 	d3d_FVF = D3DFVF_XYZ | D3DFVF_XYZRHW;
@@ -464,22 +445,8 @@ void D3D_GetAllStates (void)
 
 void D3D_SetDefaultStates (void)
 {
-	// clear down old matrix stacks
-	if (d3d_ViewMatrixStack) {delete d3d_ViewMatrixStack; d3d_ViewMatrixStack = NULL;}
-	if (d3d_ProjMatrixStack) {delete d3d_ProjMatrixStack; d3d_ProjMatrixStack = NULL;}
-	if (d3d_WorldMatrixStack) {delete d3d_WorldMatrixStack; d3d_WorldMatrixStack = NULL;}
-
-	// create new matrix stacks
-	d3d_ViewMatrixStack = new CD3D_MatrixStack (D3DTS_VIEW);
-	d3d_ProjMatrixStack = new CD3D_MatrixStack (D3DTS_PROJECTION);
-	d3d_WorldMatrixStack = new CD3D_MatrixStack (D3DTS_WORLD);
-
 	// init all render states
 	D3D_GetAllStates ();
-
-	// no filtering yet
-	NumFilteredStates = 0;
-	NumChangedStates = 0;
 
 	// disable lighting
 	for (int l = 0; l < 8; l++) d3d_Device->LightEnable (l, FALSE);
@@ -497,11 +464,8 @@ void D3D_SetDefaultStates (void)
 */
 
 
-void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor, bool disablezwrite)
+void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor)
 {
-	if (disablezwrite)
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-
 	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
 	D3D_SetRenderState (D3DRS_BLENDOP, blendop);
 	D3D_SetRenderState (D3DRS_SRCBLEND, srcfactor);
@@ -509,11 +473,8 @@ void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor, bool
 }
 
 
-void D3D_DisableAlphaBlend (bool enablezwrite)
+void D3D_DisableAlphaBlend (void)
 {
-	if (enablezwrite)
-		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-
 	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
@@ -529,9 +490,9 @@ void D3D_BackfaceCull (DWORD D3D_CULLTYPE)
 
 void D3D_SetTexCoordIndexes (DWORD tmu0index, DWORD tmu1index, DWORD tmu2index)
 {
-	D3D_SetTextureStageState (0, D3DTSS_TEXCOORDINDEX, tmu0index);
-	D3D_SetTextureStageState (1, D3DTSS_TEXCOORDINDEX, tmu1index);
-	D3D_SetTextureStageState (2, D3DTSS_TEXCOORDINDEX, tmu2index);
+	D3D_SetTextureState (0, D3DTSS_TEXCOORDINDEX, tmu0index);
+	D3D_SetTextureState (1, D3DTSS_TEXCOORDINDEX, tmu1index);
+	D3D_SetTextureState (2, D3DTSS_TEXCOORDINDEX, tmu2index);
 }
 
 
@@ -655,24 +616,25 @@ void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE magfilter, D3DTEXTU
 
 void D3D_SetTextureMatrixOp (DWORD tmu0op, DWORD tmu1op, DWORD tmu2op)
 {
-	D3D_SetTextureStageState (0, D3DTSS_TEXTURETRANSFORMFLAGS, tmu0op);
-	D3D_SetTextureStageState (1, D3DTSS_TEXTURETRANSFORMFLAGS, tmu1op);
-	D3D_SetTextureStageState (2, D3DTSS_TEXTURETRANSFORMFLAGS, tmu2op);
+	D3D_SetTextureState (0, D3DTSS_TEXTURETRANSFORMFLAGS, tmu0op);
+	D3D_SetTextureState (1, D3DTSS_TEXTURETRANSFORMFLAGS, tmu1op);
+	D3D_SetTextureState (2, D3DTSS_TEXTURETRANSFORMFLAGS, tmu2op);
 }
 
 
 void D3D_SetTextureColorMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
 {
-	D3D_SetTextureStageState (stage, D3DTSS_COLOROP, mode);
-	D3D_SetTextureStageState (stage, D3DTSS_COLORARG1, arg1);
-	D3D_SetTextureStageState (stage, D3DTSS_COLORARG2, arg2);
+	D3D_SetTextureState (stage, D3DTSS_COLOROP, mode);
+	D3D_SetTextureState (stage, D3DTSS_COLORARG1, arg1);
+	D3D_SetTextureState (stage, D3DTSS_COLORARG2, arg2);
 }
 
 
 void D3D_SetTextureAlphaMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
 {
-	D3D_SetTextureStageState (stage, D3DTSS_ALPHAOP, mode);
-	D3D_SetTextureStageState (stage, D3DTSS_ALPHAARG1, arg1);
-	D3D_SetTextureStageState (stage, D3DTSS_ALPHAARG2, arg2);
+	D3D_SetTextureState (stage, D3DTSS_ALPHAOP, mode);
+	D3D_SetTextureState (stage, D3DTSS_ALPHAARG1, arg1);
+	D3D_SetTextureState (stage, D3DTSS_ALPHAARG2, arg2);
 }
+
 

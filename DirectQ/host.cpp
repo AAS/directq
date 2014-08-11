@@ -20,8 +20,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "winquake.h"
 #include "d3d_quake.h"
+#include "pr_class.h"
 
 /*
 
@@ -52,11 +54,8 @@ byte		*host_colormap;
 cvar_t	host_savedir ("host_savedir", "save", CVAR_ARCHIVE);
 
 cvar_t	host_framerate ("host_framerate","0");	// set for slow motion
-cvar_t	host_speeds ("host_speeds","0");			// set for running times
-cvar_t	sv_speed ("sv_speed", "1", CVAR_SERVER);
 
 cvar_t	sys_ticrate ("sys_ticrate","0.05");
-cvar_t	serverprofile ("serverprofile","0");
 
 cvar_t	fraglimit ("fraglimit","0",CVAR_SERVER);
 cvar_t	timelimit ("timelimit","0",CVAR_SERVER);
@@ -178,7 +177,7 @@ void Host_FindMaxClients (void)
 		svs.maxclientslimit = 4;
 
 	// allocate space for the max clients
-	svs.clients = (client_s *) Pool_Alloc (POOL_PERMANENT, svs.maxclientslimit * sizeof (client_t));
+	svs.clients = (client_s *) Pool_Permanent->Alloc (svs.maxclientslimit * sizeof (client_t));
 
 	// if we request more than 1 client we set the appropriate game mode
 	if (svs.maxclients > 1)
@@ -206,7 +205,7 @@ void Host_InitLocal (void)
 ===============
 Host_WriteConfiguration
 
-Writes key bindings and archived cvars to config.cfg
+Writes key bindings and archived cvars to directq.cfg
 ===============
 */
 extern cvar_t hud_defaulthud;
@@ -221,17 +220,17 @@ void Host_WriteConfiguration (void)
 		// force all open buffers to commit and close
 		while (_fcloseall ());
 
-		if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
+		if (!(f = fopen (va ("%s/directq.cfg", com_gamedir), "w")))
 		{
 			// if we failed to open it, we sleep for a bit, then attempt it again.  windows or something seems to
 			// lock on to a file handle for a while even after it's been closed, so this might help giving it a
 			// hint that it needs to unlock
 			Sleep (1000);
 
-			if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
+			if (!(f = fopen (va ("%s/directq.cfg", com_gamedir), "w")))
 			{
 				// if after this amount of time it's still locked open, something has gone askew
-				Con_Printf ("Couldn't write config.cfg.\n");
+				Con_SafePrintf ("Couldn't write directq.cfg.\n");
 				return;
 			}
 		}
@@ -241,7 +240,7 @@ void Host_WriteConfiguration (void)
 
 		fclose (f);
 
-		Con_Printf ("Wrote config.cfg\n");
+		Con_SafePrintf ("Wrote directq.cfg\n");
 	}
 
 	if (hud_autosave.value)
@@ -252,6 +251,8 @@ void Host_WriteConfiguration (void)
 	}
 }
 
+
+cmd_t Host_WriteConfiguration_Cmd ("Host_WriteConfiguration", Host_WriteConfiguration);
 
 /*
 =================
@@ -347,10 +348,10 @@ void SV_DropClient (bool crash)
 		{
 			// call the prog function for removing a client
 			// this will set the body to a dead frame, among other things
-			saveSelf = pr_global_struct->self;
-			pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
-			PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
-			pr_global_struct->self = saveSelf;
+			saveSelf = SVProgs->GlobalStruct->self;
+			SVProgs->GlobalStruct->self = EDICT_TO_PROG(host_client->edict);
+			SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientDisconnect);
+			SVProgs->GlobalStruct->self = saveSelf;
 		}
 	}
 
@@ -394,23 +395,24 @@ void Host_ShutdownServer(bool crash)
 	int		count;
 	sizebuf_t	buf;
 	char		message[4];
-	float	start;
 
 	if (!sv.active)
 		return;
 
 	sv.active = false;
 
-// stop all client sounds immediately
+	// stop all client sounds immediately
 	if (cls.state == ca_connected)
 		CL_Disconnect ();
 
-// flush any pending messages - like the score!!!
-	start = Sys_FloatTime();
+	// flush any pending messages - like the score!!!
+	DWORD start = Sys_DWORDTime();
+
 	do
 	{
 		count = 0;
-		for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+
+		for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 		{
 			if (host_client->active && host_client->message.cursize)
 			{
@@ -426,19 +428,19 @@ void Host_ShutdownServer(bool crash)
 				}
 			}
 		}
-		if ((Sys_FloatTime() - start) > 3.0)
-			break;
+
+		if ((Sys_DWORDTime () - start) > 3000) break;
 	}
 	while (count);
 
-// make sure all the clients know we're disconnecting
+	// make sure all the clients know we're disconnecting
 	buf.data = (byte *) message;
 	buf.maxsize = 4;
 	buf.cursize = 0;
 	MSG_WriteByte(&buf, svc_disconnect);
 	count = NET_SendToAll(&buf, 5);
 	if (count)
-		Con_Printf("Host_ShutdownServer: NET_SendToAll failed for %u clients\n", count);
+		Con_Printf ("Host_ShutdownServer: NET_SendToAll failed for %u clients\n", count);
 
 	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
 		if (host_client->active)
@@ -447,7 +449,6 @@ void Host_ShutdownServer(bool crash)
 	// clear structures
 	memset (&sv, 0, sizeof(sv));
 	memset (svs.clients, 0, svs.maxclientslimit*sizeof(client_t));
-	PR_ClearProgs ();
 }
 
 
@@ -476,15 +477,13 @@ void Cmd_SignalCacheClear_f (void)
 }
 
 cmd_t Cmd_SignalCacheClear ("cacheclear", Cmd_SignalCacheClear_f);
-
-void D3D_EvictTextures (void);
+void D3D_ClearOcclusionQueries (void);
 
 void Host_ClearMemory (void)
 {
 	// clear anything that needs to be cleared specifically
 	S_StopAllSounds (true);
 	Mod_ClearAll ();
-	D3D_EvictTextures ();
 	S_ClearSounds ();
 
 	cls.signon = 0;
@@ -492,25 +491,20 @@ void Host_ClearMemory (void)
 	if (signal_cacheclear)
 	{
 		// clear the cache if signalled
-		Pool_Free (POOL_CACHE);
+		Pool_Cache->Free ();
 		signal_cacheclear = false;
 	}
 
+	// free occlusion queries - this needs to be done before the map pool as
+	// queries contain pointers to entities which must be valid
+	D3D_ClearOcclusionQueries ();
+
 	// clear virtual memory pools for the map and any scratch allocations
-	Pool_Free (POOL_MAP);
-	Pool_Free (POOL_TEMP);
-	Pool_Free (POOL_LOADFILE);
+	FreeSpaceBuffers (POOL_MAP | POOL_FILELOAD | POOL_TEMP);
 
 	// wipe the client and server structs
 	memset (&sv, 0, sizeof (sv));
 	memset (&cl, 0, sizeof (cl));
-
-	// clear out the progs structs
-	PR_ClearProgs ();
-
-	// force all open buffers to commit and close
-	// can't do this because of demos!!!
-	// while (_fcloseall ());
 }
 
 
@@ -528,29 +522,52 @@ Returns false if the time is too short to run a frame
 // really need to find a way to have 2 names refer to the same variable here...
 cvar_t host_maxfps ("host_maxfps", 72, CVAR_ARCHIVE | CVAR_SERVER);
 
-bool Host_FilterTime (float time)
+DWORD dwRealTime = 0;
+DWORD dwHostFrameTime = 0;
+DWORD dwOldRealTime = 0;
+
+bool Host_FilterTime (DWORD dwTime)
 {
-	realtime += time;
+	dwRealTime += dwTime;
+
+	// check for integer wraparound
+	if (dwRealTime < dwOldRealTime)
+	{
+		// reset the old realtime to an unwrapped value and get out
+		dwOldRealTime = dwRealTime;
+		return false;
+	}
+
+	// don't update if not enough time has passed
+	if (dwRealTime == dwOldRealTime) return false;
 
 	// bound sensibly
 	if (host_maxfps.value < 30) Cvar_Set (&host_maxfps, 30);
 	if (host_maxfps.value > 666) Cvar_Set (&host_maxfps, 666);
 
-	if (!cls.timedemo && (realtime - oldrealtime < (1.0f / host_maxfps.value)))
+	if (!cls.timedemo && (dwRealTime - dwOldRealTime < (1000.0f / host_maxfps.value)))
 		return false;		// framerate is too high
 
-	host_frametime = realtime - oldrealtime;
-	oldrealtime = realtime;
+	dwHostFrameTime = dwRealTime - dwOldRealTime;
+	dwOldRealTime = dwRealTime;
 
 	if (host_framerate.value > 0)
 		host_frametime = host_framerate.value;
 	else
 	{
 		// don't allow really long or short frames
-		if (host_frametime > 0.1) host_frametime = 0.1;
-		if (host_frametime < 0.001) host_frametime = 0.001;
+		if (dwHostFrameTime > 100) dwHostFrameTime = 100;
+		if (dwHostFrameTime < 1) dwHostFrameTime = 1;
+
+		// fixup frametime to FP scale
+		host_frametime = ((float) dwHostFrameTime + 0.5f) / 1000.0f;
 	}
-	
+
+	// fixup frametimers to FP scale
+	// also do old realtime in case we ever want to use it anywhere else
+	realtime = ((float) dwRealTime + 0.5f) / 1000.0f;
+	oldrealtime = ((float) dwOldRealTime + 0.5f) / 1000.0f;
+
 	return true;
 }
 
@@ -564,7 +581,7 @@ Host_ServerFrame
 void Host_ServerFrame (void)
 {
 	// run the world state	
-	pr_global_struct->frametime = host_frametime;
+	SVProgs->GlobalStruct->frametime = host_frametime;
 
 	// set the time and clear the general datagram
 	SV_ClearDatagram ();
@@ -609,12 +626,10 @@ void Host_SetRefreshRate (int rate)
 }
 
 
-void _Host_Frame (float time)
+void D3D_UpdateOcclusionQueries (void);
+
+void Host_Frame (DWORD time)
 {
-	static float time1 = 0;
-	static float time2 = 0;
-	static float time3 = 0;
-	int pass1, pass2, pass3;
 	static float host_refreshtime = 666;
 
 	// something bad happened, or the server disconnected
@@ -624,7 +639,12 @@ void _Host_Frame (float time)
 	rand ();
 
 	// decide the simulation time - don't run too fast, or packets will flood out
-	if (!Host_FilterTime (time)) return;
+	if (!Host_FilterTime (time))
+	{
+		// update occlusion queries always
+		D3D_UpdateOcclusionQueries ();
+		return;
+	}
 
 	// get new key events
 	Sys_SendKeyEvents ();
@@ -658,9 +678,6 @@ void _Host_Frame (float time)
 	// fetch results from server
 	if (cls.state == ca_connected) CL_ReadFromServer ();
 
-	// update video
-	if (host_speeds.value) time1 = Sys_FloatTime ();
-
 	// never refresh at > the r_filterrefresh.value x screen's refresh rate, no matter how fast everything else is running.
 	// this prevents gfx cards with limited resources from bottlenecking when everything else is
 	// running too fast (to do: is this the primary cause of lockups with OpenGL?)
@@ -670,80 +687,19 @@ void _Host_Frame (float time)
 		host_refreshtime = 0;
 	}
 
-	if (host_speeds.value) time2 = Sys_FloatTime ();
-
-	// update audio
+	// update dlights (should this move to the end of SCR_UpdateScreen?)
 	if (cls.signon == SIGNONS)
 	{
-		S_Update (r_origin, vpn, vright, vup);
 		CL_DecayLights ();
+		S_Update (r_origin, vpn, vright, vup);
 	}
 	else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 
 	CDAudio_Update ();
 
-	if (host_speeds.value)
-	{
-		pass1 = (time1 - time3) * 1000;
-		time3 = Sys_FloatTime ();
-		pass2 = (time2 - time1) * 1000;
-		pass3 = (time3 - time2) * 1000;
-
-		Con_Printf
-		(
-			"Total: %3i  Server: %3i  Refresh: %3i  Sound: %3i\n",
-			pass1 + pass2 + pass3,
-			pass1,
-			pass2,
-			pass3
-		);
-	}
-
 	host_framecount++;
 }
 
-
-void Host_Frame (float time)
-{
-	float	time1, time2;
-	static float	timetotal;
-	static int		timecount;
-	int		i, c, m;
-
-	// don't go too slow
-	if (sv_speed.value < 0.1) Cvar_Set (&sv_speed, 0.1f);
-
-	// allow to adjust the speed of the server for slowmo/fast forward effects and stuff
-	time *= sv_speed.value;
-
-	if (!serverprofile.value)
-	{
-		_Host_Frame (time);
-		return;
-	}
-	
-	time1 = Sys_FloatTime ();
-	_Host_Frame (time);
-	time2 = Sys_FloatTime ();	
-	
-	timetotal += time2 - time1;
-	timecount++;
-	
-	if (timecount < 1000)
-		return;
-
-	m = timetotal*1000/timecount;
-	timecount = 0;
-	timetotal = 0;
-	c = 0;
-	for (i=0 ; i<svs.maxclients ; i++)
-	{
-		if (svs.clients[i].active)
-			c++;
-	}
-
-	Con_Printf ("serverprofile: %2i clients %2i msec\n",  c,  m);
-}
 
 //============================================================================
 
@@ -765,6 +721,7 @@ void PR_InitBuiltIns (void);
 void Menu_MapsPopulate (void);
 void Menu_DemoPopulate (void);
 void Menu_LoadAvailableSkyboxes (void);
+void SCR_QuakeIsLoading (int stage, int maxstage);
 
 void Host_Init (quakeparms_t *parms)
 {
@@ -787,7 +744,10 @@ void Host_Init (quakeparms_t *parms)
 	// as soon as the filesystem comes up we want to load the configs so that cvars will have correct
 	// values before we proceed with anything else.  this is possible to do as we've made our cvars
 	// self-registering, so we don't need to worry about subsequent registrations or cvars that don't exist.
-	Cbuf_InsertText ("exec quake.rc\n");
+	Cbuf_InsertText ("exec autoexec.cfg\n");
+	Cbuf_InsertText ("exec directq.cfg\n");
+	Cbuf_InsertText ("exec config.cfg\n");
+	Cbuf_InsertText ("exec default.cfg\n");
 
 	// execute immediately rather than deferring
 	Cbuf_Execute ();
@@ -816,25 +776,33 @@ void Host_Init (quakeparms_t *parms)
 
 	D3D_VidInit (host_basepal);
 
-	Draw_Init ();
-	SCR_Init ();
-	R_Init ();
-	// FIXME: doesn't use the new one-window approach yet
-	S_Init ();
-	DS_Init ();
-	CDAudio_Init ();
-	HUD_Init ();
-	CL_Init ();
-	IN_Init ();
+	Draw_Init (); SCR_QuakeIsLoading (1, 9);
+	SCR_Init (); SCR_QuakeIsLoading (2, 9);
+	R_Init (); SCR_QuakeIsLoading (3, 9);
+	S_Init (); SCR_QuakeIsLoading (4, 9);
+	DS_Init (); SCR_QuakeIsLoading (5, 9);
+	CDAudio_Init (); SCR_QuakeIsLoading (6, 9);
+	HUD_Init (); SCR_QuakeIsLoading (7, 9);
+	CL_Init (); SCR_QuakeIsLoading (8, 9);
+	IN_Init (); SCR_QuakeIsLoading (9, 9);
 
 	// everythings up now
 	full_initialized = true;
 
-	// load the configs fully
-	Cbuf_InsertText ("exec quake.rc\n");
+	// load the configs fully (reverse order)
+	Cbuf_InsertText ("togglemenu\n");
+	Cbuf_InsertText ("exec autoexec.cfg\n");
+	Cbuf_InsertText ("exec directq.cfg\n");
+	Cbuf_InsertText ("exec config.cfg\n");
+	Cbuf_InsertText ("exec default.cfg\n");
 
 	// anything allocated after this point will be cleared between maps
 	host_initialized = true;
+
+	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s", DIRECTQ_VERSION, com_gamename));
+
+	// play intermission tune
+	CDAudio_Play (3, true);
 }
 
 

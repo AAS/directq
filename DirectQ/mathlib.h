@@ -38,10 +38,11 @@ extern	int nanmask;
 
 #define	IS_NAN(x) (((*(int *)&x)&nanmask)==nanmask)
 
-#define DotProduct(x,y) (x[0]*y[0]+x[1]*y[1]+x[2]*y[2])
-#define VectorSubtract(a,b,c) {c[0]=a[0]-b[0];c[1]=a[1]-b[1];c[2]=a[2]-b[2];}
-#define VectorAdd(a,b,c) {c[0]=a[0]+b[0];c[1]=a[1]+b[1];c[2]=a[2]+b[2];}
-#define VectorCopy(a,b) {b[0]=a[0];b[1]=a[1];b[2]=a[2];}
+#define DotProduct(x,y) ((x)[0]*(y)[0]+(x)[1]*(y)[1]+(x)[2]*(y)[2])
+#define VectorSubtract(vec1,vec2,dst) {(dst)[0]=(vec1)[0]-(vec2)[0];(dst)[1]=(vec1)[1]-(vec2)[1];(dst)[2]=(vec1)[2]-(vec2)[2];}
+#define VectorAdd(vec1,vec2,dst) {(dst)[0]=(vec1)[0]+(vec2)[0];(dst)[1]=(vec1)[1]+(vec2)[1];(dst)[2]=(vec1)[2]+(vec2)[2];}
+#define VectorCopy(src,dst) {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];}
+#define VectorClear(vec) {(vec)[0] = (vec)[1] = (vec)[2] = 0.0f;}
 
 void VectorMA (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc);
 

@@ -23,38 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BAN_TEST
 
 #include "quakedef.h"
-
-#ifdef BAN_TEST
-#if defined(_WIN32)
-#include <windows.h>
-#elif defined (NeXT)
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#else
-#define AF_INET 		2	/* internet */
-struct in_addr
-{
-	union
-	{
-		struct { unsigned char s_b1,s_b2,s_b3,s_b4; } S_un_b;
-		struct { unsigned short s_w1,s_w2; } S_un_w;
-		unsigned long S_addr;
-	} S_un;
-};
-#define	s_addr	S_un.S_addr	/* can be used for most tcp & ip code */
-struct sockaddr_in
-{
-    short			sin_family;
-    unsigned short	sin_port;
-	struct in_addr	sin_addr;
-    char			sin_zero[8];
-};
-char *inet_ntoa(struct in_addr in);
-unsigned long inet_addr(const char *cp);
-#endif
-#endif	// BAN_TEST
-
 #include "net_dgrm.h"
+#include "pr_class.h"
 
 // these two macros are to make the code more readable
 #define sfunc	net_landrivers[sock->landriver]
@@ -104,7 +74,7 @@ void NET_Ban_f (void)
 	}
 	else
 	{
-		if (pr_global_struct->deathmatch && !host_client->privileged)
+		if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
 			return;
 		print = SV_ClientPrintf;
 	}
@@ -322,7 +292,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 		if (length == -1)
 		{
-			Con_Printf("Read error\n");
+			Con_Printf ("Read error\n");
 			return -1;
 		}
 
@@ -458,10 +428,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 void PrintStats(qsocket_t *s)
 {
-	Con_Printf("canSend = %4u   \n", s->canSend);
-	Con_Printf("sendSeq = %4u   ", s->sendSequence);
-	Con_Printf("recvSeq = %4u   \n", s->receiveSequence);
-	Con_Printf("\n");
+	Con_Printf ("canSend = %4u   \n", s->canSend);
+	Con_Printf ("sendSeq = %4u   ", s->sendSequence);
+	Con_Printf ("recvSeq = %4u   \n", s->receiveSequence);
+	Con_Printf ("\n");
 }
 
 void NET_Stats_f (void)
@@ -470,16 +440,16 @@ void NET_Stats_f (void)
 
 	if (Cmd_Argc () == 1)
 	{
-		Con_Printf("unreliable messages sent   = %i\n", unreliableMessagesSent);
-		Con_Printf("unreliable messages recv   = %i\n", unreliableMessagesReceived);
-		Con_Printf("reliable messages sent     = %i\n", messagesSent);
-		Con_Printf("reliable messages received = %i\n", messagesReceived);
-		Con_Printf("packetsSent                = %i\n", packetsSent);
-		Con_Printf("packetsReSent              = %i\n", packetsReSent);
-		Con_Printf("packetsReceived            = %i\n", packetsReceived);
-		Con_Printf("receivedDuplicateCount     = %i\n", receivedDuplicateCount);
-		Con_Printf("shortPacketCount           = %i\n", shortPacketCount);
-		Con_Printf("droppedDatagrams           = %i\n", droppedDatagrams);
+		Con_Printf ("unreliable messages sent   = %i\n", unreliableMessagesSent);
+		Con_Printf ("unreliable messages recv   = %i\n", unreliableMessagesReceived);
+		Con_Printf ("reliable messages sent     = %i\n", messagesSent);
+		Con_Printf ("reliable messages received = %i\n", messagesReceived);
+		Con_Printf ("packetsSent                = %i\n", packetsSent);
+		Con_Printf ("packetsReSent              = %i\n", packetsReSent);
+		Con_Printf ("packetsReceived            = %i\n", packetsReceived);
+		Con_Printf ("receivedDuplicateCount     = %i\n", receivedDuplicateCount);
+		Con_Printf ("shortPacketCount           = %i\n", shortPacketCount);
+		Con_Printf ("droppedDatagrams           = %i\n", droppedDatagrams);
 	}
 	else if (strcmp(Cmd_Argv(1), "*") == 0)
 	{
@@ -554,7 +524,7 @@ static void Test_Poll(void *junk)
 		connectTime = MSG_ReadLong();
 		strcpy(address, MSG_ReadString());
 
-		Con_Printf("%s\n  frags:%3i  colors:%u %u  time:%u\n  %s\n", name, frags, colors >> 4, colors & 0x0f, connectTime / 60, address);
+		Con_Printf ("%s\n  frags:%3i  colors:%u %u  time:%u\n  %s\n", name, frags, colors >> 4, colors & 0x0f, connectTime / 60, address);
 	}
 
 	testPollCount--;
@@ -675,7 +645,7 @@ static void Test2_Poll(void *junk)
 		goto Done;
 	strcpy(value, MSG_ReadString());
 
-	Con_Printf("%-16.16s  %-16.16s\n", name, value);
+	Con_Printf ("%-16.16s  %-16.16s\n", name, value);
 
 	SZ_Clear(&net_message);
 	// save space for the header, filled in later
@@ -691,7 +661,7 @@ Reschedule:
 	return;
 
 Error:
-	Con_Printf("Unexpected repsonse to Rule Info request\n");
+	Con_Printf ("Unexpected repsonse to Rule Info request\n");
 Done:
 	net_DriverFunc.CloseSocket(test2Socket);
 	test2InProgress = false;
@@ -1242,9 +1212,9 @@ static qsocket_t *_Datagram_Connect (char *host)
 				if (sfunc.AddrCompare(&readaddr, &sendaddr) != 0)
 				{
 #ifdef DEBUG
-					Con_Printf("wrong reply address\n");
-					Con_Printf("Expected: %s\n", StrAddr (&sendaddr));
-					Con_Printf("Received: %s\n", StrAddr (&readaddr));
+					Con_Printf ("wrong reply address\n");
+					Con_Printf ("Expected: %s\n", StrAddr (&sendaddr));
+					Con_Printf ("Received: %s\n", StrAddr (&readaddr));
 					SCR_UpdateScreen ();
 #endif
 					ret = 0;
@@ -1283,14 +1253,14 @@ static qsocket_t *_Datagram_Connect (char *host)
 		while (ret == 0 && (SetNetTime() - start_time) < 2.5);
 
 		if (ret) break;
-		Con_Printf("still trying...\n"); SCR_UpdateScreen ();
+		Con_Printf ("still trying...\n"); SCR_UpdateScreen ();
 		start_time = SetNetTime();
 	}
 
 	if (ret == 0)
 	{
 		reason = "No Response";
-		Con_Printf("%s\n", reason);
+		Con_Printf ("%s\n", reason);
 		strcpy(m_return_reason, reason);
 		goto ErrorReturn;
 	}
@@ -1298,7 +1268,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	if (ret == -1)
 	{
 		reason = "Network Error";
-		Con_Printf("%s\n", reason);
+		Con_Printf ("%s\n", reason);
 		strcpy(m_return_reason, reason);
 		goto ErrorReturn;
 	}
@@ -1307,7 +1277,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	if (ret == CCREP_REJECT)
 	{
 		reason = MSG_ReadString();
-		Con_Printf(reason);
+		Con_Printf (reason);
 		strncpy(m_return_reason, reason, 31);
 		goto ErrorReturn;
 	}
@@ -1320,7 +1290,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	else
 	{
 		reason = "Bad Response";
-		Con_Printf("%s\n", reason);
+		Con_Printf ("%s\n", reason);
 		strcpy(m_return_reason, reason);
 		goto ErrorReturn;
 	}
@@ -1334,7 +1304,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	if (net_DriverFunc.Connect (newsock, &sock->addr) == -1)
 	{
 		reason = "Connect to Game failed";
-		Con_Printf("%s\n", reason);
+		Con_Printf ("%s\n", reason);
 		strcpy(m_return_reason, reason);
 		goto ErrorReturn;
 	}

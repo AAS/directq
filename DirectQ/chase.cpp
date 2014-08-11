@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // chase.c -- chase camera code
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
 bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace);
@@ -49,7 +50,7 @@ void TraceLine (vec3_t start, vec3_t end, vec3_t impact)
 	trace_t	trace;
 
 	memset (&trace, 0, sizeof(trace));
-	SV_RecursiveHullCheck (cl.worldbrush->hulls, 0, 0, 1, start, end, &trace);
+	SV_RecursiveHullCheck (cl.worldmodel->brushhdr->hulls, 0, 0, 1, start, end, &trace);
 
 	VectorCopy (trace.endpos, impact);
 }
@@ -68,10 +69,8 @@ bool Chase_CheckBrushEdict (entity_t *e, vec3_t checkpoint, int viewcontents)
 	if (e == cl_entities[cl.viewentity]) return true;
 
 	// let's not clip against these types
-	if (e->model->name[0] != '*') return true;
-
-	// because you never know what a mod might try...
 	if (e->model->type != mod_brush) return true;
+	if (e->model->name[0] != '*') return true;
 
 	// derive the bbox
 	if (e->angles[0] || e->angles[1] || e->angles[2])
@@ -114,11 +113,6 @@ bool Chase_Check (vec3_t checkpoint, int viewcontents)
 	// (may not include static entities) (but only checks brush models)
 	for (i = 0; i < d3d_RenderDef.numvisedicts; i++)
 		if (!Chase_CheckBrushEdict (d3d_RenderDef.visedicts[i], checkpoint, viewcontents)) return false;
-
-	// check translucent edicts too
-	// fixme - currently this goes through transedicts.  ah well, 1.8
-	for (i = 0; i < d3d_RenderDef.numtransedicts; i++)
-		if (!Chase_CheckBrushEdict (d3d_RenderDef.transedicts[i], checkpoint, viewcontents)) return false;
 
 	// it's good now
 	return true;

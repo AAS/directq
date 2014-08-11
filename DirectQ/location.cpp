@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "location.h"
 
 
@@ -54,7 +55,7 @@ void LOC_LoadLocations (void)
 
 	Con_DPrintf ("Loading %s\n", locname);
 
-	locations = (location_t *) Pool_Alloc (POOL_MAP, sizeof (location_t));
+	locations = (location_t *) Pool_Map->Alloc (sizeof (location_t));
 	location_t *l = locations;
 
 	while (1)
@@ -116,7 +117,7 @@ void LOC_LoadLocations (void)
 			Con_DPrintf ("Read location %s\n", l->name);
 
 			// set up a new empty location (this may not be used...)
-			l = (location_t *) Pool_Alloc (POOL_MAP, sizeof (location_t));
+			l = (location_t *) Pool_Map->Alloc (sizeof (location_t));
 			numlocations++;
 		}
 	}

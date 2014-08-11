@@ -27,6 +27,28 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 //=============================================================================
 
+typedef struct aliascache_s
+{
+	// all the info we need to draw the model is here
+	float frontlerp;
+	float backlerp;
+	float *shadedots;
+	struct image_s *teximage;
+	struct image_s *lumaimage;
+	vec3_t lightspot;
+	struct mplane_s *lightplane;
+} aliasstate_t;
+
+
+typedef struct efrag_s
+{
+	struct mleaf_s		*leaf;
+	struct entity_s		*entity;
+	struct efrag_s		*entnext;
+	struct efrag_s		*leafnext;
+} efrag_t;
+
+
 typedef struct entity_s
 {
 	bool				forcelink;		// model changed
@@ -41,22 +63,17 @@ typedef struct entity_s
 	vec3_t					msg_angles[2];	// last two updates (0 is newest)
 	vec3_t					angles;	
 	struct model_s			*model;			// NULL = no model
+	struct efrag_s			*efrag;
 	int						frame;
 	float					syncbase;		// for client-side animations
 	byte					*colormap;
 	int						effects;		// light, particals, etc
 	int						skinnum;		// for Alias models
-	int						visframe;		// last frame this entity was
-											//  found in an active leaf
+	int						visframe;		// last frame this entity was found in an active leaf
+	vec3_t					modelorg;		// relative to r_origin
 
 	// allocated at runtime client and server side
 	int						entnum;
-
-	/*
-	unused
-	int						dlightframe;	// dynamic lighting
-	int						dlightbits;
-	*/
 
 	// interpolation
 	float		frame_start_time;
@@ -78,8 +95,9 @@ typedef struct entity_s
 	// false if the entity is to be subjected to bbox culling
 	bool		nocullbox;
 
-	// true if this was a static ent that has been removed
-	bool		staticremoved;
+	// occlusion query used by this entity
+	struct d3d_occlusionquery_s *occlusion;
+	bool occluded;
 
 	// distance from client (for depth sorting)
 	float		dist;
@@ -91,8 +109,13 @@ typedef struct entity_s
 											//  not split
 
 	// the matrix used for transforming this entity
-	void		*matrix;
+	// D3DXMATRIX in *incredibly* unhappy living in an entity_t struct...
+	D3DMATRIX		matrix;
+
+	// cached info about an alias model for deferred drawing
+	aliasstate_t		aliasstate;
 } entity_t;
+
 
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
 typedef struct

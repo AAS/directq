@@ -172,6 +172,21 @@ private:
 };
 
 
+class CQMenuIntegerToggle : public CQMenuOption
+{
+public:
+	CQMenuIntegerToggle (char *commandtext, int *menuoption, int toggleoffvalue = 0, int toggleonvalue = 1);
+	void Draw (int y);
+	void Key (int k);
+	void DrawCurrentOptionHighlight (int y);
+
+private:
+	int *MenuOption;
+	int ToggleOnValue;
+	int ToggleOffValue;
+};
+
+
 class CQMenuCvarSlider : public CQMenuOption, public CQMenuCvar
 {
 public:
@@ -405,6 +420,7 @@ public:
 	void SetDrawItemCallback (menucommandii_t drawitemcallback);
 	void SetHoverItemCallback (menucommandiii_t hoveritemcallback);
 	void SetEnterItemCallback (menucommandi_t enteritemcallback);
+	void SetDeleteItemCallback (menucommandi_t deleteitemcallback);
 	void KeyFunc (int key);
 	int DrawItems (int x, int starty);
 	int GetCurrent (void);
@@ -415,6 +431,7 @@ private:
 	menucommandii_t DrawItemCallback;
 	menucommandiii_t HoverItemCallback;
 	menucommandi_t EnterItemCallback;
+	menucommandi_t DeleteItemCallback;
 
 	// properties
 	int ScrollBoxStartItem;

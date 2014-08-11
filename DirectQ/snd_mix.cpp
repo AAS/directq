@@ -40,7 +40,7 @@ __inline void Snd_InitPaintBuffer (void)
 {
 	if (!paintbuffer)
 	{
-		paintbuffer = (portable_samplepair_t *) Pool_Alloc (POOL_PERMANENT, PAINTBUF_SIZE * sizeof (portable_samplepair_t));
+		paintbuffer = (portable_samplepair_t *) Pool_Permanent->Alloc (PAINTBUF_SIZE * sizeof (portable_samplepair_t));
 		memset (paintbuffer, 0, PAINTBUF_SIZE * sizeof (portable_samplepair_t));
 	}
 }
@@ -180,13 +180,13 @@ void SND_InitScaletable (void)
 	{
 		// use a higher quality scale table than the Quake default
 		// (this is just an array lookup so the only real penalty comes from memory overhead)
-		snd_scaletable = (int **) Pool_Alloc (POOL_PERMANENT, 256 * sizeof (int *));
+		snd_scaletable = (int **) Pool_Permanent->Alloc (256 * sizeof (int *));
 		for (int i = 0; i < 256; i++) snd_scaletable[i] = NULL;
 	}
 
 	for (int i = 0; i < 256; i++)
 	{
-		if (!snd_scaletable[i]) snd_scaletable[i] = (int *) Pool_Alloc (POOL_PERMANENT, 256 * sizeof (int));
+		if (!snd_scaletable[i]) snd_scaletable[i] = (int *) Pool_Permanent->Alloc (256 * sizeof (int));
 		for (int j = 0; j < 256; j++) snd_scaletable[i][j] = ((signed char) j) * i;
 	}
 }

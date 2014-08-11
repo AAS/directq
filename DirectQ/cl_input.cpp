@@ -291,6 +291,22 @@ cvar_t	cl_pitchspeed ("cl_pitchspeed","150");
 
 cvar_t	cl_anglespeedkey ("cl_anglespeedkey","1.5");
 
+cvar_t cl_fullpitch ("cl_fullpitch", "0", CVAR_ARCHIVE);
+
+void CL_BoundViewPitch (void)
+{
+	if (cl_fullpitch.integer)
+	{
+		if (cl.viewangles[PITCH] > 90) cl.viewangles[PITCH] = 90;
+		if (cl.viewangles[PITCH] < -90) cl.viewangles[PITCH] = -90;
+	}
+	else
+	{
+		if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
+		if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
+	}
+}
+
 
 /*
 ================
@@ -306,8 +322,7 @@ void CL_AdjustAngles (void)
 	
 	if (in_speed.state & 1)
 		speed = host_frametime * cl_anglespeedkey.value;
-	else
-		speed = host_frametime;
+	else speed = host_frametime;
 
 	if (!(in_strafe.state & 1))
 	{
@@ -315,6 +330,7 @@ void CL_AdjustAngles (void)
 		cl.viewangles[YAW] += speed*cl_yawspeed.value*CL_KeyState (&in_left);
 		cl.viewangles[YAW] = anglemod(cl.viewangles[YAW]);
 	}
+
 	if (in_klook.state & 1)
 	{
 		V_StopPitchDrift ();
@@ -330,18 +346,13 @@ void CL_AdjustAngles (void)
 
 	if (up || down)
 		V_StopPitchDrift ();
-		
-	if (cl.viewangles[PITCH] > 80)
-		cl.viewangles[PITCH] = 80;
-	if (cl.viewangles[PITCH] < -70)
-		cl.viewangles[PITCH] = -70;
 
-	if (cl.viewangles[ROLL] > 50)
-		cl.viewangles[ROLL] = 50;
-	if (cl.viewangles[ROLL] < -50)
-		cl.viewangles[ROLL] = -50;
-		
+	CL_BoundViewPitch ();
+
+	if (cl.viewangles[ROLL] > 50) cl.viewangles[ROLL] = 50;
+	if (cl.viewangles[ROLL] < -50) cl.viewangles[ROLL] = -50;
 }
+
 
 /*
 ================

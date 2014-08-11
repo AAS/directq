@@ -156,6 +156,7 @@ struct cache_user_s;
 
 // common.h doesn't know what MAX_PATH is
 extern	char	com_gamedir[260];
+extern char	com_gamename[260];
 
 // common.h doesn't know what a HANDLE is...
 int COM_FOpenFile (char *filename, void *hf);
@@ -168,7 +169,7 @@ byte *COM_LoadTempFile (char *path);
 byte *COM_LoadHunkFile (char *path);
 
 extern bool		standard_quake, rogue, hipnotic, nehahra;
-bool IsTimeout (float *PrevTime, float WaitTime);
+bool IsTimeout (DWORD *PrevTime, DWORD WaitTime);
 
 
 void COM_HashData (byte *hash, const void *data, int size);

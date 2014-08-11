@@ -76,13 +76,15 @@ typedef struct {
 
 // TODO: could be shorts
 
-typedef struct {
+typedef struct
+{
 	int		onseam;
 	int		s;
 	int		t;
 } stvert_t;
 
-typedef struct dtriangle_s {
+typedef struct dtriangle_s
+{
 	int					facesfront;
 	int					vertindex[3];
 } dtriangle_t;
@@ -99,7 +101,7 @@ typedef struct
 } trivertx_t;
 
 // pre-expanded
-typedef struct
+typedef struct drawvertx_s
 {
 	byte	v[3];
 	byte	lightnormalindex;
@@ -120,23 +122,28 @@ typedef struct
 	trivertx_t	bboxmax;	// lightnormal isn't used
 } daliasgroup_t;
 
-typedef struct {
+typedef struct
+{
 	int			numskins;
 } daliasskingroup_t;
 
-typedef struct {
+typedef struct
+{
 	float	interval;
 } daliasinterval_t;
 
-typedef struct {
+typedef struct
+{
 	float	interval;
 } daliasskininterval_t;
 
-typedef struct {
+typedef struct
+{
 	aliasframetype_t	type;
 } daliasframetype_t;
 
-typedef struct {
+typedef struct
+{
 	aliasskintype_t	type;
 } daliasskintype_t;
 

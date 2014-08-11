@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
 
@@ -78,8 +79,6 @@ console is:
 */
 
 
-int			glx, gly, glwidth, glheight;
-
 float		scr_con_current;
 float		scr_conlines;		// lines of console to display
 
@@ -120,7 +119,6 @@ int			clearnotify;
 vrect_t		scr_vrect;
 
 bool	scr_disabled_for_loading;
-bool	scr_drawloading;
 bool	scr_drawmapshot;
 float	saved_viewsize = 0;
 
@@ -404,9 +402,21 @@ static void SCR_CalcRefdef (void)
 	if (gl_conscale.value < 0) Cvar_Set ("gl_conscale", "0");
 	if (gl_conscale.value > 1) Cvar_Set ("gl_conscale", "1");
 
-	// recalculate vid.width and vid.height
-	vid.width = (glwidth - vid.conwidth) * gl_conscale.value + vid.conwidth;
-	vid.height = (glheight - vid.conheight) * gl_conscale.value + vid.conheight;
+	// adjust a conwidth and conheight to match the mode aspect
+	// they should be the same aspect as the mode, with width never less than 640 and height never less than 480
+	int conheight = 480;
+	int conwidth = 480 * d3d_CurrentMode.Width / d3d_CurrentMode.Height;
+
+	// bring it up to 640
+	if (conwidth < 640)
+	{
+		conwidth = 640;
+		conheight = conwidth * d3d_CurrentMode.Height / d3d_CurrentMode.Width;
+	}
+
+	// set width and height
+	vid.width = (d3d_CurrentMode.Width - conwidth) * gl_conscale.value + conwidth;
+	vid.height = (d3d_CurrentMode.Height - conheight) * gl_conscale.value + conheight;
 
 	h = vid.height - sb_lines;
 
@@ -564,27 +574,6 @@ void SCR_DrawPause (void)
 
 
 /*
-==============
-SCR_DrawLoading
-==============
-*/
-void SCR_DrawLoading (void)
-{
-	qpic_t	*pic;
-
-	if (!scr_drawloading)
-		return;
-
-	pic = Draw_CachePic ("gfx/loading.lmp");
-	Draw_Pic ((vid.width - pic->width) / 2, (vid.height - 48 - pic->height) / 2, pic);
-}
-
-
-
-//=============================================================================
-
-
-/*
 ==================
 SCR_SetUpToDrawConsole
 ==================
@@ -592,9 +581,6 @@ SCR_SetUpToDrawConsole
 void SCR_SetUpToDrawConsole (void)
 {
 	Con_CheckResize ();
-	
-	if (scr_drawloading)
-		return;		// never a console with loading plaque
 
 	// decide on the height of the console
 	con_forcedup = !cl.worldmodel || cls.signon != SIGNONS;
@@ -892,8 +878,7 @@ void SCR_ScreenShot_f (void)
 		return;
  	}
 
-	// hack - get rid of the console notify lines and refresh the screen before taking a screenshot
-	Con_ClearNotify ();
+	// run a screen refresh
 	SCR_UpdateScreen ();
 
 	// the surface we'll use
@@ -916,7 +901,6 @@ void SCR_ScreenShot_f (void)
 }
 
 
-void R_RenderScene (void);
 void Draw_InvalidateMapshot (void);
 
 void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
@@ -1115,6 +1099,17 @@ void SCR_SetTimeout (float timeout)
 	scr_timeout = timeout;
 }
 
+bool scr_drawloading = false;
+
+void SCR_DrawLoading (void)
+{
+	if (!scr_drawloading) return;
+
+	qpic_t *pic = Draw_CachePic ("gfx/loading.lmp");
+	Draw_Pic ((vid.width - pic->width) / 2, (vid.height - 48 - pic->height) / 2, pic);
+}
+
+
 void SCR_BeginLoadingPlaque (void)
 {
 	S_StopAllSounds (true);
@@ -1122,15 +1117,10 @@ void SCR_BeginLoadingPlaque (void)
 	if (cls.state != ca_connected) return;
 	if (cls.signon != SIGNONS) return;
 
-	// redraw with no console and the loading plaque
+	// redraw with no console and no center text
 	Con_ClearNotify ();
 	scr_centertime_off = 0;
 	scr_con_current = 0;
-
-	// switch viewsize to 120
-	// (value was saved out in SCR_CalcRefdef)
-	saved_viewsize = scr_viewsize.value;
-	Cvar_Set (&scr_viewsize, 120);
 
 	scr_drawloading = true;
 	SCR_UpdateScreen ();
@@ -1152,9 +1142,6 @@ void SCR_EndLoadingPlaque (void)
 {
 	scr_disabled_for_loading = false;
 	Con_ClearNotify ();
-
-	// restore viewsize
-	if (saved_viewsize) Cvar_Set (&scr_viewsize, saved_viewsize);
 }
 
 //=============================================================================
@@ -1170,7 +1157,6 @@ char *mbpromts[] =
 };
 
 
-bool scr_drawdialog = false;
 char *scr_notifytext = NULL;
 char *scr_notifycaption = NULL;
 int scr_notifyflags = 0;
@@ -1266,17 +1252,13 @@ keypress.
 */
 int SCR_ModalMessage (char *text, char *caption, int flags)
 {
-	// draw a fresh screen
-	// fixme - the renderer needs to be reworked here...
-	scr_drawdialog = true;
-
 	scr_notifytext = text;
 	scr_notifycaption = caption;
 	scr_notifyflags = flags;
 
-	SCR_UpdateScreen ();
-
-	scr_drawdialog = false;
+	D3D_BeginRendering ();
+	SCR_DrawNotifyString (scr_notifytext, scr_notifycaption, scr_notifyflags);
+	D3D_EndRendering ();
 
 	S_ClearBuffer ();		// so dma doesn't loop current sound
 
@@ -1287,6 +1269,7 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 		key_count = -1;		// wait for a key down and up
 		Sys_SendKeyEvents ();
 
+		if (key_lastpress == K_ENTER) {key_accept = true; break;}
 		if (key_lastpress == K_ESCAPE) {key_accept = false; break;}
 
 		if (flags == MB_OK)
@@ -1312,9 +1295,9 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 		{
 			if (key_lastpress == 'o' || key_lastpress == 'O') {key_accept = true; break;}
 		}
-	} while (1);
 
-	SCR_UpdateScreen ();
+		Sleep (5);
+	} while (1);
 
 	return key_accept;
 }
@@ -1416,7 +1399,7 @@ void SCR_DrawAutomapStats (void)
 		int yahy = (((r_automap_y - r_refdef.vieworg[1]) * 1) / r_automap_scale) + (vid.height / 2);
 
 		// draw it
-		D3D_DrawTexturedPic (yahx - 5, yahy - 10, 36, 36, yahtexture);
+		Draw_Pic (yahx - 5, yahy - 10, 36, 36, yahtexture);
 	}
 
 	if (scr_automapinfo.integer & 1)
@@ -1525,7 +1508,7 @@ void SCR_UpdateScreen (void)
 
 	// begin rendering; get the size of the refresh window and set up for the render
 	// this is also used for lost device recovery mode
-	D3D_BeginRendering (&glx, &gly, &glwidth, &glheight);
+	D3D_BeginRendering ();
 
 	// if we've just lost the device we're going into recovery mode, so don't draw anything
 	if (d3d_DeviceLost) return;
@@ -1589,20 +1572,26 @@ void SCR_UpdateScreen (void)
 	{
 		if (!d3d_RenderDef.automap)
 		{
-			SCR_DrawNet ();
-			SCR_DrawTurtle ();
-			SCR_DrawPause ();
-			SCR_CheckDrawCenterString ();
+			if (!scr_drawloading) SCR_DrawNet ();
+			if (!scr_drawloading) SCR_DrawTurtle ();
+			if (!scr_drawloading) SCR_DrawPause ();
+			if (!scr_drawloading) SCR_CheckDrawCenterString ();
 			HUD_DrawHUD ();
 			SCR_DrawConsole ();
-			SHOWLMP_drawall ();
-			M_Draw ();
+			if (!scr_drawloading) SHOWLMP_drawall ();
+			if (!scr_drawloading) M_Draw ();
 		}
 		else SCR_DrawAutomapStats ();
 	}
 
-	// this should always be drawn as an overlay to what's currently on screen
-	if (scr_drawdialog) SCR_DrawNotifyString (scr_notifytext, scr_notifycaption, scr_notifyflags);
+	extern int r_speedstime;
+
+	if (r_speeds.value && r_speedstime >= 0 && !con_forcedup)
+	{
+		Draw_String (vid.width - 100, 20, va ("%5i ms   ", r_speedstime));
+		Draw_String (vid.width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
+		Draw_String (vid.width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
+	}
 
 	D3D_EndRendering ();
 
@@ -1618,5 +1607,48 @@ void SCR_UpdateScreen (void)
 	}
 
 	V_UpdatePalette ();
+}
+
+
+void SCR_DrawSlider (int x, int y, int width, int stage, int maxstage)
+{
+	// stage goes from 1 to maxstage inclusive
+	// width should really be a multiple of 8
+	// slider left
+	Draw_Character (x, y, 128);
+
+	// slider body
+	for (int i = 16; i < width; i += 8)
+		Draw_Character (x + i - 8, y, 129);
+
+	// slider right
+	Draw_Character (x + width - 8, y, 130);
+
+	// slider position
+	x = (int) ((float) (width - 24) * (((100.0f / (float) (maxstage - 1)) * (float) (stage - 1)) / 100.0f)) + x + 8;
+
+	Draw_Character (x, y, 131);
+}
+
+
+void SCR_QuakeIsLoading (int stage, int maxstage)
+{
+	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
+	SCR_CalcRefdef ();
+	D3D_BeginRendering ();
+	D3D_Set2D ();
+
+	Draw_ConsoleBackground (vid.height);
+
+	qpic_t *pic = Draw_CachePic ("gfx/loading.lmp");
+
+	int x = (vid.width - pic->width) / 2;
+	int y = (vid.height - 48 - pic->height) / 2;
+
+	Draw_Pic (x, y, pic);
+
+	SCR_DrawSlider (x + 8, y + pic->height + 8, pic->width - 16, stage, maxstage);
+
+	D3D_EndRendering ();
 }
 

@@ -20,10 +20,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_light.c
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
-// never create lightmaps smaller than this
-#define MINIMUM_LIGHTMAP_SIZE	64
+// use tall but narrow lightmaps to optimize render and uploads
+#define MINIMUM_LIGHTMAP_WIDTH 32
 
 // main lightmap object
 CD3DLightmap *d3d_Lightmaps = NULL;
@@ -32,24 +33,170 @@ cvar_t r_lerplightstyle ("r_lerplightstyle", "1", CVAR_ARCHIVE);
 cvar_t r_coloredlight ("r_coloredlight", "1", CVAR_ARCHIVE);
 cvar_t r_overbright ("gl_overbright", "1", CVAR_ARCHIVE);
 
+cvar_t r_fastlightmaps ("r_fastlightmaps", "0", CVAR_ARCHIVE);
+
 
 // unbounded
 unsigned int **d3d_blocklights;
 
-void D3D_CreateBlockLights (void)
+
+void D3D_BuildLightmapForSurface (msurface_t *surf)
 {
+	// fill in lightmap extents
+	surf->smax = (surf->extents[0] >> 4) + 1;
+	surf->tmax = (surf->extents[1] >> 4) + 1;
+
+	// attempt to create the lightmap
+	if (d3d_Lightmaps && d3d_Lightmaps->AllocBlock (surf))
+	{
+		surf->d3d_Lightmap->CalcLightmapTexCoords (surf);
+		return;
+	}
+
+	// didn't create a lightmap so allocate a new one
+	// this will always work as a new block that's big enough will just have become free
+	surf->d3d_Lightmap = new CD3DLightmap (surf);
+	d3d_Lightmaps->AllocBlock (surf);
+	surf->d3d_Lightmap->CalcLightmapTexCoords (surf);
+}
+
+
+void D3D_BuildLightmapTextureChains (brushhdr_t *hdr)
+{
+	int nummapsinchains = 0;
+	int nummapsinsurfs = 0;
+
+	// clear down chains
+	for (int i = 0; i < hdr->numtextures; i++)
+	{
+		texture_t *tex = hdr->textures[i];
+
+		if (!tex) continue;
+		tex->texturechain = NULL;
+	}
+
+	// now build them up
+	for (int i = 0; i < hdr->numsurfaces; i++)
+	{
+		msurface_t *surf = &hdr->surfaces[i];
+
+		// ensure
+		surf->d3d_Lightmap = NULL;
+
+		// no lightmaps on these surface types
+		if (surf->flags & SURF_DRAWSKY) continue;
+		if (surf->flags & SURF_DRAWTURB) continue;
+
+		texture_t *tex = surf->texinfo->texture;
+
+		surf->texturechain = tex->texturechain;
+		tex->texturechain = surf;
+	}
+
+	// now build lightmaps for all surfaces in each chain
+	for (int i = 0; i < hdr->numtextures; i++)
+	{
+		texture_t *tex = hdr->textures[i];
+
+		if (!tex) continue;
+		if (!tex->texturechain) continue;
+
+		// build lightmaps for all surfs in this chain
+		for (msurface_t *surf = tex->texturechain; surf; surf = surf->texturechain)
+		{
+			D3D_BuildLightmapForSurface (surf);
+			nummapsinchains++;
+		}
+
+		// clear down
+		tex->texturechain = NULL;
+	}
+
+	// finally pick up any surfaces we may have missed above
+	// (there should be none)
+	for (int i = 0; i < hdr->numsurfaces; i++)
+	{
+		msurface_t *surf = &hdr->surfaces[i];
+
+		// no lightmaps on these surface types
+		if (surf->flags & SURF_DRAWSKY) continue;
+		if (surf->flags & SURF_DRAWTURB) continue;
+
+		// already has a lightmap
+		if (surf->d3d_Lightmap) continue;
+
+		// build the lightmap
+		D3D_BuildLightmapForSurface (surf);
+		nummapsinsurfs++;
+	}
+
+	if (nummapsinchains) Con_DPrintf ("Built %i surface lightmaps in texturechains\n", nummapsinchains);
+	if (nummapsinsurfs) Con_DPrintf ("Built %i surface lightmaps in surfaces\n", nummapsinsurfs);
+}
+
+
+/*
+==================
+D3D_BuildLightmaps
+
+Builds the lightmap textures with all the surfaces from all brush models
+
+lightmaps are arranged by surface texture in an attempt to get all surfaces with the same texture into the same lightmap.
+this gives us (1) less state changes from texture changes, and (2) larger surface batches to submit in one go.
+==================
+*/
+void D3D_BuildLightmaps (void)
+{
+	Con_DPrintf ("Loading lightmaps... ");
+
+	model_t	*mod;
 	extern int MaxExtents[];
+
+	Con_DPrintf ("Max Surface Extents: %i x %i\n", MaxExtents[0], MaxExtents[1]);
 
 	// get max blocklight size
 	int blsize = ((MaxExtents[0] >> 4) + 1) * ((MaxExtents[1] >> 4) + 1);
 
 	// rgb array
-	d3d_blocklights = (unsigned int **) Pool_Alloc (POOL_MAP, sizeof (unsigned int *) * 3);
+	d3d_blocklights = (unsigned int **) Pool_Map->Alloc (sizeof (unsigned int *) * 3);
 
 	// each component
-	d3d_blocklights[0] = (unsigned int *) Pool_Alloc (POOL_MAP, sizeof (unsigned int) * blsize);
-	d3d_blocklights[1] = (unsigned int *) Pool_Alloc (POOL_MAP, sizeof (unsigned int) * blsize);
-	d3d_blocklights[2] = (unsigned int *) Pool_Alloc (POOL_MAP, sizeof (unsigned int) * blsize);
+	d3d_blocklights[0] = (unsigned int *) Pool_Map->Alloc (sizeof (unsigned int) * blsize);
+	d3d_blocklights[1] = (unsigned int *) Pool_Map->Alloc (sizeof (unsigned int) * blsize);
+	d3d_blocklights[2] = (unsigned int *) Pool_Map->Alloc (sizeof (unsigned int) * blsize);
+
+	// for the next map
+	MaxExtents[0] = MaxExtents[1] = 0;
+
+	// clear down any previous lightmaps
+	SAFE_DELETE (d3d_Lightmaps);
+
+	// note - the player is model 0 in the precache list
+	for (int j = 1; j < MAX_MODELS; j++)
+	{
+		// note - we set the end of the precache list to NULL in cl_parse to ensure this test is valid
+		if (!(mod = cl.model_precache[j])) break;
+
+		mod->cacheent = NULL;
+
+		if (mod->type != mod_brush) continue;
+
+		// alloc space for caching the entity state
+		if (mod->name[0] == '*')
+		{
+			mod->cacheent = (entity_t *) Pool_Map->Alloc (sizeof (entity_t));
+			continue;
+		}
+
+		// build the lightmaps by texturechains - using sorts seems to give higher r_speeds
+		// counts somehow; could probably fix it but why bother when there's another way?
+		D3D_BuildLightmapTextureChains (mod->brushhdr);
+	}
+
+	// upload all lightmaps
+	d3d_Lightmaps->Upload ();
+
+	Con_DPrintf ("Done");
 }
 
 
@@ -152,7 +299,8 @@ void D3D_FillLightmap (msurface_t *surf, byte *dest, int stride)
 			t = *blb++ >> shift;
 			dest[0] = vid.lightmap[BYTE_CLAMP (t)];
 
-			// no need for dest[3] cos i switched it to xrgb
+			// also fill dest[3] because we may not support xrgb and we're doing alpha blending in places
+			dest[3] = 255;
 			dest += 4;
 		}
 	}
@@ -172,7 +320,7 @@ void D3D_BuildLightmap (msurface_t *surf)
 	byte *lightmap = surf->samples;
 
 	// set to full bright if no light data
-	if (r_fullbright.integer || !cl.worldbrush->lightdata)
+	if (r_fullbright.integer || !cl.worldmodel->brushhdr->lightdata)
 	{
 		for (int i = 0; i < size; i++)
 		{
@@ -347,7 +495,7 @@ void R_MarkLights (dlight_t *light, int num, mnode_t *node)
 	}
 
 	// mark the polygons
-	surf = cl.worldbrush->surfaces + node->firstsurface;
+	surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface;
 
 	for (i = 0; i < node->numsurfaces; i++, surf++)
 	{
@@ -389,6 +537,12 @@ void R_PushDlights (mnode_t *headnode)
 
 		R_MarkLights (l, i, headnode);
 	}
+}
+
+
+void R_UpdateBModelDlights (mnode_t *headnode)
+{
+	if (!r_dynamic.value) return;
 }
 
 
@@ -451,12 +605,13 @@ loc0:
 		VectorCopy (mid, lightspot);
 		lightplane = node->plane;
 
-		surf = cl.worldbrush->surfaces + node->firstsurface;
+		surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface;
 
 		for (i = 0; i < node->numsurfaces; i++, surf++)
 		{
 			// no lightmaps
-			if (surf->flags & SURF_DRAWTILED) continue;
+			if (surf->flags & SURF_DRAWSKY) continue;
+			if (surf->flags & SURF_DRAWTURB) continue;
 
 			ds = (int) ((float) DotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
 			dt = (int) ((float) DotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
@@ -561,13 +716,10 @@ void R_LightPoint (entity_t *e, float *c)
 	float		add;
 	vec3_t		dist;
 
-	if (!cl.worldbrush->lightdata)
+	if (!cl.worldmodel->brushhdr->lightdata)
 	{
 		// no light data
-		if (e->model->type == mod_brush)
-			c[0] = c[1] = c[2] = 1.0f;
-		else c[0] = c[1] = c[2] = 255.0f;
-
+		c[0] = c[1] = c[2] = 255.0f;
 		return;
 	}
 
@@ -588,16 +740,16 @@ void R_LightPoint (entity_t *e, float *c)
 	}
 
 	// set end point
-	end[0] = e->origin[0];
-	end[1] = e->origin[1];
-	end[2] = e->origin[2] - 8192;
+	end[0] = start[0];
+	end[1] = start[1];
+	end[2] = start[2] - 8192;
 
 	// initially nothing
 	c[0] = c[1] = c[2] = 0;
 	lightplane = NULL;
 
 	// get lighting
-	R_RecursiveLightPoint (c, cl.worldbrush->nodes, start, end);
+	R_RecursiveLightPoint (c, cl.worldmodel->brushhdr->nodes, start, end);
 
 	// rescale to ~classic Q1 range for multiplayer
 	// done before dynamic lights so that they don't overbright the model too much
@@ -666,29 +818,29 @@ void CD3DLightmap::CheckSurfaceForModification (msurface_t *surf)
 	// no lightmap modifications
 	if (!r_dynamic.value) return;
 
+	// update lightmaps every other frame; this is adaptive in that if we're running slow lightmaps will update slower,
+	// causing us to run faster, causing lightmaps to update faster, causing us to run slower until the world implodes
+	bool skiplightstyle = ((r_fastlightmaps.integer & 2) && (d3d_RenderDef.framecount & 1));
+	bool skipdynamic = ((r_fastlightmaps.integer & 1) && (d3d_RenderDef.framecount & 1));
+
 	// cached lightstyle change
 	for (int maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
-		if (d_lightstylevalue[surf->styles[maps]] != surf->cached_light[maps])
+		if ((d_lightstylevalue[surf->styles[maps]] != surf->cached_light[maps]) && !skiplightstyle)
 			goto ModifyLightmap;
 
 	// dynamic this frame || dynamic previous frame
-	if (surf->dlightframe == d3d_RenderDef.framecount || surf->cached_dlight) goto ModifyLightmap;
+	if ((surf->dlightframe == d3d_RenderDef.framecount || surf->cached_dlight) && !skipdynamic) goto ModifyLightmap;
 
 	// no changes
 	return;
 
 ModifyLightmap:;
-	// get the region to make dirty for this update
-	// notice how D3D uses top as 0, and right and bottom rather than width and height, making this so much cleaner (== less bug-prone)
-	if (surf->light_l < this->DirtyRect.left) this->DirtyRect.left = surf->light_l;
-	if (surf->light_t < this->DirtyRect.top) this->DirtyRect.top = surf->light_t;
-	if (surf->light_r > this->DirtyRect.right) this->DirtyRect.right = surf->light_r;
-	if (surf->light_b > this->DirtyRect.bottom) this->DirtyRect.bottom = surf->light_b;
-
 	// lock the full texture rect (only if not already locked!!!)
 	if (!this->modified)
 	{
-		hr = this->d3d_Texture->LockRect (0, &this->LockedRect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+		// uploading smaller chunks immediately gives better performance than a
+		// potentially large dirty rect, much of which may not have been modified
+		hr = this->d3d_Texture->LockRect (0, &this->LockedRect, NULL, 0);
 		if (FAILED (hr)) return;
 	}
 
@@ -701,8 +853,8 @@ ModifyLightmap:;
 	D3D_FillLightmap
 	(
 		surf,
-		((byte *) this->LockedRect.pBits) + ((surf->light_t * this->size + surf->light_l) * 4),
-		(this->size * 4) - (surf->smax << 2)
+		((byte *) this->LockedRect.pBits) + ((surf->light_t * this->width + surf->light_l) * 4),
+		(this->width * 4) - (surf->smax << 2)
 	);
 
 	// flag as modified
@@ -710,19 +862,27 @@ ModifyLightmap:;
 }
 
 
-void CD3DLightmap::CalcLightmapTexCoords (msurface_t *surf, float *v, float *st)
+void CD3DLightmap::CalcLightmapTexCoords (msurface_t *surf)
 {
-	st[0] = DotProduct (v, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
-	st[0] -= surf->texturemins[0];
-	st[0] += (int) surf->light_l * 16;
-	st[0] += 8;
-	st[0] /= (float) (this->size * 16);
+	// note: _controlfp is ineffective here
+	for (int i = 0; i < surf->numverts; i++)
+	{
+		polyvert_t *vert = &surf->verts[i];
 
-	st[1] = DotProduct (v, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
-	st[1] -= surf->texturemins[1];
-	st[1] += (int) surf->light_t * 16;
-	st[1] += 8;
-	st[1] /= (float) (this->size * 16);
+		// (why is this a class member when it has everything to do with the surf and nothing to do with the class?)
+		// (because it needs to know the lightmap size, that's why)
+		vert->lm[0] = DotProduct (vert->basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
+		vert->lm[0] -= surf->texturemins[0];
+		vert->lm[0] += (int) surf->light_l * 16;
+		vert->lm[0] += 8;
+		vert->lm[0] /= (float) (this->width * 16);
+
+		vert->lm[1] = DotProduct (vert->basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
+		vert->lm[1] -= surf->texturemins[1];
+		vert->lm[1] += (int) surf->light_t * 16;
+		vert->lm[1] += 8;
+		vert->lm[1] /= (float) (this->height * 16);
+	}
 }
 
 
@@ -730,21 +890,15 @@ void CD3DLightmap::Upload (void)
 {
 	if (this->next) this->next->Upload ();
 
-	// mark as dirty do that the changes go through to D3D
+	// when creating we defer the upload until the full map is built for faster loading times
 	if (this->modified)
 	{
-		this->d3d_Texture->AddDirtyRect (NULL);
 		this->d3d_Texture->UnlockRect (0);
+		this->d3d_Texture->AddDirtyRect (NULL);
 	}
 
 	// tell D3D we're going to need this managed resource shortly
 	this->d3d_Texture->PreLoad ();
-
-	// dirty region is nothing at the start
-	this->DirtyRect.left = this->size;
-	this->DirtyRect.right = 0;
-	this->DirtyRect.top = this->size;
-	this->DirtyRect.bottom = 0;
 
 	// not modified by default
 	this->modified = false;
@@ -753,24 +907,16 @@ void CD3DLightmap::Upload (void)
 
 void CD3DLightmap::UploadModified (void)
 {
+	// this doesn't actually upload any more
 	if (this->next) this->next->UploadModified ();
-
-	// invalid dirty rect
-	if (this->DirtyRect.left > this->DirtyRect.right) return;
-	if (this->DirtyRect.top > this->DirtyRect.top) return;
 
 	// see was it modified
 	if (this->modified)
 	{
-		this->d3d_Texture->AddDirtyRect (&this->DirtyRect);
+		// uploading smaller chunks immediately gives better performance than a
+		// potentially large dirty rect, much of which may not have been modified
 		this->d3d_Texture->UnlockRect (0);
-
-		// flag as unmodified and clear the dirty region
 		this->modified = false;
-		this->DirtyRect.left = this->size;
-		this->DirtyRect.right = 0;
-		this->DirtyRect.top = this->size;
-		this->DirtyRect.bottom = 0;
 	}
 }
 
@@ -784,31 +930,40 @@ CD3DLightmap::CD3DLightmap (msurface_t *surf)
 	d3d_Lightmaps = this;
 
 	// size needs to be set before creating the texture so that texture creation knows what size to create it at
-	// never create < MINIMUM_LIGHTMAP_SIZE
-	for (int i = MINIMUM_LIGHTMAP_SIZE; ; i *= 2)
+	// never create < MINIMUM_LIGHTMAP_WIDTH
+	for (int i = MINIMUM_LIGHTMAP_WIDTH; ; i *= 2)
 	{
-		if (i > d3d_DeviceCaps.MaxTextureWidth || i > d3d_DeviceCaps.MaxTextureHeight)
+		if (i > surf->smax)
 		{
-			// oh crap...
-			// note - even on 3DFX this gives a max surf extents of 4080
-			Host_Error ("CD3DLightmap::CD3DLightmap: i > d3d_DeviceCaps.MaxTextureWidth || i > d3d_DeviceCaps.MaxTextureHeight");
-			return;
-		}
-
-		if (i >= surf->maxextent)
-		{
-			Con_DPrintf ("Creating lightmap at %i\n", i);
-			this->size = i;
+			this->width = i;
 			break;
 		}
+	}
+
+	// clamp to max texture size
+	if (this->width > d3d_DeviceCaps.MaxTextureWidth) this->width = d3d_DeviceCaps.MaxTextureWidth;
+
+	// height is just the max texture height
+	this->height = d3d_DeviceCaps.MaxTextureHeight;
+
+	Con_DPrintf ("Creating lightmap at %ix%i\n", this->width, this->height);
+
+	// sanity check
+	// this should never happen on regular Quake maps but might happen if the BSP process
+	// gives an aberrant surf with huge extents
+	if (this->width < surf->smax || this->height < surf->tmax)
+	{
+		// the surf extent is too large for the 3D card if this happens.  nothing i can do about that...
+		Host_Error ("CD3DLightmap::CD3DLightmap: this->size < surf->maxextent");
+		return;
 	}
 
 	// now attempt to create the lightmap texture
 	// (fixme - allow single component here where the source data is also single component)
 	hr = d3d_Device->CreateTexture
 	(
-		this->size,
-		this->size,
+		this->width,
+		this->height,
 		1,
 		0,
 		d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8,
@@ -828,14 +983,15 @@ CD3DLightmap::CD3DLightmap (msurface_t *surf)
 	this->d3d_Texture->SetPriority (16384);
 
 	// set up the data
+	// when creating we defer the upload until the full map is built for faster loading times
 	this->d3d_Texture->LockRect (0, &this->LockedRect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
 
 	// texture is locked
 	this->modified = true;
-	this->allocated = new int[this->size]; //(int *) Pool_Alloc (POOL_MAP, sizeof (int) * this->size);
+	this->allocated = new int[this->width]; //(int *) Pool_Map->Alloc (sizeof (int) * this->size);
 
 	// clear allocations
-	memset (this->allocated, 0, sizeof (int) * this->size);
+	memset (this->allocated, 0, sizeof (int) * this->width);
 }
 
 
@@ -860,11 +1016,12 @@ bool CD3DLightmap::AllocBlock (msurface_t *surf)
 	do
 	{
 		// lightmap is too small
-		if (this->size < surf->maxextent) break;
+		if (this->width < surf->smax) break;
+		if (this->height < surf->tmax) break;
 
-		int best = this->size;
+		int best = this->height;
 
-		for (int i = 0; i < this->size - surf->smax; i++)
+		for (int i = 0; i < this->width - surf->smax; i++)
 		{
 			int j;
 			int best2 = 0;
@@ -883,7 +1040,7 @@ bool CD3DLightmap::AllocBlock (msurface_t *surf)
 			}
 		}
 
-		if (best + surf->tmax > this->size)
+		if (best + surf->tmax > this->height)
 			break;
 
 		for (int i = 0; i < surf->smax; i++)
@@ -896,6 +1053,9 @@ bool CD3DLightmap::AllocBlock (msurface_t *surf)
 		// set lightmap for the surf
 		surf->d3d_Lightmap = this;
 
+		// store the texture back to surf for easier access/etc
+		surf->d3d_LightmapTex = this->d3d_Texture;
+
 		// build the lightmap
 		D3D_BuildLightmap (surf);
 
@@ -903,8 +1063,8 @@ bool CD3DLightmap::AllocBlock (msurface_t *surf)
 		D3D_FillLightmap
 		(
 			surf,
-			((byte *) this->LockedRect.pBits) + ((surf->light_t * this->size + surf->light_l) * 4),
-			(this->size * 4) - (surf->smax << 2)
+			((byte *) this->LockedRect.pBits) + ((surf->light_t * this->width + surf->light_l) * 4),
+			(this->width * 4) - (surf->smax << 2)
 		);
 
 		return true;
@@ -915,9 +1075,3 @@ bool CD3DLightmap::AllocBlock (msurface_t *surf)
 	else return false;
 }
 
-
-void CD3DLightmap::BindLightmap (int stage)
-{
-	// binds go here so that we can protect the texture against evil modifications
-	D3D_SetTexture (stage, this->d3d_Texture);
-}

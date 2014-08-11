@@ -27,6 +27,7 @@ to do - highlight player position better + move to rmain
 */
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
 
@@ -37,7 +38,6 @@ cvar_t r_automapscroll_z ("r_automapscroll_z", 32.0f, CVAR_ARCHIVE);
 
 bool r_automap;
 extern bool scr_drawmapshot;
-extern bool scr_drawloading;
 
 // default automap viewpoint
 // x and y are updated on entry to the automap
@@ -132,7 +132,6 @@ bool D3D_DrawAutomap (void)
 	if (!r_automap) return false;
 	if (cls.state != ca_connected) return false;
 	if (scr_drawmapshot) return false;
-	if (scr_drawloading) return false;
 	if (cl.intermission == 1 && key_dest == key_game) return false;
 	if (cl.intermission == 2 && key_dest == key_game) return false;
 

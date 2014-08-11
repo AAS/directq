@@ -31,7 +31,11 @@ void Sys_Error (char *error, ...);
 
 void Sys_Quit (void);
 
+// poxy old drifting FPU timer
 float Sys_FloatTime (void);
+
+// rock-solid integer millisecond timer
+DWORD Sys_DWORDTime (void);
 
 void Sys_SendKeyEvents (void);
 // Perform Key_Event () callbacks until the input que is empty

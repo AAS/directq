@@ -154,6 +154,8 @@ void Joy_AdvancedUpdate_f (void);
 void IN_JoyMove (usercmd_t *cmd);
 
 
+void CL_BoundViewPitch (void);
+
 /*
 ===========
 Force_CenterView_f
@@ -174,7 +176,9 @@ void IN_UpdateClipCursor (void)
 {
 	if (mouseinitialized && mouseactive && !m_directinput.integer)
 	{
-		ClipCursor (&window_rect);
+		RECT cliprect;
+		GetWindowRect (d3d_Window, &cliprect);
+		ClipCursor (&cliprect);
 	}
 }
 
@@ -233,7 +237,6 @@ void IN_ActivateMouse (void)
 	if (xiActiveController >= 0)
 	{
 		// toggle xinput on
-		XInputEnable (TRUE);
 		xiActive = true;
 	}
 
@@ -261,9 +264,12 @@ void IN_ActivateMouse (void)
 			if (mouseparmsvalid)
 				restore_spi = SystemParametersInfo (SPI_SETMOUSE, 0, newmouseparms, 0);
 
-			SetCursorPos (window_center_x, window_center_y);
+			RECT cliprect;
+
+			GetWindowRect (d3d_Window, &cliprect);
+			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 			SetCapture (d3d_Window);
-			ClipCursor (&window_rect);
+			ClipCursor (&cliprect);
 		}
 
 		mouseactive = true;
@@ -281,7 +287,6 @@ void IN_DeactivateMouse (void)
 	if (xiActiveController >= 0)
 	{
 		// toggle xinput off
-		XInputEnable (FALSE);
 		xiActive = false;
 	}
 
@@ -491,6 +496,10 @@ void IN_MouseMove (usercmd_t *cmd)
 	int mx = 0;
 	int my = 0;
 
+	RECT cliprect;
+
+	GetWindowRect (d3d_Window, &cliprect);
+
 	if (!mouseactive) return;
 
 	// ensure that we have a device and it's actually acquired!!!
@@ -608,8 +617,8 @@ void IN_MouseMove (usercmd_t *cmd)
 		}
 
 		GetCursorPos (&current_pos);
-		mx = current_pos.x - window_center_x + mx_accum;
-		my = current_pos.y - window_center_y + my_accum;
+		mx = current_pos.x - ((cliprect.right - cliprect.left) / 2) + mx_accum;
+		my = current_pos.y - ((cliprect.bottom - cliprect.top) / 2) + my_accum;
 		mx_accum = 0;
 		my_accum = 0;
 	}
@@ -668,9 +677,7 @@ void IN_MouseMove (usercmd_t *cmd)
 		if (((in_mlook.state & 1) || m_look.value) && !(in_strafe.state & 1))
 		{
 			cl.viewangles[PITCH] += m_pitch.value * mouse_y;
-
-			if (cl.viewangles[PITCH] > 80) cl.viewangles[PITCH] = 80;
-			if (cl.viewangles[PITCH] < -70) cl.viewangles[PITCH] = -70;
+			CL_BoundViewPitch ();
 		}
 		else
 		{
@@ -682,7 +689,8 @@ void IN_MouseMove (usercmd_t *cmd)
 
 	// if the mouse has moved, force it to the center, so there's room to move
 	// note - don't need this with directinput
-	if ((mx || my) && !m_directinput.integer) SetCursorPos (window_center_x, window_center_y);
+	if ((mx || my) && !m_directinput.integer)
+		SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 }
 
 
@@ -762,13 +770,16 @@ void IN_Accumulate (void)
 	{
 		if (!m_directinput.integer)
 		{
-			GetCursorPos (&current_pos);
+			RECT cliprect;
 
-			mx_accum += current_pos.x - window_center_x;
-			my_accum += current_pos.y - window_center_y;
+			GetCursorPos (&current_pos);
+			GetWindowRect (d3d_Window, &cliprect);
+
+			mx_accum += current_pos.x - ((cliprect.right - cliprect.left) / 2);
+			my_accum += current_pos.y - ((cliprect.bottom - cliprect.top) / 2);
 
 			// force the mouse to the center, so there's room to move
-			SetCursorPos (window_center_x, window_center_y);
+			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 		}
 	}
 }
@@ -1203,8 +1214,7 @@ void IN_JoyMove (usercmd_t *cmd)
 	}
 
 	// bounds check pitch
-	if (cl.viewangles[PITCH] > 80.0) cl.viewangles[PITCH] = 80.0;
-	if (cl.viewangles[PITCH] < -70.0) cl.viewangles[PITCH] = -70.0;
+	CL_BoundViewPitch ();
 }
 
 
@@ -1217,7 +1227,6 @@ void IN_StartupXInput (void)
 
 	if (xiActive)
 	{
-		XInputEnable (FALSE);
 		xiActive = false;
 	}
 
@@ -1350,8 +1359,7 @@ void IN_ControllerMove (usercmd_t *cmd)
 	IN_ControllerAxisMove (cmd, xiState.Gamepad.bRightTrigger, 0, 255, &xi_axisrt);
 
 	// fix up the command (bound/etc)
-	if (cl.viewangles[PITCH] > 80.0) cl.viewangles[PITCH] = 80.0;
-	if (cl.viewangles[PITCH] < -70.0) cl.viewangles[PITCH] = -70.0;
+	CL_BoundViewPitch ();
 
 	// check for a change of state
 	if (xiLastPacket == xiState.dwPacketNumber) return;

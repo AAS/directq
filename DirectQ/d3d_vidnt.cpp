@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
 #include "winquake.h"
@@ -27,7 +28,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <commctrl.h>
 
 
-extern int NumFilteredStates;
 void D3D_SetDefaultStates (void);
 void D3D_SetAllStates (void);
 
@@ -44,18 +44,12 @@ D3DCAPS9 d3d_DeviceCaps;
 d3d_global_caps_t d3d_GlobalCaps;
 D3DPRESENT_PARAMETERS d3d_PresentParams;
 
-extern LPDIRECT3DINDEXBUFFER9 d3d_DPSkyIndexes;
-extern LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts;
-
 // for various render-to-texture and render-to-surface stuff
 LPDIRECT3DSURFACE9 d3d_BackBuffer = NULL;
 
 void D3D_InitUnderwaterTexture (void);
 void D3D_KillUnderwaterTexture (void);
 
-// gamma ramps
-D3DGAMMARAMP d3d_DefaultGammaRamp;
-D3DGAMMARAMP d3d_ActiveGammaRamp;
 
 // global video state
 viddef_t	vid;
@@ -71,11 +65,6 @@ bool d3d_DeviceLost = false;
 bool vid_canalttab = false;
 bool vid_initialized = false;
 bool scr_skipupdate;
-
-
-CD3D_MatrixStack *d3d_WorldMatrixStack = NULL;
-CD3D_MatrixStack *d3d_ViewMatrixStack = NULL;
-CD3D_MatrixStack *d3d_ProjMatrixStack = NULL;
 
 
 // RotateAxisLocal requires instantiating a class and filling it's members just to pass
@@ -113,8 +102,20 @@ cvar_t		g_gamma ("g_gamma", "1", CVAR_ARCHIVE);
 cvar_t		b_gamma ("b_gamma", "1", CVAR_ARCHIVE);
 cvar_t		vid_vsync ("vid_vsync", "0", CVAR_ARCHIVE);
 
+typedef struct vid_gammaramp_s
+{
+	WORD r[256];
+	WORD g[256];
+	WORD b[256];
+} vid_gammaramp_t;
+
+vid_gammaramp_t d3d_DefaultGamma;
+vid_gammaramp_t d3d_CurrentGamma;
+
 // consistency with DP and FQ
 cvar_t r_anisotropicfilter ("gl_texture_anisotropy", "1", CVAR_ARCHIVE);
+
+cvar_t gl_triplebuffer ("gl_triplebuffer", 1, CVAR_ARCHIVE);
 
 d3d_ModeDesc_t *d3d_ModeList = NULL;
 
@@ -139,32 +140,21 @@ D3DFORMAT d3d_AdapterModeDescs[] =
 // rather than having lots and lots and lots of globals all holding multiple instances of the same data, let's do
 // something radical, scary and potentially downright dangerous, and clean things up a bit.
 DWORD		WindowStyle, ExWindowStyle;
-int			window_center_x, window_center_y, window_x, window_y;
-RECT		window_rect;
 
 void ClearAllStates (void);
 void AppActivate (BOOL fActive, BOOL minimize);
 
 
-/*
-================
-VID_UpdateWindowStatus
-================
-*/
-void VID_UpdateWindowStatus (void)
-{
-	window_rect.left = window_x;
-	window_rect.top = window_y;
-	window_rect.right = window_x + d3d_CurrentMode.Width;
-	window_rect.bottom = window_y + d3d_CurrentMode.Height;
-	window_center_x = (window_rect.left + window_rect.right) / 2;
-	window_center_y = (window_rect.top + window_rect.bottom) / 2;
 
-	IN_UpdateClipCursor ();
+DWORD D3D_RenderThread (LPVOID lpParam)
+{
+	while (1)
+	{
+	}
+
+	return 0;
 }
 
-
-void D3D_SetConSize (int modewidth, int modeheight);
 
 void D3D_ResetWindow (D3DDISPLAYMODE *mode)
 {
@@ -223,55 +213,10 @@ void D3D_ResetWindow (D3DDISPLAYMODE *mode)
 	{
 		// fullscreen mode
 		modestate = MS_FULLDIB;
-
-		// needed because we're not getting WM_MOVE messages fullscreen on NT
-		window_x = 0;
-		window_y = 0;
 	}
 
-	// store rect to window_rect
-	window_rect.bottom = rect.bottom;
-	window_rect.left = rect.left;
-	window_rect.right = rect.right;
-	window_rect.top = rect.top;
-
-	// set up glx/y/width/height
-	glx = 0;
-	gly = 0;
-	glwidth = mode->Width;
-	glheight = mode->Height;
-
-	// reset console size
-	D3D_SetConSize (mode->Width, mode->Height);
-
-	// force a status update (i *think* this is all we need here)
-	VID_UpdateWindowStatus ();
-}
-
-
-void D3D_SetGamma (D3DGAMMARAMP *ramp)
-{
-	if (!ramp) return;
-
-	HDC hDC = GetDC (d3d_Window);
-
-	for (int i = 0; i < 256; i++)
-	{
-		// clamp to 0-255 range
-		ramp->red[i] = BYTE_CLAMP (ramp->red[i]);
-		ramp->green[i] = BYTE_CLAMP (ramp->green[i]);
-		ramp->blue[i] = BYTE_CLAMP (ramp->blue[i]);
-
-		// store in MSBs
-		ramp->red[i] <<= 8;
-		ramp->green[i] <<= 8;
-		ramp->blue[i] <<= 8;
-	}
-
-	// set using GDI, NOT direct3d
-	SetDeviceGammaRamp (hDC, ramp);
-
-	ReleaseDC (d3d_Window, hDC);
+	// update cursor clip region
+	IN_UpdateClipCursor ();
 }
 
 
@@ -328,6 +273,26 @@ D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 }
 
 
+DWORD D3D_GetPresentInterval (void)
+{
+	if (vid_vsync.integer)
+	{
+		if (d3d_DeviceCaps.PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
+			return D3DPRESENT_INTERVAL_ONE;
+		else D3DPRESENT_INTERVAL_IMMEDIATE;
+	}
+	else
+	{
+		if (d3d_DeviceCaps.PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
+			return D3DPRESENT_INTERVAL_IMMEDIATE;
+		else D3DPRESENT_INTERVAL_ONE;
+	}
+
+	// shut up compiler
+	return D3DPRESENT_INTERVAL_IMMEDIATE;
+}
+
+
 void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 {
 	memset (pp, 0, sizeof (D3DPRESENT_PARAMETERS));
@@ -351,8 +316,8 @@ void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 	pp->Flags = D3DPRESENTFLAG_DISCARD_DEPTHSTENCIL;
 
 	pp->SwapEffect = D3DSWAPEFFECT_DISCARD;
-	pp->PresentationInterval = vid_vsync.integer ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
-	pp->BackBufferCount = 1;
+	pp->PresentationInterval = D3D_GetPresentInterval ();
+	pp->BackBufferCount = (gl_triplebuffer.integer && d3d_GlobalCaps.supportTripleBuffer) ? 2 : 1;
 	pp->BackBufferWidth = mode->Width;
 	pp->BackBufferHeight = mode->Height;
 	pp->hDeviceWindow = d3d_Window;
@@ -391,8 +356,7 @@ void D3D_NumModes_f (void)
 
 	if (nummodes == 1)
 		Con_Printf ("%d video mode is available\n", nummodes);
-	else
-		Con_Printf ("%d video modes are available\n", nummodes);
+	else Con_Printf ("%d video modes are available\n", nummodes);
 }
 
 
@@ -478,14 +442,15 @@ void D3D_RecoverDeviceResources (void)
 }
 
 
+void D3D_ClearOcclusionQueries (void);
+
 void D3D_LoseDeviceResources (void)
 {
 	// release anything that needs to be released
+	D3D_ClearOcclusionQueries ();
 	D3D_KillUnderwaterTexture ();
+	D3D_ReleaseBuffers ();
 	D3D_ShutdownHLSL ();
-
-	// shove out all managed resources back to system memory
-	d3d_Device->EvictManagedResources ();
 
 	// ensure that present params are valid
 	D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
@@ -607,46 +572,6 @@ void D3D_EnumerateVideoModes (void)
 		// no modes available for this format
 		if (!ModeCount) continue;
 
-		// check multisampling for this format - initially none
-		d3d_GlobalCaps.supportFullscreenMultisample[m] = 0;
-		d3d_GlobalCaps.supportWindowedMultisample[m] = 0;
-
-		// now get the level of fullscreen multisampling supported
-		for (int i = 2; i < 17; i++)
-		{
-			hr = d3d_Object->CheckDeviceMultiSampleType
-			(
-				D3DADAPTER_DEFAULT,
-				D3DDEVTYPE_HAL,
-				d3d_AdapterModeDescs[m],
-				FALSE,
-				(D3DMULTISAMPLE_TYPE) i,
-				NULL
-			);
-
-			if (SUCCEEDED (hr))
-				d3d_GlobalCaps.supportFullscreenMultisample[m] = i;
-			else break;
-		}
-
-		// now get the level of windowed multisampling supported
-		for (int i = 2; i < 17; i++)
-		{
-			hr = d3d_Object->CheckDeviceMultiSampleType
-			(
-				D3DADAPTER_DEFAULT,
-				D3DDEVTYPE_HAL,
-				d3d_AdapterModeDescs[m],
-				TRUE,
-				(D3DMULTISAMPLE_TYPE) i,
-				NULL
-			);
-
-			if (SUCCEEDED (hr))
-				d3d_GlobalCaps.supportWindowedMultisample[m] = i;
-			else break;
-		}
-
 		// enumerate them all
 		for (int i = 0; i < ModeCount; i++)
 		{
@@ -672,7 +597,7 @@ void D3D_EnumerateVideoModes (void)
 			// we need to keep our own list because d3d makes it awkward for us by maintaining a separate list for each format
 			if (!d3d_ModeList)
 			{
-				d3d_ModeList = (d3d_ModeDesc_t *) Pool_Alloc (POOL_PERMANENT, sizeof (d3d_ModeDesc_t));
+				d3d_ModeList = (d3d_ModeDesc_t *) Pool_Permanent->Alloc (sizeof (d3d_ModeDesc_t));
 				newmode = d3d_ModeList;
 			}
 			else
@@ -682,7 +607,7 @@ void D3D_EnumerateVideoModes (void)
 					if (!newmode->Next)
 						break;
 
-				newmode->Next = (d3d_ModeDesc_t *) Pool_Alloc (POOL_PERMANENT, sizeof (d3d_ModeDesc_t));
+				newmode->Next = (d3d_ModeDesc_t *) Pool_Permanent->Alloc (sizeof (d3d_ModeDesc_t));
 				newmode = newmode->Next;
 			}
 
@@ -737,7 +662,7 @@ void D3D_EnumerateVideoModes (void)
 	if (!NumWindowedModes) return;
 
 	// now we emulate winquake by pushing windowed modes to the start of the list
-	d3d_ModeDesc_t *WindowedModes = (d3d_ModeDesc_t *) Pool_Alloc (POOL_PERMANENT, NumWindowedModes * sizeof (d3d_ModeDesc_t));
+	d3d_ModeDesc_t *WindowedModes = (d3d_ModeDesc_t *) Pool_Permanent->Alloc (NumWindowedModes * sizeof (d3d_ModeDesc_t));
 	int wm = 0;
 
 	// walk the main list adding any windowed modes to the windowed modes list
@@ -919,34 +844,180 @@ void D3D_InfoDump_f (void)
 
 cmd_t d3d_InfoDump_Cmd ("d3d_infodump", D3D_InfoDump_f);
 
-extern DWORD d3d_BufferUsage;
+
+void D3D_GetMaxBackBuffers (D3DDISPLAYMODE *mode)
+{
+	// fill in with valid values
+	D3D_SetPresentParams (&d3d_PresentParams, mode);
+
+	// D3D allows 1, 2 or 3 backbuffers so try them all
+	// (the documentation claims that the count will be filled in with a valid value after one failure.  it's lying)
+	for (int i = 3; i; i--)
+	{
+		d3d_PresentParams.BackBufferCount = i;
+
+		// attempt to create with this number of backbuffers
+		// (Quark ETP needs D3DCREATE_FPU_PRESERVE)
+		hr = d3d_Object->CreateDevice
+		(
+			D3DADAPTER_DEFAULT,
+			D3DDEVTYPE_HAL,
+			d3d_Window,
+			d3d_GlobalCaps.deviceCreateFlags | D3DCREATE_FPU_PRESERVE,
+			&d3d_PresentParams,
+			&d3d_Device
+		);
+
+		if (SUCCEEDED (hr))
+		{
+			// clear to black immediately so that we don't start up with a blank window
+			d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
+			d3d_Device->Present (NULL, NULL, NULL, NULL);
+
+			// this is the max number of backbuffers the device supports
+			// release the device, set a global cap, and get out
+			SAFE_RELEASE (d3d_Device);
+
+			if (i == 1)
+				d3d_GlobalCaps.supportTripleBuffer = false;
+			else d3d_GlobalCaps.supportTripleBuffer = true;
+			return;
+		}
+	}
+
+	// if we get to here we have a bad device
+	Sys_Error ("Could not create device");
+}
 
 
-void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
+void D3D_GetVideoRAM (D3DDISPLAYMODE *mode)
 {
 	D3D_SetPresentParams (&d3d_PresentParams, mode);
 
-	// attempt to create the device - we can ditch all of the extra flags now :)
-	hr = d3d_Object->CreateDevice (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_Window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &d3d_PresentParams, &d3d_Device);
+	d3d_PresentParams.AutoDepthStencilFormat = D3DFMT_UNKNOWN;
+	d3d_PresentParams.BackBufferCount = 0;
+	d3d_PresentParams.BackBufferFormat = D3DFMT_UNKNOWN;
+	d3d_PresentParams.BackBufferHeight = 10;
+	d3d_PresentParams.BackBufferWidth = 10;
+	d3d_PresentParams.EnableAutoDepthStencil = FALSE;
+	d3d_PresentParams.Flags = 0;
+	d3d_PresentParams.FullScreen_RefreshRateInHz = 0;
+	d3d_PresentParams.Windowed = TRUE;
+
+	// (Quark ETP needs D3DCREATE_FPU_PRESERVE)
+	hr = d3d_Object->CreateDevice
+	(
+		D3DADAPTER_DEFAULT,
+		D3DDEVTYPE_HAL,
+		d3d_Window,
+		D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE,
+		&d3d_PresentParams,
+		&d3d_Device
+	);
 
 	if (FAILED (hr))
 	{
-		hr = d3d_Object->CreateDevice (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_Window, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3d_PresentParams, &d3d_Device);
+		d3d_GlobalCaps.videoRAMMB = -1;
+		return;
+	}
 
-		if (FAILED (hr))
-		{
-			Sys_Error ("D3D_InitDirect3D: IDirect3D9::CreateDevice failed");
-			return;
-		}
+	d3d_GlobalCaps.videoRAMMB = (d3d_Device->GetAvailableTextureMem ()) / (1024 * 1024);
+	SAFE_RELEASE (d3d_Device);
+}
 
-		Con_Printf ("Using Software Vertex Processing\n\n");
-		d3d_BufferUsage = D3DUSAGE_SOFTWAREPROCESSING;
+
+void D3D_TexMem_f (void)
+{
+	Con_Printf ("Available Texture Memory: %i MB\n", (d3d_Device->GetAvailableTextureMem ()) / (1024 * 1024));
+}
+
+
+cmd_t D3D_TexMem_Cmd ("gl_videoram", D3D_TexMem_f);
+
+void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
+{
+	// get a more accurate count of video ram
+	D3D_GetVideoRAM (mode);
+
+	// get the kind of capabilities we can expect from a HAL device ("hello Dave")
+	hr = d3d_Object->GetDeviceCaps (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3d_DeviceCaps);
+
+	if (FAILED (hr)) Sys_Error ("D3D_InitDirect3D: Failed to retrieve object caps");
+
+	// check for basic required capabilities ("your name's not down, you're not coming in")
+	if (d3d_DeviceCaps.MaxStreams < 1) Sys_Error ("You must have a Direct3D 9 driver to run DirectQ");
+	if (!(d3d_DeviceCaps.DevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX)) Sys_Error ("You need at least a DirectX 7-compliant device to run DirectQ");
+	if (!(d3d_DeviceCaps.DevCaps & D3DDEVCAPS_HWRASTERIZATION)) Sys_Error ("You need a hardware-accelerated device to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_MIPMAP)) Sys_Error ("You need a device that supports mipmapping to run DirectQ");
+
+	// check for required texture op caps
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_ADD)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_ADD to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_DISABLE)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_DISABLE to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_MODULATE)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_MODULATE to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_MODULATE2X)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_MODULATE2X to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_MODULATE4X)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_MODULATE4X to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_SELECTARG1)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_SELECTARG1 to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_SELECTARG2)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_SELECTARG2 to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_BLENDTEXTUREALPHA)) Sys_Error ("You need a device that supports D3DTEXOPCAPS_BLENDTEXTUREALPHA to run DirectQ");
+
+	// check for texture addressing modes
+	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_CLAMP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_CLAMP to run DirectQ");
+	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_WRAP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_WRAP to run DirectQ");
+
+	// check for TMU support
+	if (d3d_DeviceCaps.MaxTextureBlendStages < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
+	if (d3d_DeviceCaps.MaxSimultaneousTextures < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
+
+	// check for z buffer support
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_ALWAYS)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_EQUAL)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_GREATER)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_GREATEREQUAL)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_LESS)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_LESSEQUAL)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_NEVER)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_NOTEQUAL)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
+
+	// check for hardware T&L support
+	if ((d3d_DeviceCaps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) && (d3d_DeviceCaps.DevCaps & D3DDEVCAPS_PUREDEVICE))
+	{
+		d3d_GlobalCaps.supportHardwareTandL = true;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
 	}
 	else
 	{
-		Con_Printf ("Using Hardware Vertex Processing\n\n");
-		d3d_BufferUsage = 0;
+		d3d_GlobalCaps.supportHardwareTandL = false;
+		d3d_GlobalCaps.deviceCreateFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT;
 	}
+
+	// first of all we decide what formats and counts we can support for the raw device
+	D3D_GetMaxBackBuffers (mode);
+
+	// now reset the present params as they will have become messed up above
+	D3D_SetPresentParams (&d3d_PresentParams, mode);
+
+	// attempt to create the device - we can ditch all of the extra flags now :)
+	// (Quark ETP needs D3DCREATE_FPU_PRESERVE - using _controlfp during texcoord gen doesn't work
+	// here as the generated coords will also lost precision when being applied
+	hr = d3d_Object->CreateDevice
+	(
+		D3DADAPTER_DEFAULT,
+		D3DDEVTYPE_HAL,
+		d3d_Window,
+		d3d_GlobalCaps.deviceCreateFlags | D3DCREATE_FPU_PRESERVE,
+		&d3d_PresentParams,
+		&d3d_Device
+	);
+
+	if (FAILED (hr))
+	{
+		Sys_Error ("D3D_InitDirect3D: IDirect3D9::CreateDevice failed");
+		return;
+	}
+
+	if (d3d_GlobalCaps.supportHardwareTandL)
+		Con_Printf ("Using Hardware Vertex Processing\n\n");
+	else Con_Printf ("Using Software Vertex Processing\n\n");
 
 	// report some caps
 	Con_Printf ("Video mode %i (%ix%i) Initialized\n", d3d_mode.integer, mode->Width, mode->Height);
@@ -959,7 +1030,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 	d3d_Device->Present (NULL, NULL, NULL, NULL);
 
-	// get capabilities on the device
+	// get capabilities on the actual device
 	hr = d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
 
 	if (FAILED (hr))
@@ -968,8 +1039,11 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 		return;
 	}
 
+	if (d3d_GlobalCaps.videoRAMMB < 0)
+		d3d_GlobalCaps.videoRAMMB = (d3d_Device->GetAvailableTextureMem ()) / (1024 * 1024);
+
 	// report on selected ones
-	Con_Printf ("Available Texture Memory: %i MB\n", (d3d_Device->GetAvailableTextureMem ()) / (1024 * 1024));
+	Con_Printf ("Available Texture Memory: %i MB\n", d3d_GlobalCaps.videoRAMMB);
 	Con_Printf ("Maximum Texture Blend Stages: %i\n", d3d_DeviceCaps.MaxTextureBlendStages);
 	Con_Printf ("Maximum Simultaneous Textures: %i\n", d3d_DeviceCaps.MaxSimultaneousTextures);
 	Con_Printf ("Maximum Texture Size: %i x %i\n", d3d_DeviceCaps.MaxTextureWidth, d3d_DeviceCaps.MaxTextureHeight);
@@ -989,26 +1063,22 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	d3d_GlobalCaps.supportDXT3 = D3D_CheckTextureFormat (D3DFMT_DXT3, FALSE);
 	d3d_GlobalCaps.supportDXT5 = D3D_CheckTextureFormat (D3DFMT_DXT5, FALSE);
 
+	// check for availability of occlusion queries
+	LPDIRECT3DQUERY9 testOcclusion = NULL;
+
+	if (SUCCEEDED (d3d_Device->CreateQuery (D3DQUERYTYPE_OCCLUSION, &testOcclusion)))
+	{
+		Con_Printf ("Using Occlusion Queries\n");
+		d3d_GlobalCaps.supportOcclusion = true;
+		SAFE_RELEASE (testOcclusion);
+	}
+	else d3d_GlobalCaps.supportOcclusion = false;
+
+	// set up everything else
 	D3D_InitUnderwaterTexture ();
 	D3D_InitHLSL ();
 
 	Con_Printf ("\n");
-
-	// switch gamma ramp handling to pure GDI
-	HDC hDC = GetDC (NULL);
-	GetDeviceGammaRamp (hDC, &d3d_DefaultGammaRamp);
-	ReleaseDC (NULL, hDC);
-
-	for (int i = 0; i < 256; i++)
-	{
-		// scale to expected range
-		d3d_DefaultGammaRamp.red[i] >>= 8;
-		d3d_DefaultGammaRamp.green[i] >>= 8;
-		d3d_DefaultGammaRamp.blue[i] >>= 8;
-	}
-
-	// copy it to the active gamma ramp
-	memcpy (&d3d_ActiveGammaRamp, &d3d_DefaultGammaRamp, sizeof (D3DGAMMARAMP));
 
 	// set default states
 	D3D_SetDefaultStates ();
@@ -1021,34 +1091,8 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 }
 
 
-void D3D_SetConSize (int modewidth, int modeheight)
-{
-	// adjust conwidth and conheight to match the mode aspect
-	// they should be the same aspect as the mode, with width never less than 640 and height never less than 480
-	vid.conheight = 480;
-	vid.conwidth = 480 * modewidth / modeheight;
-
-	// bring it up to 640
-	if (vid.conwidth < 640)
-	{
-		vid.conwidth = 640;
-		vid.conheight = vid.conwidth * modeheight / modewidth;
-	}
-
-	// set width and height
-	vid.width = vid.conwidth;
-	vid.height = vid.conheight;
-}
-
-
 void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 {
-	window_rect.top = window_rect.left = 0;
-
-	// store these out so that they will remain valid after everything is set up
-	window_rect.right = mode->Width;
-	window_rect.bottom = mode->Height;
-
 	if (mode->RefreshRate == 0)
 	{
 		// windowed mode
@@ -1063,7 +1107,11 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	}
 
 	RECT rect;
-	memcpy (&rect, &window_rect, sizeof (RECT));
+
+	rect.top = rect.left = 0;
+	rect.right = mode->Width;
+	rect.bottom = mode->Height;
+
 	AdjustWindowRectEx (&rect, WindowStyle, FALSE, 0);
 
 	int width = rect.right - rect.left;
@@ -1073,7 +1121,7 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	(
 		ExWindowStyle,
 		D3D_WINDOW_CLASS_NAME,
-		"DirectQ Release 1.7.666c",
+		va ("DirectQ Release %s", DIRECTQ_VERSION),
 		WindowStyle,
 		rect.left, rect.top,
 		width,
@@ -1111,22 +1159,17 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	{
 		// fullscreen mode
 		modestate = MS_FULLDIB;
-
-		// needed because we're not getting WM_MOVE messages fullscreen on NT
-		window_x = 0;
-		window_y = 0;
 	}
 
 	ShowWindow (d3d_Window, SW_SHOWDEFAULT);
 	UpdateWindow (d3d_Window);
 
-	D3D_SetConSize (mode->Width, mode->Height);
-
 	HICON hIcon = LoadIcon (GetModuleHandle (NULL), MAKEINTRESOURCE (IDI_APPICON));
 	SendMessage (d3d_Window, WM_SETICON, (WPARAM) TRUE, (LPARAM) hIcon);
 	SendMessage (d3d_Window, WM_SETICON, (WPARAM) FALSE, (LPARAM) hIcon);
 
-	VID_UpdateWindowStatus ();
+	// set cursor clip region
+	IN_UpdateClipCursor ();
 }
 
 
@@ -1146,6 +1189,14 @@ void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
 		D3D_FindBestWindowedMode (mode);
 	else
 		D3D_FindBestFullscreenMode (mode);
+
+	// retrieve and store the gamma ramp for the desktop
+	HDC hdc = GetDC (NULL);
+	GetDeviceGammaRamp (hdc, &d3d_DefaultGamma);
+	ReleaseDC (NULL, hdc);
+
+	// destroy our splash screen
+	Splash_Destroy ();
 
 	// create the mode and activate input
 	D3D_CreateWindow (mode);
@@ -1302,6 +1353,9 @@ static void PaletteFromColormap (byte *pal, byte *map)
 			lumatable[i] = 0x80808080;
 		else lumatable[i] = 0;
 	}
+
+	// for avoidance of the pink fringe effect
+	pal[765] = pal[766] = pal[767] = 0;
 
 	// entry 255 is not a luma
 	vid.fullbright[255] = false;
@@ -1468,8 +1522,6 @@ void D3D_VidInit (byte *palette)
 		d3d_CurrentMode.Height = 0;
 	}
 
-	Splash_Destroy ();
-
 	// set the selected video mode
 	D3D_SetVideoMode (&d3d_CurrentMode);
 }
@@ -1477,15 +1529,18 @@ void D3D_VidInit (byte *palette)
 
 void D3D_ShutdownDirect3D (void)
 {
-	// restore original gamma ramp
-	D3D_SetGamma (&d3d_DefaultGammaRamp);
+	// clear the screen to black so that shutdown doesn't leave artefacts from the last SCR_UpdateScreen
+	if (d3d_Device)
+	{
+		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
+		d3d_Device->Present (NULL, NULL, NULL, NULL);
+	}
+
+	// also need these... ;)
+	D3D_LoseDeviceResources ();
 
 	// release anything that needs to be released
 	D3D_ReleaseTextures ();
-
-	// release everything else
-	SAFE_RELEASE (d3d_DPSkyIndexes);
-	SAFE_RELEASE (d3d_DPSkyVerts);
 
 	// destroy the device and object
 	SAFE_RELEASE (d3d_Device);
@@ -1493,27 +1548,31 @@ void D3D_ShutdownDirect3D (void)
 }
 
 
-void D3D_SetActiveGamma (void);
-
 void VID_DefaultMonitorGamma_f (void)
 {
-	// if gamma fucks up, this will restore it to something approaching OK
+	// restore ramps to linear in case something fucks up
 	for (int i = 0; i < 256; i++)
 	{
-		d3d_DefaultGammaRamp.red[i] = i;
-		d3d_DefaultGammaRamp.green[i] = i;
-		d3d_DefaultGammaRamp.blue[i] = i;
+		// this is correct in terms of the default linear GDI gamma
+		d3d_DefaultGamma.r[i] = d3d_CurrentGamma.r[i] = i << 8;
+		d3d_DefaultGamma.g[i] = d3d_CurrentGamma.g[i] = i << 8;
+		d3d_DefaultGamma.b[i] = d3d_CurrentGamma.b[i] = i << 8;
 	}
 
-	D3D_SetGamma (&d3d_DefaultGammaRamp);
-
-	D3D_SetActiveGamma ();
+	HDC hdc = GetDC (NULL);
+	SetDeviceGammaRamp (hdc, &d3d_DefaultGamma);
+	ReleaseDC (NULL, hdc);
 }
 
 cmd_t VID_DefaultMonitorGamma_Cmd ("vid_defaultmonitorgamma", VID_DefaultMonitorGamma_f);
 
 void VID_Shutdown (void)
 {
+	// always restore gamma correctly
+	HDC hdc = GetDC (NULL);
+	SetDeviceGammaRamp (hdc, &d3d_DefaultGamma);
+	ReleaseDC (NULL, hdc);
+
 	if (vid_initialized)
 	{
 		vid_canalttab = false;
@@ -1694,12 +1753,6 @@ void D3D_CheckTextureFiltering (void)
 
 		if (key_dest == key_console) Con_Printf ("Set %i x Anisotropic Filtering\n", real_aniso);
 	}
-
-	for (int i = 0; i < d3d_DeviceCaps.MaxTextureBlendStages; i++)
-	{
-		D3D_SetSamplerState (i, D3DSAMP_MAXANISOTROPY, real_aniso);
-		D3D_SetTextureMipmap (i, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-	}
 }
 
 
@@ -1780,44 +1833,48 @@ void D3D_CheckVidMode (void)
 
 int D3D_AdjustGamma (float gammaval, int baseval)
 {
-	// same gamma calc as GLQuake
-	float f = pow ((float) ((baseval + 1) / 256.0), (float) gammaval);
+	baseval >>= 8;
+
+	// the same gamma calc as GLQuake had some "gamma creep" where DirectQ would gradually get brighter
+	// the more it was run; this hopefully fixes it once and for all
+	float f = pow ((float) baseval / 255.0f, (float) gammaval);
 	float inf = f * 255 + 0.5;
 
 	// return what we got
-	return BYTE_CLAMP ((int) inf);
+	return (BYTE_CLAMP ((int) inf)) << 8;
 }
 
 
 void D3D_SetActiveGamma (void)
 {
-	// to do - make this independent for r/g/b - done.
+	// apply v_gamma to all components
 	for (int i = 0; i < 256; i++)
 	{
-		// play nice - base this on the user's selected gamma rather than on 0-255
-		// as they may have adjusted it for their own monitor.
-		// adjust for each component initially, then adjust by master value
-		d3d_ActiveGammaRamp.red[i] = D3D_AdjustGamma (r_gamma.value, d3d_DefaultGammaRamp.red[i]);
-		d3d_ActiveGammaRamp.green[i] = D3D_AdjustGamma (g_gamma.value, d3d_DefaultGammaRamp.green[i]);
-		d3d_ActiveGammaRamp.blue[i] = D3D_AdjustGamma (b_gamma.value, d3d_DefaultGammaRamp.blue[i]);
-
-		// now adjust them all by the master
-		d3d_ActiveGammaRamp.red[i] = D3D_AdjustGamma (v_gamma.value, d3d_ActiveGammaRamp.red[i]);
-		d3d_ActiveGammaRamp.green[i] = D3D_AdjustGamma (v_gamma.value, d3d_ActiveGammaRamp.green[i]);
-		d3d_ActiveGammaRamp.blue[i] = D3D_AdjustGamma (v_gamma.value, d3d_ActiveGammaRamp.blue[i]);
+		d3d_CurrentGamma.r[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3D_AdjustGamma (v_gamma.value, d3d_DefaultGamma.b[i]);
 	}
 
-	// set the new gamma ramp
-	D3D_SetGamma (&d3d_ActiveGammaRamp);
+	// now apply r/g/b to the derived values
+	for (int i = 0; i < 256; i++)
+	{
+		d3d_CurrentGamma.r[i] = D3D_AdjustGamma (r_gamma.value, d3d_CurrentGamma.r[i]);
+		d3d_CurrentGamma.g[i] = D3D_AdjustGamma (g_gamma.value, d3d_CurrentGamma.g[i]);
+		d3d_CurrentGamma.b[i] = D3D_AdjustGamma (b_gamma.value, d3d_CurrentGamma.b[i]);
+	}
+
+	HDC hdc = GetDC (d3d_Window);
+	SetDeviceGammaRamp (hdc, &d3d_CurrentGamma);
+	ReleaseDC (d3d_Window, hdc);
 }
 
 
 void D3D_CheckGamma (void)
 {
-	static int oldvgamma = 0;
-	static int oldrgamma = 0;
-	static int oldggamma = 0;
-	static int oldbgamma = 0;
+	static int oldvgamma = 100;
+	static int oldrgamma = 100;
+	static int oldggamma = 100;
+	static int oldbgamma = 100;
 
 	// didn't change - call me paranoid about floats!!!
 	if ((int) (v_gamma.value * 100) == oldvgamma &&
@@ -1836,23 +1893,6 @@ void D3D_CheckGamma (void)
 	oldbgamma = (int) (b_gamma.value * 100);
 
 	D3D_SetActiveGamma ();
-}
-
-
-void D3D_CheckSubdivideSize (void)
-{
-	extern cvar_t gl_subdivide_size;
-	extern cvar_t r_hlsl;
-	static float old_subdivide_size = gl_subdivide_size.value;
-
-	// no subdivision with hlsl
-	if (r_hlsl.value) return;
-
-	if (gl_subdivide_size.value != old_subdivide_size)
-	{
-		Con_Printf ("You must reload the map for this setting to take effect\n");
-		old_subdivide_size = gl_subdivide_size.value;
-	}
 }
 
 
@@ -1882,11 +1922,34 @@ void D3D_CheckPixelShaders (void)
 }
 
 
-void D3D_BeginRendering (int *x, int *y, int *width, int *height)
+void D3D_CheckTripleBuffer (void)
 {
-	// if (NumFilteredStates) Con_Printf ("Filtered %i redundant state changes\n", NumFilteredStates);
-	NumFilteredStates = 0;
+	if (!d3d_GlobalCaps.supportTripleBuffer) return;
 
+	int oldtriplebuffer = gl_triplebuffer.integer;
+
+	if (oldtriplebuffer != gl_triplebuffer.integer)
+	{
+		oldtriplebuffer = gl_triplebuffer.integer;
+		D3D_VidRestart_f ();
+	}
+}
+
+
+void D3D_CheckVSync (void)
+{
+	static int old_vsync = vid_vsync.integer;
+
+	if (old_vsync != vid_vsync.integer)
+	{
+		old_vsync = vid_vsync.integer;
+		D3D_VidRestart_f ();
+	}
+}
+
+
+void D3D_BeginRendering (void)
+{
 	// check for device recovery and recover it if needed
 	if (!D3D_CheckRecoverDevice ()) return;
 
@@ -1894,25 +1957,20 @@ void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 	D3D_CheckGamma ();
 	D3D_CheckVidMode ();
 	D3D_CheckTextureFiltering ();
-	D3D_CheckSubdivideSize ();
 	D3D_CheckPixelShaders ();
+	D3D_CheckTripleBuffer ();
+	D3D_CheckVSync ();
 
-	*x = *y = 0;
-	*width = window_rect.right - window_rect.left;
-	*height = window_rect.bottom - window_rect.top;
+	// begin a new scene
+	d3d_Device->BeginScene ();
 }
 
 
 void D3D_EndRendering (void)
 {
-	// if nothing was drawn there is no need for a screen refresh
-	if (!d3d_SceneBegun) return;
-
+	// end the previous scene
 	d3d_Device->EndScene ();
-	d3d_SceneBegun = FALSE;
 
-	// it's recommended to call EndScene as far ahead of calling Present as possible,
-	// but in practice with Quake it doesn't really make any difference
 	hr = d3d_Device->Present (NULL, NULL, NULL, NULL);
 
 	// check for a lost device
@@ -1928,7 +1986,7 @@ void D3D_EndRendering (void)
 	// the only difference for windowed modes is that the cursor is shown
 	extern bool mouseactive;
 
-	if (key_dest == key_menu || key_dest == key_console)
+	if (key_dest == key_menu || key_dest == key_console || cls.state != ca_connected)
 	{
 		if (mouseactive)
 		{
@@ -1936,7 +1994,10 @@ void D3D_EndRendering (void)
 			if (d3d_CurrentMode.RefreshRate == 0) IN_ShowMouse (TRUE);
 
 			// recenter the cursor here so that it will be visible if windowed
-			SetCursorPos (window_center_x, window_center_y);
+			RECT cliprect;
+
+			GetWindowRect (d3d_Window, &cliprect);
+			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
 		}
 	}
 	else

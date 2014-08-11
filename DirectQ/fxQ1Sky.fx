@@ -1,7 +1,6 @@
 
 float4x4 WorldMatrix;
 float4x4 ProjMatrix;
-float4x4 ViewMatrix;
 
 texture solidLayer;
 texture alphaLayer;
@@ -9,14 +8,15 @@ texture alphaLayer;
 
 sampler solidMap = sampler_state
 {
-	texture = solidLayer;
+	texture = <solidLayer>;
 	addressu = WRAP;
 	addressv = WRAP;
 };
 
+
 sampler alphaMap = sampler_state
 {
-	texture = alphaLayer;
+	texture = <alphaLayer>;
 	addressu = WRAP;
 	addressv = WRAP;
 };
@@ -27,7 +27,7 @@ float3 Scale;
 float3 r_origin;
 
 
-// this needs to mirror the layout of glwarpvert_t in gl_warp.cpp
+// this needs to mirror the layout of warppolyvert_t in gl_warp.cpp
 struct VS_INPUT 
 {
 	float4 Position : POSITION0;
@@ -61,15 +61,12 @@ VS_OUTPUT SkyVS (VS_INPUT Input)
 {
 	VS_OUTPUT Output;
 
-	Output.Position = mul (Input.Position, WorldMatrix);
-	Output.Position = mul (Output.Position, ViewMatrix);
-	Output.Position = mul (Output.Position, ProjMatrix);
+	// this is friendlier for preshaders
+	Output.Position = mul (Input.Position, mul (WorldMatrix, ProjMatrix));
 
 	// use the untranslated input position as the output texcoord, shift by r_origin
-	Output.Texcoord.x = Input.Position.x - r_origin.x;
-	Output.Texcoord.y = Input.Position.y - r_origin.y;
-	Output.Texcoord.z = (Input.Position.z - r_origin.z) * 3.0;
-	
+	Output.Texcoord = Input.Position - r_origin;
+	Output.Texcoord.z *= 3.0;
 	return (Output);
 }
 

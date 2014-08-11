@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
+#include "d3d_model.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -40,8 +41,6 @@ cvar_t	m_yaw ("m_yaw","0.022", CVAR_ARCHIVE);
 cvar_t	m_forward ("m_forward","0", CVAR_ARCHIVE);
 cvar_t	m_side ("m_side","0.8", CVAR_ARCHIVE);
 
-cvar_t	r_rapidfire ("r_rapidfire", "0", CVAR_ARCHIVE);
-
 // proquake nat fix
 cvar_t	cl_natfix ("cl_natfix", "1");
 
@@ -59,8 +58,10 @@ lightstyle_t	*cl_lightstyle;
 dlight_t		*cl_dlights = NULL;
 
 // visedicts now belong to the render
-void D3D_AddVisEdict (entity_t *ent, bool noculledict);
+void D3D_AddVisEdict (entity_t *ent);
 void D3D_BeginVisedicts (void);
+
+void R_InitEfrags (void);
 
 
 /*
@@ -83,13 +84,11 @@ void CL_ClearState (void)
 
 	// clear down anything that was allocated one-time-only at startup
 	memset (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
-	memset (cl_temp_entities, 0, MAX_TEMP_ENTITIES * sizeof (entity_t));
-	memset (cl_beams, 0, MAX_BEAMS * sizeof (beam_t));
 	memset (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
 	// allocate space for the first 512 entities - also clears the array
 	// the remainder are left at NULL and allocated on-demand if they are ever needed
-	entity_t *cl_dynamic_entities = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t) * BASE_ENTITIES);
+	entity_t *cl_dynamic_entities = (entity_t *) Pool_Map->Alloc (sizeof (entity_t) * BASE_ENTITIES);
 
 	// now fill them in
 	// this array was allocated in CL_Init as it's a one-time-only need.
@@ -102,6 +101,8 @@ void CL_ClearState (void)
 		}
 		else cl_entities[i] = NULL;
 	}
+
+	R_InitEfrags ();
 }
 
 
@@ -122,10 +123,6 @@ void CL_Disconnect (void)
 
 	SHOWLMP_clear ();
 
-	// bring the console down and fade the colors back to normal
-	//	SCR_BringDownConsole ();
-
-	cl.worldbrush = NULL;
 	cl.worldmodel = NULL;
 
 	// if running a local server, shut it down
@@ -147,6 +144,9 @@ void CL_Disconnect (void)
 		if (sv.active)
 			Host_ShutdownServer(false);
 	}
+
+	extern HWND d3d_Window;
+	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s", DIRECTQ_VERSION, com_gamename));
 
 	cls.demoplayback = cls.timedemo = false;
 	cls.signon = 0;
@@ -511,13 +511,7 @@ void CL_RelinkEntities (void)
 		ent = cl_entities[i];
 
 		// doesn't have a model
-		if (!ent->model)
-		{
-			// remove this entity from the render
-			if (ent->forcelink) ent->staticremoved = true;
-
-			continue;
-		}
+		if (!ent->model) continue;
 
 		// if the object wasn't included in the last packet, remove it
 		if (ent->msgtime != cl.mtime[0])
@@ -619,7 +613,7 @@ void CL_RelinkEntities (void)
 		bool nolerp = false;
 
 		if (ent->model->type == mod_alias)
-			nolerp = ent->model->ah->nolerp;
+			nolerp = ent->model->aliashdr->nolerp;
 
 		if (r_lerporient.value && !nolerp)
 		{
@@ -703,12 +697,12 @@ void CL_RelinkEntities (void)
 				if (cl.stats[STAT_ACTIVEWEAPON] == IT_NAILGUN)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.001;
+					dl->die = cl.time + 0.1;
 				}
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_LIGHTNING)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.001;
+					dl->die = cl.time + 0.1;
 
 					// switch the dlight colour
 					R_ColourDLight (dl, 2, 225, 541);
@@ -716,7 +710,7 @@ void CL_RelinkEntities (void)
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.001;
+					dl->die = cl.time + 0.1;
 
 					// switch the dlight colour
 					R_ColourDLight (dl, 2, 225, 541);
@@ -724,11 +718,8 @@ void CL_RelinkEntities (void)
 				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_NAILGUN)
 				{
 					// rapid fire
-					dl->die = cl.time + 0.001;
+					dl->die = cl.time + 0.1;
 				}
-
-				// switch off rapid fire
-				if (!r_rapidfire.value) dl->die = cl.time + 0.1;
 			}
 
 			VectorCopy (ent->origin,  dl->origin);
@@ -846,7 +837,7 @@ void CL_RelinkEntities (void)
 		// chasecam test
 		if (i == cl.viewentity && !chase_active.value) continue;
 
-		D3D_AddVisEdict (ent, false);
+		D3D_AddVisEdict (ent);
 	}
 }
 
@@ -952,13 +943,11 @@ void CL_Init (void)
 	// referenced during a changelevel (?only when there's no intermission?) so it needs to be in
 	// the persistent heap, and (3) the full thing is allocated each map anyway, so why not shift
 	// the overhead (small as it is) to one time only.
-	cl_entities = (entity_t **) Pool_Alloc (POOL_PERMANENT, MAX_EDICTS * sizeof (entity_t *));
+	cl_entities = (entity_t **) Pool_Permanent->Alloc (MAX_EDICTS * sizeof (entity_t *));
 
 	// these were static arrays but we put them into memory pools so that we can track usage more accurately
-	cl_dlights = (dlight_t *) Pool_Alloc (POOL_PERMANENT, MAX_DLIGHTS * sizeof (dlight_t));
-	cl_temp_entities = (entity_t *) Pool_Alloc (POOL_PERMANENT, MAX_TEMP_ENTITIES * sizeof (entity_t));
-	cl_beams = (beam_t *) Pool_Alloc (POOL_PERMANENT, MAX_BEAMS * sizeof (beam_t));
-	cl_lightstyle = (lightstyle_t *) Pool_Alloc (POOL_PERMANENT, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
+	cl_dlights = (dlight_t *) Pool_Permanent->Alloc (MAX_DLIGHTS * sizeof (dlight_t));
+	cl_lightstyle = (lightstyle_t *) Pool_Permanent->Alloc (MAX_LIGHTSTYLES * sizeof (lightstyle_t));
 
 	CL_InitInput ();
 }

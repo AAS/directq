@@ -41,8 +41,10 @@ extern cvar_t com_nehahra;
 void Menu_SPNewGame (void)
 {
 	if (sv.active)
+	{
 		if (!SCR_ModalMessage ("Are you sure you want to\nstart a new game?\n", "Confirm New Game", MB_YESNO))
 			return;
+	}
 
 	key_dest = key_game;
 
@@ -105,6 +107,7 @@ CScrollBoxProvider *ActiveScrollbox = NULL;
 void Menu_SaveLoadOnDraw (int y, int itemnum);
 void Menu_SaveLoadOnHover (int initialy, int y, int itemnum);
 void Menu_SaveLoadOnEnter (int itemnum);
+void Menu_SaveLoadOnDelete (int itemnum);
 
 
 typedef struct save_game_info_s
@@ -119,133 +122,181 @@ typedef struct save_game_info_s
 } save_game_info_t;
 
 
-void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
+// the old version was written before i was really comfortable using COM_Parse and dates back quite a few years
+void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 {
-	int		j;
-	char	name[MAX_PATH];
-	int		version;
-	float	dummy;
-	int		stuff_total;
-	int		stuff_done;
-	SYSTEMTIME st;
+	// blank the save info
+	memset (si, 0, sizeof (save_game_info_t));
 
 	// copy the file name
 	strcpy (si->filename, filename);
 
-	// read the header comment
-	fscanf (f, "%79s\n", name);
+	// set up intial kills and secrets
+	si->kills[0] = '0';
+	si->secrets[0] = '0';
 
-	// change _ to space
-	for (j = 0; j < SAVEGAME_COMMENT_LENGTH; j++)
-		if (name[j] == '_') name[j] = ' ';
+	// the version was already checked coming into here so first thing we get is the savegame comment
+	char str[32768], *start;
 
-	// strip out "kills"
-	// (note: per Host_SavegameComment kills always starts at position 22)
-	name[22] = 0;
+	// read the comment
+	fscanf (f, "%s\n", str);
+
+	// hack out the level name
+	for (int i = strlen (str); i >= 0; i--)
+	{
+		// convert '_' back to ' '
+		if (str[i] == '_') str[i] = ' ';
+
+		// null term after map name
+		if (!strnicmp (&str[i], "kills:", 6)) str[i] = 0;
+	}
+
+	// trim trailing spaces
+	for (int i = strlen (str) - 1; i >= 0; i--)
+	{
+		if (str[i] != ' ')
+		{
+			str[i + 1] = 0;
+			break;
+		}
+	}
 
 	// copy in the map name
-	strncpy (si->mapname, name, SAVEGAME_COMMENT_LENGTH);
+	strncpy (si->mapname, str, SAVEGAME_COMMENT_LENGTH);
 
-	// parse out number of kills
-	// (note: per Host_SavegameComment number of kills always starts at position 28)
-	sscanf (&name[28], "%i/%i", &stuff_done, &stuff_total);
+	// these exist to soak up data we skip over
+	float fsoak;
+	int isoak;
+	char csoak[256];
 
-	// copy to kills
-	// note: we did it this way so that we could strip out the whitespace from it.
-	// kills numbers are written as %3i, but parsing the array would break if there was > 999 of either
-	_snprintf (si->kills, 64, "%i/%i", stuff_done, stuff_total);
+	// skip spawn parms
+	for (int i = 0; i < NUM_SPAWN_PARMS; i++) fscanf (f, "%f\n", &fsoak);
 
-	// read and skip over spawn parms
-	for (j = 0; j < NUM_SPAWN_PARMS; j++)
-		fscanf (f, "%f\n", &dummy);
-
+	// skill is up next
 	// read skill as a float, and convert to int
-	fscanf (f, "%f\n", &dummy);
-	si->skill = (int) (dummy + 0.1);
+	fscanf (f, "%f\n", &fsoak);
+	si->skill = (int) (fsoak + 0.1);
 
 	// sanity check (in case the save is manually hacked...)
 	if (si->skill > 3) si->skill = 3;
 	if (si->skill < 0) si->skill = 0;
 
 	// read bsp mapname
-	fscanf (f, "%s\n", name);
+	fscanf (f, "%s\n", str);
 
 	if (!si->mapname[0] || si->mapname[0] == 32)
 	{
 		// not every map has a friendly name
-		strncpy (si->mapname, name, SAVEGAME_COMMENT_LENGTH);
+		strncpy (si->mapname, str, SAVEGAME_COMMENT_LENGTH);
 		si->mapname[22] = 0;
 	}
 
-	// now read time for real as a float
-	fscanf (f, "%f\n", &dummy);
+	// now read time as a float
+	fscanf (f, "%f\n", &fsoak);
 
-	// convert dummy time to real time
-	_snprintf (si->time, 64, "%02i:%02i", ((int) dummy) / 60, (int) dummy - (((int) dummy) / 60) * 60);
+	// convert fsoak time to real time
+	_snprintf (si->time, 64, "%02i:%02i", ((int) fsoak) / 60, (int) fsoak - (((int) fsoak) / 60) * 60);
 
-	// initially nothing (differentiate from 0 as there may be genuinely 0)
-	stuff_total = -1;
-	stuff_done = -1;
+	// skip lightstyles
+	for (int i = 0; i < MAX_LIGHTSTYLES; i++) fscanf (f, "%s\n", str);
 
-	// now parse the rest of the file looking for the other stuff we need
-	while (1)
+	// init counts
+	int num_kills = 0;
+	int total_kills = 0;
+	int num_secrets = 0;
+	int total_secrets = 0;
+
+	// read the first edict - this will be the globalvars containing the info about kills and secrets
+	for (int i = 0; i < 32760; i++)
 	{
-		// scan into secrets as a dummy
-		fscanf (f, "%s", si->secrets);
+		// read and always null-term it
+		str[i] = fgetc (f);
+		str[i + 1] = 0;
 
-		if (!strcmp (si->secrets, "\"stuff_total\"") && stuff_total == -1)
+		// done
+		if (str[i] == EOF || !str[i])
 		{
-			// scan again to get the data
-			fscanf (f, "%s", si->secrets);
-
-			// these are stored as floats, so we terminate at the .
-			for (j = 0; ; j++)
-			{
-				if (si->secrets[j] == '.')
-				{
-					si->secrets[j] = 0;
-					break;
-				}
-			}
-
-			stuff_total = atoi (&si->secrets[1]);
+			str[i] = 0;
+			break;
 		}
 
-		if (!strcmp (si->secrets, "\"stuff_done\"") && stuff_done == -1)
+		// done
+		if (str[i] == '}')
 		{
-			// scan again to get the data
-			fscanf (f, "%s", si->secrets);
-
-			// these are stored as floats, so we terminate at the .
-			for (j = 0; ; j++)
-			{
-				if (si->secrets[j] == '.')
-				{
-					si->secrets[j] = 0;
-					break;
-				}
-			}
-
-			stuff_done = atoi (&si->secrets[1]);
+			str[i + 1] = 0;
+			break;
 		}
-
-		// eof
-		if (feof (f)) break;
-
-		// got them all
-		if (!(stuff_total == -1 || stuff_done == -1)) break;
 	}
 
-	if (stuff_total == -1) stuff_total = 0;
-	if (stuff_done == -1) stuff_done = 0;
+	// no start yet
+	start = NULL;
 
-	if (stuff_done > stuff_total) stuff_done = stuff_total;
+	// locate the opening brace
+	for (int i = 0; ; i++)
+	{
+		if (str[i] == '{')
+		{
+			start = &str[i];
+			break;
+		}
 
-	_snprintf (si->secrets, 64, "%i/%i", stuff_done, stuff_total);
+		if (str[i] == 0) break;
+	}
 
+	// only parse if we have a start pointer
+	if (start)
+	{
+		// p
+		start = COM_Parse (start);
+
+		// check
+		if (com_token[0] && !strcmp (com_token, "{"))
+		{
+			char keyname[64];
+
+			while (1)
+			{
+				// parse the key
+				start = COM_Parse (start);
+
+				// end
+				if (com_token[0] == '}') break;
+				if (!start) break;
+
+				// copy out key
+				strncpy (keyname, com_token, 63);
+
+				// parse the value
+				start = COM_Parse (start);
+
+				// fail silently
+				if (!start) break;
+				if (com_token[0] == '}') break;
+
+				// interpret - these are stored as floats in the save file
+				if (!stricmp (keyname, "total_secrets")) total_secrets = (int) (atof (com_token) + 0.1f);
+				if (!stricmp (keyname, "found_secrets")) num_secrets = (int) (atof (com_token) + 0.1f);
+				if (!stricmp (keyname, "total_monsters")) total_kills = (int) (atof (com_token) + 0.1f);
+				if (!stricmp (keyname, "killed_monsters")) num_kills = (int) (atof (com_token) + 0.1f);
+			}
+		}
+	}
+
+	// write out counts
+	if (total_kills)
+		_snprintf (si->kills, 64, "%i/%i", num_kills, total_kills);
+	else _snprintf (si->kills, 64, "%i", num_kills);
+
+	if (total_secrets)
+		_snprintf (si->secrets, 64, "%i/%i", num_secrets, total_secrets);
+	else _snprintf (si->secrets, 64, "%i", num_secrets);
+
+	// because f came into here already opened
 	fclose (f);
 
+	// now we set up the time and date of the save file for display
 	char name2[256];
+	SYSTEMTIME st;
 
 	// set up the file name for opening
 	_snprintf (name2, 256, "%s/%s/%s", com_gamedir, host_savedir.string, filename);
@@ -266,7 +317,7 @@ void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	FileTimeToLocalFileTime (&FileInfo.ftLastWriteTime, &lft);
 	FileTimeToSystemTime (&lft, &st);
 
-	_snprintf (si->savetime, 64, "%04i-%02i-%02i %02i:%02i", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+	_snprintf (si->savetime, 64, "%04i/%02i/%02i %02i:%02i", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
 
 	// close the file handle
 	COM_FCloseFile (&hFile);
@@ -278,7 +329,7 @@ class CSaveInfo
 public:
 	CSaveInfo (FILE *f, char *filename)
 	{
-		GetSaveInfo (f, filename, &this->SaveInfo);
+		Menu_ParseSaveInfo (f, filename, &this->SaveInfo);
 		NumSaves++;
 	}
 
@@ -482,12 +533,14 @@ void Menu_SaveLoadScanSaves (void)
 	SaveScrollbox->SetDrawItemCallback (Menu_SaveLoadOnDraw);
 	SaveScrollbox->SetHoverItemCallback (Menu_SaveLoadOnHover);
 	SaveScrollbox->SetEnterItemCallback (Menu_SaveLoadOnEnter);
+	SaveScrollbox->SetDeleteItemCallback (Menu_SaveLoadOnDelete);
 
 	// note that numsaves is *always* guaranteed to be at least 1 as we added the "new savegame" item
 	LoadScrollbox = new CScrollBoxProvider (NumSaves - 1, MAX_SAVE_DISPLAY, 22);
 	LoadScrollbox->SetDrawItemCallback (Menu_SaveLoadOnDraw);
 	LoadScrollbox->SetHoverItemCallback (Menu_SaveLoadOnHover);
 	LoadScrollbox->SetEnterItemCallback (Menu_SaveLoadOnEnter);
+	LoadScrollbox->SetDeleteItemCallback (Menu_SaveLoadOnDelete);
 
 	// same list now
 	savelistchanged = false;
@@ -600,6 +653,55 @@ void Menu_SaveLoadOnDraw (int y, int itemnum)
 void Draw_InvalidateMapshot (void);
 void Host_DoSavegame (char *savename);
 
+void Menu_SaveLoadOnDelete (int itemnum)
+{
+	// can't delete this one!
+	if (m_state == m_save && itemnum == 0)
+	{
+		SCR_ModalMessage ("You cannot delete\nthis item!\n", "Error", MB_OK);
+		return;
+	}
+
+	int delsave = SCR_ModalMessage
+	(
+		"Are you sure that you want to\ndelete this save?\n",
+		va ("Delete %s", ActiveSaveInfoArray[itemnum]->SaveInfo.filename),
+		MB_YESNO
+	);
+
+	if (delsave)
+	{
+		// delete the save
+		char delfile[MAX_PATH];
+
+		_snprintf (delfile, MAX_PATH, "%s\\%s\\%s", com_gamedir, host_savedir.string, ActiveSaveInfoArray[itemnum]->SaveInfo.filename);
+
+		// change / to \\ 
+		for (int i = 0; ; i++)
+		{
+			if (!delfile[i]) break;
+			if (delfile[i] == '/') delfile[i] = '\\';
+		}
+
+		if (!DeleteFile (delfile))
+		{
+			SCR_UpdateScreen ();
+			SCR_ModalMessage ("Delete file failed\n", "Error", MB_OK);
+			return;
+		}
+
+		// dirty and rescan
+		savelistchanged = true;
+		Menu_SaveLoadScanSaves ();
+
+		// rerun the enter function
+		if (m_state == m_save)
+			Menu_SaveCustomEnter ();
+		else Menu_LoadCustomEnter ();
+	}
+}
+
+
 void Menu_SaveLoadOnEnter (int itemnum)
 {
 	// ensure the folder exists
@@ -704,20 +806,17 @@ int Menu_SaveLoadCustomDraw (int y)
 			Menu_PrintCenter (y + 10, "You cannot save with an inactive local server");
 			validsave = false;
 		}
-
-		if (cl.intermission)
+		else if (cl.intermission)
 		{
 			Menu_PrintCenter (y + 10, "You cannot save during an intermission");
 			validsave = false;
 		}
-
-		if (svs.maxclients != 1)
+		else if (svs.maxclients != 1)
 		{
 			Menu_PrintCenter (y + 10, "You cannot save a multiplayer game");
 			validsave = false;
 		}
-
-		if (cl.stats[STAT_HEALTH] <= 0)
+		else if (cl.stats[STAT_HEALTH] <= 0)
 		{
 			Menu_PrintCenter (y + 10, "You cannot save with a dead player");
 			validsave = false;
@@ -731,7 +830,7 @@ int Menu_SaveLoadCustomDraw (int y)
 	}
 	else
 	{
-		if (!SaveInfoList)
+		if (!SaveInfoList || !ActiveSaveInfoArray[0])
 		{
 			Menu_PrintCenter (y + 10, "There are no Saved Games to Load from");
 			Menu_PrintCenter (y + 30, "Press ESC to Exit this Menu");
@@ -760,6 +859,7 @@ void Menu_SaveLoadCustomKey (int key)
 	case K_UPARROW:
 		menu_soundlevel = m_sound_nav;
 
+	case K_DEL:
 	case K_ENTER:
 		// fall through to default here as ActiveScrollbox might go to NULL
 		// position don't change anyway so it's cool
@@ -770,6 +870,7 @@ void Menu_SaveLoadCustomKey (int key)
 		return;
 	}
 
+	// hmmm - this seems to do nothing...
 	// get what the position is now
 	int newcurr = ActiveScrollbox->GetCurrent ();
 
@@ -798,6 +899,7 @@ void Menu_InitSaveLoadMenu (void)
 	menu_Save.AddOption (new CQMenuCustomDraw (Menu_SaveLoadCustomDraw));
 	menu_Save.AddOption (new CQMenuCustomKey (K_UPARROW, Menu_SaveLoadCustomKey));
 	menu_Save.AddOption (new CQMenuCustomKey (K_DOWNARROW, Menu_SaveLoadCustomKey));
+	menu_Save.AddOption (new CQMenuCustomKey (K_DEL, Menu_SaveLoadCustomKey));
 	menu_Save.AddOption (new CQMenuCustomKey (K_ENTER, Menu_SaveLoadCustomKey));
 
 	menu_Load.AddOption (new CQMenuBanner ("gfx/p_load.lmp"));
@@ -806,6 +908,7 @@ void Menu_InitSaveLoadMenu (void)
 	menu_Load.AddOption (new CQMenuCustomDraw (Menu_SaveLoadCustomDraw));
 	menu_Load.AddOption (new CQMenuCustomKey (K_UPARROW, Menu_SaveLoadCustomKey));
 	menu_Load.AddOption (new CQMenuCustomKey (K_DOWNARROW, Menu_SaveLoadCustomKey));
+	menu_Load.AddOption (new CQMenuCustomKey (K_DEL, Menu_SaveLoadCustomKey));
 	menu_Load.AddOption (new CQMenuCustomKey (K_ENTER, Menu_SaveLoadCustomKey));
 
 	// the initial scan at runtime can be slow owing to filesystem first access, so

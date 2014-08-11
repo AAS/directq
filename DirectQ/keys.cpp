@@ -18,7 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 #include "quakedef.h"
-#include <windows.h>
+
 /*
 
 key up events are sent even if in console mode
@@ -997,7 +997,11 @@ void Key_Event (int key, bool down)
 
 	if (key_count <= 0)
 	{
-		return;		// just catching keys for Con_NotifyBox
+		// just catching keys for Con_NotifyBox
+		// (this function doesn't exist anymore, but we leave the
+		// check in case it has unknown consequences or assumptions
+		// are made that it still exists elsewhere).
+		return;
 	}
 
 	// update auto-repeat status

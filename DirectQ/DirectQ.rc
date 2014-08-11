@@ -2,13 +2,13 @@
 #include "resource.h"
 
 // bitmaps and other image types
-IDR_SPLASH				RCDATA		"splash.png"
+IDR_SPLASH			RCDATA		"splash.png"
 
 IDR_PARTICLEDOT			RCDATA		"particledot.png"
 
 IDR_QMBBLOOD			RCDATA		"qmbblood.png"
 IDR_QMBBUBBLE			RCDATA		"qmbbubble.png"
-IDR_QMBLIGHTNING			RCDATA		"qmblightning.png"
+IDR_QMBLIGHTNING		RCDATA		"qmblightning.png"
 IDR_QMBLIGHTNING_OLD		RCDATA		"qmblightning_old.png"
 IDR_QMBSMOKE			RCDATA		"qmbsmoke.png"
 IDR_QMBSPARK			RCDATA		"qmbspark.png"
@@ -18,10 +18,14 @@ IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
 IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
 
 // shaders
-IDR_ALIAS				RCDATA		"fxAlias.fx"
-IDR_LIQUID				RCDATA		"fxLiquid.fx"
-IDR_SKY					RCDATA		"fxQ1Sky.fx"
+IDR_LIQUID			RCDATA		"fxLiquid.fx"
+IDR_SKY				RCDATA		"fxQ1Sky.fx"
 
 // icons
-IDI_APPICON				ICON			"dq.ico"
+IDI_APPICON			ICON		"dq.ico"
+
+
+// lookup tables
+IDR_ANORMDOTS			RCDATA		"anorm_dots.bin"
+IDR_ANORMS			RCDATA		"anorms.bin"
 

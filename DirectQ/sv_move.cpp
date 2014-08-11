@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_move.c -- monster movement
 
 #include "quakedef.h"
+#include "pr_class.h"
 
 #define	STEPSIZE	18
 
@@ -104,7 +105,7 @@ SV_movestep
 Called by monster program code.
 The move will be adjusted for slopes and stairs, but if the move isn't
 possible, no move is done, false is returned, and
-pr_global_struct->trace_normal is set to the normal of the blocking wall
+SVProgs->GlobalStruct->trace_normal is set to the normal of the blocking wall
 =============
 */
 bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
@@ -127,7 +128,7 @@ bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
 		{
 			VectorAdd (ent->v.origin, move, neworg);
 			enemy = PROG_TO_EDICT(ent->v.enemy);
-			if (i == 0 && enemy != sv.edicts)
+			if (i == 0 && enemy != SVProgs->Edicts)
 			{
 				dz = ent->v.origin[2] - PROG_TO_EDICT(ent->v.enemy)->v.origin[2];
 				if (dz > 40)
@@ -148,7 +149,7 @@ bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
 				return true;
 			}
 			
-			if (enemy == sv.edicts)
+			if (enemy == SVProgs->Edicts)
 				break;
 		}
 		
@@ -398,7 +399,7 @@ void SV_MoveToGoal (void)
 	edict_t		*enemy;
 #endif
 
-	ent = PROG_TO_EDICT(pr_global_struct->self);
+	ent = PROG_TO_EDICT(SVProgs->GlobalStruct->self);
 	goal = PROG_TO_EDICT(ent->v.goalentity);
 	dist = G_FLOAT(OFS_PARM0);
 
@@ -411,9 +412,9 @@ void SV_MoveToGoal (void)
 // if the next step hits the enemy, return immediately
 #ifdef QUAKE2
 	enemy = PROG_TO_EDICT(ent->v.enemy);
-	if (enemy != sv.edicts &&  SV_CloseEnough (ent, enemy, dist) )
+	if (enemy != SVProgs->Edicts &&  SV_CloseEnough (ent, enemy, dist) )
 #else
-	if ( PROG_TO_EDICT(ent->v.enemy) != sv.edicts &&  SV_CloseEnough (ent, goal, dist) )
+	if ( PROG_TO_EDICT(ent->v.enemy) != SVProgs->Edicts &&  SV_CloseEnough (ent, goal, dist) )
 #endif
 		return;
 

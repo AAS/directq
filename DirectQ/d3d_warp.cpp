@@ -20,12 +20,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // gl_warp.c -- sky and water polygons
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
-#include "d3d_hlsl.h"
 
-// r_lightmap 1 uses the grey texture on account of 2 x overbrighting
-extern LPDIRECT3DTEXTURE9 r_greytexture;
-extern cvar_t r_lightmap;
+extern cvar_t r_maxvertexsubmission;
 
 extern	model_t	*loadmodel;
 
@@ -35,12 +33,20 @@ LPDIRECT3DTEXTURE9 simpleskytexture = NULL;
 LPDIRECT3DTEXTURE9 solidskytexture = NULL;
 LPDIRECT3DTEXTURE9 alphaskytexture = NULL;
 LPDIRECT3DTEXTURE9 skyboxtextures[6] = {NULL};
-LPDIRECT3DINDEXBUFFER9 d3d_DPSkyIndexes = NULL;
-LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts = NULL;
 
 // the menu needs to know the name of the loaded skybox
 char CachedSkyBoxName[MAX_PATH] = {0};
 bool SkyboxValid = false;
+
+void D3D_AddSurfaceVertToRender (polyvert_t *vert, D3DMATRIX *m = NULL);
+
+
+typedef struct warpverts_s
+{
+	float v[3];
+	float st[2];
+} warpverts_t;
+
 
 /*
 ==============================================================================================================================
@@ -57,11 +63,18 @@ bool d3d_UpdateWarp = false;
 typedef struct uwvert_s
 {
 	float x, y, z;
-	float s1, t1;
-	float s2, t2;
+	float s, t;
 } uwvert_t;
 
+// some drivers don't obey the stride param to DPUP - sigh.
+typedef struct uwbackup_s
+{
+	float s;
+	float t;
+} uwbackup_t;
+
 uwvert_t *underwaterverts = NULL;
+uwbackup_t *underwaterbackup = NULL;
 
 float CompressST (float in)
 {
@@ -89,7 +102,8 @@ void D3D_InitUnderwaterTexture (void)
 {
 	// alloc underwater verts one time only
 	// store 2 extra s/t so we can cache the original values for updates
-	if (!underwaterverts) underwaterverts = (uwvert_t *) Pool_Alloc (POOL_PERMANENT, 2112 * sizeof (uwvert_t));
+	if (!underwaterverts) underwaterverts = (uwvert_t *) Pool_Permanent->Alloc (2112 * sizeof (uwvert_t));
+	if (!underwaterbackup) underwaterbackup = (uwbackup_t *) Pool_Permanent->Alloc (2112 * sizeof (uwbackup_t));
 
 	// ensure that it's gone before creating
 	SAFE_RELEASE (underwatersurface);
@@ -120,6 +134,8 @@ void D3D_InitUnderwaterTexture (void)
 
 	// tesselation for warps
 	uwvert_t *wv = underwaterverts;
+	uwbackup_t *wb = underwaterbackup;
+
 	float tessw = (float) d3d_CurrentMode.Width / 32.0f;
 	float tessh = (float) d3d_CurrentMode.Height / 32.0f;
 
@@ -131,20 +147,22 @@ void D3D_InitUnderwaterTexture (void)
 			wv->x = x;
 			wv->y = y;
 			wv->z = 0;
-			wv->s1 = CompressST (s);
-			wv->t1 = CompressST (t);
-			wv->s2 = wv->s1;
-			wv->t2 = wv->t1;
+			wv->s = CompressST (s);
+			wv->t = CompressST (t);
+			wb->s = wv->s;
+			wb->t = wv->t;
 			wv++;
+			wb++;
 
 			wv->x = (x + tessw);
 			wv->y = y;
 			wv->z = 0;
-			wv->s1 = CompressST (s + 1);
-			wv->t1 = CompressST (t);
-			wv->s2 = wv->s1;
-			wv->t2 = wv->t1;
+			wv->s = CompressST (s + 1);
+			wv->t = CompressST (t);
+			wb->s = wv->s;
+			wb->t = wv->t;
 			wv++;
+			wb++;
 		}
 	}
 }
@@ -160,13 +178,22 @@ void D3D_KillUnderwaterTexture (void)
 
 void D3D_BeginUnderwaterWarp (void)
 {
+	extern cshift_t cshift_empty;
+
 	// couldn't create the underwater texture or we don't want to warp
 	if (!UnderwaterValid || (r_waterwarp.integer != 1)) return;
 
+	// no viewleaf yet
+	if (!d3d_RenderDef.viewleaf) return;
+
 	// no warps present on these leafs
-	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY ||
+	if ((d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY ||
 		d3d_RenderDef.viewleaf->contents == CONTENTS_SKY ||
-		d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID) return;
+		d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID) &&
+		!cl.inwater) return;
+
+	// additional check for noclipping
+	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY && cshift_empty.percent == 0) return;
 
 	extern LPDIRECT3DSURFACE9 d3d_BackBuffer;
 
@@ -228,19 +255,18 @@ void D3D_DrawUnderwaterWarp (void)
 	// for the next frame
 	d3d_UpdateWarp = false;
 
-	// this causes Z-fighting artefacts on alpha-blended overlay surfs, so send it through T&L
-	d3d_WorldMatrixStack->Reset ();
-	d3d_WorldMatrixStack->LoadIdentity ();
+	// XYZRHW causes Z-fighting artefacts on alpha-blended overlay surfs, so send it through T&L
+	D3DXMATRIX m;
+	D3DXMatrixIdentity (&m);
+	d3d_Device->SetTransform (D3DTS_VIEW, &m);
+	d3d_Device->SetTransform (D3DTS_WORLD, &m);
 
-	d3d_ViewMatrixStack->Reset ();
-	d3d_ViewMatrixStack->LoadIdentity ();
-
-	d3d_ProjMatrixStack->Reset ();
-	d3d_ProjMatrixStack->LoadIdentity ();
-	d3d_ProjMatrixStack->Ortho2D (0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
+	D3DXMatrixOrthoOffCenterRH (&m, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
+	d3d_Device->SetTransform (D3DTS_PROJECTION, &m);
 
 	// ensure
 	D3D_DisableAlphaBlend ();
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
@@ -264,16 +290,19 @@ void D3D_DrawUnderwaterWarp (void)
 		uwvert_t *wv = underwaterverts + v;
 		uwvert_t *verts = wv;
 
+		// and the backup s/t verts
+		uwbackup_t *wb = underwaterbackup + v;
+		uwbackup_t *backup = wb;
+
 		// there's a potential optimization in here... we could precalc the warps as up to 4 verts will be shared...
-		for (int vv = 0; vv < 66; vv++, verts++)
+		for (int vv = 0; vv < 66; vv++, verts++, backup++)
 		{
-			// we stashed the originally generated coords in verts 6 and 7 so bring them back to
-			// 4 and 5, warping as we go, for the render
-			verts->s1 = (verts->s2 + sin (verts->t2 + rdt) * r_waterwarpscale.value) * 0.03125f;
-			verts->t1 = (verts->t2 + sin (verts->s2 + rdt) * r_waterwarpscale.value) * 0.03125f;
+			// because there are drivers that don't obey the stride param below we keep a backup in a second array.
+			verts->s = (backup->s + sin (backup->t + rdt) * r_waterwarpscale.value) * 0.03125f;
+			verts->t = (backup->t + sin (backup->s + rdt) * r_waterwarpscale.value) * 0.03125f;
 		}
 
-		D3D_DrawPrimitive (D3DPT_TRIANGLESTRIP, 64, wv, sizeof (uwvert_t));
+		d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLESTRIP, 64, wv, sizeof (uwvert_t));
 	}
 }
 
@@ -286,193 +315,37 @@ void D3D_DrawUnderwaterWarp (void)
 ==============================================================================================================================
 */
 
-typedef struct glwarpvert_s
+// keep this here but drop it from the archive
+cvar_t gl_subdivide_size ("gl_subdivide_size", 128);
+
+void R_GenerateTurbSurface (model_t *mod, msurface_t *surf)
 {
-	// this needs to cache the originally generated verts for transforms and the
-	// originally generated texcoords for warps
-	float xyz[3];
-	float st[2];
-	float xyz2[3];
-	float st2[2];
-} glwarpvert_t;
+	// set up initial verts for the HLSL pass
+	polyvert_t *surfverts = (polyvert_t *) Pool_Map->Alloc (surf->numverts * sizeof (polyvert_t));
+	surf->verts = surfverts;
 
-void BoundPoly (int numverts, float *verts, vec3_t mins, vec3_t maxs)
-{
-	mins[0] = mins[1] = mins[2] = 9999;
-	maxs[0] = maxs[1] = maxs[2] = -9999;
-	float *v = verts;
+	// this pass is also good for getting the midpoint of the surf
+	VectorClear (surf->midpoint);
 
-	for (int i = 0; i < numverts; i++, v += 3)
+	// copy out base verts for subdividing from
+	for (int i = 0; i < surf->numverts; i++, surfverts++)
 	{
-		for (int j = 0; j < 3; j++)
-		{
-			if (v[j] < mins[j]) mins[j] = v[j];
-			if (v[j] > maxs[j]) maxs[j] = v[j];
-		}
-	}
-}
-
-void D3D_InitSurfMinMaxs (msurface_t *surf);
-void D3D_CheckSurfMinMaxs (msurface_t *surf, float *v);
-
-
-cvar_t gl_subdivide_size ("gl_subdivide_size", 128, CVAR_ARCHIVE);
-float d3d_subdivide_size = 128.0f;
-
-void SubdividePolygon (msurface_t *warpface, int numverts, float *verts)
-{
-	vec3_t	mins, maxs;
-	vec3_t	front[64], back[64];
-	float	dist[64];
-
-	if (numverts > 60) Sys_Error ("numverts = %i", numverts);
-
-	BoundPoly (numverts, verts, mins, maxs);
-
-	for (int i = 0; i < 3; i++)
-	{
-		float m = (mins[i] + maxs[i]) * 0.5;
-		m = d3d_subdivide_size * floor (m / d3d_subdivide_size + 0.5);
-
-		if (maxs[i] - m < 8) continue;
-		if (m - mins[i] < 8) continue;
-
-		// cut it
-		float *v = verts + i;
-
-		for (int j = 0; j < numverts; j++, v += 3)
-			dist[j] = *v - m;
-
-		// wrap cases
-		dist[numverts] = dist[0];
-		v -= i;
-		VectorCopy (verts, v);
-
-		int f = 0;
-		int b = 0;
-		v = verts;
-
-		for (int j = 0; j < numverts; j++, v += 3)
-		{
-			if (dist[j] >= 0)
-			{
-				VectorCopy (v, front[f]);
-				f++;
-			}
-
-			if (dist[j] <= 0)
-			{
-				VectorCopy (v, back[b]);
-				b++;
-			}
-
-			if (dist[j] == 0 || dist[j + 1] == 0) continue;
-
-			if ((dist[j] > 0) != (dist[j + 1] > 0))
-			{
-				// clip point
-				float frac = dist[j] / (dist[j] - dist[j + 1]);
-
-				for (int k = 0; k < 3; k++)
-					front[f][k] = back[b][k] = v[k] + frac * (v[3 + k] - v[k]);
-
-				f++;
-				b++;
-			}
-		}
-
-		SubdividePolygon (warpface, f, front[0]);
-		SubdividePolygon (warpface, b, back[0]);
-		return;
-	}
-
-	// alloc this poly
-	glpoly_t *poly = (glpoly_t *) Pool_Alloc (POOL_MAP, sizeof (glpoly_t));
-	glwarpvert_t *warpverts = (glwarpvert_t *) Pool_Alloc (POOL_MAP, numverts * sizeof (glwarpvert_t));
-
-	poly->verts = (glpolyvert_t *) warpverts;
-	poly->numverts = numverts;
-	poly->next = warpface->polys;
-	warpface->polys = poly;
-
-	for (int i = 0; i < numverts; i++, verts += 3, warpverts++)
-	{
-		VectorCopy (verts, warpverts->xyz);
-		VectorCopy (verts, warpverts->xyz2);
-
-		// check these too
-		D3D_CheckSurfMinMaxs (warpface, verts);
-
-		float s = DotProduct (verts, warpface->texinfo->vecs[0]);
-		float t = DotProduct (verts, warpface->texinfo->vecs[1]);
-
-		// cache the texcoords in both st and lm
-		warpverts->st[0] = warpverts->st2[0] = s;
-		warpverts->st[1] = warpverts->st2[1] = t;
-	}
-}
-
-
-void GL_SubdivideWater (msurface_t *surf, model_t *mod)
-{
-	vec3_t verts[64];
-	float *vec;
-
-	// eval subdivide size - sanity check and store to global for keeping things consistent
-	if (gl_subdivide_size.value < 1) Cvar_Set (&gl_subdivide_size, 1.0f);
-	d3d_subdivide_size = gl_subdivide_size.value;
-
-	// convert edges back to a normal polygon
-	int numverts = 0;
-
-	for (int i = 0; i < surf->numedges; i++)
-	{
-		int lindex = mod->bh->surfedges[surf->firstedge + i];
+		int lindex = mod->brushhdr->surfedges[surf->firstedge + i];
 
 		if (lindex > 0)
-			vec = mod->bh->vertexes[mod->bh->edges[lindex].v[0]].position;
-		else vec = mod->bh->vertexes[mod->bh->edges[-lindex].v[1]].position;
+			surfverts->basevert = mod->brushhdr->vertexes[mod->brushhdr->edges[lindex].v[0]].position;
+		else surfverts->basevert = mod->brushhdr->vertexes[mod->brushhdr->edges[-lindex].v[1]].position;
 
-		VectorCopy (vec, verts[numverts]);
-		numverts++;
+		// setup s/t (don't need to cache a spare copy with these but we do anyway)
+		surfverts->st[0] = surfverts->st2[0] = DotProduct (surfverts->basevert, surf->texinfo->vecs[0]);
+		surfverts->st[1] = surfverts->st2[1] = DotProduct (surfverts->basevert, surf->texinfo->vecs[1]);
+
+		// accumulate into midpoint
+		VectorAdd (surf->midpoint, surfverts->basevert, surf->midpoint);
 	}
 
-	// min and max for automap
-	D3D_InitSurfMinMaxs (surf);
-
-	// now subdivide it
-	SubdividePolygon (surf, numverts, verts[0]);
-
-	// the first poly is the undivided one for hlsl rendering so now we need to rebuild that
-	glpoly_t *poly = (glpoly_t *) Pool_Alloc (POOL_MAP, sizeof (glpoly_t));
-	glwarpvert_t *warpverts = (glwarpvert_t *) Pool_Alloc (POOL_MAP, numverts * sizeof (glwarpvert_t));
-
-	poly->verts = (glpolyvert_t *) warpverts;
-	poly->numverts = numverts;
-	poly->next = surf->polys;
-	surf->polys = poly;
-
-	for (int i = 0; i < surf->numedges; i++, warpverts++)
-	{
-		int lindex = mod->bh->surfedges[surf->firstedge + i];
-
-		if (lindex > 0)
-			vec = mod->bh->vertexes[mod->bh->edges[lindex].v[0]].position;
-		else vec = mod->bh->vertexes[mod->bh->edges[-lindex].v[1]].position;
-
-		VectorCopy (vec, warpverts->xyz);
-		VectorCopy (vec, warpverts->xyz2);
-
-		// check these too
-		D3D_CheckSurfMinMaxs (surf, vec);
-
-		float s = DotProduct (vec, surf->texinfo->vecs[0]);
-		float t = DotProduct (vec, surf->texinfo->vecs[1]);
-
-		// cache the texcoords in both st and lm
-		warpverts->st[0] = warpverts->st2[0] = s;
-		warpverts->st[1] = warpverts->st2[1] = t;
-	}
+	// get final midpoint
+	VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
 }
 
 
@@ -485,11 +358,11 @@ void GL_SubdivideWater (msurface_t *surf, model_t *mod)
 */
 
 
-/*
-================
-D3D_DrawAlphaWaterSurfaces
-================
-*/
+byte d3d_WaterAlpha = 255;
+byte d3d_LavaAlpha = 255;
+byte d3d_SlimeAlpha = 255;
+byte d3d_TeleAlpha = 255;
+
 cvar_t r_lavaalpha ("r_lavaalpha", 1, CVAR_ARCHIVE);
 cvar_t r_telealpha ("r_telealpha", 1, CVAR_ARCHIVE);
 cvar_t r_slimealpha ("r_slimealpha", 1, CVAR_ARCHIVE);
@@ -500,113 +373,16 @@ cvar_t r_warpfactor ("r_warpfactor", 2, CVAR_ARCHIVE);
 // lock water/slime/tele/lava alpha sliders
 cvar_t r_lockalpha ("r_lockalpha", "1", CVAR_ARCHIVE);
 
-// water ripple
-cvar_t r_waterripple ("r_waterripple", "0", CVAR_ARCHIVE);
-
-float *warpsin = NULL;
 float warptime = 10;
-float warpfactor = 1;
 
-void R_InitWarp (void)
+float warpsintime;
+float warpcostime;
+
+void D3D_InitializeTurb (void)
 {
-	int i;
-
-	warpsin = (float *) Pool_Alloc (POOL_PERMANENT, 256 * sizeof (float));
-
-	for (i = 0; i < 256; i++)
-	{
-		float f = (float) i / 40.743665f;
-
-		// just take the sin so that we can multiply it by a variable warp factor
-		warpsin[i] = sin (f);
-	}
-}
-
-
-// this has been cvar-ized to allow user control of the warps; the defaults mimic software quake
-#define WARPCALC(s,t) ((s + warpsin[(int) ((t * warpfactor) + warptime) & 255] * r_warpscale.value) * 0.015625f)
-
-void D3D_WarpSurfacePolygon (glpoly_t *p)
-{
-	glwarpvert_t *v = (glwarpvert_t *) p->verts;
-
-	// this has been set up so that the same warpcalc def can be used for both size ranges
-	for (int i = 0; i < p->numverts; i++, v++)
-	{
-		// fixme - put in a lookup!!!
-		// this is not currently supported with hlsl owing to the fact that we don't tesselate the surf so much
-		if (r_waterripple.value) v->xyz[2] = v->xyz[2] + r_waterripple.value * sin (v->xyz[0] * 0.05 + cl.time * 3) * sin (v->xyz[1] * 0.05 + cl.time * 3);
-
-		// we cached a copy of the texcoords in st2 so that we can do this live
-		v->st[0] = WARPCALC (v->st2[0], v->st2[1]);
-		v->st[1] = WARPCALC (v->st2[1], v->st2[0]);
-	}
-}
-
-
-void D3D_RestoreWarpVerts (glpoly_t *p)
-{
-	glwarpvert_t *v = (glwarpvert_t *) p->verts;
-
-	for (int i = 0; i < p->numverts; i++, v++)
-	{
-		v->xyz[0] = v->xyz2[0];
-		v->xyz[1] = v->xyz2[1];
-		v->xyz[2] = v->xyz2[2];
-	}
-}
-
-
-void D3D_TransformWaterSurface (msurface_t *surf)
-{
-	D3DXMATRIX *m = (D3DXMATRIX *) surf->matrix;
-
-	if (d3d_GlobalCaps.usingPixelShaders)
-	{
-		// one poly only
-		glpoly_t *p = surf->polys;
-		glwarpvert_t *v = (glwarpvert_t *) p->verts;
-
-		for (int i = 0; i < p->numverts; i++, v++)
-		{
-			// transform them and copy out
-			v->xyz[0] = v->xyz2[0] * m->_11 + v->xyz2[1] * m->_21 + v->xyz2[2] * m->_31 + m->_41;
-			v->xyz[1] = v->xyz2[0] * m->_12 + v->xyz2[1] * m->_22 + v->xyz2[2] * m->_32 + m->_42;
-			v->xyz[2] = v->xyz2[0] * m->_13 + v->xyz2[1] * m->_23 + v->xyz2[2] * m->_33 + m->_43;
-		}
-	}
-	else
-	{
-		// start at the poly after the first
-		for (glpoly_t *p = surf->polys->next; p; p = p->next)
-		{
-			glwarpvert_t *v = (glwarpvert_t *) p->verts;
-
-			for (int i = 0; i < p->numverts; i++, v++)
-			{
-				// transform them and copy out
-				v->xyz[0] = v->xyz2[0] * m->_11 + v->xyz2[1] * m->_21 + v->xyz2[2] * m->_31 + m->_41;
-				v->xyz[1] = v->xyz2[0] * m->_12 + v->xyz2[1] * m->_22 + v->xyz2[2] * m->_32 + m->_42;
-				v->xyz[2] = v->xyz2[0] * m->_13 + v->xyz2[1] * m->_23 + v->xyz2[2] * m->_33 + m->_43;
-			}
-		}
-	}
-}
-
-
-byte d3d_WaterAlpha = 255;
-byte d3d_LavaAlpha = 255;
-byte d3d_SlimeAlpha = 255;
-byte d3d_TeleAlpha = 255;
-
-void D3D_PrepareWaterSurfaces (void)
-{
-	// create the sintable (done whether or not water is drawn so that is always happens in frame 0
-	// instead of during active gameplay; we should push this off to a one-time setup but we're lazy
-	if (!warpsin) R_InitWarp ();
-
-	// prevent state changes if water ain't being drawn
-	if (!(d3d_RenderDef.renderflags & R_RENDERWATERSURFACE)) return;
+	// sin and cos are calced per vertex for non-HLSL so cache them
+	warpsintime = sin (cl.time) * 8.0f;
+	warpcostime = cos (cl.time) * 8.0f;
 
 	// store alpha values
 	// this needs to be checked first because the actual values we'll use depend on whether or not the sliders are locked
@@ -628,10 +404,6 @@ void D3D_PrepareWaterSurfaces (void)
 		d3d_TeleAlpha = BYTE_CLAMP (r_telealpha.value * 256);
 	}
 
-	// check for turning translucency on
-	if (d3d_WaterAlpha < 255 || d3d_LavaAlpha < 255 || d3d_SlimeAlpha < 255 || d3d_TeleAlpha < 255) d3d_RenderDef.renderflags |= R_RENDERALPHAWATER;
-	if (d3d_WaterAlpha == 255 || d3d_LavaAlpha == 255 || d3d_SlimeAlpha == 255 || d3d_TeleAlpha == 255) d3d_RenderDef.renderflags |= R_RENDEROPAQUEWATER;
-
 	// bound factor
 	if (r_warpfactor.value < 0) Cvar_Set (&r_warpfactor, 0.0f);
 	if (r_warpfactor.value > 8) Cvar_Set (&r_warpfactor, 8);
@@ -646,215 +418,298 @@ void D3D_PrepareWaterSurfaces (void)
 
 	// set the warp time and factor (moving this calculation out of a loop)
 	warptime = cl.time * 10.18591625f * r_warpspeed.value;
-
-	// warpfactor is only variable for fixed, hlsl always uses r_warpfactor.value
-	if (d3d_subdivide_size > 48)
-		warpfactor = r_warpfactor.value * 2.546479f;
-	else warpfactor = r_warpfactor.value;
 }
 
 
-void R_DrawWaterChain (texture_t *t)
+warpverts_t *d3d_WarpVerts = NULL;
+unsigned short *d3d_WarpIndexes = NULL;
+
+int d3d_NumWarpVerts = 0;
+int d3d_NumWarpIndexes = 0;
+
+int previouswarptexture = 0;
+int previouswarpalpha = 0;
+
+void D3D_SetupTurbState (void)
 {
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
+	D3D_SetTexCoordIndexes (0);
+
 	if (d3d_GlobalCaps.usingPixelShaders)
 	{
-		// liquids should be affected by r_lightmap 1
-		if (r_lightmap.integer)
-			d3d_LiquidFX.SetTexture ("baseTexture", r_greytexture);
-		else d3d_LiquidFX.SetTexture ("baseTexture", (LPDIRECT3DTEXTURE9) t->d3d_Texture);
+		hr = d3d_Device->SetVertexDeclaration (d3d_LiquidDeclaration);
+		d3d_LiquidFX->SetTechnique ("Liquid");
 
-		// draw all the surfaces
-		for (msurface_t *surf = t->texturechain; surf; surf = surf->texturechain)
-		{
-			// one poly only
-			glpoly_t *p = surf->polys;
-			d3d_LiquidFX.Draw (D3DPT_TRIANGLEFAN, p->numverts - 2, p->verts, sizeof (glwarpvert_t));
-			d3d_RenderDef.brush_polys++;
-		}
+		UINT numpasses;
+		d3d_LiquidFX->Begin (&numpasses, D3DXFX_DONOTSAVESTATE);
+
+		d3d_LiquidFX->SetMatrix ("WorldMatrix", D3D_MakeD3DXMatrix (&d3d_WorldMatrix));
+		d3d_LiquidFX->SetMatrix ("ProjMatrix", D3D_MakeD3DXMatrix (&d3d_ProjMatrix));
+
+		d3d_LiquidFX->SetFloat ("warptime", warptime);
+		d3d_LiquidFX->SetFloat ("warpfactor", r_warpfactor.value);
+		d3d_LiquidFX->SetFloat ("warpscale", r_warpscale.value);
+
+		d3d_LiquidFX->SetFloat ("Alpha", 1.0f);
+
+		d3d_LiquidFX->BeginPass (0);
 	}
 	else
 	{
-		// liquids should be affected by r_lightmap 1
-		if (r_lightmap.integer)
-			D3D_SetTexture (0, r_greytexture);
-		else D3D_SetTexture (0, (LPDIRECT3DTEXTURE9) t->d3d_Texture);
+		D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
 
-		// draw all the surfaces
-		for (msurface_t *surf = t->texturechain; surf; surf = surf->texturechain)
-		{
-			// start at the poly after the first
-			for (glpoly_t *p = surf->polys->next; p; p = p->next)
-			{
-				// note - we can use d3d_LiquidFX.Draw here...
-				D3D_WarpSurfacePolygon (p);
-				d3d_LiquidFX.Draw (D3DPT_TRIANGLEFAN, p->numverts - 2, p->verts, sizeof (glwarpvert_t));
-				D3D_RestoreWarpVerts (p);
-
-				d3d_RenderDef.brush_polys++;
-			}
-		}
-	}
-}
-
-
-void D3D_WaterCommonState (void)
-{
-	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
-
-	if (d3d_GlobalCaps.usingPixelShaders)
-	{
-		d3d_Device->SetVertexDeclaration (d3d_LiquidDeclaration);
-		d3d_LiquidFX.BeginRender ();
-
-		d3d_LiquidFX.SetMatrix ("WorldMatrix", d3d_WorldMatrixStack->GetTop ());
-		d3d_LiquidFX.SetMatrix ("ViewMatrix", d3d_ViewMatrixStack->GetTop ());
-		d3d_LiquidFX.SetMatrix ("ProjMatrix", d3d_ProjMatrixStack->GetTop ());
-
-		d3d_LiquidFX.SetFloat ("warptime", warptime);
-		d3d_LiquidFX.SetFloat ("warpfactor", r_warpfactor.value);
-		d3d_LiquidFX.SetFloat ("warpscale", r_warpscale.value);
-	}
-	//else
-	{
-		D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
-		D3D_SetTexCoordIndexes (0);
-
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
 		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+	}
 
-		D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-		D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+	// initialize the buffer for holding verts (needed by the alpha pass)
+	D3D_GetVertexBufferSpace ((void **) &d3d_WarpVerts);
+	D3D_GetIndexBufferSpace ((void **) &d3d_WarpIndexes);
+
+	d3d_NumWarpVerts = 0;
+	d3d_NumWarpIndexes = 0;
+	previouswarptexture = 0;
+	previouswarpalpha = 0;
+}
+
+
+void D3D_TakeDownTurbState (void)
+{
+	// draw anything left over
+	// required always so that the buffer will unlock
+	D3D_SubmitVertexes (d3d_NumWarpVerts, d3d_NumWarpIndexes, sizeof (warpverts_t));
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		// end and do the usual thing of disabling shaders fully
+		d3d_LiquidFX->EndPass ();
+		d3d_LiquidFX->End ();
+		d3d_Device->SetVertexShader (NULL);
+		d3d_Device->SetPixelShader (NULL);
+
+		D3D_SetFVF (D3DFVF_XYZ | D3DFVF_XYZRHW);
+		D3D_SetTexture (0, NULL);
+	}
+	else D3D_SetRenderState (D3DRS_TEXTUREFACTOR, 0xffffffff);
+}
+
+
+__inline void D3D_EmitWarpVertex (polyvert_t *src, D3DMATRIX *m)
+{
+	warpverts_t *dest = &d3d_WarpVerts[d3d_NumWarpVerts++];
+
+	if (m)
+	{
+		dest->v[0] = src->basevert[0] * m->_11 + src->basevert[1] * m->_21 + src->basevert[2] * m->_31 + m->_41;
+		dest->v[1] = src->basevert[0] * m->_12 + src->basevert[1] * m->_22 + src->basevert[2] * m->_32 + m->_42;
+		dest->v[2] = src->basevert[0] * m->_13 + src->basevert[1] * m->_23 + src->basevert[2] * m->_33 + m->_43;
+	}
+	else
+	{
+		dest->v[0] = src->basevert[0];
+		dest->v[1] = src->basevert[1];
+		dest->v[2] = src->basevert[2];
+	}
+
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		dest->st[0] = src->st[0];
+		dest->st[1] = src->st[1];
+	}
+	else
+	{
+		dest->st[0] = (src->st[0] + warpsintime) / 64.0f;
+		dest->st[1] = (src->st[1] + warpcostime) / 64.0f;
 	}
 }
 
 
-void D3D_DrawOpaqueWaterSurfaces (void)
+__inline void D3D_EmitWarpSurface (msurface_t *surf)
 {
-	// prevent state changes if opaque water ain't being drawn
-	if (!(d3d_RenderDef.renderflags & R_RENDEROPAQUEWATER)) return;
-
-	msurface_t *surf;
-	texture_t *t;
-
-	// always do these even with hlsl so that the internal state tracking will update properly
-	if (!d3d_GlobalCaps.usingPixelShaders) D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
-
-	D3D_DisableAlphaBlend ();
-	D3D_WaterCommonState ();
-
-	if (d3d_GlobalCaps.usingPixelShaders)
+	// emit indexes
+	for (int i = 2; i < surf->numverts; i++)
 	{
-		d3d_LiquidFX.SetFloat ("Alpha", 1.0f);
-		d3d_LiquidFX.SwitchToPass (0);
-	}
-	//else
-	{
-		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+		d3d_WarpIndexes[d3d_NumWarpIndexes++] = d3d_NumWarpVerts;
+		d3d_WarpIndexes[d3d_NumWarpIndexes++] = d3d_NumWarpVerts + i - 1;
+		d3d_WarpIndexes[d3d_NumWarpIndexes++] = d3d_NumWarpVerts + i;
 	}
 
-	for (int i = 0; i < cl.worldbrush->numtextures; i++)
-	{
-		// no texture (e2m3 gets this)
-		if (!(t = cl.worldbrush->textures[i])) continue;
+	// emit vertexes
+	for (int i = 0; i < surf->numverts; i++)
+		D3D_EmitWarpVertex (&surf->verts[i], surf->matrix);
 
-		// nothing to draw for this texture
-		if (!(surf = t->texturechain)) continue;
-
-		// skip over
-		if (!(surf->flags & SURF_DRAWTURB)) continue;
-
-		// skip alpha surfaces
-		if ((surf->flags & SURF_DRAWLAVA) && d3d_LavaAlpha < 255) continue;
-		if ((surf->flags & SURF_DRAWTELE) && d3d_TeleAlpha < 255) continue;
-		if ((surf->flags & SURF_DRAWSLIME) && d3d_SlimeAlpha < 255) continue;
-		if ((surf->flags & SURF_DRAWWATER) && d3d_WaterAlpha < 255) continue;
-
-		// draw it
-		R_DrawWaterChain (t);
-	}
-
-	// finish up the hlsl render if using it
-	if (d3d_GlobalCaps.usingPixelShaders) d3d_LiquidFX.EndRender ();
+	// explicitly NULL the surface matrix
+	surf->matrix = NULL;
 }
 
 
-void D3D_DrawAlphaWaterSurfaces (void)
+void D3D_EmitModelSurfToAlpha (d3d_modelsurf_t *modelsurf)
 {
-	// prevent state changes if alpha water ain't being drawn
-	if (!(d3d_RenderDef.renderflags & R_RENDERALPHAWATER)) return;
-
-	// set up for warping
-	// always do these even with hlsl so that the internal state tracking will update properly
-	if (!d3d_GlobalCaps.usingPixelShaders) D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
-
-	msurface_t *surf;
-	texture_t *t;
-
-	// enable translucency
-	D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
-	D3D_WaterCommonState ();
-
-	if (d3d_GlobalCaps.usingPixelShaders)
-		d3d_LiquidFX.SwitchToPass (0);
-	//else
+	if (modelsurf->matrix)
 	{
-		D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_CONSTANT);
-		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_CONSTANT);
-	}
-
-	for (int i = 0; i < cl.worldbrush->numtextures; i++)
-	{
-		// no texture (e2m3 gets this)
-		if (!(t = cl.worldbrush->textures[i])) continue;
-
-		// nothing to draw for this texture
-		if (!(surf = t->texturechain)) continue;
-
-		// skip over
-		if (!(surf->flags & SURF_DRAWTURB)) continue;
-
-		// skip opaque surfaces
-		if ((surf->flags & SURF_DRAWLAVA) && d3d_LavaAlpha == 255) continue;
-		if ((surf->flags & SURF_DRAWTELE) && d3d_TeleAlpha == 255) continue;
-		if ((surf->flags & SURF_DRAWSLIME) && d3d_SlimeAlpha == 255) continue;
-		if ((surf->flags & SURF_DRAWWATER) && d3d_WaterAlpha == 255) continue;
-
-		if (d3d_GlobalCaps.usingPixelShaders)
+		// copy out the midpoint for matrix transforms
+		float midpoint[3] =
 		{
-			if (surf->flags & SURF_DRAWLAVA)
-				d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_LavaAlpha / 255.0f);
-			else if (surf->flags & SURF_DRAWTELE)
-				d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_TeleAlpha / 255.0f);
-			else if (surf->flags & SURF_DRAWSLIME)
-				d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_SlimeAlpha / 255.0f);
-			else d3d_LiquidFX.SetFloat ("Alpha", (float) d3d_WaterAlpha / 255.0f);
-		}
+			modelsurf->surf->midpoint[0],
+			modelsurf->surf->midpoint[1],
+			modelsurf->surf->midpoint[2]
+		};
+
+		// keep the code easier to read
+		D3DMATRIX *m = modelsurf->matrix;
+
+		// transform the surface midpoint by the modelsurf matrix so that it goes into the proper place
+		modelsurf->surf->midpoint[0] = midpoint[0] * m->_11 + midpoint[1] * m->_21 + midpoint[2] * m->_31 + m->_41;
+		modelsurf->surf->midpoint[1] = midpoint[0] * m->_12 + midpoint[1] * m->_22 + midpoint[2] * m->_32 + m->_42;
+		modelsurf->surf->midpoint[2] = midpoint[0] * m->_13 + midpoint[1] * m->_23 + midpoint[2] * m->_33 + m->_43;
+
+		// now add it
+		D3D_AddToAlphaList (modelsurf);
+
+		// restore the original midpoint
+		modelsurf->surf->midpoint[0] = midpoint[0];
+		modelsurf->surf->midpoint[1] = midpoint[1];
+		modelsurf->surf->midpoint[2] = midpoint[2];
+	}
+	else
+	{
+		// just add it
+		D3D_AddToAlphaList (modelsurf);
+	}
+}
+
+
+void D3D_EmitModelSurfsToAlpha (d3d_modelsurf_t *surfchain)
+{
+	for (d3d_modelsurf_t *modelsurf = surfchain; modelsurf; modelsurf = modelsurf->surfchain)
+	{
+		// emit this surf (both automatic and explicit alpha)
+		D3D_EmitModelSurfToAlpha (modelsurf);
+	}
+}
+
+
+void D3D_EmitWarpSurface (d3d_modelsurf_t *modelsurf)
+{
+	d3d_RenderDef.brush_polys++;
+
+	bool recommit = false;
+
+	byte thisalpha = 255;
+
+	// automatic alpha
+	if (modelsurf->surf->flags & SURF_DRAWWATER) thisalpha = d3d_WaterAlpha;
+	if (modelsurf->surf->flags & SURF_DRAWLAVA) thisalpha = d3d_LavaAlpha;
+	if (modelsurf->surf->flags & SURF_DRAWTELE) thisalpha = d3d_TeleAlpha;
+	if (modelsurf->surf->flags & SURF_DRAWSLIME) thisalpha = d3d_SlimeAlpha;
+
+	// explicit alpha
+	if (modelsurf->surf->alphaval < 255) thisalpha = modelsurf->surf->alphaval;
+
+	if (thisalpha != previouswarpalpha) recommit = true;
+	if ((int) modelsurf->tex->teximage->d3d_Texture != previouswarptexture) recommit = true;
+
+	// check for a full buffer or state change and draw the verts if so
+	if (D3D_AreBuffersFull (d3d_NumWarpVerts + modelsurf->surf->numverts, d3d_NumWarpIndexes + (modelsurf->surf->numverts - 2) * 3) || recommit)
+	{
+		D3D_SubmitVertexes (d3d_NumWarpVerts, d3d_NumWarpIndexes, sizeof (warpverts_t));
+
+		// reset the pointers and counters
+		d3d_NumWarpVerts = 0;
+		d3d_NumWarpIndexes = 0;
+		D3D_GetVertexBufferSpace ((void **) &d3d_WarpVerts);
+		D3D_GetIndexBufferSpace ((void **) &d3d_WarpIndexes);
+	}
+
+	// check for a texture or alpha change
+	// (either of these will trigger the recommit above)
+	if ((int) modelsurf->tex->teximage->d3d_Texture != previouswarptexture)
+	{
+		if (d3d_GlobalCaps.usingPixelShaders)
+			d3d_LiquidFX->SetTexture ("baseTexture", modelsurf->tex->teximage->d3d_Texture);
+		else D3D_SetTexture (0, modelsurf->tex->teximage->d3d_Texture);
+
+		previouswarptexture = (int) modelsurf->tex->teximage->d3d_Texture;
+	}
+
+	if (thisalpha != previouswarpalpha)
+	{
+		if (d3d_GlobalCaps.usingPixelShaders)
+			d3d_LiquidFX->SetFloat ("Alpha", (float) thisalpha / 255.0f);
 		else
 		{
-			if (surf->flags & SURF_DRAWLAVA)
-				D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_LavaAlpha, 255, 255, 255));
-			else if (surf->flags & SURF_DRAWTELE)
-				D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_TeleAlpha, 255, 255, 255));
-			else if (surf->flags & SURF_DRAWSLIME)
-				D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_SlimeAlpha, 255, 255, 255));
-			else D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (d3d_WaterAlpha, 255, 255, 255));
+			if (thisalpha < 255)
+				D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_TFACTOR);
+			else D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+
+			D3D_SetRenderState (D3DRS_TEXTUREFACTOR, D3DCOLOR_ARGB (BYTE_CLAMP (thisalpha), 255, 255, 255));
 		}
 
-		// draw it
-		R_DrawWaterChain (t);
+		previouswarpalpha = thisalpha;
 	}
 
-	// take down
-	D3D_DisableAlphaBlend ();
+	// HLSL needs to commit a param change
+	if (recommit && d3d_GlobalCaps.usingPixelShaders) d3d_LiquidFX->CommitChanges ();
 
-	// finish up the hlsl render if using it
-	if (d3d_GlobalCaps.usingPixelShaders)
-		d3d_LiquidFX.EndRender ();
-	//else
+	// store out the matrix to the surf
+	modelsurf->surf->matrix = modelsurf->matrix;
+
+	// emit this surface's verts and indexes to the buffer
+	D3D_EmitWarpSurface (modelsurf->surf);
+}
+
+
+void D3D_DrawWaterSurfaces (void)
+{
+	bool stateset = false;
+
+	// initialize the turb surfaces data and determine if we need to draw anything
+	D3D_InitializeTurb ();
+
+	// even if we're fully alpha we still pass through here so that we can add items to the alpha list
+	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
 	{
-		D3D_SetTextureStageState (0, D3DTSS_CONSTANT, 0xffffffff);
+		d3d_registeredtexture_t *rt = &d3d_RegisteredTextures[i];
+
+		// chains which are empty or non-turb are skipped over
+		if (!rt->surfchain) continue;
+		if (!(rt->surfchain->surf->flags & SURF_DRAWTURB)) continue;
+
+		// skip over alpha surfaces - automatic skip unless the surface explicitly overrides it (same path)
+		if ((rt->surfchain->surf->flags & SURF_DRAWLAVA) && d3d_LavaAlpha < 255) {D3D_EmitModelSurfsToAlpha (rt->surfchain); continue;}
+		if ((rt->surfchain->surf->flags & SURF_DRAWTELE) && d3d_TeleAlpha < 255) {D3D_EmitModelSurfsToAlpha (rt->surfchain); continue;}
+		if ((rt->surfchain->surf->flags & SURF_DRAWSLIME) && d3d_SlimeAlpha < 255) {D3D_EmitModelSurfsToAlpha (rt->surfchain); continue;}
+		if ((rt->surfchain->surf->flags & SURF_DRAWWATER) && d3d_WaterAlpha < 255) {D3D_EmitModelSurfsToAlpha (rt->surfchain); continue;}
+
+		// now draw all surfaces with this texture
+		for (d3d_modelsurf_t *modelsurf = rt->surfchain; modelsurf; modelsurf = modelsurf->surfchain)
+		{
+			// check for alpha on individual surfs here
+			if (modelsurf->surf->alphaval < 255)
+			{
+				// individual surfs can have alpha at this point
+				D3D_EmitModelSurfToAlpha (modelsurf);
+				continue;
+			}
+
+			// determine if we need a state update; this is just for setting the
+			// initial state; we always update the texture on a texture change
+			// we check in here because we might be skipping some of these surfaces if they have alpha set
+			if (!stateset)
+			{
+				D3D_SetupTurbState ();
+				stateset = true;
+			}
+
+			// this one used for both alpha and non-alpha
+			D3D_EmitWarpSurface (modelsurf);
+		}
 	}
+
+	// determine if we need to take down state
+	if (stateset) D3D_TakeDownTurbState ();
 }
 
 
@@ -887,12 +742,24 @@ void D3D_DrawAlphaWaterSurfaces (void)
 #define SKYGRID_RECIP (1.0f / (SKYGRID_SIZE))
 #define SKYSPHERE_NUMVERTS (SKYGRID_SIZE_PLUS_1 * SKYGRID_SIZE_PLUS_1)
 #define SKYSPHERE_NUMTRIS (SKYGRID_SIZE * SKYGRID_SIZE * 2)
+#define SKYSPHERE_NUMINDEXES (SKYGRID_SIZE * SKYGRID_SIZE * 6)
 
-typedef struct warpverts_s
+typedef struct skysphereverts_s
 {
-	float x, y, z;
-	float s, t;
-} skyverts_t;
+	float xyz[3];
+	float st1[2];
+	float st2[2];
+} skysphereverts_t;
+
+
+LPDIRECT3DINDEXBUFFER9 d3d_DPSkyIndexes = NULL;
+LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts = NULL;
+
+int d3d_NumSkyVerts = 0;
+int d3d_NumSkyIndexes = 0;
+
+warpverts_t *d3d_SkyVerts = NULL;
+unsigned short *d3d_SkyIndexes = NULL;
 
 cvar_t r_skywarp ("r_skywarp", 1, CVAR_ARCHIVE);
 cvar_t r_skybackscroll ("r_skybackscroll", 8, CVAR_ARCHIVE);
@@ -901,24 +768,71 @@ cvar_t r_skyalpha ("r_skyalpha", 1, CVAR_ARCHIVE);
 
 // dynamic far clip plane for sky
 extern float r_clipdist;
-
 unsigned *skyalphatexels = NULL;
 
-void R_ClipSky (void)
+void D3D_InitializeSky (void)
 {
-	// disable textureing and writes to the color buffer
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0);
-	D3D_SetFVF (D3DFVF_XYZ);
+	D3D_GetVertexBufferSpace ((void **) &d3d_SkyVerts);
+	D3D_GetIndexBufferSpace ((void **) &d3d_SkyIndexes);
 
-	for (msurface_t *surf = d3d_RenderDef.skychain; surf; surf = surf->texturechain)
+	d3d_NumSkyVerts = 0;
+	d3d_NumSkyIndexes = 0;
+
+	// bound alpha
+	if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
+	if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
+
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
+	D3D_SetTexCoordIndexes (0, 1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+
+	if (!r_skywarp.value)
 	{
-		// fixme - only need to store 3 floats for these - cut down on geometry going to the card
-		D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, surf->polys->numverts - 2, surf->polys->verts, sizeof (glpolyvert_t));
-		d3d_RenderDef.brush_polys++;
-	}
+		// simple sky warp
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
 
-	// revert state
-	D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0x0000000F);
+		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
+		D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+
+		D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
+		D3D_SetTexture (0, simpleskytexture);
+	}
+	else if (SkyboxValid || !d3d_GlobalCaps.usingPixelShaders)
+	{
+		// emit a clipping area
+		D3D_SetFVF (D3DFVF_XYZ);
+		D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
+		D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0);
+	}
+	else
+	{
+		// hlsl sky warp
+		float speedscale[] = {cl.time * r_skybackscroll.value, cl.time * r_skyfrontscroll.value, 1};
+
+		speedscale[0] -= (int) speedscale[0] & ~127;
+		speedscale[1] -= (int) speedscale[1] & ~127;
+
+		d3d_Device->SetVertexDeclaration (d3d_SkyDeclaration);
+		d3d_SkyFX->SetTechnique ("SkyTech");
+
+		UINT numpasses;
+
+		d3d_SkyFX->Begin (&numpasses, D3DXFX_DONOTSAVESTATE);
+
+		d3d_SkyFX->SetMatrix ("WorldMatrix", D3D_MakeD3DXMatrix (&d3d_WorldMatrix));
+		d3d_SkyFX->SetMatrix ("ProjMatrix", D3D_MakeD3DXMatrix (&d3d_ProjMatrix));
+
+		d3d_SkyFX->SetTexture ("solidLayer", solidskytexture);
+		d3d_SkyFX->SetTexture ("alphaLayer", alphaskytexture);
+
+		d3d_SkyFX->SetFloat ("Alpha", r_skyalpha.value);
+		d3d_SkyFX->SetFloatArray ("r_origin", r_origin, 3);
+		d3d_SkyFX->SetFloatArray ("Scale", speedscale, 3);
+
+		d3d_SkyFX->BeginPass (0);
+	}
 }
 
 
@@ -949,7 +863,7 @@ void D3D_UpdateSkyAlpha (void)
 	// alloc texels
 	if (!skyalphatexels)
 	{
-		skyalphatexels = (unsigned *) Pool_Alloc (POOL_MAP, Level0Desc.Width * Level0Desc.Height * sizeof (unsigned));
+		skyalphatexels = (unsigned *) Pool_Map->Alloc (Level0Desc.Width * Level0Desc.Height * sizeof (unsigned));
 		copytexels = true;
 	}
 
@@ -986,25 +900,14 @@ extern cvar_t gl_fogdensity;
 extern cvar_t gl_fogsky;
 
 // for restoring fog
-void D3D_PerpareFog (void);
+void D3D_PrepareFog (void);
 
-void D3D_DrawSkySphere (float scale)
+void D3D_AddSkySphereToRender (float scale)
 {
 	D3D_UpdateSkyAlpha ();
 
-	if (gl_fogenable.integer && gl_fogsky.integer)
-	{
-		// switch to the new fog modes for sky - just fog it as if it was further away
-		D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
-		D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
-		D3D_SetRenderStatef (D3DRS_FOGEND, gl_fogend.value * 20 / 8192.0f * r_clipdist);
-	}
-
 	// darkplaces warp
-	// for all that they say "you VILL use ein index buffer, heil Bill", NOWHERE in the SDK is it
-	// documented that you need to call SetIndices to tell the device the index buffer to use.  Aside
-	// from the entry for SetIndices, of course, but NOWHERE else.  C'mon Microsoft, GET IT FUCKING RIGHT!
-	d3d_Device->SetStreamSource (0, d3d_DPSkyVerts, 0, sizeof (skyverts_t));
+	d3d_Device->SetStreamSource (0, d3d_DPSkyVerts, 0, sizeof (warpverts_t));
 	d3d_Device->SetIndices (d3d_DPSkyIndexes);
 
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
@@ -1025,58 +928,113 @@ void D3D_DrawSkySphere (float scale)
 	D3D_SetTextureMatrixOp (D3DTTFF_COUNT2, D3DTTFF_COUNT2);
 	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
 
-	d3d_WorldMatrixStack->Scale (scale, scale, scale);
+	D3DMATRIX skymatrix;
+	memcpy (&skymatrix, &d3d_WorldMatrix, sizeof (D3DMATRIX));
+	D3D_ScaleMatrix (&skymatrix, scale, scale, scale);
+	d3d_Device->SetTransform (D3DTS_WORLD, &skymatrix);
 
-	// sky should be affected by r_lightmap 1 too
-	if (r_lightmap.integer)
-	{
-		// don't bother with the ops or the scrolling
-		D3D_SetTexture (0, r_greytexture);
-		D3D_SetTexture (1, r_greytexture);
-	}
-	else
-	{
-		float speedscale;
-		D3DXMATRIX scrollmatrix;
-		D3DXMatrixIdentity (&scrollmatrix);
+	float speedscale;
+	D3DMATRIX scrollmatrix;
+	D3D_LoadIdentity (&scrollmatrix);
 
-		// use cl.time so that it pauses properly when the console is down (same as everything else)
-		speedscale = cl.time * r_skybackscroll.value;
-		speedscale -= (int) speedscale & ~127;
-		speedscale /= 128.0f;
+	// use cl.time so that it pauses properly when the console is down (same as everything else)
+	speedscale = cl.time * r_skybackscroll.value;
+	speedscale -= (int) speedscale & ~127;
+	speedscale /= 128.0f;
 
-		// aaaaarrrrggghhhh - direct3D doesn't use standard matrix positions for texture transforms!!!
-		// and where *exactly* was that documented again...?
-		scrollmatrix._31 = speedscale;
-		scrollmatrix._32 = speedscale;
-		d3d_Device->SetTransform (D3DTS_TEXTURE0, &scrollmatrix);
+	// aaaaarrrrggghhhh - direct3D doesn't use standard matrix positions for texture transforms!!!
+	// and where *exactly* was that documented again...?
+	scrollmatrix._31 = speedscale;
+	scrollmatrix._32 = speedscale;
+	d3d_Device->SetTransform (D3DTS_TEXTURE0, &scrollmatrix);
 
-		// use cl.time so that it pauses properly when the console is down (same as everything else)
-		speedscale = cl.time * r_skyfrontscroll.value;
-		speedscale -= (int) speedscale & ~127;
-		speedscale /= 128.0f;
+	// use cl.time so that it pauses properly when the console is down (same as everything else)
+	speedscale = cl.time * r_skyfrontscroll.value;
+	speedscale -= (int) speedscale & ~127;
+	speedscale /= 128.0f;
 
-		// aaaaarrrrggghhhh - direct3D doesn't use standard matrix positions for texture transforms!!!
-		// and where *exactly* was that documented again...?
-		scrollmatrix._31 = speedscale;
-		scrollmatrix._32 = speedscale;
-		d3d_Device->SetTransform (D3DTS_TEXTURE1, &scrollmatrix);
+	// aaaaarrrrggghhhh - direct3D doesn't use standard matrix positions for texture transforms!!!
+	// and where *exactly* was that documented again...?
+	scrollmatrix._31 = speedscale;
+	scrollmatrix._32 = speedscale;
+	d3d_Device->SetTransform (D3DTS_TEXTURE1, &scrollmatrix);
 
-		D3D_SetTexture (0, solidskytexture);
-		D3D_SetTexture (1, alphaskytexture);
-	}
+	D3D_SetTexture (0, solidskytexture);
+	D3D_SetTexture (1, alphaskytexture);
 
 	// all that just for this...
-	D3D_DrawPrimitive (D3DPT_TRIANGLELIST, 0, 0, SKYSPHERE_NUMVERTS, 0, SKYSPHERE_NUMTRIS);
-
-	// restore old fog
-	if (gl_fogenable.integer && gl_fogsky.integer)
-		D3D_PerpareFog ();
+	d3d_Device->DrawIndexedPrimitive (D3DPT_TRIANGLELIST, 0, 0, SKYSPHERE_NUMVERTS, 0, SKYSPHERE_NUMTRIS);
 
 	// take down specific stuff
 	D3D_SetTextureMatrixOp (D3DTTFF_DISABLE, D3DTTFF_DISABLE);
-	D3D_SetTextureStageState (0, D3DTSS_CONSTANT, 0xffffffff);
-	D3D_SetTextureStageState (1, D3DTSS_CONSTANT, 0xffffffff);
+	D3D_SetTextureState (0, D3DTSS_CONSTANT, 0xffffffff);
+	D3D_SetTextureState (1, D3DTSS_CONSTANT, 0xffffffff);
+
+	// restore transform
+	d3d_Device->SetTransform (D3DTS_WORLD, &d3d_WorldMatrix);
+}
+
+
+void D3D_AddSkySurfaceToRender (msurface_t *surf, D3DMATRIX *m)
+{
+	d3d_RenderDef.brush_polys++;
+
+	if (d3d_RenderDef.skyframe != d3d_RenderDef.framecount)
+	{
+		// initialize sky for the frame
+		D3D_InitializeSky ();
+
+		// flag sky as having been initialized this frame
+		d3d_RenderDef.skyframe = d3d_RenderDef.framecount;
+	}
+
+	// check for batch submission
+	if (D3D_AreBuffersFull (d3d_NumSkyVerts + surf->numverts, d3d_NumSkyIndexes + (surf->numverts - 2)))
+	{
+		// draw this batch
+		D3D_SubmitVertexes (d3d_NumSkyVerts, d3d_NumSkyIndexes, sizeof (warpverts_t));
+
+		// reset batch
+		D3D_GetVertexBufferSpace ((void **) &d3d_SkyVerts);
+		D3D_GetIndexBufferSpace ((void **) &d3d_SkyIndexes);
+		d3d_NumSkyIndexes = 0;
+		d3d_NumSkyVerts = 0;
+	}
+
+	// add vertexes
+	polyvert_t *src = surf->verts;
+	warpverts_t *dest = &d3d_SkyVerts[d3d_NumSkyVerts];
+
+	// add them all
+	for (int i = 0; i < surf->numverts; i++, src++, dest++)
+	{
+		if (m)
+		{
+			dest->v[0] = src->basevert[0] * m->_11 + src->basevert[1] * m->_21 + src->basevert[2] * m->_31 + m->_41;
+			dest->v[1] = src->basevert[0] * m->_12 + src->basevert[1] * m->_22 + src->basevert[2] * m->_32 + m->_42;
+			dest->v[2] = src->basevert[0] * m->_13 + src->basevert[1] * m->_23 + src->basevert[2] * m->_33 + m->_43;
+		}
+		else
+		{
+			dest->v[0] = src->basevert[0];
+			dest->v[1] = src->basevert[1];
+			dest->v[2] = src->basevert[2];
+		}
+
+		dest->st[0] = src->st[0];
+		dest->st[1] = src->st[1];
+	}
+
+	// add indexes
+	for (int i = 2; i < surf->numverts; i++)
+	{
+		d3d_SkyIndexes[d3d_NumSkyIndexes++] = d3d_NumSkyVerts;
+		d3d_SkyIndexes[d3d_NumSkyIndexes++] = d3d_NumSkyVerts + i - 1;
+		d3d_SkyIndexes[d3d_NumSkyIndexes++] = d3d_NumSkyVerts + i;
+	}
+
+	// next set of verts
+	d3d_NumSkyVerts += surf->numverts;
 }
 
 
@@ -1094,48 +1052,40 @@ int	st_to_vec[6][3] =
 
 float sky_min, sky_max;
 
-typedef struct skyboxquad_s
+void MakeSkyVec (warpverts_t *vert, float s, float t, int axis)
 {
-	float v[3];
-	float st[2];
-} skyboxquad_t;
-
-skyboxquad_t sbquad[4];
-
-void MakeSkyVec (float s, float t, int axis, int vert)
-{
-	vec3_t b;
-	int j, k;
-
-	// fill in verts
-	b[0] = s * r_clipdist;
-	b[1] = t * r_clipdist;
-	b[2] = r_clipdist;
-
-	for (j = 0; j < 3; j++)
+	// fill in verts (draw at double the clipping dist)
+	float b[] =
 	{
-		k = st_to_vec[axis][j];
+		s * r_clipdist * 2,
+		t * r_clipdist * 2,
+		r_clipdist * 2
+	};
+
+	for (int j = 0; j < 3; j++)
+	{
+		int k = st_to_vec[axis][j];
 
 		if (k < 0)
-			sbquad[vert].v[j] = -b[-k - 1];
-		else sbquad[vert].v[j] = b[k - 1];
+			vert->v[j] = -b[-k - 1] + r_origin[j];
+		else vert->v[j] = b[k - 1] + r_origin[j];
 	}
 
 	// fill in texcoords
 	// avoid bilerp seam
-	sbquad[vert].st[0] = (s + 1) * 0.5;
-	sbquad[vert].st[1] = (t + 1) * 0.5;
+	vert->st[0] = (s + 1) * 0.5;
+	vert->st[1] = (t + 1) * 0.5;
 
 	// clamp
-	if (sbquad[vert].st[0] < sky_min) sbquad[vert].st[0] = sky_min; else if (sbquad[vert].st[0] > sky_max) sbquad[vert].st[0] = sky_max;
-	if (sbquad[vert].st[1] < sky_min) sbquad[vert].st[1] = sky_min; else if (sbquad[vert].st[1] > sky_max) sbquad[vert].st[1] = sky_max;
+	if (vert->st[0] < sky_min) vert->st[0] = sky_min; else if (vert->st[0] > sky_max) vert->st[0] = sky_max;
+	if (vert->st[1] < sky_min) vert->st[1] = sky_min; else if (vert->st[1] > sky_max) vert->st[1] = sky_max;
 
 	// invert t
-	sbquad[vert].st[1] = 1.0 - sbquad[vert].st[1];
+	vert->st[1] = 1.0 - vert->st[1];
 }
 
 
-void R_DrawSkybox ()
+void R_AddSkyboxToRender (void)
 {
 	int i;
 	float skymins[2] = {-1, -1};
@@ -1145,17 +1095,6 @@ void R_DrawSkybox ()
 	sky_min = 1.0 / 512;
 	sky_max = 511.0 / 512;
 
-	// note - this looks ugly as fuck on skyboxes on account of corners; i've tried it with per-pixel and
-	// with exp and exp2 mode, but the effect remains.  the solution seems to be to project the skybox onto
-	// a sphere of some kind.  maybe later.
-	if (gl_fogenable.integer && gl_fogsky.integer)
-	{
-		// switch to the new fog modes for sky - just fog it as if it was further away
-		D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
-		D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
-		D3D_SetRenderStatef (D3DRS_FOGEND, gl_fogend.value * 20.0f / 8192.0f * r_clipdist);
-	}
-
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
 
 	for (i = 0; i < 6; i++)
@@ -1163,155 +1102,71 @@ void R_DrawSkybox ()
 		// we allowed the skybox to load if any of the components were not found (crazy modders!), so we must account for that here
 		if (!skyboxtextures[skytexorder[i]]) continue;
 
-		// sky should be affected by r_lightmap 1 too
-		if (r_lightmap.integer)
-			D3D_SetTexture (0, r_greytexture);
-		else D3D_SetTexture (0, skyboxtextures[skytexorder[i]]);
+		D3D_SetTexture (0, skyboxtextures[skytexorder[i]]);
 
-		MakeSkyVec (skymins[0], skymins[1], i, 0);
-		MakeSkyVec (skymins[0], skymaxs[1], i, 1);
-		MakeSkyVec (skymaxs[0], skymaxs[1], i, 2);
-		MakeSkyVec (skymaxs[0], skymins[1], i, 3);
+		warpverts_t *verts = NULL;
+		unsigned short *indexes = NULL;
 
-		D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, sbquad, sizeof (skyboxquad_t));
-		d3d_RenderDef.brush_polys++;
-	}
+		// this hardly seems worth it for a max of 6 quads but we do it anyway, what the heck?
+		D3D_GetVertexBufferSpace ((void **) &verts);
+		D3D_GetIndexBufferSpace ((void **) &indexes);
 
-	// restore old fog
-	if (gl_fogenable.integer && gl_fogsky.integer)
-		D3D_PerpareFog ();
-}
+		MakeSkyVec (&verts[0], skymins[0], skymins[1], i);
+		MakeSkyVec (&verts[1], skymins[0], skymaxs[1], i);
+		MakeSkyVec (&verts[2], skymaxs[0], skymaxs[1], i);
+		MakeSkyVec (&verts[3], skymaxs[0], skymins[1], i);
 
+		indexes[0] = 0; indexes[1] = 1; indexes[2] = 2; indexes[3] = 0; indexes[4] = 2; indexes[5] = 3;
 
-void R_DrawSimpleSky (msurface_t *skychain)
-{
-	// disable textureing and writes to the color buffer
-	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
-
-	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
-
-	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
-
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
-	D3D_SetTexture (0, simpleskytexture);
-
-	for (msurface_t *surf = skychain; surf; surf = surf->texturechain)
-	{
-		// fixme - only need to store 3 floats for these - cut down on geometry going to the card
-		D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, surf->polys->numverts - 2, surf->polys->verts, sizeof (glpolyvert_t));
+		D3D_SubmitVertexes (4, 6, sizeof (warpverts_t));
 		d3d_RenderDef.brush_polys++;
 	}
 }
 
 
-void D3D_DrawShaderSky (msurface_t *skychain)
+void D3D_FinalizeSky (void)
 {
-	float speedscale[] = {cl.time * r_skybackscroll.value, cl.time * r_skyfrontscroll.value, 1};
+	// no surfs were added
+	if (d3d_RenderDef.skyframe != d3d_RenderDef.framecount) return;
 
-	speedscale[0] -= (int) speedscale[0] & ~127;
-	speedscale[1] -= (int) speedscale[1] & ~127;
+	// draw anything that was left over
+	// required always so that the buffer will unlock
+	D3D_SubmitVertexes (d3d_NumSkyVerts, d3d_NumSkyIndexes, sizeof (warpverts_t));
 
-	d3d_Device->SetVertexDeclaration (d3d_SkyDeclaration);
-	d3d_SkyFX.BeginRender ();
-
-	d3d_SkyFX.SetMatrix ("WorldMatrix", d3d_WorldMatrixStack->GetTop ());
-	d3d_SkyFX.SetMatrix ("ViewMatrix", d3d_ViewMatrixStack->GetTop ());
-	d3d_SkyFX.SetMatrix ("ProjMatrix", d3d_ProjMatrixStack->GetTop ());
-
-	d3d_SkyFX.SetTexture ("solidLayer", solidskytexture);
-	d3d_SkyFX.SetTexture ("alphaLayer", alphaskytexture);
-
-	d3d_SkyFX.SetFloat ("Alpha", r_skyalpha.value);
-	d3d_SkyFX.SetFloatArray ("r_origin", r_origin, 3);
-	d3d_SkyFX.SetFloatArray ("Scale", speedscale, 3);
-
-	d3d_SkyFX.SwitchToPass (0);
-
-	// not subdivided
-	for (msurface_t *surf = skychain; surf; surf = surf->texturechain)
+	if (SkyboxValid || !d3d_GlobalCaps.usingPixelShaders)
 	{
-		d3d_SkyFX.Draw (D3DPT_TRIANGLEFAN, surf->polys->numverts - 2, surf->polys->verts, sizeof (glpolyvert_t));
-		d3d_RenderDef.brush_polys++;
-	}
+		D3D_SetRenderState (D3DRS_COLORWRITEENABLE, 0x0000000F);
+		D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
 
-	d3d_SkyFX.EndRender ();
-}
+		// invert the depth func and add the skybox
+		// also disable depth writing so that it retains the z values from the clipping brushes
+		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
+		// add the skybox
+		if (SkyboxValid)
+			R_AddSkyboxToRender ();
+		else D3D_AddSkySphereToRender (r_clipdist / 8);
 
-/*
-=================
-D3D_DrawSkyChain
-=================
-*/
-void D3D_DrawSkyChain (void)
-{
-	// no sky to draw!
-	if (!d3d_RenderDef.skychain) return;
-
-	// baseline projection for simple sky and clipping brushes
-	d3d_ProjMatrixStack->LoadIdentity ();
-	d3d_ProjMatrixStack->Frustum3D (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_clipdist);
-
-	if (!r_skywarp.value)
-	{
-		R_DrawSimpleSky (d3d_RenderDef.skychain);
-		return;
-	}
-
-	if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
-	if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
-
-	// hack for sky where mappers do weird and wonderful non-standard things
-	float skyclipdist = r_clipdist * 2;
-
-	if (d3d_GlobalCaps.usingPixelShaders && !SkyboxValid)
-	{
-		D3D_DrawShaderSky (d3d_RenderDef.skychain);
-		return;
-	}
-
-	// write the regular sky polys into the depth buffer to get a baseline
-	R_ClipSky ();
-
-	// flip the depth func so that the regular polys will prevent sphere polys outside their area reaching the framebuffer
-	// also disable writing to Z
-	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_GREATEREQUAL);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-
-	// sky layer drawing state
-	d3d_WorldMatrixStack->Push ();
-	d3d_WorldMatrixStack->Translate (r_origin[0], r_origin[1], r_origin[2]);
-
-	// increase the far clip plane for the actual sky brushes because we're going to draw it farther away
-	d3d_ProjMatrixStack->LoadIdentity ();
-	d3d_ProjMatrixStack->Frustum3D (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, skyclipdist);
-
-	if (SkyboxValid)
-	{
-		// skybox drawing
-		R_DrawSkybox ();
+		// restore the old depth func
+		D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+		D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 	}
 	else
 	{
-		// draw skysphere layers layer
-		// the DP sphere is calculated at a scale of 16 so bring it up to the full correct scale
-		D3D_DrawSkySphere (r_clipdist / 8);
+		// done
+		d3d_SkyFX->EndPass ();
+		d3d_SkyFX->End ();
+
+		// take down shaders
+		d3d_Device->SetPixelShader (NULL);
+		d3d_Device->SetVertexShader (NULL);
+
+		// set fvf to invalid to force an update next time it's used
+		D3D_SetFVF (D3DFVF_XYZ | D3DFVF_XYZRHW);
+		D3D_SetTexture (0, NULL);
+		D3D_SetTexture (1, NULL);
 	}
-
-	// don't bother undoing the projection matrix as we're going to be resetting it for real anyway when we come to draw the world
-	d3d_WorldMatrixStack->Pop ();
-
-	// restore the depth func
-	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-
-	// now write the regular polys one more time to clip world geometry
-	// not certain if this is actually necessary...!
-	// i'll put it back it i notice any indication it's needed
-	// R_ClipSky ();
 }
 
 
@@ -1320,18 +1175,14 @@ void D3D_DrawSkyChain (void)
 
 		SKY INITIALIZATION
 
-	The sphere is drawn from a VertexBuffer.  The sky texture is in two layers, top and bottom, contained in the same
-	texture.
-
 ==============================================================================================================================
 */
 
 
-DWORD d3d_BufferUsage = D3DUSAGE_SOFTWAREPROCESSING;
-
 void D3D_InitSkySphere (void)
 {
-	if (d3d_DPSkyVerts) return;
+	// protect against multiple allocations
+	if (d3d_DPSkyVerts && d3d_DPSkyIndexes) return;
 
 	int i, j;
 	float a, b, x, ax, ay, v[3], length;
@@ -1343,8 +1194,8 @@ void D3D_InitSkySphere (void)
 
 	hr = d3d_Device->CreateVertexBuffer
 	(
-		SKYSPHERE_NUMVERTS * sizeof (skyverts_t),
-		D3DUSAGE_WRITEONLY | d3d_BufferUsage,
+		SKYSPHERE_NUMVERTS * sizeof (warpverts_t),
+		D3DUSAGE_WRITEONLY,
 		0,
 		D3DPOOL_MANAGED,
 		&d3d_DPSkyVerts,
@@ -1357,12 +1208,12 @@ void D3D_InitSkySphere (void)
 		return;
 	}
 
-	skyverts_t *ssv;
+	warpverts_t *ssv;
 
 	i = SKYSPHERE_NUMVERTS;
 
-	d3d_DPSkyVerts->Lock (0, SKYSPHERE_NUMVERTS * sizeof (skyverts_t), (void **) &ssv, 0);
-	skyverts_t *ssv2 = ssv;
+	d3d_DPSkyVerts->Lock (0, SKYSPHERE_NUMVERTS * sizeof (warpverts_t), (void **) &ssv, 0);
+	warpverts_t *ssv2 = ssv;
 
 	float maxv = 0;
 	float minv = 1048576;
@@ -1395,11 +1246,11 @@ void D3D_InitSkySphere (void)
 			// the heaving and buckling effect
 			length = 3.0f / sqrt (v[0] * v[0] + v[1] * v[1] + (v[2] * v[2] * 9));
 
-			ssv2->s = v[0] * length;
-			ssv2->t = v[1] * length;
-			ssv2->x = v[0];
-			ssv2->y = v[1];
-			ssv2->z = v[2];
+			ssv2->st[0] = v[0] * length;
+			ssv2->st[1] = v[1] * length;
+			ssv2->v[0] = v[0];
+			ssv2->v[1] = v[1];
+			ssv2->v[2] = v[2];
 
 			ssv2++;
 		}
@@ -1414,7 +1265,7 @@ void D3D_InitSkySphere (void)
 	hr = d3d_Device->CreateIndexBuffer
 	(
 		(SKYGRID_SIZE * SKYGRID_SIZE * 6) * sizeof (unsigned short),
-		D3DUSAGE_WRITEONLY | d3d_BufferUsage,
+		D3DUSAGE_WRITEONLY,
 		D3DFMT_INDEX16,
 		D3DPOOL_MANAGED,
 		&d3d_DPSkyIndexes,
@@ -1471,14 +1322,8 @@ void R_InitSky (miptex_t *mt)
 	// create the sky sphere (one time only)
 	D3D_InitSkySphere ();
 
-	int			i, j, p;
-	byte		*src;
-	unsigned	transpix;
-	int			r, g, b;
-	unsigned	*rgba;
-
 	// because you never know when a mapper might use a non-standard size...
-	unsigned *trans = (unsigned *) Pool_Alloc (POOL_TEMP, mt->width * mt->height * sizeof (unsigned) / 2);
+	unsigned *trans = (unsigned *) Pool_Temp->Alloc (mt->width * mt->height * sizeof (unsigned) / 2);
 
 	// copy out
 	int transwidth = mt->width / 2;
@@ -1489,23 +1334,21 @@ void R_InitSky (miptex_t *mt)
 	SAFE_RELEASE (solidskytexture);
 	SAFE_RELEASE (alphaskytexture);
 
-	src = (byte *) mt + mt->offsets[0];
+	byte *src = (byte *) mt + mt->offsets[0];
+	unsigned int transpix, r = 0, g = 0, b = 0;
 
-	// make an average value for the back to avoid
-	// a fringe on the top level
-	for (i = 0, r = 0, g = 0, b = 0; i < transheight; i++)
+	// make an average value for the back to avoid a fringe on the top level
+	for (int i = 0; i < transheight; i++)
 	{
-		for (j = 0; j < transwidth; j++)
+		for (int j = 0; j < transwidth; j++)
 		{
-			p = src[i * mt->width + j + transwidth];
+			// solid sky can go up as 8 bit
+			int p = src[i * mt->width + j + transwidth];
+			((byte * ) trans)[(i * transwidth) + j] = p;
 
-			rgba = &d_8to24table[p];
-
-			trans[(i * transwidth) + j] = *rgba;
-
-			r += ((byte *) rgba)[0];
-			g += ((byte *) rgba)[1];
-			b += ((byte *) rgba)[2];
+			r += ((byte *) &d_8to24table[p])[0];
+			g += ((byte *) &d_8to24table[p])[1];
+			b += ((byte *) &d_8to24table[p])[2];
 		}
 	}
 
@@ -1514,15 +1357,15 @@ void R_InitSky (miptex_t *mt)
 	((byte *) &transpix)[2] = BYTE_CLAMP (b / (transwidth * transheight));
 	((byte *) &transpix)[3] = 0;
 
-	// upload it
-	D3D_LoadTexture (&solidskytexture, transwidth, transheight, (byte *) trans, NULL, false, false);
+	// upload it - solid sky can go up as 8 bit
+	D3D_UploadTexture (&solidskytexture, trans, transwidth, transheight, IMAGE_NOCOMPRESS);
 
 	// bottom layer
-	for (i = 0; i < transheight; i++)
+	for (int i = 0; i < transheight; i++)
 	{
-		for (j = 0; j < transwidth; j++)
+		for (int j = 0; j < transwidth; j++)
 		{
-			p = src[i * mt->width + j];
+			int p = src[i * mt->width + j];
 
 			if (p == 0)
 				trans[(i * transwidth) + j] = transpix;
@@ -1530,18 +1373,12 @@ void R_InitSky (miptex_t *mt)
 		}
 	}
 
-	// upload it
-	D3D_LoadTexture (&alphaskytexture, transwidth, transheight, (byte *) trans, NULL, false, true);
+	// upload it - alpha sky needs to go up as 32 bit owing to averaging
+	D3D_UploadTexture (&alphaskytexture, trans, transwidth, transheight, IMAGE_32BIT | IMAGE_NOCOMPRESS | IMAGE_ALPHA);
 
-	// simple sky
+	// simple sky just uses a 1 x 1 texture of the average colour
 	((byte *) &transpix)[3] = 255;
-
-	for (i = 0; i < transheight; i++)
-		for (j = 0; j < transwidth; j++)
-			trans[(i * transwidth) + j] = transpix;
-
-	// upload it
-	D3D_LoadTexture (&simpleskytexture, transwidth, transheight, (byte *) trans, NULL, false, true);
+	D3D_UploadTexture (&simpleskytexture, &transpix, 1, 1, IMAGE_32BIT | IMAGE_NOCOMPRESS);
 
 	// no texels yet
 	skyalphatexels = NULL;
@@ -1554,7 +1391,7 @@ void R_InitSky (miptex_t *mt)
 char *suf[6] = {"rt", "bk", "lf", "ft", "up", "dn"};
 char *sbdir[] = {"env", "gfx/env", "gfx", NULL};
 
-void R_LoadSkyBox (char *basename, bool feedback)
+void R_UnloadSkybox (void)
 {
 	// release any skybox textures we might already have
 	SAFE_RELEASE (skyboxtextures[0]);
@@ -1567,6 +1404,13 @@ void R_LoadSkyBox (char *basename, bool feedback)
 	// the skybox is invalid now so revert to regular warps
 	SkyboxValid = false;
 	CachedSkyBoxName[0] = 0;
+}
+
+
+void R_LoadSkyBox (char *basename, bool feedback)
+{
+	// force an unload of the current skybox
+	R_UnloadSkybox ();
 
 	// there's no standard for where to keep skyboxes so we try all of /gfx/env, /env and /gfx
 	// all of which have been used at some time in the past.  we can add more esoteric locations here if required
@@ -1591,7 +1435,7 @@ void R_LoadSkyBox (char *basename, bool feedback)
 		if (numloaded)
 		{
 			// as FQ is the behaviour modders expect let's allow partial skyboxes (much as it galls me)
-			Con_Printf ("Loaded %i skybox components\n", numloaded);
+			if (feedback) Con_Printf ("Loaded %i skybox components\n", numloaded);
 
 			// the skybox is valid now, no need to search any more
 			SkyboxValid = true;
@@ -1600,7 +1444,7 @@ void R_LoadSkyBox (char *basename, bool feedback)
 		}
 	}
 
-	Con_Printf ("Failed to load skybox\n");
+	if (feedback) Con_Printf ("Failed to load skybox\n");
 }
 
 
@@ -1617,4 +1461,17 @@ void R_Loadsky (void)
 }
 
 
+void R_RevalidateSkybox (void)
+{
+	// revalidates the currently loaded skybox
+	// need to copy out cached name as we're going to change it
+	char basename[260];
+
+	strcpy (basename, CachedSkyBoxName);
+	R_LoadSkyBox (basename, false);
+}
+
+
 cmd_t Loadsky_Cmd ("loadsky", R_Loadsky);
+
+

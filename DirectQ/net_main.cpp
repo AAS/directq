@@ -206,17 +206,9 @@ static void MaxPlayers_f (void)
 }
 
 
-static void NET_Port_f (void)
+void NET_SetPort (char *newport)
 {
-	int 	n;
-
-	if (Cmd_Argc () != 2)
-	{
-		Con_Printf ("\"port\" is \"%u\"\n", net_hostport);
-		return;
-	}
-
-	n = atoi(Cmd_Argv(1));
+	int n = atoi (newport);
 
 	if (n < 1 || n > 65534)
 	{
@@ -236,10 +228,24 @@ static void NET_Port_f (void)
 }
 
 
+static void NET_Port_f (void)
+{
+	int 	n;
+
+	if (Cmd_Argc () != 2)
+	{
+		Con_Printf ("\"port\" is \"%u\"\n", net_hostport);
+		return;
+	}
+
+	NET_SetPort (Cmd_Argv (1));
+}
+
+
 static void PrintSlistHeader(void)
 {
-	Con_Printf("Server          Map             Users\n");
-	Con_Printf("--------------- --------------- -----\n");
+	Con_Printf ("Server          Map             Users\n");
+	Con_Printf ("--------------- --------------- -----\n");
 	slistLastShown = 0;
 }
 
@@ -251,9 +257,9 @@ static void PrintSlist(void)
 	for (n = slistLastShown; n < hostCacheCount; n++)
 	{
 		if (hostcache[n].maxusers)
-			Con_Printf("%-15.15s %-15.15s %2u/%2u\n", hostcache[n].name, hostcache[n].map, hostcache[n].users, hostcache[n].maxusers);
+			Con_Printf ("%-15.15s %-15.15s %2u/%2u\n", hostcache[n].name, hostcache[n].map, hostcache[n].users, hostcache[n].maxusers);
 		else
-			Con_Printf("%-15.15s %-15.15s\n", hostcache[n].name, hostcache[n].map);
+			Con_Printf ("%-15.15s %-15.15s\n", hostcache[n].name, hostcache[n].map);
 	}
 	slistLastShown = n;
 }
@@ -262,9 +268,9 @@ static void PrintSlist(void)
 static void PrintSlistTrailer(void)
 {
 	if (hostCacheCount)
-		Con_Printf("== end list ==\n\n");
+		Con_Printf ("== end list ==\n\n");
 	else
-		Con_Printf("No Quake servers found.\n\n");
+		Con_Printf ("No Quake servers found.\n\n");
 }
 
 
@@ -275,7 +281,7 @@ void NET_Slist_f (void)
 
 	if (! slistSilent)
 	{
-		Con_Printf("Looking for Quake servers...\n");
+		Con_Printf ("Looking for Quake servers...\n");
 		PrintSlistHeader();
 	}
 
@@ -364,11 +370,14 @@ qsocket_t *NET_Connect (char *host)
 		if (hostCacheCount)
 		{
 			for (n = 0; n < hostCacheCount; n++)
+			{
 				if (stricmp (host, hostcache[n].name) == 0)
 				{
 					host = hostcache[n].cname;
 					break;
 				}
+			}
+
 			if (n < hostCacheCount)
 				goto JustDoIt;
 		}
@@ -385,19 +394,23 @@ qsocket_t *NET_Connect (char *host)
 		if (hostCacheCount != 1)
 			return NULL;
 		host = hostcache[0].cname;
-		Con_Printf("Connecting to...\n%s @ %s\n\n", hostcache[0].name, host);
+		Con_Printf ("Connecting to...\n%s @ %s\n\n", hostcache[0].name, host);
 	}
 
 	if (hostCacheCount)
+	{
 		for (n = 0; n < hostCacheCount; n++)
+		{
 			if (stricmp (host, hostcache[n].name) == 0)
 			{
 				host = hostcache[n].cname;
 				break;
 			}
+		}
+	}
 
 JustDoIt:
-	for (net_driverlevel=0 ; net_driverlevel<numdrivers; net_driverlevel++)
+	for (net_driverlevel = 0; net_driverlevel < numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
@@ -408,12 +421,12 @@ JustDoIt:
 
 	if (host)
 	{
-		Con_Printf("\n");
+		Con_Printf ("\n");
 		PrintSlistHeader();
 		PrintSlist();
 		PrintSlistTrailer();
 	}
-	
+
 	return NULL;
 }
 
@@ -504,7 +517,7 @@ int	NET_GetMessage (qsocket_t *sock)
 
 	if (sock->disconnected)
 	{
-		Con_Printf("NET_GetMessage: disconnected socket\n");
+		Con_Printf ("NET_GetMessage: disconnected socket\n");
 		return -1;
 	}
 
@@ -567,7 +580,7 @@ int NET_SendMessage (qsocket_t *sock, sizebuf_t *data)
 
 	if (sock->disconnected)
 	{
-		Con_Printf("NET_SendMessage: disconnected socket\n");
+		Con_Printf ("NET_SendMessage: disconnected socket\n");
 		return -1;
 	}
 
@@ -589,7 +602,7 @@ int NET_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 
 	if (sock->disconnected)
 	{
-		Con_Printf("NET_SendMessage: disconnected socket\n");
+		Con_Printf ("NET_SendMessage: disconnected socket\n");
 		return -1;
 	}
 
@@ -748,7 +761,7 @@ void NET_Init (void)
 
 	for (i = 0; i < net_numsockets; i++)
 	{
-		s = (qsocket_t *) Pool_Alloc (POOL_PERMANENT, sizeof (qsocket_t));
+		s = (qsocket_t *) Pool_Permanent->Alloc (sizeof (qsocket_t));
 		s->next = net_freeSockets;
 		net_freeSockets = s;
 		s->disconnected = true;

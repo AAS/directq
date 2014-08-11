@@ -1,0 +1,14 @@
+DIRECTQ 1.8.1 UPDATE
+====================
+
+- Forced a skybox unload on game change and revalidation of the current skybox every map change.
+- Removed "Loaded n skybox components" message from worldspawn skyboxes.
+- Fixed bad texture crash on e2m3 (and possibly others) (again).
+- Added missing call to SV_PushRotate.
+- Fixed crash with > 32MB of external textures in use.
+- Reworked game loading to load pak0 to pak9 before any other pak, pk3 or zip files.
+- Removed cheesy rapid fire dlight effect and fixed screen-shaking with lightning gun.
+- Increased temp memory buffer to 128 MB.
+- Added ability to delete a save from the save/load menus.
+- Fixed several crash bugs in the save/load menus when no items were present.
+

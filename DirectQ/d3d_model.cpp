@@ -23,10 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // on the same machine.
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
 void R_InitSky (miptex_t *mt);
-void GL_MakeAliasModelDisplayLists (model_t *m, aliashdr_t *hdr);
+void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangle_t *triangles);
+void R_GenerateTurbSurface (model_t *mod, msurface_t *surf);
 
 model_t	*loadmodel;
 brushhdr_t *brushmodel;
@@ -37,8 +39,6 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer);
 void Mod_LoadBrushModel (model_t *mod, void *buffer);
 void Mod_LoadAliasModel (model_t *mod, void *buffer);
 model_t *Mod_LoadModel (model_t *mod, bool crash);
-
-void D3D_GetAliasVerts (aliashdr_t *hdr);
 
 byte	*mod_novis;
 byte	*decompressed;
@@ -72,13 +72,13 @@ Mod_Init
 */
 void Mod_Init (void)
 {
-	mod_known = (model_t **) Pool_Alloc (POOL_PERMANENT, MAX_MOD_KNOWN * sizeof (model_t *));
+	mod_known = (model_t **) Pool_Permanent->Alloc (MAX_MOD_KNOWN * sizeof (model_t *));
 	memset (mod_known, 0, MAX_MOD_KNOWN * sizeof (model_t *));
 
-	mod_novis = (byte *) Pool_Alloc (POOL_PERMANENT, (MAX_MAP_LEAFS + 7) / 8);
+	mod_novis = (byte *) Pool_Permanent->Alloc ((MAX_MAP_LEAFS + 7) / 8);
 	memset (mod_novis, 0xff, (MAX_MAP_LEAFS + 7) / 8);
 
-	decompressed = (byte *) Pool_Alloc (POOL_PERMANENT, (MAX_MAP_LEAFS + 7) / 8);
+	decompressed = (byte *) Pool_Permanent->Alloc ((MAX_MAP_LEAFS + 7) / 8);
 }
 
 
@@ -93,10 +93,10 @@ mleaf_t *Mod_PointInLeaf (vec3_t p, model_t *model)
 	float		d;
 	mplane_t	*plane;
 	
-	if (!model || !model->bh->nodes)
+	if (!model || !model->brushhdr->nodes)
 		Host_Error ("Mod_PointInLeaf: bad model");
 
-	node = model->bh->nodes;
+	node = model->brushhdr->nodes;
 	while (1)
 	{
 		if (node->contents < 0)
@@ -124,7 +124,7 @@ byte *Mod_DecompressVis (byte *in, model_t *model)
 	byte	*out;
 	int		row;
 
-	row = (model->bh->numleafs + 7) >> 3;	
+	row = (model->brushhdr->numleafs + 7) >> 3;	
 	out = decompressed;
 
 	if (!in)
@@ -163,7 +163,7 @@ byte *Mod_DecompressVis (byte *in, model_t *model)
 
 byte *Mod_LeafPVS (mleaf_t *leaf, model_t *model)
 {
-	if (leaf == model->bh->leafs)
+	if (leaf == model->brushhdr->leafs)
 		return mod_novis;
 
 	return Mod_DecompressVis (leaf->compressed_vis, model);
@@ -219,12 +219,12 @@ void Mod_AddToFatPVS (vec3_t org, mnode_t *node)
 byte *Mod_FatPVS (vec3_t org)
 {
 	// it's expected that cl.worldmodel will be the same as sv.worldmodel. ;)
-	fatbytes = (cl.worldmodel->bh->numleafs + 31) >> 3;
+	fatbytes = (cl.worldmodel->brushhdr->numleafs + 31) >> 3;
 
-	if (!fatpvs) fatpvs = (byte *) Pool_Alloc (POOL_MAP, fatbytes);
+	if (!fatpvs) fatpvs = (byte *) Pool_Map->Alloc (fatbytes);
 
 	memset (fatpvs, 0, fatbytes);
-	Mod_AddToFatPVS (org, cl.worldmodel->bh->nodes);
+	Mod_AddToFatPVS (org, cl.worldmodel->brushhdr->nodes);
 
 	return fatpvs;
 }
@@ -277,7 +277,7 @@ model_t *Mod_FindName (char *name)
 
 		// allocate a model
 		// this is also done for cached models as the mod_known array is managed separately
-		mod_known[i] = (model_t *) Pool_Alloc (POOL_MAP, sizeof (model_t));
+		mod_known[i] = (model_t *) Pool_Map->Alloc (sizeof (model_t));
 
 		strncpy (mod_known[i]->name, name, 63);
 		mod_known[i]->needload = true;
@@ -301,6 +301,7 @@ void Mod_TouchModel (char *name)
 	mod = Mod_FindName (name);
 }
 
+
 /*
 ==================
 Mod_LoadModel
@@ -323,10 +324,6 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 		// did we find it?
 		memcpy (mod, cachemod, sizeof (model_t));
 
-		// set up alias vertex counts
-		if (mod->type == mod_alias)
-			D3D_GetAliasVerts (mod->ah);
-
 		// don't need to load it
 		mod->needload = false;
 
@@ -335,7 +332,7 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	}
 
 	// make the full loading pool available for us again
-	Pool_Reset (POOL_LOADFILE);
+	Pool_FileLoad->Rewind ();
 
 	// load the file
 	if (!(buf = (unsigned *) COM_LoadTempFile (mod->name)))
@@ -353,9 +350,9 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	mod->needload = false;
 
 	// set all header pointers initially NULL
-	mod->ah = NULL;
-	mod->bh = NULL;
-	mod->sh = NULL;
+	mod->aliashdr = NULL;
+	mod->brushhdr = NULL;
+	mod->spritehdr = NULL;
 
 	switch (LittleLong (*(unsigned *) buf))
 	{
@@ -506,8 +503,8 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 	m->nummiptex = LittleLong (m->nummiptex);
 
 	brushmodel->numtextures = m->nummiptex;
-	brushmodel->textures = (texture_t **) Pool_Alloc (POOL_MAP, brushmodel->numtextures * sizeof (texture_t *));
-	tx = (texture_t *) Pool_Alloc (POOL_MAP, sizeof (texture_t) * brushmodel->numtextures);
+	brushmodel->textures = (texture_t **) Pool_Map->Alloc (brushmodel->numtextures * sizeof (texture_t *));
+	tx = (texture_t *) Pool_Map->Alloc (sizeof (texture_t) * brushmodel->numtextures);
 
 	for (i = 0; i < m->nummiptex; i++)
 	{
@@ -591,20 +588,26 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 			tx->contentscolor[2] = 255;
 		}
 
-		if (!strnicmp (mt->name, "sky", 3))	
+		if (!strnicmp (mt->name, "sky", 3))
+		{
 			R_InitSky (mt);
+
+			// set correct dimensions for texcoord building
+			tx->width = 64;
+			tx->height = 64;
+		}
 		else
 		{
 			if (brushmodel->bspversion == Q1_BSPVERSION)
 			{
-				tx->d3d_Texture = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP);
-				tx->d3d_Fullbright = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA);
+				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP);
+				tx->lumaimage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP | IMAGE_LUMA);
 			}
 			else
 			{
 				// no lumas in halflife
-				tx->d3d_Texture = D3D_LoadTexture (mt, IMAGE_MIPMAP | IMAGE_BSP | IMAGE_HALFLIFE);
-				tx->d3d_Fullbright = NULL;
+				tx->teximage = D3D_LoadTexture (mt->name, mt->width, mt->height, (byte *) (mt + 1), IMAGE_MIPMAP | IMAGE_BSP | IMAGE_HALFLIFE);
+				tx->lumaimage = NULL;
 			}
 		}
 
@@ -749,7 +752,7 @@ extern cvar_t r_coloredlight;
 bool Mod_LoadLITFile (lump_t *l)
 {
 	if (!r_coloredlight.value) return false;
-	if (loadmodel->bh->bspversion != Q1_BSPVERSION) return false;
+	if (loadmodel->brushhdr->bspversion != Q1_BSPVERSION) return false;
 
 	HANDLE lithandle = INVALID_HANDLE_VALUE;
 	char litname[128];
@@ -824,13 +827,13 @@ void Mod_LoadLighting (lump_t *l)
 	if (brushmodel->bspversion == HL_BSPVERSION)
 	{
 		// read direct with no LIT file or no expansion
-		brushmodel->lightdata = (byte *) Pool_Alloc (POOL_MAP, l->filelen);
+		brushmodel->lightdata = (byte *) Pool_Map->Alloc (l->filelen);
 		memcpy (brushmodel->lightdata, mod_base + l->fileofs, l->filelen);
 		return;
 	}
 
 	// expand size to 3 component
-	brushmodel->lightdata = (byte *) Pool_Alloc (POOL_MAP, l->filelen * 3);
+	brushmodel->lightdata = (byte *) Pool_Map->Alloc (l->filelen * 3);
 
 	// check for a lit file
 	if (Mod_LoadLITFile (l)) return;
@@ -866,7 +869,7 @@ void Mod_LoadEntities (lump_t *l)
 	}
 
 	// resolve missing NULL term in entities lump; VPA will automatically 0 the memory so no need to do so ourselves.
-	brushmodel->entities = (char *) Pool_Alloc (POOL_MAP, l->filelen + 1);
+	brushmodel->entities = (char *) Pool_Map->Alloc (l->filelen + 1);
 	memcpy (brushmodel->entities, mod_base + l->fileofs, l->filelen);
 }
 
@@ -882,13 +885,13 @@ void Mod_LoadVertexes (lump_t *l)
 	mvertex_t	*out;
 	int			i, count;
 
-	in = (dvertex_t *)(mod_base + l->fileofs);
+	in = (dvertex_t *) (mod_base + l->fileofs);
 
 	if (l->filelen % sizeof(*in))
 		Host_Error ("MOD_LoadBmodel: LUMP_VERTEXES funny lump size in %s", loadmodel->name);
 
 	count = l->filelen / sizeof (*in);
-	out = (mvertex_t *) Pool_Alloc (POOL_MAP, count * sizeof (*out));	
+	out = (mvertex_t *) Pool_Map->Alloc (count * sizeof (*out));	
 
 	brushmodel->vertexes = out;
 	brushmodel->numvertexes = count;
@@ -900,6 +903,7 @@ void Mod_LoadVertexes (lump_t *l)
 		out->position[2] = LittleFloat (in->point[2]);
 	}
 }
+
 
 /*
 =================
@@ -916,7 +920,7 @@ void Mod_LoadSubmodels (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Host_Error ("MOD_LoadBmodel: LUMP_SUBMODELS funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (dmodel_t *) Pool_Alloc (POOL_MAP, count*sizeof(*out));	
+	out = (dmodel_t *) Pool_Map->Alloc (count*sizeof(*out));	
 
 	brushmodel->submodels = out;
 	brushmodel->numsubmodels = count;
@@ -953,8 +957,8 @@ void Mod_LoadEdges (lump_t *l)
 	if (l->filelen % sizeof (*in))
 		Host_Error ("MOD_LoadBmodel: LUMP_EDGES funny lump size in %s", loadmodel->name);
 
-	count = l->filelen / sizeof (*in);
-	out = (medge_t *) Pool_Alloc (POOL_MAP, (count + 1) * sizeof (*out));	
+	count = l->filelen / sizeof (dedge_t);
+	out = (medge_t *) Pool_Map->Alloc ((count + 1) * sizeof (medge_t));	
 
 	brushmodel->edges = out;
 	brushmodel->numedges = count;
@@ -965,6 +969,7 @@ void Mod_LoadEdges (lump_t *l)
 		out->v[1] = (unsigned short) LittleShort (in->v[1]);
 	}
 }
+
 
 /*
 =================
@@ -985,7 +990,7 @@ void Mod_LoadTexinfo (lump_t *l)
 		Host_Error ("MOD_LoadBmodel: LUMP_TEXINFO funny lump size in %s",loadmodel->name);
 
 	count = l->filelen / sizeof (texinfo_t);
-	out = (mtexinfo_t *) Pool_Alloc (POOL_MAP, count * sizeof (mtexinfo_t));
+	out = (mtexinfo_t *) Pool_Map->Alloc (count * sizeof (mtexinfo_t));
 
 	brushmodel->texinfo = out;
 	brushmodel->numtexinfo = count;
@@ -1042,166 +1047,198 @@ Fills in s->texturemins[] and s->extents[]
 */
 int MaxExtents[2] = {0, 0};
 
-void CalcSurfaceExtents (msurface_t *s)
+void CalcSurfaceExtents (msurface_t *surf, float *mins, float *maxs)
 {
-	float	mins[2], maxs[2], val;
-	int		i, j, lindex;
-	float	*vec;
-	int		bmins[2], bmaxs[2];
-
-	mins[0] = mins[1] = 99999999;
-	maxs[0] = maxs[1] = -99999999;
-
-	for (i = 0; i < s->numedges; i++)
-	{
-		lindex = brushmodel->surfedges[s->firstedge + i];
-
-		// reconstruct verts
-		if (lindex >= 0)
-			vec = brushmodel->vertexes[brushmodel->edges[lindex].v[0]].position;
-		else
-			vec = brushmodel->vertexes[brushmodel->edges[-lindex].v[1]].position;
-
-		// reconstruct s/t
-		for (j = 0; j < 2; j++)
-		{
-			val = DotProduct (vec, s->texinfo->vecs[j]) + s->texinfo->vecs[j][3];
-
-			if (val < mins[j]) mins[j] = val;
-			if (val > maxs[j]) maxs[j] = val;
-		}
-	}
-
-	for (i = 0; i < 2; i++)
+	for (int i = 0; i < 2; i++)
 	{	
-		bmins[i] = floor (mins[i] / 16);
-		bmaxs[i] = ceil (maxs[i] / 16);
+		int bmins = floor (mins[i] / 16);
+		int bmaxs = ceil (maxs[i] / 16);
 
-		// minimum s/t * 16
-		s->texturemins[i] = bmins[i] * 16;
-
-		// extent of s/t * 16
-		s->extents[i] = (bmaxs[i] - bmins[i]) * 16;
+		surf->texturemins[i] = bmins * 16;
+		surf->extents[i] = (bmaxs - bmins) * 16;
 
 		// find max allowable extents
-		int maxextents = d3d_DeviceCaps.MaxTextureWidth;
-
-		// always take the lower of the 2 because a lightmap must be square (well, not really...)
-		if (d3d_DeviceCaps.MaxTextureHeight < maxextents) maxextents = d3d_DeviceCaps.MaxTextureHeight;
-
-		// -16 because surf->smax and surf->tmax will add 1
-		maxextents = (maxextents << 4) - 16;
+		int maxextents = ((d3d_DeviceCaps.MaxTextureWidth < d3d_DeviceCaps.MaxTextureHeight ? d3d_DeviceCaps.MaxTextureWidth : d3d_DeviceCaps.MaxTextureHeight) << 4) - 16;
 
 		// to all practical purposes this will never be hit; even on 3DFX it's 4080 which is well in excess of the
 		// max allowed by stock ID Quake.  just clamping it may result in weird lightmaps in extreme maps, but in
 		// practice it doesn't even happen for reasons previously outlined.
-		if (s->extents[i] > maxextents) s->extents[i] = maxextents;
+		if (surf->extents[i] > maxextents) surf->extents[i] = maxextents;
 	}
 }
 
 
 /*
 =================
-Mod_LoadFaces
+Mod_CalcSurfaceBounds -- johnfitz -- calculate bounding box for per-surface frustum culling
+
+also used by the automap
 =================
 */
-void Mod_LoadFaces (lump_t *l)
+void Mod_CalcSurfaceBounds (msurface_t *surf)
 {
-	dface_t		*in;
-	msurface_t 	*out;
-	int			i, count, surfnum;
-	int			planenum, side;
+	mvertex_t *v;
 
-	in = (dface_t *) (mod_base + l->fileofs);
+	surf->mins[0] = surf->mins[1] = surf->mins[2] = 99999999;
+	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -99999999;
 
-	if (l->filelen % sizeof (*in))
+	for (int i = 0; i < surf->numverts; i++)
 	{
-		Host_Error ("Mod_LoadFaces: LUMP_FACES funny lump size in %s", loadmodel->name);
+		int e = brushmodel->surfedges[surf->firstedge + i];
+
+		if (e >= 0)
+			v = &brushmodel->vertexes[brushmodel->edges[e].v[0]];
+		else v = &brushmodel->vertexes[brushmodel->edges[-e].v[1]];
+
+		if (surf->mins[0] > v->position[0]) surf->mins[0] = v->position[0];
+		if (surf->mins[1] > v->position[1]) surf->mins[1] = v->position[1];
+		if (surf->mins[2] > v->position[2]) surf->mins[2] = v->position[2];
+		if (surf->maxs[0] < v->position[0]) surf->maxs[0] = v->position[0];
+		if (surf->maxs[1] < v->position[1]) surf->maxs[1] = v->position[1];
+		if (surf->maxs[2] < v->position[2]) surf->maxs[2] = v->position[2];
+	}
+}
+
+
+/*
+=================
+Mod_LoadSurfaces
+=================
+*/
+void Mod_LoadSurfaces (lump_t *l)
+{
+	dface_t *face = (dface_t *) (mod_base + l->fileofs);
+
+	if (l->filelen % sizeof (*face))
+	{
+		Host_Error ("Mod_LoadSurfaces: LUMP_FACES funny lump size face %s", loadmodel->name);
 		return;
 	}
 
-	count = l->filelen / sizeof (*in);
-	out = (msurface_t *) Pool_Alloc (POOL_MAP, count * sizeof (*out));	
+	int count = l->filelen / sizeof (*face);
+	msurface_t *surf = (msurface_t *) Pool_Map->Alloc (count * sizeof (*surf));	
 
-	brushmodel->surfaces = out;
+	brushmodel->surfaces = surf;
 	brushmodel->alphasurfaces = NULL;
 	brushmodel->numsurfaces = count;
 
-	for (surfnum = 0; surfnum < count; surfnum++, in++, out++)
+	for (int surfnum = 0; surfnum < count; surfnum++, face++, surf++)
 	{
-		out->firstedge = LittleLong (in->firstedge);
-		out->numedges = (unsigned short) LittleShort (in->numedges);		
-		out->flags = 0;
+		// we need this for sorting
+		surf->surfnum = surfnum;
 
-		planenum = (unsigned short) LittleShort (in->planenum);
-		side = LittleShort (in->side);
+		// verts/etc
+		surf->firstedge = LittleLong (face->firstedge);
+		surf->numverts = (unsigned short) LittleShort (face->numedges);
+		surf->flags = 0;
 
-		if (side) out->flags |= SURF_PLANEBACK;			
+		Mod_CalcSurfaceBounds (surf);
 
-		out->plane = brushmodel->planes + planenum;
+		if (LittleShort (face->side)) surf->flags |= SURF_PLANEBACK;			
 
-		out->texinfo = brushmodel->texinfo + (unsigned short) LittleShort (in->texinfo);
-
-		CalcSurfaceExtents (out);
+		surf->plane = brushmodel->planes + (unsigned short) (LittleShort (face->planenum));
+		surf->texinfo = brushmodel->texinfo + (unsigned short) LittleShort (face->texinfo);
 
 		// lighting info
-		for (i = 0; i < MAXLIGHTMAPS; i++)
-			out->styles[i] = in->styles[i];
-
-		i = LittleLong (in->lightofs);
+		for (int i = 0; i < MAXLIGHTMAPS; i++)
+			surf->styles[i] = face->styles[i];
 
 		if (brushmodel->bspversion == Q1_BSPVERSION)
 		{
 			// expand offsets for pre-expanded light
-			if (i < 0)
-				out->samples = NULL;
-			else out->samples = brushmodel->lightdata + (i * 3);
+			if (LittleLong (face->lightofs) < 0)
+				surf->samples = NULL;
+			else surf->samples = brushmodel->lightdata + (LittleLong (face->lightofs) * 3);
 		}
 		else
 		{
 			// already rgb
-			if (i < 0)
-				out->samples = NULL;
-			else out->samples = brushmodel->lightdata + i;
+			if (LittleLong (face->lightofs) < 0)
+				surf->samples = NULL;
+			else surf->samples = brushmodel->lightdata + LittleLong (face->lightofs);
 		}
 
-		// fully opaque
-		out->alpha = 255;
-
-		// set the drawing flags flag
-		if (!strncmp (out->texinfo->texture->name, "sky", 3))
+		if (surf->texinfo->texture->name[0] == '*')
 		{
-			// sky surfaces are not subdivided but they store verts in main memory and they don't evaluate texcoords
-			out->flags |= (SURF_DRAWSKY | SURF_DRAWTILED);
+			// set contents flags
+			if (!strncmp (surf->texinfo->texture->name, "*lava", 5))
+				surf->flags |= SURF_DRAWLAVA;
+			else if (!strncmp (surf->texinfo->texture->name, "*tele", 5))
+				surf->flags |= SURF_DRAWTELE;
+			else if (!strncmp (surf->texinfo->texture->name, "*slime", 6))
+				surf->flags |= SURF_DRAWSLIME;
+			else surf->flags |= SURF_DRAWWATER;
+
+			// generic turb marker
+			surf->flags |= SURF_DRAWTURB;
+
+			// (never used?)
+			surf->extents[0] = surf->extents[1] = 16384;
+			surf->texturemins[0] = surf->texturemins[1] = -8192;
+
+			// subdivide for warps
+			R_GenerateTurbSurface (loadmodel, surf);
 			continue;
 		}
 
-		if (out->texinfo->texture->name[0] == '*')
+		// setup the base vertexes and get their pointer (warps don't have these yet)
+		polyvert_t *verts = (polyvert_t *) Pool_Map->Alloc (surf->numverts * sizeof (polyvert_t));
+
+		// these surf types aren't subdivided and have no warp verts
+		surf->verts = verts;
+
+		// keep code cleaner looking
+		brushhdr_t *hdr = loadmodel->brushhdr;
+
+		VectorClear (surf->midpoint);
+
+		float mins[2] = {99999999, 99999999};
+		float maxs[2] = {-99999999, -99999999};
+
+		for (int i = 0; i < surf->numverts; i++, verts++)
 		{
-			// set contents flags
-			if (!strncmp (out->texinfo->texture->name, "*lava", 5))
-				out->flags |= SURF_DRAWLAVA;
-			else if (!strncmp (out->texinfo->texture->name, "*tele", 5))
-				out->flags |= SURF_DRAWTELE;
-			else if (!strncmp (out->texinfo->texture->name, "*slime", 6))
-				out->flags |= SURF_DRAWSLIME;
-			else out->flags |= SURF_DRAWWATER;
+			int lindex = hdr->surfedges[face->firstedge + i];
+			mtexinfo_t *ti = surf->texinfo;
 
-			out->flags |= (SURF_DRAWTURB | SURF_DRAWTILED);
+			// store a pointer to the base vert so as to cut down on memory usage
+			if (lindex > 0)
+				verts->basevert = hdr->vertexes[hdr->edges[lindex].v[0]].position;
+			else verts->basevert = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
 
-			for (i = 0; i < 2; i++)
+			// accumulate into midpoint
+			VectorAdd (surf->midpoint, verts->basevert, surf->midpoint);
+
+			// now generate base s, base t, mins and maxs (lightmaps will have to wait...)
+			for (int j = 0; j < 2; j++)
 			{
-				out->extents[i] = 16384;
-				out->texturemins[i] = -8192;
+				verts->st[j] = (DotProduct (verts->basevert, ti->vecs[j]) + ti->vecs[j][3]);
+
+				if (verts->st[j] < mins[j]) mins[j] = verts->st[j];
+				if (verts->st[j] > maxs[j]) maxs[j] = verts->st[j];
 			}
 
-			// allocated in main vertex buffer
+			// final s and t
+			verts->st[0] /= (float) ti->texture->width;
+			verts->st[1] /= (float) ti->texture->height;
+		}
+
+		// calc extents (sky and solid only, and sky doesn't even need it)
+		CalcSurfaceExtents (surf, mins, maxs);
+
+		// get final mindpoint
+		VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
+
+		// set the drawing flags flag
+		if (!strncmp (surf->texinfo->texture->name, "sky", 3))
+		{
+			// sky surfaces are not subdivided but they store verts face main memory and they don't evaluate texcoords
+			surf->flags |= SURF_DRAWSKY;
 			continue;
 		}
 
 		// check extents against max extents
-		if (out->extents[0] > MaxExtents[0]) MaxExtents[0] = out->extents[0];
-		if (out->extents[1] > MaxExtents[1]) MaxExtents[1] = out->extents[1];
+		if (surf->extents[0] > MaxExtents[0]) MaxExtents[0] = surf->extents[0];
+		if (surf->extents[1] > MaxExtents[1]) MaxExtents[1] = surf->extents[1];
 	}
 }
 
@@ -1250,12 +1287,12 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 
 	if (v->filelen)
 	{
-		visdata = (byte *) Pool_Alloc (POOL_MAP, v->filelen);
+		visdata = (byte *) Pool_Map->Alloc (v->filelen);
 		memcpy (visdata, mod_base + v->fileofs, v->filelen);
 	}
 
 	// nodes and leafs need to be in consecutive memory - see comment in R_LeafVisibility
-	lout = (mleaf_t *) Pool_Alloc (POOL_MAP, (leafcount * sizeof (mleaf_t)) + (nodecount * sizeof (mnode_t)));
+	lout = (mleaf_t *) Pool_Map->Alloc ((leafcount * sizeof (mleaf_t)) + (nodecount * sizeof (mnode_t)));
 	brushmodel->leafs = lout;
 
 	for (i = 0; i < leafcount; i++, lin++, lout++)
@@ -1323,7 +1360,7 @@ void Mod_LoadVisLeafsNodes (lump_t *v, lump_t *l, lump_t *n)
 		}
 
 		// static entities
-		lout->statics = NULL;
+		lout->efrags = NULL;
 
 		// not seen yet
 		lout->seen = false;
@@ -1401,7 +1438,7 @@ void Mod_LoadClipnodes (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Host_Error ("MOD_LoadBmodel: LUMP_CLIPNODES funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (dclipnode_t *) Pool_Alloc (POOL_MAP, count * sizeof (*out));	
+	out = (dclipnode_t *) Pool_Map->Alloc (count * sizeof (*out));	
 
 	brushmodel->clipnodes = out;
 	brushmodel->numclipnodes = count;
@@ -1497,7 +1534,7 @@ void Mod_MakeHull0 (void)
 	
 	in = brushmodel->nodes;
 	count = brushmodel->numnodes;
-	out = (dclipnode_t *) Pool_Alloc (POOL_MAP, count*sizeof(*out));	
+	out = (dclipnode_t *) Pool_Map->Alloc (count*sizeof(*out));	
 
 	hull->clipnodes = out;
 	hull->firstclipnode = 0;
@@ -1533,7 +1570,7 @@ void Mod_LoadMarksurfaces (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Host_Error ("MOD_LoadBmodel: LUMP_MARKSURFACES funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (msurface_t **) Pool_Alloc (POOL_MAP, count*sizeof(*out));	
+	out = (msurface_t **) Pool_Map->Alloc (count*sizeof(*out));	
 
 	brushmodel->marksurfaces = out;
 	brushmodel->nummarksurfaces = count;
@@ -1564,7 +1601,7 @@ void Mod_LoadSurfedges (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Host_Error ("MOD_LoadBmodel: LUMP_SURFEDGES: funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (int *) Pool_Alloc (POOL_MAP, count*sizeof(*out));	
+	out = (int *) Pool_Map->Alloc (count*sizeof(*out));	
 
 	brushmodel->surfedges = out;
 	brushmodel->numsurfedges = count;
@@ -1590,8 +1627,11 @@ void Mod_LoadPlanes (lump_t *l)
 	in = (dplane_t *)(mod_base + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		Host_Error ("MOD_LoadBmodel: LUMP_PLANES funny lump size in %s",loadmodel->name);
+
 	count = l->filelen / sizeof(*in);
-	out = (mplane_t *) Pool_Alloc (POOL_MAP, count*2*sizeof(*out));	
+
+	// why double the number of planes???
+	out = (mplane_t *) Pool_Map->Alloc (count * 2 * sizeof (mplane_t));	
 	
 	brushmodel->planes = out;
 	brushmodel->numplanes = count;
@@ -1641,8 +1681,8 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 		((int *) header)[i] = LittleLong (((int *) header)[i]);
 
 	// alloc space for a brush header
-	mod->bh = (brushhdr_t *) Pool_Alloc (POOL_MAP, sizeof (brushhdr_t));
-	brushmodel = mod->bh;
+	mod->brushhdr = (brushhdr_t *) Pool_Map->Alloc (sizeof (brushhdr_t));
+	brushmodel = mod->brushhdr;
 
 	// store the version for correct hull checking
 	brushmodel->bspversion = LittleLong (header->version);
@@ -1655,7 +1695,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
 	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
-	Mod_LoadFaces (&header->lumps[LUMP_FACES]);
+	Mod_LoadSurfaces (&header->lumps[LUMP_FACES]);
 	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES]);
 	Mod_LoadVisLeafsNodes (&header->lumps[LUMP_VISIBILITY], &header->lumps[LUMP_LEAFS], &header->lumps[LUMP_NODES]);
 	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES]);
@@ -1669,35 +1709,35 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 
 	// set up the submodels (FIXME: this is confusing)
 	// (this should never happen as each model will normally be it's own first submodel)
-	if (!mod->bh->numsubmodels) return;
+	if (!mod->brushhdr->numsubmodels) return;
 
 	// first pass fills in for the world (which is it's own first submodel), then grabs a submodel slot off the list.
 	// subsequent passes fill in the submodel slot grabbed at the end of the previous pass.
 	// the last pass doesn't need to grab a submodel slot as everything is already filled in
 	// fucking hell, he wasn't joking!
-	brushhdr_t *smheaders = (brushhdr_t *) Pool_Alloc (POOL_MAP, sizeof (brushhdr_t) * mod->bh->numsubmodels);
+	brushhdr_t *smheaders = (brushhdr_t *) Pool_Map->Alloc (sizeof (brushhdr_t) * mod->brushhdr->numsubmodels);
 
-	for (i = 0; i < mod->bh->numsubmodels; i++)
+	for (i = 0; i < mod->brushhdr->numsubmodels; i++)
 	{
-		// retrieve the submodel
-		dmodel_t *bm = &mod->bh->submodels[i];
+		// retrieve the submodel (submodel 0 will be the world)
+		dmodel_t *bm = &mod->brushhdr->submodels[i];
 
 		// fill in submodel specific stuff
-		mod->bh->hulls[0].firstclipnode = bm->headnode[0];
+		mod->brushhdr->hulls[0].firstclipnode = bm->headnode[0];
 
 		for (int j = 1; j < MAX_MAP_HULLS; j++)
 		{
 			// clipnodes
-			mod->bh->hulls[j].firstclipnode = bm->headnode[j];
-			mod->bh->hulls[j].lastclipnode = mod->bh->numclipnodes - 1;
+			mod->brushhdr->hulls[j].firstclipnode = bm->headnode[j];
+			mod->brushhdr->hulls[j].lastclipnode = mod->brushhdr->numclipnodes - 1;
 		}
 
 		// first surf in the inline model and number of surfs in it
-		mod->bh->firstmodelsurface = bm->firstface;
-		mod->bh->nummodelsurfaces = bm->numfaces;
+		mod->brushhdr->firstmodelsurface = bm->firstface;
+		mod->brushhdr->nummodelsurfaces = bm->numfaces;
 
 		// leafs
-		mod->bh->numleafs = bm->visleafs;
+		mod->brushhdr->numleafs = bm->visleafs;
 
 		// bounding box
 		VectorCopy (bm->maxs, mod->maxs);
@@ -1706,7 +1746,8 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 		// radius
 		mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
 
-		if (i < mod->bh->numsubmodels - 1)
+		// grab a submodel slot for the next pass through the loop
+		if (i < mod->brushhdr->numsubmodels - 1)
 		{
 			// duplicate the basic information
 			char name[10];
@@ -1721,11 +1762,11 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 			memcpy (inlinemod, mod, sizeof (model_t));
 
 			// allocate a new header for the model
-			inlinemod->bh = smheaders;
+			inlinemod->brushhdr = smheaders;
 			smheaders++;
 
 			// copy the header data from the original model
-			memcpy (inlinemod->bh, mod->bh, sizeof (brushhdr_t));
+			memcpy (inlinemod->brushhdr, mod->brushhdr, sizeof (brushhdr_t));
 
 			// write in the name
 			strncpy (inlinemod->name, name, 63);
@@ -1745,22 +1786,26 @@ ALIAS MODELS
 ==============================================================================
 */
 
-aliashdr_t	*pheader;
-
-stvert_t	*stverts = NULL;
-mtriangle_t	*triangles;
-
-// a pose is a single set of vertexes.  a frame may be
-// an animating sequence of poses
-trivertx_t **ThePoseverts = NULL;
-
-int			posenum;
-
-byte		**player_8bit_texels_tbl;
-byte		*player_8bit_texels;
 
 // FIXME - store per frame rather than for the entire model???
 float aliasbboxmins[3], aliasbboxmaxs[3];
+
+
+void Mod_LoadFrameVerts (aliashdr_t *pheader, trivertx_t *verts)
+{
+	drawvertx_t *vertexes = (drawvertx_t *) Pool_Cache->Alloc (pheader->vertsperframe * sizeof (drawvertx_t));
+
+	for (int i = 0; i < pheader->vertsperframe; i++, vertexes++, verts++)
+	{
+		vertexes->lerpvert = true;
+		vertexes->lightnormalindex = verts->lightnormalindex;
+		vertexes->v[0] = verts->v[0];
+		vertexes->v[1] = verts->v[1];
+		vertexes->v[2] = verts->v[2];
+	}
+
+	pheader->nummeshframes++;
+}
 
 
 /*
@@ -1768,19 +1813,18 @@ float aliasbboxmins[3], aliasbboxmaxs[3];
 Mod_LoadAliasFrame
 =================
 */
-void *Mod_LoadAliasFrame (void *pin, maliasframedesc_t *frame)
+void *Mod_LoadAliasFrame (aliashdr_t *pheader, void *pin, maliasframedesc_t *frame)
 {
-	trivertx_t		*pinframe;
-	int				i;
+	trivertx_t		*verts;
 	daliasframe_t	*pdaliasframe;
 	
 	pdaliasframe = (daliasframe_t *) pin;
 
 	strncpy (frame->name, pdaliasframe->name, 16);
-	frame->firstpose = posenum;
+	frame->firstpose = pheader->nummeshframes;
 	frame->numposes = 1;
 
-	for (i = 0; i < 3; i++)
+	for (int i = 0; i < 3; i++)
 	{
 		frame->bboxmin.v[i] = pdaliasframe->bboxmin.v[i];
 		frame->bboxmax.v[i] = pdaliasframe->bboxmax.v[i];
@@ -1789,25 +1833,13 @@ void *Mod_LoadAliasFrame (void *pin, maliasframedesc_t *frame)
 		if (frame->bboxmax.v[i] > aliasbboxmaxs[i]) aliasbboxmaxs[i] = frame->bboxmax.v[i];
 	}
 
-	pinframe = (trivertx_t *) (pdaliasframe + 1);
+	verts = (trivertx_t *) (pdaliasframe + 1);
 
-	ThePoseverts[posenum] = pinframe;
-	posenum++;
+	// load the frame vertexes
+	Mod_LoadFrameVerts (pheader, verts);
+	verts += pheader->vertsperframe;
 
-	pinframe += pheader->numverts;
-
-	return (void *)pinframe;
-}
-
-
-void *Mod_CountAliasFrame (void *pin)
-{
-	daliasframe_t *pdaliasframe = (daliasframe_t *) pin;
-	trivertx_t *pinframe = (trivertx_t *) (pdaliasframe + 1);
-
-	posenum++;
-
-	return (void *) (pinframe + pheader->numverts);
+	return (void *) verts;
 }
 
 
@@ -1816,7 +1848,7 @@ void *Mod_CountAliasFrame (void *pin)
 Mod_LoadAliasGroup
 =================
 */
-void *Mod_LoadAliasGroup (void *pin, maliasframedesc_t *frame)
+void *Mod_LoadAliasGroup (aliashdr_t *pheader, void *pin, maliasframedesc_t *frame)
 {
 	daliasgroup_t		*pingroup;
 	int					i, numframes;
@@ -1824,10 +1856,8 @@ void *Mod_LoadAliasGroup (void *pin, maliasframedesc_t *frame)
 	void				*ptemp;
 
 	pingroup = (daliasgroup_t *) pin;
-
 	numframes = LittleLong (pingroup->numframes);
-
-	frame->firstpose = posenum;
+	frame->firstpose = pheader->nummeshframes;
 	frame->numposes = numframes;
 
 	for (i = 0; i < 3; i++)
@@ -1840,43 +1870,19 @@ void *Mod_LoadAliasGroup (void *pin, maliasframedesc_t *frame)
 	}
 
 	pin_intervals = (daliasinterval_t *) (pingroup + 1);
-
 	frame->interval = LittleFloat (pin_intervals->interval);
-
 	pin_intervals += numframes;
-
 	ptemp = (void *) pin_intervals;
 
 	for (i = 0; i < numframes; i++)
 	{
-		ThePoseverts[posenum] = (trivertx_t *) ((daliasframe_t *) ptemp + 1);
-		posenum++;
-
-		ptemp = (trivertx_t *) ((daliasframe_t *) ptemp + 1) + pheader->numverts;
+		Mod_LoadFrameVerts (pheader, (trivertx_t *) ((daliasframe_t *) ptemp + 1));
+		ptemp = (trivertx_t *) ((daliasframe_t *) ptemp + 1) + pheader->vertsperframe;
 	}
 
 	return ptemp;
 }
 
-
-void *Mod_CountAliasGroup (void *pin)
-{
-	daliasgroup_t *pingroup = (daliasgroup_t *) pin;
-	int numframes = LittleLong (pingroup->numframes);
-
-	daliasinterval_t *pin_intervals = (daliasinterval_t *) (pingroup + 1);
-	pin_intervals += numframes;
-
-	void *ptemp = (void *) pin_intervals;
-
-	for (int i = 0; i < numframes; i++)
-	{
-		posenum++;
-		ptemp = (trivertx_t *) ((daliasframe_t *) ptemp + 1) + pheader->numverts;
-	}
-
-	return ptemp;
-}
 
 //=========================================================
 
@@ -1966,7 +1972,7 @@ void Mod_FloodFillSkin (byte *skin, int skinwidth, int skinheight)
 Mod_LoadAllSkins
 ===============
 */
-void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
+void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 {
 	int		i, j, k;
 	char	name[32];
@@ -1978,16 +1984,16 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 
 	skin = (byte *) (pskintype + 1);
 
-	if (numskins < 1 || numskins > MAX_SKINS)
-		Host_Error ("Mod_LoadAliasModel: Invalid # of skins: %d\n", numskins);
+	if (pheader->numskins < 1) Host_Error ("Mod_LoadAliasModel: Invalid # of skins: %d\n", pheader->numskins);
 
+	pheader->skins = (aliasskin_t *) Pool_Cache->Alloc (pheader->numskins * sizeof (aliasskin_t));
 	s = pheader->skinwidth * pheader->skinheight;
 
 	// don't remove the extension here as Q1 has s_light.mdl and s_light.spr, so we need to differentiate them
-	for (i = 0; i < numskins; i++)
+	for (i = 0; i < pheader->numskins; i++)
 	{
 		// no saved texels
-		pheader->texels[i] = NULL;
+		pheader->skins[i].texels = NULL;
 
 		if (pskintype->type == ALIAS_SKIN_SINGLE)
 		{
@@ -1997,39 +2003,39 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 			// progs/player.mdl is already hardcoded in sv_main so it's ok here too
 			if (!stricmp (loadmodel->name, "progs/player.mdl"))
 			{
-				pheader->texels[i] = (byte *) Pool_Alloc (POOL_CACHE, s);
-				memcpy (pheader->texels[i], (byte *) (pskintype + 1), s);
+				pheader->skins[i].texels = (byte *) Pool_Cache->Alloc (s);
+				memcpy (pheader->skins[i].texels, (byte *) (pskintype + 1), s);
 				loadmodel->flags |= EF_PLAYER;
 			}
 
 			_snprintf (name, 32, "%s_%i", loadmodel->name, i);
 
-			pheader->texture[i][0] =
-			pheader->texture[i][1] =
-			pheader->texture[i][2] =
-			pheader->texture[i][3] = D3D_LoadTexture
+			pheader->skins[i].texture[0] =
+			pheader->skins[i].texture[1] =
+			pheader->skins[i].texture[2] =
+			pheader->skins[i].texture[3] = D3D_LoadTexture
 			(
 				name,
 				pheader->skinwidth, 
 				pheader->skinheight,
 				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS | ((loadmodel->flags & EF_RMQRAIN) ? IMAGE_RMQRAIN : 0)
+				IMAGE_MIPMAP | IMAGE_ALIAS
 			);
 
 			// load fullbright
-			pheader->fullbright[i][0] =
-			pheader->fullbright[i][1] =
-			pheader->fullbright[i][2] =
-			pheader->fullbright[i][3] = D3D_LoadTexture
+			pheader->skins[i].fullbright[0] =
+			pheader->skins[i].fullbright[1] =
+			pheader->skins[i].fullbright[2] =
+			pheader->skins[i].fullbright[3] = D3D_LoadTexture
 			(
 				name,
 				pheader->skinwidth, 
 				pheader->skinheight,
 				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA | ((loadmodel->flags & EF_RMQRAIN) ? IMAGE_RMQRAIN : 0)
+				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
 			);
 
-			pskintype = (daliasskintype_t *)((byte *)(pskintype+1) + s);
+			pskintype = (daliasskintype_t *) ((byte *) (pskintype + 1) + s);
 		}
 		else
 		{
@@ -2047,32 +2053,36 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 
 				if (j == 0 && !stricmp (loadmodel->name, "progs/player.mdl"))
 				{
-					pheader->texels[i] = (byte *) Pool_Alloc (POOL_CACHE, s);
-					memcpy (pheader->texels[i], (byte *) (pskintype), s);
+					// saving this out doesn't really work as each skin in the group will
+					// overwrite the last.
+					pheader->skins[i].texels = (byte *) Pool_Cache->Alloc (s);
+					memcpy (pheader->skins[i].texels, (byte *) (pskintype), s);
 					loadmodel->flags |= EF_PLAYER;
 				}
 
 				_snprintf (name, 32, "%s_%i_%i", loadmodel->name, i,j);
 
-				pheader->texture[i][j & 3] = D3D_LoadTexture 
+				// this tries to catch models with > 4 group skins
+				pheader->skins[i].texture[j & 3] = D3D_LoadTexture 
 				(
 					name,
 					pheader->skinwidth, 
 					pheader->skinheight,
 					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS | ((loadmodel->flags & EF_RMQRAIN) ? IMAGE_RMQRAIN : 0)
+					IMAGE_MIPMAP | IMAGE_ALIAS
 				);
 
-				pheader->fullbright[i][j & 3] = D3D_LoadTexture 
+				// so does this
+				pheader->skins[i].fullbright[j & 3] = D3D_LoadTexture 
 				(
 					name,
 					pheader->skinwidth, 
 					pheader->skinheight,
 					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA | ((loadmodel->flags & EF_RMQRAIN) ? IMAGE_RMQRAIN : 0)
+					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
 				);
 
-				pskintype = (daliasskintype_t *)((byte *)(pskintype) + s);
+				pskintype = (daliasskintype_t *) ((byte *) (pskintype) + s);
 			}
 
 			k = j;
@@ -2080,8 +2090,8 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 			// fill in any skins that weren't loaded
 			for (; j < 4; j++)
 			{
-				pheader->texture[i][j & 3] = pheader->texture[i][j - k]; 
-				pheader->fullbright[i][j & 3] = pheader->fullbright[i][j - k]; 
+				pheader->skins[i].texture[j & 3] = pheader->skins[i].texture[j - k]; 
+				pheader->skins[i].fullbright[j & 3] = pheader->skins[i].fullbright[j - k]; 
 			}
 		}
 	}
@@ -2098,31 +2108,16 @@ Mod_LoadAliasModel
 */
 void Mod_LoadAliasModel (model_t *mod, void *buffer)
 {
-	int					i, j;
-	mdl_t				*pinmodel;
-	stvert_t			*pinstverts;
-	dtriangle_t			*pintriangles;
-	int					version, numframes;
-	int					size;
-	daliasframetype_t	*pframetype;
-	daliasskintype_t	*pskintype;
-	int					start, end, total;
+	mdl_t *pinmodel = (mdl_t *) buffer;
 
-	pinmodel = (mdl_t *) buffer;
+	if (LittleLong (pinmodel->version) != ALIAS_VERSION)
+		Host_Error ("%s has wrong version number (%i should be %i)", mod->name, LittleLong (pinmodel->version), ALIAS_VERSION);
 
-	version = LittleLong (pinmodel->version);
-
-	if (version != ALIAS_VERSION)
-		Host_Error ("%s has wrong version number (%i should be %i)", mod->name, version, ALIAS_VERSION);
-
-	// allocate space for a working header, plus all the data except the frames,
-	// skin and group info
-	size = 	sizeof (aliashdr_t) + (LittleLong (pinmodel->numframes) - 1) * sizeof (maliasframedesc_t);
-
-	// alloc in the cache
-	pheader = (aliashdr_t *) Pool_Alloc (POOL_CACHE, size);
+	// alloc the header in the cache
+	aliashdr_t *pheader = (aliashdr_t *) Pool_Cache->Alloc (sizeof (aliashdr_t));
 
 	mod->flags = LittleLong (pinmodel->flags);
+	mod->type = mod_alias;
 
 	// even if we alloced from the cache we still fill it in
 	// endian-adjust and copy the data, starting with the alias model header
@@ -2130,91 +2125,84 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	pheader->numskins = LittleLong (pinmodel->numskins);
 	pheader->skinwidth = LittleLong (pinmodel->skinwidth);
 	pheader->skinheight = LittleLong (pinmodel->skinheight);
-	pheader->numverts = LittleLong (pinmodel->numverts);
+	pheader->vertsperframe = LittleLong (pinmodel->numverts);
 	pheader->numtris = LittleLong (pinmodel->numtris);
 	pheader->numframes = LittleLong (pinmodel->numframes);
-	numframes = pheader->numframes;
+	pheader->nummesh = pheader->numtris * 3;
 
 	// validate the setup
 	// Sys_Error seems a little harsh here...
-	if (numframes < 1) Host_Error ("Mod_LoadAliasModel: Invalid # of frames: %d\n", numframes);
+	if (pheader->numframes < 1) Host_Error ("Mod_LoadAliasModel: Invalid # of frames: %d\n", pheader->numframes);
 	if (pheader->numtris <= 0) Host_Error ("model %s has no triangles", mod->name);
-	if (pheader->numverts <= 0) Host_Error ("model %s has no vertices", mod->name);
+	if (pheader->vertsperframe <= 0) Host_Error ("model %s has no vertices", mod->name);
 
 	pheader->size = LittleFloat (pinmodel->size) * ALIAS_BASE_SIZE_RATIO;
 	mod->synctype = (synctype_t) LittleLong (pinmodel->synctype);
 	mod->numframes = pheader->numframes;
 
-	for (i=0 ; i<3 ; i++)
+	for (int i = 0; i < 3; i++)
 	{
 		pheader->scale[i] = LittleFloat (pinmodel->scale[i]);
 		pheader->scale_origin[i] = LittleFloat (pinmodel->scale_origin[i]);
-		pheader->eyeposition[i] = LittleFloat (pinmodel->eyeposition[i]);
 	}
 
 	// load the skins
-	pskintype = (daliasskintype_t *) &pinmodel[1];
-	pskintype = (daliasskintype_t *) Mod_LoadAllSkins (pheader->numskins, pskintype);
+	daliasskintype_t *pskintype = (daliasskintype_t *) &pinmodel[1];
+	pskintype = (daliasskintype_t *) Mod_LoadAllSkins (pheader, pskintype);
 
 	// load base s and t vertices
-	pinstverts = (stvert_t *) pskintype;
-	stverts = (stvert_t *) Pool_Alloc (POOL_TEMP, pheader->numverts * sizeof (stvert_t));
+	stvert_t *pinstverts = (stvert_t *) pskintype;
 
-	for (i = 0; i < pheader->numverts; i++)
+	for (int i = 0; i < pheader->vertsperframe; i++)
 	{
-		stverts[i].onseam = LittleLong (pinstverts[i].onseam);
-		stverts[i].s = LittleLong (pinstverts[i].s);
-		stverts[i].t = LittleLong (pinstverts[i].t);
+		pinstverts[i].s = LittleLong (pinstverts[i].s);
+		pinstverts[i].t = LittleLong (pinstverts[i].t);
+		pinstverts[i].onseam = LittleLong (pinstverts[i].onseam);
 	}
 
 	// load triangle lists
-	pintriangles = (dtriangle_t *) &pinstverts[pheader->numverts];
-	triangles = (mtriangle_t *) Pool_Alloc (POOL_TEMP, pheader->numtris * sizeof (mtriangle_t));
+	dtriangle_t *pintriangles = (dtriangle_t *) &pinstverts[pheader->vertsperframe];
 
-	for (i = 0; i < pheader->numtris; i++)
+	for (int i = 0; i < pheader->numtris; i++)
 	{
-		triangles[i].facesfront = LittleLong (pintriangles[i].facesfront);
+		pintriangles[i].facesfront = LittleLong (pintriangles[i].facesfront);
 
-		for (j = 0; j < 3; j++) triangles[i].vertindex[j] = LittleLong (pintriangles[i].vertindex[j]);
+		pintriangles[i].vertindex[0] = LittleLong (pintriangles[i].vertindex[0]);
+		pintriangles[i].vertindex[1] = LittleLong (pintriangles[i].vertindex[1]);
+		pintriangles[i].vertindex[2] = LittleLong (pintriangles[i].vertindex[2]);
 	}
 
-	// count the frames
-	// we need to do this as a separate pass as group frames will mean that pheader->numframes will not
-	// always be valid here...
-	pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
-
-	for (i = 0, posenum = 0; i < numframes; i++)
-	{
-		aliasframetype_t frametype = (aliasframetype_t) LittleLong (pframetype->type);
-
-		if (frametype == ALIAS_SINGLE)
-			pframetype = (daliasframetype_t *) Mod_CountAliasFrame (pframetype + 1);
-		else pframetype = (daliasframetype_t *) Mod_CountAliasGroup (pframetype + 1);
-	}
-
-	// now that we know how many frames we need we can alloc verts for them
-	ThePoseverts = (trivertx_t **) Pool_Alloc (POOL_TEMP, posenum * sizeof (trivertx_t *));
-
-	// now load the frames for real
-	pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
+	// load the frames
+	daliasframetype_t *pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
+	pheader->frames = (maliasframedesc_t *) Pool_Cache->Alloc (pheader->numframes * sizeof (maliasframedesc_t));
 
 	// initial bbox
 	aliasbboxmins[0] = aliasbboxmins[1] = aliasbboxmins[2] = 9999999;
 	aliasbboxmaxs[0] = aliasbboxmaxs[1] = aliasbboxmaxs[2] = -9999999;
+	pheader->nummeshframes = 0;
 
-	for (i = 0, posenum = 0; i < numframes; i++)
+	for (int i = 0; i < pheader->numframes; i++)
 	{
 		aliasframetype_t frametype = (aliasframetype_t) LittleLong (pframetype->type);
 
 		if (frametype == ALIAS_SINGLE)
-			pframetype = (daliasframetype_t *) Mod_LoadAliasFrame (pframetype + 1, &pheader->frames[i]);
-		else pframetype = (daliasframetype_t *) Mod_LoadAliasGroup (pframetype + 1, &pheader->frames[i]);
+			pframetype = (daliasframetype_t *) Mod_LoadAliasFrame (pheader, pframetype + 1, &pheader->frames[i]);
+		else pframetype = (daliasframetype_t *) Mod_LoadAliasGroup (pheader, pframetype + 1, &pheader->frames[i]);
 	}
 
-	pheader->numposes = posenum;
-	mod->type = mod_alias;
+	// link in the frame vert pointers
+	pheader->vertexes = (drawvertx_t **) Pool_Cache->Alloc (pheader->nummeshframes * sizeof (drawvertx_t *));
 
-	for (i = 0; i < 3; i++)
+	for (int i = 0; i < pheader->nummeshframes; i++)
+	{
+		// the mesh verts immediately follow the frames in memory
+		drawvertx_t *vertexes = (drawvertx_t *) (((byte *) pheader->frames) + pheader->numframes * sizeof (maliasframedesc_t));
+		vertexes += i * pheader->vertsperframe;
+
+		pheader->vertexes[i] = vertexes;
+	}
+
+	for (int i = 0; i < 3; i++)
 	{
 		mod->mins[i] = aliasbboxmins[i] * pheader->scale[i] + pheader->scale_origin[i];
 		mod->maxs[i] = aliasbboxmaxs[i] * pheader->scale[i] + pheader->scale_origin[i];
@@ -2232,20 +2220,17 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	if (mod->mins[1] < mod->mins[0]) mod->mins[0] = mod->mins[1];
 
 	// build the draw lists
-	GL_MakeAliasModelDisplayLists (mod, pheader);
+	GL_MakeAliasModelDisplayLists (pheader, pinstverts, pintriangles);
 
 	// always lerp it until we determine otherwise
 	pheader->nolerp = false;
-	mod->ah = pheader;
-
-	// set up alias vertex counts
-	D3D_GetAliasVerts (pheader);
+	mod->aliashdr = pheader;
 
 	// copy it out to the cache
 	Cache_Alloc (mod->name, mod, sizeof (model_t));
 
 	// just reset the pool for now so that we can reuse memory that has already been committed but isn't needed anymore
-	Pool_Reset (POOL_TEMP);
+	Pool_Temp->Rewind ();
 }
 
 
@@ -2270,7 +2255,7 @@ void *Mod_LoadSpriteFrame (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	size = width * height * (thespr->version == SPR32_VERSION ? 4 : 1);
 
-	pspriteframe = (mspriteframe_t *) Pool_Alloc (POOL_CACHE, sizeof (mspriteframe_t));
+	pspriteframe = (mspriteframe_t *) Pool_Cache->Alloc (sizeof (mspriteframe_t));
 
 	memset (pspriteframe, 0, sizeof (mspriteframe_t));
 
@@ -2332,7 +2317,7 @@ void *Mod_LoadSpriteGroup (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	numframes = LittleLong (pingroup->numframes);
 
-	pspritegroup = (mspritegroup_t *) Pool_Alloc (POOL_CACHE, sizeof (mspritegroup_t) +
+	pspritegroup = (mspritegroup_t *) Pool_Cache->Alloc (sizeof (mspritegroup_t) +
 				(numframes - 1) * sizeof (pspritegroup->frames[0]));
 
 	pspritegroup->numframes = numframes;
@@ -2341,7 +2326,7 @@ void *Mod_LoadSpriteGroup (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	pin_intervals = (dspriteinterval_t *)(pingroup + 1);
 
-	poutintervals = (float *) Pool_Alloc (POOL_CACHE, numframes * sizeof (float));
+	poutintervals = (float *) Pool_Cache->Alloc (numframes * sizeof (float));
 
 	pspritegroup->intervals = poutintervals;
 
@@ -2392,9 +2377,9 @@ void Mod_LoadSpriteModel (model_t *mod, void *buffer)
 
 	size = sizeof (msprite_t) +	(numframes - 1) * sizeof (psprite->frames);
 
-	psprite = (msprite_t *) Pool_Alloc (POOL_CACHE, size);
+	psprite = (msprite_t *) Pool_Cache->Alloc (size);
 
-	mod->sh = psprite;
+	mod->spritehdr = psprite;
 
 	psprite->type = LittleLong (pin->type);
 	psprite->version = version;
@@ -2465,7 +2450,7 @@ void Mod_Print (void)
 	{
 		if (mod_known[i]->type != mod_alias) continue;
 
-		Con_Printf ("%8p : %s\n", mod_known[i]->ah, mod_known[i]->name);
+		Con_Printf ("%8p : %s\n", mod_known[i]->aliashdr, mod_known[i]->name);
 	}
 }
 

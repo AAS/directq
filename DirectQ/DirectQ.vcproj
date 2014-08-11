@@ -78,8 +78,8 @@
 				GenerateDebugInformation="true"
 				ProgramDatabaseFile="$(OutDir)/DirectQ.pdb"
 				SubSystem="2"
-				StackReserveSize="4194304"
-				StackCommitSize="4194304"
+				StackReserveSize="1048576"
+				StackCommitSize="1048576"
 				LargeAddressAware="1"
 				TerminalServerAware="1"
 				RandomizedBaseAddress="1"
@@ -91,6 +91,8 @@
 			/>
 			<Tool
 				Name="VCManifestTool"
+				OutputManifestFile="$(IntDir)\$(TargetFileName).manifest"
+				EmbedManifest="false"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -163,6 +165,8 @@
 				EnableUAC="false"
 				UACExecutionLevel="2"
 				SubSystem="2"
+				StackReserveSize="1048576"
+				StackCommitSize="1048576"
 				LargeAddressAware="1"
 				TerminalServerAware="1"
 				OptimizeReferences="2"
@@ -176,6 +180,8 @@
 			/>
 			<Tool
 				Name="VCManifestTool"
+				OutputManifestFile="$(IntDir)\$(TargetFileName).manifest"
+				EmbedManifest="false"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -263,23 +269,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\d3d_brush.cpp"
-				>
-			</File>
-			<File
 				RelativePath=".\d3d_draw.cpp"
 				>
 			</File>
 			<File
 				RelativePath=".\d3d_enum.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_hlsl.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_matrix.cpp"
 				>
 			</File>
 			<File
@@ -407,6 +401,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\pr_class.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\pr_cmds.cpp"
 				>
 			</File>
@@ -415,7 +413,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\pr_exec.cpp"
+				RelativePath=".\r_efrag.cpp"
 				>
 			</File>
 			<File
@@ -455,6 +453,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\sv_world.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\sys_win.cpp"
 				>
 			</File>
@@ -466,24 +468,12 @@
 				RelativePath=".\wad.cpp"
 				>
 			</File>
-			<File
-				RelativePath=".\world.cpp"
-				>
-			</File>
 		</Filter>
 		<Filter
 			Name="Header Files"
 			Filter="h;hpp;hxx;hm;inl;inc;xsd"
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
-			<File
-				RelativePath=".\anorm_dots.h"
-				>
-			</File>
-			<File
-				RelativePath=".\anorms.h"
-				>
-			</File>
 			<File
 				RelativePath=".\bspfile.h"
 				>
@@ -521,7 +511,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\d3d_hlsl.h"
+				RelativePath=".\d3d_model.h"
 				>
 			</File>
 			<File
@@ -534,14 +524,6 @@
 			</File>
 			<File
 				RelativePath=".\dshow_mp3.h"
-				>
-			</File>
-			<File
-				RelativePath=".\gl_model.h"
-				>
-			</File>
-			<File
-				RelativePath=".\glquake.h"
 				>
 			</File>
 			<File
@@ -594,6 +576,10 @@
 			</File>
 			<File
 				RelativePath=".\net_wins.h"
+				>
+			</File>
+			<File
+				RelativePath=".\pr_class.h"
 				>
 			</File>
 			<File
@@ -675,11 +661,15 @@
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
 			<File
-				RelativePath=".\DirectQ.rc"
+				RelativePath=".\anorm_dots.bin"
 				>
 			</File>
 			<File
-				RelativePath=".\fxAlias.fx"
+				RelativePath=".\anorms.bin"
+				>
+			</File>
+			<File
+				RelativePath=".\DirectQ.rc"
 				>
 			</File>
 			<File

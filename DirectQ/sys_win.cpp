@@ -25,11 +25,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include "shlobj.h"
 
+
+int Sys_LoadResourceData (int resourceid, void **resbuf)
+{
+	// per MSDN, UnlockResource is obsolete and does nothing any more.  There is
+	// no way to free the memory used by a resource after you're finished with it.
+	// If you ask me this is kinda fucked, but what do I know?  We'll just leak it.
+	HRSRC hResInfo = FindResource (NULL, MAKEINTRESOURCE (resourceid), RT_RCDATA);
+	HGLOBAL hResData = LoadResource (NULL, hResInfo);
+	resbuf[0] = (byte *) LockResource (hResData);
+	int len = SizeofResource (NULL, hResInfo);
+
+	return len;
+}
+
+
 // we need this a lot so define it just once
 HRESULT hr = S_OK;
-
-#define MINIMUM_WIN_MEMORY		0x1000000
-#define MAXIMUM_WIN_MEMORY		0x4000000
 
 #define PAUSE_SLEEP		50				// sleep time on pause or minimization
 #define NOT_FOCUS_SLEEP	20				// sleep time when not focus
@@ -42,74 +54,6 @@ static HANDLE	heventParent;
 static HANDLE	heventChild;
 
 volatile int sys_checksum;
-
-
-// QueryPerformanceFrequency is EVIL on x64 and dual-core, so use the built-in high res multimedia timer
-// instead.  QuakeWorld and Quake II both use this, and it gets 1 millisecond resolution.
-class CQuakeTimer
-{
-public:
-	CQuakeTimer (int resolution)
-	{
-		this->First = true;
-		this->Resolution = resolution;
-		this->StartTime = 0;
-
-		if (timeBeginPeriod (this->Resolution) != TIMERR_NOERROR)
-		{
-			MessageBox
-			(
-				NULL,
-				"A high resolution multimedia timer was not found on your system",
-				"Error",
-				MB_OK | MB_ICONERROR
-			);
-
-			exit (666);
-		}
-	}
-
-	~CQuakeTimer (void)
-	{
-		timeEndPeriod (this->Resolution);
-	}
-
-	float GetFloatTime (void)
-	{
-		DWORD now = timeGetTime ();
-
-		if (this->First)
-		{
-			this->First = false;
-			this->StartTime = now;
-			return 0.0f;
-		}
-
-		// check for wrap
-		if (now < this->StartTime)
-		{
-			// if we get a turnover we just set starttime to now, return 0, and hope for the best
-			// this may cause momentary weirdness but I'm not gonna leave my machine on for 49.7
-			// days to test it, and nor should you.
-			this->StartTime = now;
-			return 0.0f;
-		}
-
-		// no change (why is this not if (now == starttime)?
-		if (now - this->StartTime == 0) return 0.0f;
-
-		// return the time difference we got
-		return (float) (now - this->StartTime) / 1000.0f;
-	}
-
-private:
-	int Resolution;
-	bool First;
-	DWORD StartTime;
-};
-
-
-CQuakeTimer *Sys_Timer = NULL;
 
 
 int	Sys_FileExists (char *path)
@@ -151,10 +95,47 @@ Sys_Init
 */
 void Sys_Init (void)
 {
-	OSVERSIONINFO	vinfo;
+	OSVERSIONINFO vinfo;
+	TIMECAPS tc;
 
-	// init our high-res multimedia timer (check in case we ever accidentally call Sys_FloatTime before this)
-	if (!Sys_Timer) Sys_Timer = new CQuakeTimer (1);
+	if (timeGetDevCaps (&tc, sizeof (TIMECAPS)) != TIMERR_NOERROR) 
+	{
+		MessageBox
+		(
+			NULL,
+			"A high resolution multimedia timer was not found on your system",
+			"Error",
+			MB_OK | MB_ICONERROR
+		);
+
+		exit (666);
+	}
+
+	// make sure that what timeGetDevCaps reported back is actually supported!
+	for (int i = tc.wPeriodMin;; i++)
+	{
+		MMRESULT mmr = timeBeginPeriod (i);
+
+		// can't support this time period
+		if (mmr == TIMERR_NOCANDO) continue;
+
+		// supported
+		if (mmr == TIMERR_NOERROR) break;
+
+		// as soon as we hit more than 1/10 second accuracy we abort
+		if (i > 100)
+		{
+			MessageBox
+			(
+				NULL,
+				"A high resolution multimedia timer was not found on your system",
+				"Error",
+				MB_OK | MB_ICONERROR
+			);
+
+			exit (666);
+		}
+	}
 
 	vinfo.dwOSVersionInfoSize = sizeof (vinfo);
 
@@ -233,15 +214,21 @@ void Sys_Quit (void)
 /*
 ================
 Sys_FloatTime
+
+unfortunately this code is STILL used throughout the engine
 ================
 */
 float Sys_FloatTime (void)
 {
-	// this should be automatically initialized before the first call to here but let's make sure
-	if (!Sys_Timer) Sys_Timer = new CQuakeTimer (1);
+	// adjust for rounding errors
+	return ((float) timeGetTime () + 0.5f) / 1000.0f;
+}
 
-	// get the time
-	return Sys_Timer->GetFloatTime ();
+
+DWORD Sys_DWORDTime (void)
+{
+	// adjust for rounding errors
+	return timeGetTime ();
 }
 
 
@@ -463,7 +450,6 @@ void Splash_Init (void);
 void IN_ActivateMouse (void);
 void IN_DeactivateMouse (void);
 int MapKey (int key);
-void VID_UpdateWindowStatus (void);
 void ClearAllStates (void);
 LONG CDAudio_MessageHandler(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
@@ -524,7 +510,6 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
     LONG    lRet = 1;
 	int		fActive, fMinimized, temp;
 	extern unsigned int uiWheelMessage;
-	extern int window_x, window_y;
 
 	if (Msg == uiWheelMessage) Msg = WM_MOUSEWHEEL;
 
@@ -552,9 +537,8 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_MOVE:
-		window_x = (int) LOWORD (lParam);
-		window_y = (int) HIWORD (lParam);
-		VID_UpdateWindowStatus ();
+		// update cursor clip region
+		IN_UpdateClipCursor ();
 		break;
 
 	case WM_KEYDOWN:
@@ -652,14 +636,13 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 
 
-void VID_DefaultMonitorGamma_f (void);
+void Host_Frame (DWORD time);
+void D3D_CreateShadeDots (void);
 
 int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	quakeparms_t parms;
-	float time, oldtime, newtime;
 	char cwd[MAX_PATH];
-	int t;
 
 	// previous instances do not exist in Win32
 	// this is stupid as is can't be anothing but NULL...
@@ -678,10 +661,14 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	}
 
 	// init memory pools
-	// these need to be up before we get the directory as it uses va!!!
+	// these need to be up as early as possible as other things in the startup use them
 	Pool_Init ();
 
 	global_nCmdShow = nCmdShow;
+
+	// calc aliasmodel shading dotproducts
+	// these are done from here to preserve stack space
+	D3D_CreateShadeDots ();
 
 	// set the directory containing Quake
 	SetQuakeDirectory ();
@@ -749,41 +736,42 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		return 666;
 	}
 
+	DWORD time, oldtime, newtime;
+
 	Sys_Init ();
 	Host_Init (&parms);
-	oldtime = Sys_FloatTime ();
+	oldtime = timeGetTime ();
 
-	// for catching crashes and restoring monitor gamma
-	try
+	// main window message loop
+	while (1)
 	{
-		// main window message loop
-		while (1)
+		// yield the CPU for a little while when paused, minimized, or not the focus
+		if (cl.paused || !ActiveApp || Minimized || block_drawing)
 		{
-			// yield the CPU for a little while when paused, minimized, or not the focus
-			if (cl.paused || !ActiveApp || Minimized || block_drawing)
-			{
-				// no point in bothering to draw
-				scr_skipupdate = 1;
+			// no point in bothering to draw
+			scr_skipupdate = 1;
 
-				if (cl.paused)
-					Sleep (PAUSE_SLEEP);
-				else Sleep (NOT_FOCUS_SLEEP);
-			}
-
-			newtime = Sys_FloatTime ();
-			time = newtime - oldtime;
-
-			Host_Frame (time);
-			oldtime = newtime;
-
-			// this doesn't really sleep, it just lets other threads spawned by the app do their thing
-			Sleep (0);
+			if (cl.paused)
+				Sleep (PAUSE_SLEEP);
+			else Sleep (NOT_FOCUS_SLEEP);
 		}
-	}
-	catch (...)
-	{
-		// try to restore monitor gamma correctly if we crash
-		VID_DefaultMonitorGamma_f ();
+
+		newtime = timeGetTime ();
+
+		// check for integer wraparound
+		if (newtime < oldtime)
+		{
+			oldtime = newtime;
+			continue;
+		}
+
+		// don't update if no time has passed
+		if (newtime == oldtime) continue;
+
+		time = newtime - oldtime;
+
+		Host_Frame (time);
+		oldtime = newtime;
 	}
 
 	// success of application

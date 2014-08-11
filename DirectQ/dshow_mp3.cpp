@@ -50,7 +50,6 @@ Note: DS_FindTrack is a bit messy right now; I should go back and clean it up.
 
 #include "quakedef.h"
 #include <DShow.h>
-#include <windows.h>
 #include "winquake.h"
 
 #pragma comment (lib, "Strmiids.lib")
@@ -75,7 +74,7 @@ public:
 	void PauseTrack (void)
 	{
 		// ensure that we can pause
-		if (!this->ds_Control) return;
+		if (!this->Initialized) return;
 
 		// ensure that we're not already paused
 		if (this->Paused) return;
@@ -88,7 +87,7 @@ public:
 	void ResumeTrack (void)
 	{
 		// ensure that we can resume
-		if (!this->ds_Control) return;
+		if (!this->Initialized) return;
 
 		// ensure that we're paused before we resume
 		if (this->Paused) return;
@@ -101,7 +100,7 @@ public:
 	void AdjustVolume (void)
 	{
 		// ensure that we can change volume
-		if (!this->ds_Audio) return;
+		if (!this->Initialized) return;
 
 		long db;
 
@@ -164,7 +163,7 @@ public:
 	void DoEvents (void)
 	{
 		// ensure that we can process events
-		if (!this->ds_Event) return;
+		if (!this->Initialized) return;
 
 		long EventCode, Param1, Param2;
 
@@ -198,10 +197,10 @@ public:
 		if (this->ds_Graph) this->ds_Graph->Abort ();
 
 		// release them all
+		SAFE_RELEASE (this->ds_Position);
+		SAFE_RELEASE (this->ds_Event);
 		SAFE_RELEASE (this->ds_Audio);
 		SAFE_RELEASE (this->ds_Control);
-		SAFE_RELEASE (this->ds_Event);
-		SAFE_RELEASE (this->ds_Position);
 		SAFE_RELEASE (this->ds_Graph);
 	}
 };

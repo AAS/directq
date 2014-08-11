@@ -341,6 +341,10 @@ V_cshift_f
 */
 void V_cshift_f (void)
 {
+	// yes, this annoyed me - now to see can i get waterwarp working with it...
+	for (int i = 0; i < 666; i++)
+		Con_DPrintf ("BURN IN HELL 1337 QC H4X0RZ!!!\n");
+
 	cshift_empty.destcolor[0] = atoi(Cmd_Argv(1));
 	cshift_empty.destcolor[1] = atoi(Cmd_Argv(2));
 	cshift_empty.destcolor[2] = atoi(Cmd_Argv(3));

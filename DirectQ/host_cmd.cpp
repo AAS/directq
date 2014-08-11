@@ -19,7 +19,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
+#include "pr_class.h"
 
 extern cvar_t	pausable;
 
@@ -125,7 +127,7 @@ void Host_God_f (void)
 		return;
 	}
 
-	if (pr_global_struct->deathmatch && !host_client->privileged)
+	if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
 		return;
 
 	sv_player->v.flags = (int)sv_player->v.flags ^ FL_GODMODE;
@@ -143,7 +145,7 @@ void Host_Notarget_f (void)
 		return;
 	}
 
-	if (pr_global_struct->deathmatch && !host_client->privileged)
+	if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
 		return;
 
 	sv_player->v.flags = (int)sv_player->v.flags ^ FL_NOTARGET;
@@ -163,7 +165,7 @@ void Host_Noclip_f (void)
 		return;
 	}
 
-	if (pr_global_struct->deathmatch && !host_client->privileged)
+	if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
 		return;
 
 	if (sv_player->v.movetype != MOVETYPE_NOCLIP)
@@ -195,7 +197,7 @@ void Host_Fly_f (void)
 		return;
 	}
 
-	if (pr_global_struct->deathmatch && !host_client->privileged)
+	if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
 		return;
 
 	if (sv_player->v.movetype != MOVETYPE_FLY)
@@ -378,11 +380,14 @@ Host_Connect_f
 User command to connect to server
 =====================
 */
+void NET_SetPort (char *newport);
+
 void Host_Connect_f (void)
 {
 	char	name[MAX_QPATH];
 	
 	cls.demonum = -1;		// stop demo loop in case this fails
+
 	if (cls.demoplayback)
 	{
 		CL_StopPlayback ();
@@ -390,6 +395,23 @@ void Host_Connect_f (void)
 	}
 
 	strncpy (name, Cmd_Argv(1), 63);
+
+	// use for connect host:port format
+	char *portname = NULL;
+
+	for (int i = strlen (name); i; i--)
+	{
+		if (name[i] == ':')
+		{
+			portname = &name[i + 1];
+			name[i] = 0;
+			break;
+		}
+	}
+
+	// if a port was specified switch to it
+	if (portname) NET_SetPort (portname);
+
 	CL_EstablishConnection (name);
 	Host_Reconnect_f ();
 }
@@ -502,7 +524,7 @@ void Host_DoSavegame (char *savename)
 		fprintf (f, "%f\n", svs.clients->spawn_parms[i]);
 	fprintf (f, "%d\n", current_skill);
 	fprintf (f, "%s\n", sv.name);
-	fprintf (f, "%f\n",sv.time);
+	fprintf (f, "%f\n", SV_TIME);
 
 	// write the light styles
 	for (i = 0; i < MAX_LIGHTSTYLES; i++)
@@ -514,9 +536,9 @@ void Host_DoSavegame (char *savename)
 
 	ED_WriteGlobals (f);
 
-	for (i = 0; i < sv.num_edicts; i++)
+	for (i = 0; i < SVProgs->NumEdicts; i++)
 	{
-		ED_Write (f, EDICT_NUM(i));
+		ED_Write (f, GetEdictForNumber(i));
 		fflush (f);
 	}
 
@@ -652,16 +674,19 @@ void Host_Loadgame_f (void)
 	}
 
 	fscanf (f, "%i\n", &version);
+
 	if (version != SAVEGAME_VERSION)
 	{
 		fclose (f);
 		Con_Printf ("Savegame is version %i, not %i\n", version, SAVEGAME_VERSION);
 		return;
 	}
+
 	fscanf (f, "%s\n", str);
 	for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
 		fscanf (f, "%f\n", &spawn_parms[i]);
-// this silliness is so we can load 1.06 save files, which have float skill values
+
+	// this silliness is so we can load 1.06 save files, which have float skill values
 	fscanf (f, "%f\n", &tfloat);
 	current_skill = (int)(tfloat + 0.1);
 	Cvar_Set ("skill", (float)current_skill);
@@ -691,7 +716,7 @@ void Host_Loadgame_f (void)
 	for (i=0 ; i<MAX_LIGHTSTYLES ; i++)
 	{
 		fscanf (f, "%s\n", str);
-		sv.lightstyles[i] = (char *) Pool_Alloc (POOL_MAP, strlen(str)+1);
+		sv.lightstyles[i] = (char *) Pool_Map->Alloc (strlen(str)+1);
 		strcpy (sv.lightstyles[i], str);
 	}
 
@@ -729,8 +754,8 @@ void Host_Loadgame_f (void)
 		else
 		{
 			// parse an edict
-			ent = EDICT_NUM(entnum);
-			memset (&ent->v, 0, qcprogs.entityfields * 4);
+			ent = GetEdictForNumber(entnum);
+			memset (&ent->v, 0, SVProgs->QC.entityfields * 4);
 			ent->free = false;
 			ED_ParseEdict (start, ent);
 
@@ -742,8 +767,8 @@ void Host_Loadgame_f (void)
 		entnum++;
 	}
 	
-	sv.num_edicts = entnum;
-	sv.time = time;
+	SVProgs->NumEdicts = entnum;
+	sv.dwTime = time * 1000;
 
 	fclose (f);
 
@@ -794,7 +819,7 @@ void Host_Name_f (void)
 		if (strcmp(host_client->name, newName) != 0)
 			Con_Printf ("%s renamed to %s\n", host_client->name, newName);
 	strcpy (host_client->name, newName);
-	host_client->edict->v.netname = host_client->name - pr_strings;
+	host_client->edict->v.netname = host_client->name - SVProgs->Strings;
 	
 // send notification to all clients
 	
@@ -1052,9 +1077,9 @@ void Host_Kill_f (void)
 		return;
 	}
 	
-	pr_global_struct->time = sv.time;
-	pr_global_struct->self = EDICT_TO_PROG(sv_player);
-	PR_ExecuteProgram (pr_global_struct->ClientKill);
+	SVProgs->GlobalStruct->time = SV_TIME;
+	SVProgs->GlobalStruct->self = EDICT_TO_PROG(sv_player);
+	SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientKill);
 }
 
 
@@ -1079,11 +1104,11 @@ void Host_Pause_f (void)
 
 		if (sv.paused)
 		{
-			SV_BroadcastPrintf ("%s paused the game\n", pr_strings + sv_player->v.netname);
+			SV_BroadcastPrintf ("%s paused the game\n", SVProgs->Strings + sv_player->v.netname);
 		}
 		else
 		{
-			SV_BroadcastPrintf ("%s unpaused the game\n",pr_strings + sv_player->v.netname);
+			SV_BroadcastPrintf ("%s unpaused the game\n",SVProgs->Strings + sv_player->v.netname);
 		}
 
 		// send notification to all clients
@@ -1156,22 +1181,22 @@ void Host_Spawn_f (void)
 		// set up the edict
 		ent = host_client->edict;
 
-		memset (&ent->v, 0, qcprogs.entityfields * 4);
-		ent->v.colormap = NUM_FOR_EDICT(ent);
+		memset (&ent->v, 0, SVProgs->QC.entityfields * 4);
+		ent->v.colormap = GetNumberForEdict(ent);
 		ent->v.team = (host_client->colors & 15) + 1;
-		ent->v.netname = host_client->name - pr_strings;
+		ent->v.netname = host_client->name - SVProgs->Strings;
 
 		// copy spawn parms out of the client_t
 
 		for (i=0 ; i< NUM_SPAWN_PARMS ; i++)
-			(&pr_global_struct->parm1)[i] = host_client->spawn_parms[i];
+			(&SVProgs->GlobalStruct->parm1)[i] = host_client->spawn_parms[i];
 
 		// call the spawn function
 
-		pr_global_struct->time = sv.time;
-		pr_global_struct->self = EDICT_TO_PROG(sv_player);
-		PR_ExecuteProgram (pr_global_struct->ClientConnect);
-		PR_ExecuteProgram (pr_global_struct->PutClientInServer);	
+		SVProgs->GlobalStruct->time = SV_TIME;
+		SVProgs->GlobalStruct->self = EDICT_TO_PROG(sv_player);
+		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->ClientConnect);
+		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->PutClientInServer);	
 	}
 
 	// send all current names, colors, and frag counts
@@ -1179,7 +1204,7 @@ void Host_Spawn_f (void)
 
 	// send time of update
 	MSG_WriteByte (&host_client->message, svc_time);
-	MSG_WriteFloat (&host_client->message, sv.time);
+	MSG_WriteFloat (&host_client->message, SV_TIME);
 
 	for (i=0, client = svs.clients ; i<svs.maxclients ; i++, client++)
 	{
@@ -1205,26 +1230,26 @@ void Host_Spawn_f (void)
 	// send some stats
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_TOTALSECRETS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->total_secrets);
+	MSG_WriteLong (&host_client->message, SVProgs->GlobalStruct->total_secrets);
 
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_TOTALMONSTERS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->total_monsters);
+	MSG_WriteLong (&host_client->message, SVProgs->GlobalStruct->total_monsters);
 
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_SECRETS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->found_secrets);
+	MSG_WriteLong (&host_client->message, SVProgs->GlobalStruct->found_secrets);
 
 	MSG_WriteByte (&host_client->message, svc_updatestat);
 	MSG_WriteByte (&host_client->message, STAT_MONSTERS);
-	MSG_WriteLong (&host_client->message, pr_global_struct->killed_monsters);
+	MSG_WriteLong (&host_client->message, SVProgs->GlobalStruct->killed_monsters);
 
 	// send a fixangle
 	// Never send a roll angle, because savegames can catch the server
 	// in a state where it is expecting the client to correct the angle
 	// and it won't happen if the game was just loaded, so you wind up
 	// with a permanent head tilt
-	ent = EDICT_NUM( 1 + (host_client - svs.clients) );
+	ent = GetEdictForNumber( 1 + (host_client - svs.clients) );
 	MSG_WriteByte (&host_client->message, svc_setangle);
 	for (i=0 ; i < 2 ; i++)
 		MSG_WriteAngle (&host_client->message, ent->v.angles[i], true);
@@ -1279,7 +1304,7 @@ void Host_Kick_f (void)
 			return;
 		}
 	}
-	else if (pr_global_struct->deathmatch && !host_client->privileged)
+	else if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
 		return;
 
 	save = host_client;
@@ -1364,7 +1389,7 @@ void Host_Give_f (void)
 		return;
 	}
 
-	if (pr_global_struct->deathmatch && !host_client->privileged)
+	if (SVProgs->GlobalStruct->deathmatch && !host_client->privileged)
 		return;
 
 	t = Cmd_Argv(1);
@@ -1515,10 +1540,10 @@ edict_t	*FindViewthing (void)
 	int		i;
 	edict_t	*e;
 	
-	for (i=0 ; i<sv.num_edicts ; i++)
+	for (i=0 ; i<SVProgs->NumEdicts ; i++)
 	{
-		e = EDICT_NUM(i);
-		if ( !strcmp (pr_strings + e->v.classname, "viewthing") )
+		e = GetEdictForNumber(i);
+		if ( !strcmp (SVProgs->Strings + e->v.classname, "viewthing") )
 			return e;
 	}
 	Con_Printf ("No viewthing on map\n");
@@ -1581,7 +1606,7 @@ void PrintFrameName (model_t *m, int frame)
 	aliashdr_t 			*hdr;
 	maliasframedesc_t	*pframedesc;
 
-	hdr = m->ah;
+	hdr = m->aliashdr;
 
 	if (!hdr) return;
 
@@ -1661,7 +1686,7 @@ void Host_Startdemos_f (void)
 		c = MAX_DEMOS;
 	}
 
-	Con_Printf ("%i demo(s) in loop\n", c);
+	Con_SafePrintf ("%i demo(s) in loop\n", c);
 
 	for (i = 1; i < c + 1; i++)
 		strncpy (cls.demos[i - 1], Cmd_Argv (i), sizeof (cls.demos[0]) - 1);

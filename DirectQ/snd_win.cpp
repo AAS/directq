@@ -28,7 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // 1 second at 16-bit stereo 44100hz
 #define SECONDARY_BUFFER_SIZE	0x100000
 
-static bool dsound_init = false;
+bool dsound_init = false;
 static int	sample16;
 static int	snd_sent, snd_completed;
 
@@ -69,7 +69,7 @@ bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize,
 			if (dsound_init)
 			{
 				// prevent recursive reinitialization
-				Con_Printf ("S_GetBufferLock: DS::Lock Sound Buffer Failed\n");
+				Con_DPrintf ("S_GetBufferLock: DS::Lock Sound Buffer Failed\n");
 				S_Shutdown ();
 				S_Startup ();
 			}
@@ -82,7 +82,7 @@ bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize,
 			if (dsound_init)
 			{
 				// prevent recursive reinitialization
-				Con_Printf ("S_GetBufferLock: DS: couldn't restore buffer\n");
+				Con_DPrintf ("S_GetBufferLock: DS: couldn't restore buffer\n");
 				S_Shutdown ();
 				S_Startup ();
 			}

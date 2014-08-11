@@ -1,0 +1,68 @@
+DIRECTQ 1.8.0 FULL RELEASE
+==========================
+
+This release follows the 1.8.0 beta release, and addresses technical omissions and errors.  This is the final full release of DirectQ 1.8.0
+and addresses all bugs that were reported (and some that weren't), as well as introducing some new last-minute features.
+
+- Fixed bug where on some gfx cards alias models with fullbright colours would render all grey owing to a bad texture blend mode.
+- Added cl_fullpitch cvar (default 0) to extend look up/down viewangles to full 90/-90 range.
+- Values of r_drawviewmodel between 0 and 1 can now give permanent gun alpha.
+- Fixed Quark ETP weirdness by re-enabling D3DCREATE_FPU_PRESERVE.
+- Added ability for 2D gfx to load from /gfx as well as from /textures/gfx.
+- Fixed incorrect protocol version in release builds.
+
+
+DIRECTQ 1.8.0 UPDATES
+=====================
+
+* Added Host_WriteConfiguration command to write out current config.cfg
+* Significantly cleaned out in-memory alias model format, faster loading, less RAM usage, nicer code.
+* Fixed crash bug if the gun is the only alias model in the scene when DirectQ starts up (ouch!)
+* Removed bug where brushmodels were being drawn twice (goes back to 1.6 I think).
+* Rationalised header file usage a little and got rid of a lot of ugly casts.
+* Moved entire project back to September 2004 D3D9 SDK (better compatibility with more systems).
+* Added cl_maxparticles cvar to control the max number of particles that can be allocated (default 65536).
+* Added sv_progs support.
+* Moved a lot of progs handling to a class in prep for CSQC support.
+* Increased particle size to more accurately match GLQuake.
+* A LOT of clean-up and rationalization on 2D rendering.
+* Further restructuring of alias models; massive speed increase from switch to triangle lists.
+* Added connect host:port command format (uses currently set port if none specified).
+* Restored gl_triplebuffer cvar and made it do what it actually should (use triple buffered rendering).
+* Fixed rare crash bug when a viewmodel is switched and the previous had a frame num higher than the number of frames in the new.
+* Fixed bug where a surf with extents > 4000ish would get invalid lightmap coords.
+* Restored infinite projection matrix, dynamic clip dist is now just used for positioning skyboxes.
+* Removed r_normqrain as it no longer has a detrimental effect.
+* Removed try/catch gamma preservation hack as it didn't work.
+* Precalculated interpolated alias model shading dot products to less than degree accuracy.
+* Added support for recording demos at any time.
+* Completely reworked brushmodel render and in-memory formats for better efficiency, especially with large open complex scenes.
+* Added r_trilistsize to control render batch sizing, set to -1 to autotune (default), 1 for default Quake behaviour, anything else to override.
+* Added death "fade to black" effect, nice and subtle (disabled in multiplayer).
+* Changed lightmaps to tall but narrow for better upload and cache efficiency.
+* Fixed some memory leaks in the shader system.
+* Fixed console scale not updating properly after a mode switch.
+* Cleaned out more disgusting legacy gl_vidnt.c globals storing multiple copies of the same data but which go out of sync too easily.
+* Fixed occasional crash when releasing a texture on shutdown.
+* No, *really* fixed it.
+* Increased max temp entities to 21,845.
+- Anti-z-fighting hack has been fixed.
+- Extra bmodels in automap fixed.
+- Max beams gone up to 29,127.
+- Fixed QC attempts to set cvars that don't exist crashing the engine.
+- Fixed issue with drivers that don't obey the stride parameter to DrawPrimitiveUP.
+- Switched main render to VBOs (aside from particles which were hugely inefficient).
+- Fixed save games showing incorrect kill counts in save/load menu.
+- Fixed incorrect bmodel x rotation (gah!)
+- Made r_speeds counts more consistent with GLQuake.
+- Added occlusion queries on all alias models.
+- Removed use of r_lightmap cvar.
+- Restored VBO use for r_hlsl 0 sky warp.
+- Added compatibility warning to gamedir menu when Quoth is enabled.
+- Fixed long-standing DirectQ "gamma creep" bug, and greatly simplified gamma handling.
+
+
+
+
+
+

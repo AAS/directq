@@ -96,8 +96,6 @@ typedef struct
 void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b);
 
 
-#define	MAX_BEAMS	512
-
 typedef struct
 {
 	int		entity;
@@ -229,7 +227,6 @@ typedef struct
 
 	// refresh related state
 	struct model_s	*worldmodel;	// cl_entitites[0].model
-	struct brushheader_s *worldbrush;
 
 	int			num_entities;	// held in cl_entities array
 
@@ -289,26 +286,13 @@ extern	cvar_t	m_forward;
 extern	cvar_t	m_side;
 
 
-#define	MAX_TEMP_ENTITIES	512			// lightning bolts, etc
-
-typedef struct staticent_s
-{
-	// the entity itself
-	entity_t *ent;
-
-	// linking
-	struct staticent_s *next;
-} staticent_t;
-
-
 extern	client_state_t	cl;
 
 // FIXME, allocate dynamically
 extern	entity_t		**cl_entities;
 extern	lightstyle_t	*cl_lightstyle;
 extern	dlight_t		*cl_dlights;
-extern	entity_t		*cl_temp_entities;
-extern	beam_t			*cl_beams;
+
 
 //=============================================================================
 

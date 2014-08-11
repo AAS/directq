@@ -134,6 +134,9 @@ Cvar_Set
 */
 void Cvar_Set (cvar_t *var, char *value)
 {
+	// some QC attempts to set old WinQuake cvars that don't exist any more
+	if (!var) return;
+
 	if (!Cvar_SetPrevalidate (var)) return;
 
 	if (strcmp (var->string, value))
@@ -151,6 +154,9 @@ void Cvar_Set (cvar_t *var, char *value)
 
 void Cvar_Set (cvar_t *var, float value)
 {
+	// some QC attempts to set old WinQuake cvars that don't exist any more
+	if (!var) return;
+
 	if (!Cvar_SetPrevalidate (var)) return;
 
 	if (var->value != value)

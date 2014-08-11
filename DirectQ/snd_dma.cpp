@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // snd_dma.c -- main control for any streaming sound output device
 
 #include "quakedef.h"
+#include "d3d_model.h"
 
 #ifdef _WIN32
 #include "winquake.h"
@@ -113,14 +114,14 @@ void S_SoundInfo_f(void)
 		return;
 	}
 	
-    Con_Printf("%5d stereo\n", shm->channels - 1);
-    Con_Printf("%5d samples\n", shm->samples);
-    Con_Printf("%5d samplepos\n", shm->samplepos);
-    Con_Printf("%5d samplebits\n", shm->samplebits);
-    Con_Printf("%5d submission_chunk\n", shm->submission_chunk);
-    Con_Printf("%5d speed\n", shm->speed);
-    Con_Printf("0x%x dma buffer\n", shm->buffer);
-	Con_Printf("%5d total_channels\n", total_channels);
+    Con_Printf ("%5d stereo\n", shm->channels - 1);
+    Con_Printf ("%5d samples\n", shm->samples);
+    Con_Printf ("%5d samplepos\n", shm->samplepos);
+    Con_Printf ("%5d samplebits\n", shm->samplebits);
+    Con_Printf ("%5d submission_chunk\n", shm->submission_chunk);
+    Con_Printf ("%5d speed\n", shm->speed);
+    Con_Printf ("0x%x dma buffer\n", shm->buffer);
+	Con_Printf ("%5d total_channels\n", total_channels);
 }
 
 
@@ -164,7 +165,7 @@ cmd_t S_SoundInfo_f_Cmd ("soundinfo", S_SoundInfo_f);
 void S_Init (void)
 {
 	// always init this otherwise we'll crash during sound clearing
-	known_sfx = (sfx_t *) Pool_Alloc (POOL_PERMANENT, MAX_SFX * sizeof (sfx_t));
+	known_sfx = (sfx_t *) Pool_Permanent->Alloc (MAX_SFX * sizeof (sfx_t));
 	num_sfx = 0;
 
 	if (COM_CheckParm("-nosound"))
@@ -914,7 +915,7 @@ void S_SoundList(void)
 			Con_Printf ("L");
 		else
 			Con_Printf (" ");
-		Con_Printf("(%2db) %6i : %s\n",sc->width*8,  size, sfx->name);
+		Con_Printf ("(%2db) %6i : %s\n",sc->width*8,  size, sfx->name);
 	}
 	Con_Printf ("Total resident: %i\n", total);
 }

@@ -21,12 +21,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "menu_common.h"
 #include "d3d_quake.h"
 
 CQMenu menu_HUD (m_hudoptions);
-
-void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha);
 
 extern cvar_t	crosshair;
 extern cvar_t	cl_crossx;
@@ -632,7 +631,7 @@ void HUD_DividerLine (int y, int len)
 	}
 
 	str[len] = 0;
-	Draw_String ((vid.conwidth / 2) - (len * 4) - 4, y, str);
+	Draw_String ((vid.width / 2) - (len * 4) - 4, y, str);
 }
 
 
@@ -752,10 +751,10 @@ void HUD_DeathmatchOverlay (void)
 	char num[12];
 
 	pic = Draw_CachePic ("gfx/ranking.lmp");
-	Draw_Pic ((vid.conwidth - pic->width) / 2, 32, pic);
+	Draw_Pic ((vid.width - pic->width) / 2, 32, pic);
 
 	// base X
-	x = vid.conwidth / 2;
+	x = vid.width / 2;
 
 	// starting Y
 	y = 32 + pic->height + 8;
@@ -777,7 +776,7 @@ void HUD_DeathmatchOverlay (void)
 	y += 12;
 	HUD_DividerLine (y, 16);
 
-	x = 80 + ((vid.conwidth - 320) >> 1);
+	x = 80 + ((vid.width - 320) >> 1);
 	y += 12;
 
 	HUD_SortFrags ();
@@ -831,7 +830,7 @@ void HUD_SoloScoreboard (char *picname, float solotime)
 	qpic_t *pic;
 
 	pic = Draw_CachePic (picname);
-	Draw_Pic ((vid.conwidth - pic->width) / 2, 48, pic);
+	Draw_Pic ((vid.width - pic->width) / 2, 48, pic);
 
 	// calculate time
 	minutes = solotime / 60;
@@ -840,7 +839,7 @@ void HUD_SoloScoreboard (char *picname, float solotime)
 	units = seconds - 10 * tens;
 
 	// base X
-	SBX = vid.conwidth / 2;
+	SBX = vid.width / 2;
 
 	// starting Y
 	SBY = 48 + pic->height + 10;
@@ -1423,7 +1422,7 @@ void HUD_DrawSBar (void)
 		int x = HUD_GetX (&hud_sbar_x, &hud_sbar_cx);
 		int y = HUD_GetY (&hud_sbar_y, &hud_sbar_cy);
 
-		Draw_AlphaPic (x, y, sb_sbar, hud_sbaralpha.value);
+		Draw_Pic (x, y, sb_sbar, hud_sbaralpha.value);
 	}
 }
 
@@ -1446,7 +1445,7 @@ void HUD_DrawIBar (int ActiveWeapon, bool DrawFrags)
 		int x = HUD_GetX (&hud_ibar_x, &hud_ibar_cx);
 		int y = HUD_GetY (&hud_ibar_y, &hud_ibar_cy);
 
-		Draw_AlphaPic (x, y, ibarpic, hud_sbaralpha.value);
+		Draw_Pic (x, y, ibarpic, hud_sbaralpha.value);
 
 		// the 4 mini frag-lists are only drawn on this one
 		if (DrawFrags) HUD_DrawFrags ();
@@ -1525,36 +1524,65 @@ void HUD_MiniDeathmatchOverlay (void)
 
 void HUD_DrawFPS (bool force)
 {
-	char str[16];
-	static int fps = 0;
-	static float last_realtime = 0.0;
-	static int last_framecount = 0;
+#if 0
+	// consistency
+	char str[17];
+	static int oldframecount = 0;
+	static float oldtime = 0, fps = 0;
 
 	// positioning
 	int x = HUD_GetX (&hud_fps_x, NULL);
 	int y = HUD_GetY (&hud_fps_y, NULL);
 
-	if (realtime - last_realtime > 0.25)
+	float time = realtime - oldtime;
+	int frames = host_framecount - oldframecount;
+
+	if (time < 0 || frames < 0)
 	{
-		if (cls.state == ca_connected && 0)
-		{
-			if (d3d_RenderDef.frametime < 0.0015015f)
-				fps = 666;
-			else fps = (int) (1.0f / d3d_RenderDef.frametime);
-		}
-		else
-		{
-			fps = (host_framecount - last_framecount) / (realtime - last_realtime) + 0.5;
-			last_framecount = host_framecount;
-			last_realtime = realtime;
-		}
+		oldtime = realtime;
+		oldframecount = host_framecount;
+		return;
+	}
+
+	// update value every 1/4 second
+	if (time > 0.25)
+	{
+		fps = (float) frames / time;
+		oldtime = realtime;
+		oldframecount = host_framecount;
 	}
 
 	if (scr_showfps.value || force)
 	{
-		_snprintf (str, 16, "%4i fps", fps);
+		// adjust for rounding errors
+		_snprintf (str, 16, "%4i fps", (int) (fps + 0.5f));
 		Draw_String (x, y, str);
 	}
+#else
+	static int frames = 0;
+	static float fpsrate = 0;
+	char str[17];
+	static DWORD dwOldFrameTime = 0;
+	extern DWORD dwRealTime;
+
+	if (++frames >= 16 && dwRealTime > dwOldFrameTime)
+	{
+		fpsrate = ((float) (frames * 1000)) / (dwRealTime - dwOldFrameTime);
+		frames = 0;
+		dwOldFrameTime = dwRealTime;
+	}
+
+	if (scr_showfps.value || force)
+	{
+		// positioning
+		int x = HUD_GetX (&hud_fps_x, NULL);
+		int y = HUD_GetY (&hud_fps_y, NULL);
+
+		// adjust for rounding errors
+		_snprintf (str, 16, "%4.1f fps", fpsrate);
+		Draw_String (x, y, str);
+	}
+#endif
 }
 
 

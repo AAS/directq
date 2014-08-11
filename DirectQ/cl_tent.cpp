@@ -20,10 +20,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_tent.c -- client side temporary entities
 
 #include "quakedef.h"
+#include "d3d_model.h"
+
+CSpaceBuffer *Pool_TempEntities = NULL;
+CSpaceBuffer *Pool_Beams = NULL;
 
 int			num_temp_entities;
 entity_t	*cl_temp_entities;
+
 beam_t		*cl_beams;
+int			num_beams;
 
 sfx_t			*cl_sfx_wizhit;
 sfx_t			*cl_sfx_knighthit;
@@ -33,10 +39,9 @@ sfx_t			*cl_sfx_ric2;
 sfx_t			*cl_sfx_ric3;
 sfx_t			*cl_sfx_r_exp3;
 
-// don't protect this one as a mod may wish to use it
-cvar_t r_extradlight ("r_extradlight", "0", CVAR_ARCHIVE);
+cvar_t r_extradlight ("r_extradlight", "1", CVAR_ARCHIVE);
 
-void D3D_AddVisEdict (entity_t *ent, bool noculledict);
+void D3D_AddVisEdict (entity_t *ent);
 
 /*
 =================
@@ -53,6 +58,10 @@ void CL_InitTEnts (void)
 	beam_t	*b;
 	int		i;
 
+	// reset temp entitiy counts; the pools will be created on-demand
+	num_temp_entities = 0;
+	num_beams = 0;
+
 	// we need to load these too as models are being cleared between maps
 	cl_bolt1_mod = Mod_ForName ("progs/bolt.mdl", true);
 	cl_bolt2_mod = Mod_ForName ("progs/bolt2.mdl", true);
@@ -62,9 +71,9 @@ void CL_InitTEnts (void)
 	cl_beam_mod = Mod_ForName ("progs/beam.mdl", false);
 
 	// don't frame interpolate the bolts
-	cl_bolt1_mod->ah->nolerp = true;
-	cl_bolt2_mod->ah->nolerp = true;
-	cl_bolt3_mod->ah->nolerp = true;
+	cl_bolt1_mod->aliashdr->nolerp = true;
+	cl_bolt2_mod->aliashdr->nolerp = true;
+	cl_bolt3_mod->aliashdr->nolerp = true;
 
 	// sounds
 	cl_sfx_wizhit = S_PrecacheSound ("wizard/hit.wav");
@@ -86,11 +95,22 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 	// if the model didn't load just ignore it
 	if (!m) return;
 
+	if (!Pool_Beams)
+	{
+		Pool_Beams = new CSpaceBuffer ("Beams", 1, POOL_MAP);
+		cl_beams = (beam_t *) Pool_Beams->Alloc (1);
+		Pool_Beams->Rewind ();
+	}
+
+	// reset the beams pool to the beginning if there are no active beams
+	if (!num_beams) Pool_Beams->Rewind ();
+
 	beam_t	*b;
 	int		i;
 
 	// override any beam with the same entity
-	for (i = 0, b = cl_beams; i < MAX_BEAMS; i++, b++)
+	// fixme - reuse first???
+	for (i = 0, b = cl_beams; i < num_beams; i++, b++)
 	{
 		if (b->entity == ent)
 		{
@@ -104,7 +124,7 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 	}
 
 	// find a free beam
-	for (i = 0, b = cl_beams; i < MAX_BEAMS; i++, b++)
+	for (i = 0, b = cl_beams; i < num_beams; i++, b++)
 	{
 		if (!b->model || b->endtime < cl.time)
 		{
@@ -117,7 +137,15 @@ void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 		}
 	}
 
-	Con_Printf ("beam list overflow!\n");	
+	// create a new beam
+	b = (beam_t *) Pool_Beams->Alloc (sizeof (beam_t));
+
+	b->entity = ent;
+	b->model = m;
+	b->endtime = cl.time + 0.2;
+	VectorCopy (start, b->start);
+	VectorCopy (end, b->end);
+	num_beams++;
 }
 
 
@@ -285,7 +313,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (start, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.001;
+			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 2, 225, 541);
@@ -293,7 +321,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.001;
+			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 2, 225, 541);
@@ -318,7 +346,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (start, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.001;
+			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 2, 225, 541);
@@ -326,7 +354,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.001;
+			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 2, 225, 541);
@@ -351,7 +379,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (start, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.001;
+			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 2, 225, 541);
@@ -359,7 +387,7 @@ void CL_ParseTEnt (void)
 			dl = CL_AllocDlight (0);
 			VectorCopy (end, dl->origin);
 			dl->radius = 250;
-			dl->die = cl.time + 0.001;
+			dl->die = cl.time + 0.1;
 			dl->decay = 300;
 
 			R_ColourDLight (dl, 2, 225, 541);
@@ -484,8 +512,20 @@ entity_t *CL_NewTempEntity (void)
 {
 	entity_t	*ent;
 
-	if (num_temp_entities == MAX_TEMP_ENTITIES) return NULL;
+	if (!Pool_TempEntities)
+	{
+		Pool_TempEntities = new CSpaceBuffer ("Temp Entities", 8, POOL_MAP);
+		cl_temp_entities = (entity_t *) Pool_TempEntities->Alloc (1);
+		Pool_TempEntities->Rewind ();
+	}
 
+	// begin a new sequence
+	if (!num_temp_entities) Pool_TempEntities->Rewind ();
+
+	// ensure space in the buffer
+	Pool_TempEntities->Alloc (sizeof (entity_t));
+
+	// alloc this temp entity
 	ent = &cl_temp_entities[num_temp_entities];
 	memset (ent, 0, sizeof (*ent));
 
@@ -518,7 +558,7 @@ void CL_UpdateTEnts (void)
 	num_temp_entities = 0;
 
 	// update lightning
-	for (i = 0, b = cl_beams; i < MAX_BEAMS; i++, b++)
+	for (i = 0, b = cl_beams; i < num_beams; i++, b++)
 	{
 		if (!b->model || b->endtime < cl.time)
 			continue;
@@ -565,7 +605,7 @@ void CL_UpdateTEnts (void)
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
 			ent->angles[2] = rand () % 360;
-			ent->model->ah->nolerp = true;
+			ent->model->aliashdr->nolerp = true;
 
 			// spotted by metlslime - inner loop used i as well!
 			for (int j = 0; j < 3; j++)
@@ -575,7 +615,7 @@ void CL_UpdateTEnts (void)
 			}
 
 			// add a visedict for it
-			D3D_AddVisEdict (ent, false);
+			D3D_AddVisEdict (ent);
 
 			d -= 30;
 		}

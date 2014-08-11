@@ -17,33 +17,274 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// r_surf.c: surface-related refresh code
+
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
-
 void R_PushDlights (mnode_t *headnode);
-void EmitSkyPolys (msurface_t *surf);
-void D3D_DrawWorld (void);
-__inline void R_AddStaticEntitiesForLeaf (mleaf_t *leaf);
-void D3D_AutomapRecursiveNode (mnode_t *node);
+void D3D_AddSkySurfaceToRender (msurface_t *surf, D3DMATRIX *m);
+void D3D_DrawWaterSurfaces (void);
+
 
 cvar_t r_lockpvs ("r_lockpvs", "0");
+cvar_t r_maxvertexsubmission ("r_maxvertexsubmission", "65000", CVAR_ARCHIVE);
+
+void D3D_RotateForEntity (entity_t *e);
+void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
+
 
 /*
-===============
-R_TextureAnimation
+=============================================================
 
-Returns the proper texture for a given time and base texture
-===============
+	ALL BRUSH MODELS
+
+=============================================================
 */
-texture_t *R_TextureAnimationInner (texture_t *base)
-{
-	int		relative;
-	int		count;
 
-	if (d3d_RenderDef.currententity->frame)
+CSpaceBuffer *Pool_ModelSurfs = NULL;
+d3d_modelsurf_t *d3d_ModelSurfs = NULL;
+int d3d_NumModelSurfs = 0;
+
+void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, D3DMATRIX *matrix)
+{
+	// ensure that there is space
+	Pool_ModelSurfs->Alloc (sizeof (d3d_modelsurf_t));
+
+	// take the next modelsurf
+	d3d_modelsurf_t *ms = &d3d_ModelSurfs[d3d_NumModelSurfs++];
+
+	ms->surf = surf;
+	ms->tex = tex;
+	ms->matrix = matrix;
+}
+
+
+void D3D_DrawModelSurfs (bool fbon)
+{
+	int cachedlightmap = 0;
+	int cachedtexture = 0;
+
+	int numverts = 0;
+	int numindexes = 0;
+
+	brushpolyvert_t *brushverts = NULL;
+	unsigned short *brushindexes = NULL;
+
+	bool stateset = false;
+
+	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
+	{
+		d3d_registeredtexture_t *rt = &d3d_RegisteredTextures[i];
+
+		if (!rt->texture) continue;
+		if (!rt->surfchain) continue;
+		if (!rt->texture->teximage) continue;
+		if (rt->surfchain->surf->flags & SURF_DRAWSKY) continue;
+		if (rt->surfchain->surf->flags & SURF_DRAWTURB) continue;
+
+		if (fbon && !rt->texture->lumaimage) continue;
+		if (!fbon && rt->texture->lumaimage) continue;
+
+		if (!stateset)
+		{
+			D3D_BeginVertexes ((void **) &brushverts, (void **) &brushindexes, sizeof (brushpolyvert_t));
+			stateset = true;
+		}
+
+		texture_t *tex = rt->texture;
+
+		for (d3d_modelsurf_t *modelsurf = rt->surfchain; modelsurf; modelsurf = modelsurf->surfchain)
+		{
+			msurface_t *surf = modelsurf->surf;
+			d3d_RenderDef.brush_polys++;
+
+			if (!D3D_CheckVBO (surf->numverts, (surf->numverts - 2) * 3))
+			{
+				D3D_EndVertexes ();
+				D3D_BeginVertexes ((void **) &brushverts, (void **) &brushindexes, sizeof (brushpolyvert_t));
+				numindexes = 0;
+				numverts = 0;
+
+				// force a texture change too on the new VBO
+				cachedtexture = -1;
+			}
+
+			// a change of lightmap or of texture needs a new batch
+			if ((int) surf->d3d_LightmapTex != cachedlightmap || (int) tex->teximage != cachedtexture)
+			{
+				if (numverts || numindexes)
+				{
+					// go to a new vbo mark
+					D3D_GotoNewVBOMark ();
+				}
+
+				// update textures (D3D_SetTexture will soak up state changes here)
+				// this needs to be done here otherwise we won't get correct textures set owing to moving the cache outside the main loop
+				if (tex->lumaimage)
+				{
+					D3D_SetVBOColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
+					D3D_SetVBOColorMode (2, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+
+					D3D_SetVBOTexture (1, tex->lumaimage->d3d_Texture);
+					D3D_SetVBOTexture (2, tex->teximage->d3d_Texture);
+				}
+				else
+				{
+					D3D_SetVBOColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+					D3D_SetVBOColorMode (2, D3DTOP_DISABLE);
+
+					D3D_SetVBOTexture (1, tex->teximage->d3d_Texture);
+				}
+
+				// and the lightmap
+				D3D_SetVBOColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
+				D3D_SetVBOTexture (0, surf->d3d_LightmapTex);
+
+				// store back cached stuff
+				cachedlightmap = (int) surf->d3d_LightmapTex;
+				cachedtexture = (int) tex->teximage;
+			}
+
+			// write out the matrix to the surf so that it transforms correctly
+			surf->matrix = modelsurf->matrix;
+
+			// emit indexes
+			for (int v = 2; v < surf->numverts; v++)
+			{
+				brushindexes[numindexes++] = numverts;
+				brushindexes[numindexes++] = numverts + v - 1;
+				brushindexes[numindexes++] = numverts + v;
+			}
+
+			D3DMATRIX *m = surf->matrix;
+			polyvert_t *src = surf->verts;
+
+			// emit vertexes
+			for (int v = 0; v < surf->numverts; v++, src++, brushverts++)
+			{
+				if (m)
+				{
+					brushverts->xyz[0] = src->basevert[0] * m->_11 + src->basevert[1] * m->_21 + src->basevert[2] * m->_31 + m->_41;
+					brushverts->xyz[1] = src->basevert[0] * m->_12 + src->basevert[1] * m->_22 + src->basevert[2] * m->_32 + m->_42;
+					brushverts->xyz[2] = src->basevert[0] * m->_13 + src->basevert[1] * m->_23 + src->basevert[2] * m->_33 + m->_43;
+				}
+				else
+				{
+					brushverts->xyz[0] = src->basevert[0];
+					brushverts->xyz[1] = src->basevert[1];
+					brushverts->xyz[2] = src->basevert[2];
+				}
+
+				brushverts->st[0] = src->st[0];
+				brushverts->st[1] = src->st[1];
+
+				brushverts->lm[0] = src->lm[0];
+				brushverts->lm[1] = src->lm[1];
+			}
+
+			// explicitly NULL the surface matrix
+			surf->matrix = NULL;
+			numverts += surf->numverts;
+
+			D3D_UpdateVBOMark (surf->numverts, (surf->numverts - 2) * 3);
+		}
+	}
+
+	// set indexes for the last primitive (if any)
+	// required always so that the buffer will unlock
+	if (stateset) D3D_EndVertexes ();
+}
+
+
+void D3D_SetBrushCommonState (int alphaval)
+{
+	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX2);
+
+	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+	D3D_SetTextureMipmap (2, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
+	D3D_SetTexCoordIndexes (1, 0, 0);
+
+	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
+	D3D_SetTextureColorMode (1, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_CURRENT);
+
+	// stage 0 is the lightmap (and may be modulated with alpha)
+	if (alphaval < 255)
+	{
+		D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_TFACTOR);
+		D3D_SetRenderState (D3DRS_TEXTUREFACTOR, D3DCOLOR_ARGB (BYTE_CLAMP (alphaval), 255, 255, 255));
+	}
+	else D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
+
+	// no alpha ops here irrespective
+	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
+	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
+}
+
+
+void D3D_EmitModelSurfToAlpha (d3d_modelsurf_t *modelsurf);
+
+void D3D_AddWorldSurfacesToRender (void)
+{
+	// this should only ever happen if the scene is filled with water or sky
+	if (!d3d_NumModelSurfs) return;
+
+	// common
+	D3D_SetBrushCommonState (255);
+
+	// reverse the order to get correct front to back ordering
+	d3d_modelsurf_t *modelsurf = &d3d_ModelSurfs[d3d_NumModelSurfs - 1];
+
+	// merge the modelsurfs into the final texture order
+	for (int i = 0; i < d3d_NumModelSurfs; i++, modelsurf--)
+	{
+		// a bmodel will have already been added to the alpha list
+		// turb surfaces need to be added at this time
+		if (modelsurf->surf->alphaval < 255)
+		{
+			if (modelsurf->surf->flags & SURF_DRAWTURB)
+				D3D_EmitModelSurfToAlpha (modelsurf);
+
+			continue;
+		}
+
+		d3d_registeredtexture_t *rt = modelsurf->tex->registration;
+
+		modelsurf->surfchain = rt->surfchain;
+		rt->surfchain = modelsurf;
+	}
+
+	// now emit from the list of registered textures in two passes for fb/no fb
+	D3D_DrawModelSurfs (false);
+	D3D_DrawModelSurfs (true);
+
+	// draw opaque water here
+	D3D_DrawWaterSurfaces ();
+}
+
+
+/*
+=============================================================
+
+	WORLD MODEL BUILDING
+
+=============================================================
+*/
+
+extern float r_clipdist;
+
+texture_t *R_TextureAnimation (entity_t *ent, texture_t *base)
+{
+	int count;
+	int relative;
+	texture_t *cached = base;
+
+	if (ent->frame)
 	{
 		if (base->alternate_anims)
 			base = base->alternate_anims;
@@ -51,7 +292,7 @@ texture_t *R_TextureAnimationInner (texture_t *base)
 
 	if (!base->anim_total) return base;
 
-	relative = (int)(cl.time*10) % base->anim_total;
+	relative = (int) (cl.time * 10) % base->anim_total;
 
 	count = 0;	
 
@@ -60,48 +301,13 @@ texture_t *R_TextureAnimationInner (texture_t *base)
 		base = base->anim_next;
 
 		// prevent crash here
-		if (!base) return NULL;
-		if (++count > 100) return NULL;
+		if (!base) return cached;
+		if (++count > 100) return cached;
 	}
 
 	return base;
 }
 
-
-texture_t *R_TextureAnimation (texture_t *base)
-{
-	// check animation
-	texture_t *tex = R_TextureAnimationInner (base);
-
-	// catch errors
-	if (!tex) tex = base;
-
-	// update renderflags
-	if (tex->d3d_Fullbright && d3d_DeviceCaps.MaxTextureBlendStages > 2)
-	{
-		d3d_RenderDef.renderflags |= R_RENDERLUMA;
-		d3d_RenderDef.brushrenderflags |= R_RENDERLUMA;
-	}
-	else
-	{
-		d3d_RenderDef.renderflags |= R_RENDERNOLUMA;
-		d3d_RenderDef.brushrenderflags |= R_RENDERNOLUMA;
-	}
-
-	// return what we got
-	return tex;
-}
-
-
-/*
-=============================================================
-
-	WORLD MODEL
-
-=============================================================
-*/
-
-extern float r_clipdist;
 
 __inline void R_MarkLeafSurfs (mleaf_t *leaf, int visframe)
 {
@@ -125,16 +331,16 @@ __inline void R_PlaneSide (mplane_t *plane, float *dot, int *side)
 	switch (plane->type)
 	{
 	case PLANE_X:
-		*dot = modelorg[0] - plane->dist;
+		*dot = d3d_RenderDef.worldentity.modelorg[0] - plane->dist;
 		break;
 	case PLANE_Y:
-		*dot = modelorg[1] - plane->dist;
+		*dot = d3d_RenderDef.worldentity.modelorg[1] - plane->dist;
 		break;
 	case PLANE_Z:
-		*dot = modelorg[2] - plane->dist;
+		*dot = d3d_RenderDef.worldentity.modelorg[2] - plane->dist;
 		break;
 	default:
-		*dot = DotProduct (modelorg, plane->normal) - plane->dist;
+		*dot = DotProduct (d3d_RenderDef.worldentity.modelorg, plane->normal) - plane->dist;
 		break;
 	}
 
@@ -144,63 +350,35 @@ __inline void R_PlaneSide (mplane_t *plane, float *dot, int *side)
 }
 
 
-__inline void R_AddSurfToDrawLists (msurface_t *surf)
+__inline void D3D_AddSurfToDrawLists (msurface_t *surf)
 {
-	// get the correct animation sequence
-	texture_t *tex = R_TextureAnimation (surf->texinfo->texture);
+	// world surfs never have explicit alpha
+	// (they may pick it up from the value of r_wateralpha)
+	surf->alphaval = 255;
 
-	// if sorting by texture, just store it out
 	if (surf->flags & SURF_DRAWSKY)
-	{
-		// link it in (back to front)
-		surf->texturechain = d3d_RenderDef.skychain;
-		d3d_RenderDef.skychain = surf;
-	}
-	else if (surf->flags & SURF_DRAWTURB)
-	{
-		// link it in (back to front)
-		surf->texturechain = tex->texturechain;
-		tex->texturechain = surf;
-
-		// mark the texture as having been visible
-		tex->visframe = d3d_RenderDef.framecount;
-
-		// flag for rendering
-		d3d_RenderDef.renderflags |= R_RENDERWATERSURFACE;
-	}
+		D3D_AddSkySurfaceToRender (surf, NULL);
 	else
 	{
-		// check under/over water
-		if (surf->flags & SURF_UNDERWATER)
-			d3d_RenderDef.renderflags |= R_RENDERUNDERWATER;
-		else d3d_RenderDef.renderflags |= R_RENDERABOVEWATER;
-
 		// check for lightmap modifications
 		if (surf->d3d_Lightmap) surf->d3d_Lightmap->CheckSurfaceForModification (surf);
 
-		// link it in (front to back)
-		if (!tex->chaintail)
-			tex->texturechain = surf;
-		else tex->chaintail->texturechain = surf;
+		texture_t *tex = R_TextureAnimation (&d3d_RenderDef.worldentity, surf->texinfo->texture);
 
-		tex->chaintail = surf;
-		surf->texturechain = NULL;
+		// this only ever comes from the world so matrix is always NULL
+		D3D_AllocModelSurf (surf, tex, NULL);
 	}
 }
 
 
-/*
-================
-R_RecursiveWorldNode
-================
-*/
+void R_StoreEfrags (efrag_t **ppefrag);
+
 void R_RecursiveWorldNode (mnode_t *node)
 {
 	int			side;
 	msurface_t	*surf;
 	float		dot;
 
-loc0:;
 	if (node->contents == CONTENTS_SOLID) return;
 	if (node->visframe != d3d_RenderDef.visframecount) return;
 	if (R_CullBox (node->minmaxs, node->minmaxs + 3)) return;
@@ -208,14 +386,11 @@ loc0:;
 	// if a leaf node, draw stuff
 	if (node->contents < 0)
 	{
-		// leaf visframes are never marked?
-		((mleaf_t *) node)->visframe = d3d_RenderDef.visframecount;
-
 		// mark the surfs
 		R_MarkLeafSurfs ((mleaf_t *) node, d3d_RenderDef.framecount);
 
 		// add static entities contained in the leaf to the list
-		R_AddStaticEntitiesForLeaf ((mleaf_t *) node);
+		R_StoreEfrags (&((mleaf_t *) node)->efrags);
 		return;
 	}
 
@@ -227,10 +402,8 @@ loc0:;
 	if (dot > r_clipdist) r_clipdist = dot;
 	if (-dot > r_clipdist) r_clipdist = -dot;
 
-	// recurse down the children, front side first (but only if we *have* to
-	// note: i'm sure that there's a condition here we can goto on
-	if (node->children[side]->contents != CONTENTS_SOLID || node->children[side]->visframe != d3d_RenderDef.visframecount)
-		R_RecursiveWorldNode (node->children[side]);
+	// recurse down the children, front side first
+	R_RecursiveWorldNode (node->children[side]);
 
 	// add stuff to the draw lists
 	if (node->numsurfaces)
@@ -242,19 +415,22 @@ loc0:;
 		else if (dot > BACKFACE_EPSILON)
 			side = 0;
 
-		for (surf = cl.worldbrush->surfaces + node->firstsurface; c; c--, surf++)
+		for (surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface; c; c--, surf++)
 		{
+			// the SURF_PLANEBACK test never actually evaluates to true with GLQuake as the surf
+			// will have the same plane and facing as the node here
 			if (surf->visframe != d3d_RenderDef.framecount) continue;
-			if ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)) continue;
+			if (R_CullBox (surf->mins, surf->maxs)) continue;
 
-			// add this surf
-			R_AddSurfToDrawLists (surf);
+			D3D_AddSurfToDrawLists (surf);
+
+			// in case a bad BSP overlaps the surfs in it's nodes
+			surf->visframe = -1;
 		}
 	}
 
 	// recurse down the back side
-	node = node->children[!side];
-	goto loc0;
+	R_RecursiveWorldNode (node->children[!side]);
 }
 
 
@@ -264,9 +440,9 @@ void R_AutomapSurfaces (void)
 	// some Quake weirdness here
 	// this info taken from qbsp source code:
 	// leaf 0 is a common solid with no faces
-	for (int i = 1; i <= cl.worldbrush->numleafs; i++)
+	for (int i = 1; i <= cl.worldmodel->brushhdr->numleafs; i++)
 	{
-		mleaf_t *leaf = &cl.worldbrush->leafs[i];
+		mleaf_t *leaf = &cl.worldmodel->brushhdr->leafs[i];
 
 		// show all leafs that have previously been seen
 		if (!leaf->seen) continue;
@@ -278,23 +454,23 @@ void R_AutomapSurfaces (void)
 		R_MarkLeafSurfs (leaf, d3d_RenderDef.framecount);
 
 		// add static entities contained in the leaf to the list
-		R_AddStaticEntitiesForLeaf (leaf);
+		R_StoreEfrags (&leaf->efrags);
 	}
 
 	int side;
 	float dot;
 
 	// setup modelorg to a point so far above the viewpoint that it may as well be infinite
-	modelorg[0] = (cl.worldmodel->mins[0] + cl.worldmodel->maxs[0]) / 2;
-	modelorg[1] = (cl.worldmodel->mins[1] + cl.worldmodel->maxs[1]) / 2;
-	modelorg[2] = ((cl.worldmodel->mins[2] + cl.worldmodel->maxs[2]) / 2) + 16777216.0f;
+	d3d_RenderDef.worldentity.modelorg[0] = (cl.worldmodel->mins[0] + cl.worldmodel->maxs[0]) / 2;
+	d3d_RenderDef.worldentity.modelorg[1] = (cl.worldmodel->mins[1] + cl.worldmodel->maxs[1]) / 2;
+	d3d_RenderDef.worldentity.modelorg[2] = ((cl.worldmodel->mins[2] + cl.worldmodel->maxs[2]) / 2) + 16777216.0f;
 
 	extern cvar_t r_automap_nearclip;
 	extern float r_automap_z;
 
-	for (int i = 0; i < cl.worldbrush->numnodes; i++)
+	for (int i = 0; i < cl.worldmodel->brushhdr->numnodes; i++)
 	{
-		mnode_t *node = &cl.worldbrush->nodes[i];
+		mnode_t *node = &cl.worldmodel->brushhdr->nodes[i];
 
 		// node culling
 		if (node->contents == CONTENTS_SOLID) continue;
@@ -310,7 +486,7 @@ void R_AutomapSurfaces (void)
 
 		for (int j = 0; j < node->numsurfaces; j++)
 		{
-			msurface_t *surf = cl.worldbrush->surfaces + node->firstsurface + j;
+			msurface_t *surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface + j;
 
 			// surf culling
 			if (surf->visframe != d3d_RenderDef.framecount) continue;
@@ -318,66 +494,321 @@ void R_AutomapSurfaces (void)
 			if (surf->mins[2] > (r_refdef.vieworg[2] + r_automap_nearclip.integer + r_automap_z)) continue;
 			if ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)) continue;
 
-			R_AddSurfToDrawLists (surf);
+			D3D_AddSurfToDrawLists (surf);
 		}
 	}
-
-	// restore correct modelorg
-	VectorCopy (r_origin, modelorg);
 }
 
 
-/*
-=============
-D3D_DrawWorld
-=============
-*/
-void R_ClearSurfaceChains (model_t *mod);
-
-void D3D_PrepareWorld (void)
+void D3D_DrawAlphaBrushModel (entity_t *ent)
 {
-	entity_t	ent;
+	// model was culled
+	if (ent->visframe != d3d_RenderDef.framecount) return;
 
-	memset (&ent, 0, sizeof (ent));
-	ent.model = cl.worldmodel;
-	cl.worldmodel->cacheent = &ent;
-	ent.alphaval = 255;
-	d3d_RenderDef.currententity = &ent;
+	// sanity check
+	if (!ent->model) return;
+	if (!ent->model->brushhdr) return;
+	if (ent->model->type != mod_brush) return;
 
-	R_ClearSurfaceChains (cl.worldmodel);
+	// we ensured that the entity would only get added if it had appropriate surfs so this is quite safe
+	D3D_SetBrushCommonState (ent->alphaval);
+
+	model_t *mod = ent->model;
+	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
+	D3DMATRIX *m = &ent->matrix;
+
+	// don't bother with ordering these for now; to be honest i'm quite sick of this code at the moment
+	// and not yet ready to give it the restructuring it needs.  i'm going to be maintaining it going forward
+	// however so i do need to get back to it some time
+	for (int s = 0; s < mod->brushhdr->nummodelsurfaces; s++, surf++)
+	{
+		// sky and water are dealt with separately
+		if (surf->flags & SURF_DRAWSKY) continue;
+		if (surf->flags & SURF_DRAWTURB) continue;
+
+		// this doesn't use the optimal rendering path just yet;
+		// someday somebody's gonna make a huge towering edifice of glass as a bmodel and i'll need to do it...
+		texture_t *tex = R_TextureAnimation (ent, surf->texinfo->texture);
+
+		// these surfs aren't backfaced
+		if (tex->lumaimage)
+		{
+			D3D_SetTextureColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
+			D3D_SetTextureColorMode (2, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+
+			D3D_SetTexture (1, tex->lumaimage->d3d_Texture);
+			D3D_SetTexture (2, tex->teximage->d3d_Texture);
+		}
+		else
+		{
+			D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+			D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
+
+			D3D_SetTexture (1, tex->teximage->d3d_Texture);
+		}
+
+		D3D_SetTexture (0, surf->d3d_LightmapTex);
+
+		// get space for the verts
+		Pool_PolyVerts->Rewind ();
+		brushpolyvert_t *verts = (brushpolyvert_t *) Pool_PolyVerts->Alloc (surf->numverts * sizeof (brushpolyvert_t));
+
+		polyvert_t *src = surf->verts;
+		brushpolyvert_t *dest = verts;
+
+		for (int i = 0; i < surf->numverts; i++, src++, dest++)
+		{
+			if (m)
+			{
+				dest->xyz[0] = src->basevert[0] * m->_11 + src->basevert[1] * m->_21 + src->basevert[2] * m->_31 + m->_41;
+				dest->xyz[1] = src->basevert[0] * m->_12 + src->basevert[1] * m->_22 + src->basevert[2] * m->_32 + m->_42;
+				dest->xyz[2] = src->basevert[0] * m->_13 + src->basevert[1] * m->_23 + src->basevert[2] * m->_33 + m->_43;
+			}
+			else
+			{
+				dest->xyz[0] = src->basevert[0];
+				dest->xyz[1] = src->basevert[1];
+				dest->xyz[2] = src->basevert[2];
+			}
+
+			dest->st[0] = src->st[0];
+			dest->st[1] = src->st[1];
+
+			dest->lm[0] = src->lm[0];
+			dest->lm[1] = src->lm[1];
+		}
+
+		d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, surf->numverts - 2, verts, sizeof (brushpolyvert_t));
+		d3d_RenderDef.brush_polys++;
+	}
+}
+
+
+void D3D_SetupBrushModel (entity_t *ent)
+{
+	bool rotated;
+	vec3_t mins, maxs;
+	model_t *mod = ent->model;
+
+	if (ent->angles[0] || ent->angles[1] || ent->angles[2])
+	{
+		rotated = true;
+
+		for (int i = 0; i < 3; i++)
+		{
+			mins[i] = ent->origin[i] - mod->radius;
+			maxs[i] = ent->origin[i] + mod->radius;
+		}
+	}
+	else
+	{
+		rotated = false;
+
+		VectorAdd (ent->origin, mod->mins, mins);
+		VectorAdd (ent->origin, mod->maxs, maxs);
+	}
+
+	// static entities already have the leafs they are in bbox culled
+	if (R_CullBox (mins, maxs))
+	{
+		// mark as not visible
+		ent->visframe = -1;
+		return;
+	}
+
+	// flag the model as having been previously seen
+	ent->model->wasseen = true;
+
+	// store transform for model - we need to run this in software as we are potentially submitting
+	// multiple brush models in a single batch, all of which will be merged with the world render.
+	D3D_LoadIdentity (&ent->matrix);
+	ent->angles[0] = -ent->angles[0];	// stupid quake bug
+	D3D_RotateForEntity (ent, &ent->matrix);
+	ent->angles[0] = -ent->angles[0];	// stupid quake bug
+
+	// anti z-fighting hack
+	// this value gets rid of most artefacts without producing too much visual discontinuity
+	ent->matrix._43 -= 0.1f;
+
+	// cache data for visible entities for the automap
+	if (ent->model->cacheent && ent->model->name[0] == '*')
+	{
+		// if we're caching models just store out it's last status
+		// so that the automap can at least draw it at the position/orientation/etc it was
+		// the last time that the player saw it.  this is only done for inline brush models
+		entity_t *e2 = ent->model->cacheent;
+
+		// we don't actually need the full contents of the entity_t struct here
+		VectorCopy (ent->angles, e2->angles);
+		VectorCopy (ent->origin, e2->origin);
+
+		e2->alphaval = ent->alphaval;
+		e2->model = ent->model;
+		e2->frame = ent->frame;
+		e2->nocullbox = ent->nocullbox;
+
+		memcpy (&e2->matrix, &ent->matrix, sizeof (D3DMATRIX));
+
+		e2->visframe = d3d_RenderDef.framecount;
+
+		// set the cached ent back to itself (ensure)
+		e2->model->cacheent = e2;
+	}
+
+	// get origin vector relative to viewer
+	// this is now stored in the entity so we can read it back any time we want
+	VectorSubtract (r_refdef.vieworg, ent->origin, ent->modelorg);
+
+	// adjust for rotation
+	if (rotated)
+	{
+		vec3_t temp;
+		vec3_t forward, right, up;
+
+		// i fixed this bug for matrix transforms but of course it came back here... sigh...
+		VectorCopy (ent->modelorg, temp);
+		AngleVectors (ent->angles, forward, right, up);
+
+		ent->modelorg[0] = DotProduct (temp, forward);
+		ent->modelorg[1] = -DotProduct (temp, right);
+		ent->modelorg[2] = DotProduct (temp, up);
+	}
+
+	if (mod->name[0] == '*')
+	{
+		// calculate dynamic lighting for the inline bmodel
+		R_PushDlights (mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
+	}
+
+	// if the ent has alpha we need to add it to the alpha list
+	// even so we still run through the surfs to check for water and sky which are handled separately
+	// (sky never has alpha, water - including on alpha ents - is also handled separately and will get the
+	// correct alpha ent water if the ent has alpha during the water rendering pass)
+	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
+	int numalphasurfs = 0;
+
+	// don't bother with ordering these for now; we'll sort them by texture later
+	for (int s = 0; s < mod->brushhdr->nummodelsurfaces; s++, surf++)
+	{
+		float dot = DotProduct (ent->modelorg, surf->plane->normal) - surf->plane->dist;
+
+		if (((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
+			(!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)) ||
+			(ent->alphaval < 255 && !(surf->flags & SURF_DRAWSKY)))
+		{
+			// the surface needs to inherit an alpha from the entity so that we know how to draw it
+			surf->alphaval = ent->alphaval;
+
+			// sky surfaces need to be added immediately
+			// other surface types either go on the main list or the alpha list
+			if (surf->flags & SURF_DRAWSKY)
+				D3D_AddSkySurfaceToRender (surf, &ent->matrix);
+			else if (surf->flags & SURF_DRAWTURB)
+				D3D_AllocModelSurf (surf, surf->texinfo->texture, &ent->matrix);
+			else
+			{
+				if (mod->name[0] == '*' && surf->d3d_Lightmap)
+					surf->d3d_Lightmap->CheckSurfaceForModification (surf);
+
+				if (ent->alphaval < 255)
+				{
+					// track the number of alpha surfs in this bmodel
+					numalphasurfs++;
+				}
+				else
+				{
+					// add to the modelsurfs list
+					D3D_AllocModelSurf (surf, R_TextureAnimation (ent, surf->texinfo->texture), &ent->matrix);
+				}
+			}
+		}
+	}
+
+	if (numalphasurfs)
+	{
+		// ensure
+		ent->visframe = d3d_RenderDef.framecount;
+		D3D_AddToAlphaList (ent);
+	}
+}
+
+
+void D3D_BuildWorld (void)
+{
+	// bound to sensible values - this max size is chosen to work with the menu slider
+	// it also provides 5000 ish vertexes of headroom for primitives that may overshoot
+	if (r_maxvertexsubmission.integer < 1) Cvar_Set (&r_maxvertexsubmission, 1);
+	if (r_maxvertexsubmission.integer > 60001) Cvar_Set (&r_maxvertexsubmission, 60001);
+
+	// clear surface chains
+	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
+		d3d_RegisteredTextures[i].surfchain = NULL;
+
+	if (!Pool_ModelSurfs) Pool_ModelSurfs = new CSpaceBuffer ("Model Surfs", 16, POOL_MAP);
+
+	Pool_ModelSurfs->Rewind ();
+	d3d_ModelSurfs = (d3d_modelsurf_t *) Pool_ModelSurfs->Alloc (1);
+	d3d_NumModelSurfs = 0;
 
 	// calculate dynamic lighting for the world
-	R_PushDlights (cl.worldbrush->nodes);
+	R_PushDlights (cl.worldmodel->brushhdr->nodes);
 
 	// build the world
-	VectorCopy (r_origin, modelorg);
+	VectorCopy (r_refdef.vieworg, d3d_RenderDef.worldentity.modelorg);
 
 	// never go < 4096 as that is the clip dist in regular quake and maps/mods may expect it
 	r_clipdist = 4096;
 
+	// assume that the world is always visible ;)
+	// (although it might not be depending on the scene...)
+	d3d_RenderDef.worldentity.visframe = d3d_RenderDef.framecount;
+
+	// the automap has a different viewpoint so R_RecursiveWorldNode is not valid for it
 	if (d3d_RenderDef.automap)
 		R_AutomapSurfaces ();
-	else R_RecursiveWorldNode (cl.worldbrush->nodes);
+	else R_RecursiveWorldNode (cl.worldmodel->brushhdr->nodes);
+
+	if (r_drawentities.integer)
+	{
+		// add brushmodels to the render
+		for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
+		{
+			entity_t *ent = d3d_RenderDef.visedicts[i];
+
+			if (!ent->model) continue;
+			if (ent->model->type != mod_brush) continue;
+
+			// brush models have different surface types some of which we can't
+			// draw during the alpha pass.  we also need to include it in the lightmap
+			// uploads pass, so we need to add the full model at this stage.
+			D3D_SetupBrushModel (ent);
+		}
+	}
 }
 
 
 /*
-===============
-R_MarkLeaves
-===============
+=============================================================
+
+	VISIBILITY
+
+=============================================================
 */
+
 void R_LeafVisibility (byte *vis)
 {
-	mnode_t *node;
+	// leaf 0 is the generic solid leaf; the last leaf overlaps with the first node
+	mleaf_t *leaf = &cl.worldmodel->brushhdr->leafs[1];
 
-	for (int i = 0; i < cl.worldbrush->numleafs; i++)
+	// mark leafs and surfaces as visible
+	for (int i = 0; i < cl.worldmodel->brushhdr->numleafs; i++, leaf++)
 	{
 		if (!vis || (vis[i >> 3] & (1 << (i & 7))))
 		{
 			// note - nodes and leafs need to be in consecutive memory for this to work so
 			// that the last leaf will resolve to the first node here; this is set up in Mod_LoadVisLeafsNodes
 			// first node always needs to be in the pvs for R_RecursiveWorldNode
-			node = (mnode_t *) &cl.worldbrush->leafs[i + 1];
+			mnode_t *node = (mnode_t *) leaf;
 
 			do
 			{
@@ -446,286 +877,4 @@ void R_MarkLeaves (void)
 	}
 }
 
-
-void D3D_InitSurfMinMaxs (msurface_t *surf)
-{
-	surf->mins[0] = surf->mins[1] = surf->mins[2] = 999999999;
-	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -999999999;
-}
-
-
-void D3D_CheckSurfMinMaxs (msurface_t *surf, float *v)
-{
-	if (v[0] < surf->mins[0]) surf->mins[0] = v[0];
-	if (v[1] < surf->mins[1]) surf->mins[1] = v[1];
-	if (v[2] < surf->mins[2]) surf->mins[2] = v[2];
-
-	if (v[0] > surf->maxs[0]) surf->maxs[0] = v[0];
-	if (v[1] > surf->maxs[1]) surf->maxs[1] = v[1];
-	if (v[2] > surf->maxs[2]) surf->maxs[2] = v[2];
-}
-
-
-void D3D_BuildSurfaceVertexBuffer (msurface_t *surf, model_t *mod, glpoly_t *polybuf, glpolyvert_t *vertbuf)
-{
-	int			i, lindex;
-	float		*vec;
-
-	surf->polys = polybuf;
-	surf->polys->verts = vertbuf;
-	surf->polys->numverts = surf->numedges;
-	surf->polys->next = NULL;
-
-	glpolyvert_t *v = surf->polys->verts;
-
-	surf->midpoint[0] = surf->midpoint[1] = surf->midpoint[2] = 0;
-
-	// go through all of the verts
-	for (i = 0; i < surf->numedges; i++, v++)
-	{
-		// build vertexes
-		lindex = mod->bh->surfedges[surf->firstedge + i];
-
-		if (lindex > 0)
-			vec = mod->bh->vertexes[mod->bh->edges[lindex].v[0]].position;
-		else vec = mod->bh->vertexes[mod->bh->edges[-lindex].v[1]].position;
-
-		// copy verts in
-		v->xyz[0] = vec[0];
-		v->xyz[1] = vec[1];
-		v->xyz[2] = vec[2];
-
-		// accumulate to midpoint
-		surf->midpoint[0] += vec[0];
-		surf->midpoint[1] += vec[1];
-		surf->midpoint[2] += vec[2];
-
-		// check world extents
-		D3D_CheckSurfMinMaxs (surf, vec);
-
-		if (surf->flags & SURF_DRAWSKY)
-		{
-			// build texcoords
-			v->st[0] = DotProduct (vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
-			v->st[0] /= 64;
-
-			v->st[1] = DotProduct (vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
-			v->st[1] /= 64;
-		}
-		else
-		{
-			// build texcoords
-			v->st[0] = DotProduct (vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
-			v->st[0] /= surf->texinfo->texture->width;
-
-			v->st[1] = DotProduct (vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
-			v->st[1] /= surf->texinfo->texture->height;
-		}
-
-		if (surf->d3d_Lightmap) surf->d3d_Lightmap->CalcLightmapTexCoords (surf, vec, v->lm);
-	}
-
-	// average out midpoint
-	surf->midpoint[0] /= surf->numedges;
-	surf->midpoint[1] /= surf->numedges;
-	surf->midpoint[2] /= surf->numedges;
-}
-
-
-void GL_SubdivideWater (msurface_t *surf, model_t *mod);
-
-void D3D_PutSurfacesInVertexBuffer (void)
-{
-	int numsurfs = 0;
-	int numverts = 0;
-
-	// count numbers of surfs and polys
-	for (int j = 1; j < MAX_MODELS; j++)
-	{
-		model_t *m = cl.model_precache[j];
-
-		if (!m) break;
-		if (m->name[0] == '*') continue;
-		if (m->type != mod_brush) continue;
-
-		msurface_t *surf = m->bh->surfaces;
-
-		for (int i = 0; i < m->bh->numsurfaces; i++, surf++)
-		{
-			// skip turbulent because they're subdivided
-			if (surf->flags & SURF_DRAWTURB) continue;
-
-			numsurfs++;
-			numverts += surf->numedges;
-		}
-	}
-
-	Con_DPrintf ("%i surfs with %i verts\n", numsurfs, numverts);
-
-	// alloc one time only in bulk instead of once per surf
-	glpoly_t *polybuf = (glpoly_t *) Pool_Alloc (POOL_MAP, numsurfs * sizeof (glpoly_t));
-	glpolyvert_t *vertbuf = (glpolyvert_t *) Pool_Alloc (POOL_MAP, numverts * sizeof (glpolyvert_t));
-
-	// now do them for real
-	for (int j = 1; j < MAX_MODELS; j++)
-	{
-		model_t *m = cl.model_precache[j];
-
-		if (!m) break;
-		if (m->name[0] == '*') continue;
-		if (m->type != mod_brush) continue;
-
-		msurface_t *surf = m->bh->surfaces;
-
-		for (int i = 0; i < m->bh->numsurfaces; i++, surf++)
-		{
-			// initial world extents
-			D3D_InitSurfMinMaxs (surf);
-
-			// build the vertex buffer for this surf
-			if (surf->flags & SURF_DRAWTURB)
-			{
-				surf->polys = NULL;
-				GL_SubdivideWater (surf, m);
-			}
-			else
-			{
-				// write the polys and verts directly into the big one-time buffers
-				D3D_BuildSurfaceVertexBuffer (surf, m, polybuf, vertbuf);
-
-				// go to next buffer positions
-				polybuf++;
-				vertbuf += surf->numedges;
-			}
-		}
-	}
-}
-
-
-/*
-==================
-GL_BuildLightmaps
-
-Builds the lightmap texture
-with all the surfaces from all brush models
-==================
-*/
-void D3D_CreateBlockLights (void);
-
-
-void GL_BuildLightmaps (void)
-{
-	Con_DPrintf ("Loading lightmaps... ");
-
-	int		i, j;
-	model_t	*m;
-	extern int MaxExtents[];
-
-	Con_DPrintf ("Max Surface Extents: %i x %i\n", MaxExtents[0], MaxExtents[1]);
-	D3D_CreateBlockLights ();
-
-	MaxExtents[0] = MaxExtents[1] = 0;
-
-	// this really has less connection with dlight cache than it does with general visibility
-	d3d_RenderDef.framecount = 1;
-	d3d_RenderDef.visframecount = 0;
-
-	// clear down any previous lightmaps
-	SAFE_DELETE (d3d_Lightmaps);
-
-	// note - the world (model 0) doesn't actually have a model set in the precache list so we need to start at 1
-	for (j = 1; j < MAX_MODELS; j++)
-	{
-		m = cl.model_precache[j];
-
-		// note - we set the end of the precache list to NULL in cl_parse to ensure this test is valid
-		if (!m) break;
-
-		m->cacheent = NULL;
-
-		if (m->type != mod_brush) continue;
-
-		// assume inline until we prove otherwise
-		m->bh->brushtype = MOD_BRUSH_INLINE;
-
-		if (m->name[0] == '*')
-		{
-			// alloc space for caching the entity state
-			m->cacheent = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t));
-			continue;
-		}
-
-		// set to instanced; the world model is updated during the main refresh
-		m->bh->brushtype = MOD_BRUSH_INSTANCED;
-
-		msurface_t *surf = m->bh->surfaces;
-
-		// batch lightmaps by texture so that we can have more efficient index buffer usage
-		// first we need to init texture chains for the lightmaps
-		for (int i = 0; i < m->bh->numtextures; i++)
-		{
-			// e2m3 gets this
-			if (!m->bh->textures[i]) continue;
-
-			m->bh->textures[i]->texturechain = NULL;
-		}
-
-		// now we store the surfs in this model into the chains
-		for (int i = 0; i < m->bh->numsurfaces; i++, surf++)
-		{
-			// skip these
-			if (surf->flags & SURF_DRAWTURB) continue;
-			if (surf->flags & SURF_DRAWSKY) continue;
-
-			// link it in (back to front)
-			surf->texturechain = surf->texinfo->texture->texturechain;
-			surf->texinfo->texture->texturechain = surf;
-		}
-
-		// finally we create the lightmaps themselves
-		for (int i = 0; i < m->bh->numtextures; i++)
-		{
-			if (!m->bh->textures[i]) continue;
-			if (!m->bh->textures[i]->texturechain) continue;
-
-			for (surf = m->bh->textures[i]->texturechain; surf; surf = surf->texturechain)
-			{
-				// ensure
-				surf->d3d_Lightmap = NULL;
-
-				if (surf->flags & SURF_DRAWSKY) continue;
-				if (surf->flags & SURF_DRAWTURB) continue;
-
-				// fill in lightmap extents
-				surf->smax = (surf->extents[0] >> 4) + 1;
-				surf->tmax = (surf->extents[1] >> 4) + 1;
-
-				// max of smax and tmax
-				if (surf->tmax > surf->smax)
-					surf->maxextent = surf->tmax;
-				else surf->maxextent = surf->smax;
-
-				// create the lightmap
-				if (d3d_Lightmaps && d3d_Lightmaps->AllocBlock (surf))
-					continue;
-
-				// didn't find a lightmap so allocate a new one
-				// this will always work as a new block that's big enough will just have become free
-				surf->d3d_Lightmap = new CD3DLightmap (surf);
-				d3d_Lightmaps->AllocBlock (surf);
-			}
-
-			// clean up after ourselves
-			m->bh->textures[i]->texturechain = NULL;
-		}
-	}
-
-	// upload all lightmaps
-	d3d_Lightmaps->Upload ();
-
-	// put all the surfaces into vertex buffers
-	D3D_PutSurfacesInVertexBuffer ();
-
-	Con_DPrintf ("Done");
-}
 

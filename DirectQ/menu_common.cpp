@@ -1511,6 +1511,60 @@ void CQMenuCvarToggle::Key (int k)
 /*
 =====================================================================================================================================
 
+				INTEGER ON/OFF TOGGLE
+
+=====================================================================================================================================
+*/
+
+CQMenuIntegerToggle::CQMenuIntegerToggle (char *commandtext, int *menuoption, int toggleoffvalue, int toggleonvalue)
+{
+	this->AllocCommandText (commandtext);
+	this->AcceptsInput = true;
+	this->ToggleOffValue = toggleoffvalue;
+	this->ToggleOnValue = toggleonvalue;
+	this->MenuOption = menuoption;
+}
+
+
+void CQMenuIntegerToggle::DrawCurrentOptionHighlight (int y)
+{
+	Menu_HighlightBar (y);
+
+	// this is a hack to get the l/r indicators working correctly here
+	Menu_DrawOption (172, y, this->MenuOption[0] ? "  " : "   ", true, true);
+}
+
+
+void CQMenuIntegerToggle::Draw (int y)
+{
+	Menu_Print (148 - strlen (this->MenuCommandText) * 8, y, this->MenuCommandText);
+
+	// this is a hack to get the l/r indicators working correctly here
+	Menu_DrawOption (172, y, this->MenuOption[0] ? "On" : "Off", false, false);
+}
+
+
+void CQMenuIntegerToggle::Key (int k)
+{
+	switch (k)
+	{
+	case K_LEFTARROW:
+	case K_RIGHTARROW:
+	case K_ENTER:
+		// flip the toggle state
+		this->MenuOption[0] = !this->MenuOption[0];
+		menu_soundlevel = m_sound_option;
+		break;
+
+	default:
+		break;
+	}
+}
+
+
+/*
+=====================================================================================================================================
+
 				EMPTY OPTION
 
 =====================================================================================================================================
@@ -1885,6 +1939,7 @@ CScrollBoxProvider::CScrollBoxProvider (int numitems, int maxvisibleitems, int m
 	this->DrawItemCallback = NULL;
 	this->HoverItemCallback = NULL;
 	this->EnterItemCallback = NULL;
+	this->DeleteItemCallback = NULL;
 	this->MaxItemWidth = maxitemwidth;
 }
 
@@ -1907,15 +1962,25 @@ void CScrollBoxProvider::SetEnterItemCallback (menucommandi_t enteritemcallback)
 }
 
 
+void CScrollBoxProvider::SetDeleteItemCallback (menucommandi_t deleteitemcallback)
+{
+	this->DeleteItemCallback = deleteitemcallback;
+}
+
+
 int CScrollBoxProvider::DrawItems (int x, int starty)
 {
 	if (!this->DrawItemCallback) return starty;
+	if (!this->NumItems) return starty;
 
 	int initialy = starty;
 
 	// draw the textbox
 	Draw_TextBox (x, starty, this->MaxItemWidth * 8 + 8, this->MaxVisibleItems * 12 + 4);
 	Draw_VScrollBar (x + this->MaxItemWidth * 8 + 8, starty + 8, this->MaxVisibleItems * 12 + 4, this->ScrollBoxCurrentItem, this->NumItems);
+
+	if (this->DeleteItemCallback)
+		Draw_String (x + 20, starty + this->MaxVisibleItems * 12 + 4 + 20, "DEL: Delete Item", 128);
 
 	starty += 12;
 
@@ -1965,8 +2030,16 @@ void CScrollBoxProvider::SetCurrent (int newcurr)
 
 void CScrollBoxProvider::KeyFunc (int key)
 {
+	// protect
+	if (!this->NumItems) return;
+
 	switch (key)
 	{
+	case K_DEL:
+		if (this->DeleteItemCallback)
+			this->DeleteItemCallback (this->ScrollBoxCurrentItem);
+		break;
+
 	case K_ENTER:
 		if (this->EnterItemCallback)
 			this->EnterItemCallback (this->ScrollBoxCurrentItem);

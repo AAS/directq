@@ -248,7 +248,7 @@ void Con_Init (void)
 		}
 	}
 
-	con_text = (char *) Pool_Alloc (POOL_PERMANENT, CON_TEXTSIZE);
+	con_text = (char *) Pool_Permanent->Alloc (CON_TEXTSIZE);
 	memset (con_text, ' ', CON_TEXTSIZE);
 	con_linewidth = -1;
 	Con_CheckResize ();
@@ -430,13 +430,15 @@ void Con_Printf (char *fmt, ...)
 	if (key_dest == key_menu) Menu_PutConsolePrintInbuffer (msg);
 
 	// update the screen if the console is displayed
-	if (cls.signon != SIGNONS && !scr_disabled_for_loading )
+	if (cls.signon != SIGNONS && !scr_disabled_for_loading)
 	{
 		// protect against infinite loop if something in SCR_UpdateScreen calls Con_Printf
 		if (!inupdate)
 		{
+			// only needed during game startup to flush safeprints...
+			// but also gets called at runtime in inappropriate places...
 			inupdate = true;
-			SCR_UpdateScreen ();
+			//SCR_UpdateScreen ();
 			inupdate = false;
 		}
 	}
@@ -639,38 +641,4 @@ void Con_DrawConsole (int lines, bool drawinput)
 	if (drawinput) Con_DrawInput ();
 }
 
-
-/*
-==================
-Con_NotifyBox
-==================
-*/
-void Con_NotifyBox (char *text)
-{
-	float		t1, t2;
-
-// during startup for sound / cd warnings
-	Con_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");
-
-	Con_Printf (text);
-
-	Con_Printf ("Press a key.\n");
-	Con_Printf("\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");
-
-	key_count = -2;		// wait for a key down and up
-	key_dest = key_console;
-
-	do
-	{
-		t1 = Sys_FloatTime ();
-		SCR_UpdateScreen ();
-		Sys_SendKeyEvents ();
-		t2 = Sys_FloatTime ();
-		realtime += t2-t1;		// make the cursor blink
-	} while (key_count < 0);
-
-	Con_Printf ("\n");
-	key_dest = key_game;
-	realtime = 0;				// put the cursor back to invisible
-}
 

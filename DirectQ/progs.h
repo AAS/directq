@@ -55,7 +55,7 @@ typedef struct edict_s
 	link_t			area;			// linked to a division node or leaf
 	bool			touchleaf;		// true if the ent touches a leaf in the pvs
 	entity_state_t	baseline;
-	float			freetime;		// sv.time when the object was freed
+	DWORD			dwFreeTime;		// time when the object was freed
 	float			tracetimer;		// timer for cullentities tracing
 	int				alpha;
 	bool			sendinterval;
@@ -68,28 +68,11 @@ typedef struct edict_s
 
 //============================================================================
 
-extern	dprograms_t		qcprogs;
-extern	dfunction_t		*pr_functions;
-extern	char			*pr_strings;
-extern	ddef_t			*pr_globaldefs;
-extern	ddef_t			*pr_fielddefs;
-extern	dstatement_t	*pr_statements;
-extern	globalvars_t	*pr_global_struct;
-extern	float			*pr_globals;			// same as pr_global_struct
-
-extern	int				pr_edict_size;	// in bytes
 
 //============================================================================
 
 void PR_Init (void);
-void PR_ClearProgs (void);
 
-void PR_ExecuteProgram (func_t fnum);
-void PR_LoadProgs (void);
-
-void PR_Profile_f (void);
-
-edict_t *ED_Alloc (void);
 void ED_Free (edict_t *ed);
 
 char	*ED_NewString (char *string);
@@ -104,44 +87,34 @@ void ED_ParseGlobals (char *data);
 
 void ED_LoadFromFile (char *data);
 
-edict_t *EDICT_NUM(int n);
-int NUM_FOR_EDICT(edict_t *e);
+edict_t *GetEdictForNumber(int n);
+int GetNumberForEdict(edict_t *e);
 
-#define	NEXT_EDICT(e) ((edict_t *)( (byte *)e + pr_edict_size))
+#define	NEXT_EDICT(e) ((edict_t *)( (byte *)e + SVProgs->EdictSize))
 
-#define	EDICT_TO_PROG(e) ((byte *)e - (byte *)sv.edicts)
-#define PROG_TO_EDICT(e) ((edict_t *)((byte *)sv.edicts + e))
+#define	EDICT_TO_PROG(e) ((byte *)e - (byte *)SVProgs->Edicts)
+#define PROG_TO_EDICT(e) ((edict_t *)((byte *)SVProgs->Edicts + e))
 
 //============================================================================
 
-#define	G_FLOAT(o) (pr_globals[o])
-#define	G_INT(o) (*(int *)&pr_globals[o])
-#define	G_EDICT(o) ((edict_t *)((byte *)sv.edicts+ *(int *)&pr_globals[o]))
-#define G_EDICTNUM(o) NUM_FOR_EDICT(G_EDICT(o))
-#define	G_VECTOR(o) (&pr_globals[o])
-#define	G_STRING(o) (pr_strings + *(string_t *)&pr_globals[o])
-#define	G_FUNCTION(o) (*(func_t *)&pr_globals[o])
+#define	G_FLOAT(o) (SVProgs->Globals[o])
+#define	G_INT(o) (*(int *)&SVProgs->Globals[o])
+#define	G_EDICT(o) ((edict_t *)((byte *)SVProgs->Edicts+ *(int *)&SVProgs->Globals[o]))
+#define G_EDICTNUM(o) GetNumberForEdict(G_EDICT(o))
+#define	G_VECTOR(o) (&SVProgs->Globals[o])
+#define	G_STRING(o) (SVProgs->Strings + *(string_t *)&SVProgs->Globals[o])
+#define	G_FUNCTION(o) (*(func_t *)&SVProgs->Globals[o])
 
 #define	E_FLOAT(e,o) (((float*)&e->v)[o])
 #define	E_INT(e,o) (*(int *)&((float*)&e->v)[o])
 #define	E_VECTOR(e,o) (&((float*)&e->v)[o])
-#define	E_STRING(e,o) (pr_strings + *(string_t *)&((float*)&e->v)[o])
+#define	E_STRING(e,o) (SVProgs->Strings + *(string_t *)&((float*)&e->v)[o])
 
 extern	int		type_size[8];
 
 typedef void (*builtin_t) (void);
 extern	builtin_t *pr_builtins;
 extern int pr_numbuiltins;
-
-extern int		pr_argc;
-
-extern	bool	pr_trace;
-extern	dfunction_t	*pr_xfunction;
-extern	int			pr_xstatement;
-
-extern	unsigned short		pr_crc;
-
-void PR_RunError (char *error, ...);
 
 void ED_PrintEdicts (void);
 void ED_PrintNum (int ent);

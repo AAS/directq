@@ -20,6 +20,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_parse.c  -- parse a message received from the server
 
 #include "quakedef.h"
+#include "d3d_model.h"
+
+void D3D_TranslatePlayerSkin (int playernum);
 
 char *svc_strings[] =
 {
@@ -134,7 +137,7 @@ entity_t *CL_EntityNum (int num)
 			if (!cl_entities[cl.num_entities])
 			{
 				// alloc a new entity and set it's number
-				cl_entities[cl.num_entities] = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t));
+				cl_entities[cl.num_entities] = (entity_t *) Pool_Map->Alloc (sizeof (entity_t));
 				cl_entities[cl.num_entities]->entnum = cl.num_entities;
 			}
 
@@ -210,8 +213,8 @@ so the server doesn't disconnect.
 */
 void CL_KeepaliveMessage (void)
 {
-	float	time;
-	static float lastmsg;
+	DWORD	time;
+	static DWORD lastmsg;
 	int		ret;
 	sizebuf_t	old;
 	byte		olddata[8192];
@@ -221,7 +224,7 @@ void CL_KeepaliveMessage (void)
 	if (cls.demoplayback)
 		return;
 
-// read messages from server, should just be nops
+	// read messages from server, should just be nops
 	old = net_message;
 	memcpy (olddata, net_message.data, net_message.cursize);
 	
@@ -247,13 +250,14 @@ void CL_KeepaliveMessage (void)
 	net_message = old;
 	memcpy (net_message.data, olddata, net_message.cursize);
 
-// check time
-	time = Sys_FloatTime ();
-	if (time - lastmsg < 5)
-		return;
+	// check time
+	time = Sys_DWORDTime ();
+
+	if (time - lastmsg < 5000) return;
+
 	lastmsg = time;
 
-// write out a nop
+	// write out a nop
 	Con_Printf ("--> client to server keepalive\n");
 
 	MSG_WriteByte (&cls.message, clc_nop);
@@ -280,23 +284,23 @@ void CL_ParseServerInfo (void)
 
 	if (!model_precache)
 	{
-		model_precache = (char **) Pool_Alloc (POOL_PERMANENT, MAX_MODELS * sizeof (char *));
+		model_precache = (char **) Pool_Permanent->Alloc (MAX_MODELS * sizeof (char *));
 
 		for (i = 0; i < MAX_MODELS; i++)
-			model_precache[i] = (char *) Pool_Alloc (POOL_PERMANENT, MAX_QPATH * sizeof (char));
+			model_precache[i] = (char *) Pool_Permanent->Alloc (MAX_QPATH * sizeof (char));
 	}
 
 	if (!sound_precache)
 	{
-		sound_precache = (char **) Pool_Alloc (POOL_PERMANENT, MAX_SOUNDS * sizeof (char *));
+		sound_precache = (char **) Pool_Permanent->Alloc (MAX_SOUNDS * sizeof (char *));
 
 		for (i = 0; i < MAX_SOUNDS; i++)
-			sound_precache[i] = (char *) Pool_Alloc (POOL_PERMANENT, MAX_QPATH * sizeof (char));
+			sound_precache[i] = (char *) Pool_Permanent->Alloc (MAX_QPATH * sizeof (char));
 	}
 
 	// alloc these in permanent memory first time they're needed
-	if (!static_cl_model_precache) static_cl_model_precache = (model_t **) Pool_Alloc (POOL_PERMANENT, MAX_MODELS * sizeof (model_t *));
-	if (!static_cl_sfx_precache) static_cl_sfx_precache = (sfx_t **) Pool_Alloc (POOL_PERMANENT, MAX_SOUNDS * sizeof (sfx_t *));
+	if (!static_cl_model_precache) static_cl_model_precache = (model_t **) Pool_Permanent->Alloc (MAX_MODELS * sizeof (model_t *));
+	if (!static_cl_sfx_precache) static_cl_sfx_precache = (sfx_t **) Pool_Permanent->Alloc (MAX_SOUNDS * sizeof (sfx_t *));
 
 	Con_DPrintf ("Serverinfo packet received.\n");
 
@@ -326,11 +330,11 @@ void CL_ParseServerInfo (void)
 
 	if (cl.maxclients < 1 || cl.maxclients > MAX_SCOREBOARD)
 	{
-		Con_Printf("Bad maxclients (%u) from server\n", cl.maxclients);
+		Con_Printf ("Bad maxclients (%u) from server\n", cl.maxclients);
 		return;
 	}
 
-	cl.scores = (scoreboard_t *) Pool_Alloc (POOL_MAP, cl.maxclients * sizeof (*cl.scores));
+	cl.scores = (scoreboard_t *) Pool_Map->Alloc (cl.maxclients * sizeof (*cl.scores));
 
 	// parse gametype
 	cl.gametype = MSG_ReadByte ();
@@ -340,7 +344,7 @@ void CL_ParseServerInfo (void)
 	strncpy (cl.levelname, str, sizeof (cl.levelname) - 1);
 
 	// seperate the printfs so the server message can have a color
-	Con_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+	Con_Printf ("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
 	Con_Printf ("%c%s\n", 2, str);
 
 	// set up model and sound precache lists
@@ -394,7 +398,7 @@ void CL_ParseServerInfo (void)
 
 		if (cl.model_precache[i] == NULL)
 		{
-			Con_Printf("Model %s not found\n", model_precache[i]);
+			Con_Printf ("Model %s not found\n", model_precache[i]);
 			return;
 		}
 
@@ -419,8 +423,20 @@ void CL_ParseServerInfo (void)
 	// entity 0 is the world
 	cl_entities[0]->model = cl.worldmodel = cl.model_precache[1];
 
-	// take a pointer to the brush header
-	cl.worldbrush = cl.worldmodel->bh;
+	char mapname[MAX_PATH];
+	strncpy (mapname, cl.worldmodel->name, MAX_PATH - 1);
+
+	for (int i = strlen (cl.worldmodel->name); i; i--)
+	{
+		if (cl.worldmodel->name[i] == '/' || cl.worldmodel->name[i] == '\\')
+		{
+			strncpy (mapname, &cl.worldmodel->name[i + 1], MAX_PATH - 1);
+			break;
+		}
+	}
+
+	extern HWND d3d_Window;
+	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s - %s (%s)", DIRECTQ_VERSION, com_gamename, cl.levelname, mapname));
 
 	// clean up zone allocations
 	Zone_Compact ();
@@ -484,7 +500,10 @@ void CL_ParseUpdate (int bits)
 			bitcounts[i]++;
 
 	if (ent->msgtime != cl.mtime[1])
-		forcelink = true;	// no previous frame to lerp from
+	{
+		// entity was not present on the previous frame
+		forcelink = true;
+	}
 	else forcelink = false;
 
 	ent->msgtime = cl.mtime[0];
@@ -860,79 +879,26 @@ void CL_NewTranslation (int slot)
 }
 
 
-vec3_t absmins;
-vec3_t absmaxs;
-
-// this is basically the "a lof of this goes away" thing in the old gl_refrag...
-// or at least one version of it.  see also R_AddStaticEntitiesForLeaf and the various struct defs
-void CL_FindTouchedLeafs (entity_t *ent, mnode_t *node)
-{
-	mplane_t	*splitplane;
-	int			sides;
-
-loc0:;
-	if (node->contents == CONTENTS_SOLID) return;
-
-	// add as a touched leaf if the node is a leaf
-	if (node->contents < 0)
-	{
-loc1:;
-		mleaf_t *leaf = (mleaf_t *) node;
-		staticent_t *se = (staticent_t *) Pool_Alloc (POOL_MAP, sizeof (staticent_t));
-		se->ent = ent;
-
-		se->next = leaf->statics;
-		leaf->statics = se;
-		return;
-	}
-
-	splitplane = node->plane;
-	sides = BoxOnPlaneSide (absmins, absmaxs, splitplane);
-
-	// recurse down the contacted sides
-	if ((sides & 1) && node->children[0]->contents != CONTENTS_SOLID)
-	{
-		if (!(sides & 2) && node->children[0]->contents < 0)
-		{
-			node = node->children[0];
-			goto loc1;
-		}
-		else if (!(sides & 2))
-		{
-			node = node->children[0];
-			goto loc0;
-		}
-		else CL_FindTouchedLeafs (ent, node->children[0]);
-	}
-
-	if ((sides & 2) && node->children[1]->contents != CONTENTS_SOLID)
-	{
-		// test for a leaf and drop out if so, otherwise it's a node so go round again
-		node = node->children[1];
-
-		if (node->contents < 0)
-			goto loc1;
-		else goto loc0;	// CL_FindTouchedLeafs (ent, node);
-	}
-}
-
-
 /*
 =====================
 CL_ParseStatic
 =====================
 */
+void R_AddEfrags (entity_t *ent);
+
 void CL_ParseStatic (int version)
 {
-	if (!cl.worldbrush)
+	if (!cl.worldmodel->brushhdr)
 	{
 		Host_Error ("CL_ParseStatic: spawn static without a world\n(are you missing a mod directory?)");
 		return;
 	}
 
-	entity_t *ent;
+	// just alloc in the map pool
+	entity_t *ent = (entity_t *) Pool_Map->Alloc (sizeof (entity_t));
+	memset (ent, 0, sizeof (entity_t));
 
-	ent = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t));
+	// read in baseline state
 	CL_ParseBaseline (ent, version);
 
 	// copy it to the current state
@@ -942,23 +908,15 @@ void CL_ParseStatic (int version)
 	ent->skinnum = ent->baseline.skin;
 	ent->effects = ent->baseline.effects;
 	ent->alphaval = 255;
+	ent->efrag = NULL;
+	ent->occlusion = NULL;
+	ent->occluded = false;
 
 	VectorCopy (ent->baseline.origin, ent->origin);
 	VectorCopy (ent->baseline.angles, ent->angles);
 
 	// some static ents don't have models; that's OK as we only use this for rendering them!
-	if (ent->model)
-	{
-		// setup absmin and absmax for the entity
-		VectorAdd (ent->origin, ent->model->mins, absmins);
-		VectorAdd (ent->origin, ent->model->maxs, absmaxs);
-
-		// find all leafs which this static ent touches
-		CL_FindTouchedLeafs (ent, cl.worldbrush->nodes);
-	}
-
-	// not removed yet
-	ent->staticremoved = false;
+	if (ent->model) R_AddEfrags (ent);
 }
 
 

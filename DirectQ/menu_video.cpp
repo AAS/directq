@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
 
 #include "winquake.h"
@@ -46,7 +47,13 @@ extern cvar_t b_gamma;
 extern cvar_t r_anisotropicfilter;
 extern cvar_t vid_vsync;
 extern cvar_t r_filterrefresh;
-cvar_t dummy_vsync;
+extern cvar_t gl_triplebuffer;
+extern cvar_t r_maxvertexsubmission;
+extern cvar_t r_hlsl;
+
+// dummy cvars for temp stuff
+int dummy_vsync;
+int dummy_triplebuffer;
 
 bool D3D_ModeIsCurrent (d3d_ModeDesc_t *mode);
 
@@ -66,10 +73,24 @@ void VID_ApplyModeChange (void)
 {
 	// the value here has already been forced to correct in the draw func so we just set it
 	Cvar_Set (&d3d_mode, menu_videomodenum);
-	Cvar_Set (&vid_vsync, dummy_vsync.integer);
+	Cvar_Set (&vid_vsync, dummy_vsync);
+	Cvar_Set (&gl_triplebuffer, dummy_triplebuffer);
 
 	// position the selection back at the video mode option
 	menu_Video.Key (K_UPARROW);
+}
+
+
+bool Menu_VideoCheckNeedApply (void)
+{
+	// if any of the options that need a device reset have changed from their defaults
+	// we signal to show the apply option
+	if (menu_videomodenum != d3d_mode.integer) return true;
+	if (vid_vsync.integer != dummy_vsync) return true;
+	if (gl_triplebuffer.integer != dummy_triplebuffer) return true;
+
+	// no apply needed
+	return false;
 }
 
 
@@ -82,7 +103,7 @@ int Menu_VideoCustomDraw (int y)
 	Cvar_Set (&r_filterrefresh, (float) filterrefreshnum / 4.0f);
 
 	// check for "Apply" on d3d_mode change
-	if (menu_videomodenum == d3d_mode.integer && vid_vsync.integer == dummy_vsync.integer)
+	if (!Menu_VideoCheckNeedApply ())
 		menu_Video.DisableOptions (TAG_VIDMODEAPPLY);
 	else menu_Video.EnableOptions (TAG_VIDMODEAPPLY);
 
@@ -136,11 +157,11 @@ void Menu_VideoCustomEnter (void)
 {
 	if (!filterrefreshstrings)
 	{
-		filterrefreshstrings = (char **) Pool_Alloc (POOL_PERMANENT, 22 * sizeof (char *));
+		filterrefreshstrings = (char **) Pool_Permanent->Alloc (22 * sizeof (char *));
 
 		for (int i = 0; i < 21; i++)
 		{
-			filterrefreshstrings[i] = (char *) Pool_Alloc (POOL_PERMANENT, 16);
+			filterrefreshstrings[i] = (char *) Pool_Permanent->Alloc (16);
 			filterrefreshstrings[i][0] = 0;
 		}
 
@@ -175,7 +196,8 @@ void Menu_VideoCustomEnter (void)
 	menu_videomodenum = (int) d3d_mode.value;
 
 	// store out vsync
-	dummy_vsync.integer = vid_vsync.integer;
+	dummy_vsync = vid_vsync.integer;
+	dummy_triplebuffer = gl_triplebuffer.integer;
 
 	int real_aniso;
 
@@ -213,12 +235,12 @@ void Menu_VideoBuild (void)
 	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++);
 
 	// add 1 for terminating NULL
-	menu_videomodes = (char **) Pool_Alloc (POOL_PERMANENT, (nummodes + 1) * sizeof (char *));
+	menu_videomodes = (char **) Pool_Permanent->Alloc ((nummodes + 1) * sizeof (char *));
 
 	// now write them in
 	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
 	{
-		menu_videomodes[nummodes] = (char *) Pool_Alloc (POOL_PERMANENT, 128);
+		menu_videomodes[nummodes] = (char *) Pool_Permanent->Alloc (128);
 
 		_snprintf
 		(
@@ -241,16 +263,15 @@ void Menu_VideoBuild (void)
 	menu_Video.AddOption (new CQMenuCustomDraw (Menu_VideoCustomDraw));
 	menu_Video.AddOption (new CQMenuSpacer ("Select a Video Mode"));
 	menu_Video.AddOption (new CQMenuSpinControl (NULL, &menu_videomodenum, menu_videomodes));
-	menu_Video.AddOption (new CQMenuCvarToggle ("Vertical Sync", &dummy_vsync, 0, 1));
-	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Video.AddOption (new CQMenuIntegerToggle ("Vertical Sync", &dummy_vsync, 0, 1));
+	menu_Video.AddOption (new CQMenuIntegerToggle ("Triple Buffer", &dummy_triplebuffer, 0, 1));
+	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuCommand ("Apply Video Mode Change", VID_ApplyModeChange));
 
 	// add the rest of the options to ensure that they;re kept in order
 	menu_Video.AddOption (new CQMenuSpacer ());
 	menu_Video.AddOption (new CQMenuTitle ("Configure Video Options"));
-	menu_Video.AddOption (new CQMenuSpinControl ("Filter Refresh", &filterrefreshnum, &filterrefreshstrings));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
+	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuSpinControl ("Filter Refresh", &filterrefreshnum, &filterrefreshstrings));
 
 	if (d3d_DeviceCaps.MaxAnisotropy > 1)
 	{
@@ -259,11 +280,11 @@ void Menu_VideoBuild (void)
 		{
 			if (mode == d3d_DeviceCaps.MaxAnisotropy)
 			{
-				menu_anisotropicmodes = (char **) Pool_Alloc (POOL_PERMANENT, (i + 1) * sizeof (char *));
+				menu_anisotropicmodes = (char **) Pool_Permanent->Alloc ((i + 1) * sizeof (char *));
 
 				for (int m = 0, f = 1; m < i; m++, f *= 2)
 				{
-					menu_anisotropicmodes[m] = (char *) Pool_Alloc (POOL_PERMANENT, 32);
+					menu_anisotropicmodes[m] = (char *) Pool_Permanent->Alloc (32);
 
 					if (f == 1)
 						strncpy (menu_anisotropicmodes[m], "Off", 32);
@@ -278,6 +299,14 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
 	}
 
+	if (d3d_GlobalCaps.supportPixelShaders)
+		menu_Video.AddOption (new CQMenuCvarToggle ("Use Pixel Shaders", &r_hlsl, 0, 1));
+
+	menu_Video.AddOption (new CQMenuCvarSlider ("Vertex Batch Size", &r_maxvertexsubmission, 1, 60001, 1000));
+
+	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
+	menu_Video.AddOption (new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
 	menu_Video.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
 	menu_Video.AddOption (new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
 	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Brightness Controls"));

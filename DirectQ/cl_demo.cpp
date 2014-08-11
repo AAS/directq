@@ -20,6 +20,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+// JPG 1.05 - support for recording demos after connecting to the server
+byte	demo_head[3][MAX_MSGLEN];
+int		demo_head_size[2];
+
+
 static HANDLE demohandle = INVALID_HANDLE_VALUE;
 
 static long demofile_len, demofile_start;
@@ -206,8 +211,33 @@ int CL_GetMessage (void)
 			return -1; // File write failure
 	}
 
+	// JPG 1.05 - support for recording demos after connecting
+	if (cls.signon < 2)
+	{
+		memcpy (demo_head[cls.signon], net_message.data, net_message.cursize);
+		demo_head_size[cls.signon] = net_message.cursize;
+
+		if (!cls.signon)
+		{
+			char *ch = (char *) (demo_head[0] + demo_head_size[0]);
+
+			*ch++ = svc_print;
+
+			ch += 1 + sprintf
+			(
+				ch,
+				"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n"
+				"\nRecorded on DirectQ Release "DIRECTQ_VERSION"\n"
+				"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n"
+			);
+
+			demo_head_size[0] = ch - (char *) demo_head[0];
+		}
+	}
+
 	return r;
 }
+
 
 /*
 ====================
@@ -262,28 +292,38 @@ void CL_Record_f (void)
 		return;
 
 	c = Cmd_Argc();
+
 	if (c != 2 && c != 3 && c != 4)
 	{
 		Con_Printf ("record <demoname> [<map> [cd track]]\n");
 		return;
 	}
 
-	if (strstr(Cmd_Argv(1), ".."))
+	if (strstr (Cmd_Argv (1), ".."))
 	{
 		Con_Printf ("Relative pathnames are not allowed.\n");
 		return;
 	}
 
-	if (c == 2 && cls.state == ca_connected)
+	if (cls.demoplayback)
 	{
-		Con_Printf("Can not record - already connected to server\nClient demo recording must be started before connecting\n");
+		Con_Printf ("Can't record during demo playback\n");
 		return;
 	}
 
-// write the forced cd track number, or -1
+	if (c == 2 && cls.state == ca_connected && cls.signon < 2)
+	{
+		Con_Printf ("Can't record - try again when connected\n");
+		return;
+	}
+
+	// stop any currently recording demo
+	if (cls.demorecording) CL_Stop_f ();
+
+	// write the forced cd track number, or -1
 	if (c == 4)
 	{
-		track = atoi(Cmd_Argv(3));
+		track = atoi (Cmd_Argv (3));
 
 		// bug - this was cls.forcetrack
 		Con_Printf ("Forcing CD track to %i\n", track);
@@ -294,7 +334,12 @@ void CL_Record_f (void)
 
 	// start the map up
 	if (c > 2)
+	{
 		Cmd_ExecuteString ( va("map %s", Cmd_Argv(2)), src_command);
+
+		// if we couldn't find the map we abort recording
+		if (cls.state != ca_connected) return;
+	}
 
 	// open the demo file
 	if (demohandle != INVALID_HANDLE_VALUE)
@@ -306,7 +351,6 @@ void CL_Record_f (void)
 	COM_DefaultExtension (name, ".dem");
 
 	Con_Printf ("recording to %s.\n", name);
-
 	demohandle = CreateFile (name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
 
 	if (demohandle == INVALID_HANDLE_VALUE)
@@ -323,6 +367,59 @@ void CL_Record_f (void)
 	COM_FWriteFile (demohandle, demotrack, strlen (demotrack));
 
 	cls.demorecording = true;
+
+	// initialize the demo file if we're already connected
+	if (c < 3 && cls.state == ca_connected)
+	{
+		byte *data = net_message.data;
+		int	i, cursize = net_message.cursize;
+
+		for (i = 0; i < 2; i++)
+		{
+			net_message.data = demo_head[i];
+			net_message.cursize = demo_head_size[i];
+			CL_WriteDemoMessage ();
+		}
+
+		net_message.data = demo_head[2];
+		SZ_Clear (&net_message);
+
+		// current names, colors, and frag counts
+		for (i = 0; i < cl.maxclients; i++)
+		{
+			MSG_WriteByte (&net_message, svc_updatename);
+			MSG_WriteByte (&net_message, i);
+			MSG_WriteString (&net_message, cl.scores[i].name);
+			MSG_WriteByte (&net_message, svc_updatefrags);
+			MSG_WriteByte (&net_message, i);
+			MSG_WriteShort (&net_message, cl.scores[i].frags);
+			MSG_WriteByte (&net_message, svc_updatecolors);
+			MSG_WriteByte (&net_message, i);
+			MSG_WriteByte (&net_message, cl.scores[i].colors);
+		}
+
+		// send all current light styles
+		for (i = 0; i < MAX_LIGHTSTYLES; i++)
+		{
+			MSG_WriteByte (&net_message, svc_lightstyle);
+			MSG_WriteByte (&net_message, i);
+			MSG_WriteString (&net_message, cl_lightstyle[i].map);
+		}
+
+		// view entity
+		MSG_WriteByte (&net_message, svc_setview);
+		MSG_WriteShort (&net_message, cl.viewentity);
+
+		// signon
+		MSG_WriteByte (&net_message, svc_signonnum);
+		MSG_WriteByte (&net_message, 3);
+
+		CL_WriteDemoMessage ();
+
+		// restore net_message
+		net_message.data = data;
+		net_message.cursize = cursize;
+	}
 
 	// force a refersh of the demo list
 	Menu_DemoPopulate ();

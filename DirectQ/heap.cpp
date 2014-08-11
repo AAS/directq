@@ -21,27 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // directq memory functions.  funny how things come full-circle, isn't it?
 #include "quakedef.h"
 
-/*
-========================================================================================================================
-
-		UTILITY FUNCTIONS
-
-========================================================================================================================
-*/
-
-int MemoryRoundSizeToKB (int size, int roundtok)
-{
-	// kilobytes
-	roundtok *= 1024;
-
-	for (int newsize = 0;; newsize += roundtok)
-		if (newsize >= size)
-			return newsize;
-
-	// never reached
-	return size;
-}
-
 
 /*
 ========================================================================================================================
@@ -104,11 +83,11 @@ cmd_t Cache_Report_Cmd ("cache_report", Cache_Report_f);
 
 void *Cache_Alloc (char *name, void *data, int size)
 {
-	cacheobject_t *cache = (cacheobject_t *) Pool_Alloc (POOL_CACHE, sizeof (cacheobject_t));
+	cacheobject_t *cache = (cacheobject_t *) Pool_Cache->Alloc (sizeof (cacheobject_t));
 
 	// alloc on the cache
-	cache->name = (char *) Pool_Alloc (POOL_CACHE, strlen (name) + 1);
-	cache->data = Pool_Alloc (POOL_CACHE, size);
+	cache->name = (char *) Pool_Cache->Alloc (strlen (name) + 1);
+	cache->data = Pool_Cache->Alloc (size);
 
 	// copy in the name
 	strcpy (cache->name, name);
@@ -148,178 +127,13 @@ void Cache_Init (void)
 ========================================================================================================================
 */
 
-int mapallocs = 0;
-
-typedef struct vpool_s
-{
-	// name for display
-	char name[24];
-
-	// max memory in this pool in mb (converted to bytes at startup)
-	int maxmem;
-
-	// new allocations will start here
-	int lowmark;
-
-	// currently allocated and committed memory
-	int highmark;
-
-	// initial allocation (sized for peaks of ID1)
-	int initialkb;
-
-	// memory is allocated in chunks of this amount of bytes
-	int chunksizekb;
-
-	// max size of highmark
-	int peaksize;
-
-	// base pointer
-	byte *membase;
-} vpool_t;
-
-// these should be declared in the same order as the #defines in heap.h
-vpool_t virtualpools[NUM_VIRTUAL_POOLS] =
-{
-	// stuff in this pool is never freed while DirectQ is running
-	{"Permanent", 32, 0, 0, 10240, 512, 0, NULL},
-
-	// stuff in these pools persists for the duration of the game
-	{"This Game", 32, 0, 0, 512, 256, 0, NULL},
-	{"Cache", 256, 0, 0, 10240, 1024, 0, NULL},
-
-	// stuff in these pools persists for the duration of the map
-	// warpc only uses ~48 MB
-	{"This Map", 128, 0, 0, 10240, 2048, 0, NULL},
-	{"Edicts", 128, 0, 0, 512, 256, 0, NULL},
-
-	// used for temp allocs where we don't want to worry about freeing them
-	{"Temp Allocs", 128, 0, 0, 3072, 1024, 0, NULL},
-
-	// for COM_LoadTempFile Loading
-	{"File Loads", 128, 0, 0, 2048, 2048, 0, NULL},
-
-	// spare slots
-	{"Unused", 1, 0, 0, 64, 64, 0, NULL},
-	{"Unused", 1, 0, 0, 64, 64, 0, NULL},
-	{"Unused", 1, 0, 0, 64, 64, 0, NULL}
-};
-
-
-void *Pool_Alloc (int pool, int size)
-{
-	if (pool < 0 || pool >= NUM_VIRTUAL_POOLS)
-		Sys_Error ("Pool_Alloc: Invalid Pool");
-
-	vpool_t *vp = &virtualpools[pool];
-
-	// if temp file loading overflows we just reset it
-	if (pool == POOL_TEMP && (vp->lowmark + size) >= vp->maxmem)
-	{
-		// if the temp pool is too small to hold this allocation we just reset it
-		if (size > vp->maxmem)
-			Pool_Reset (pool, size);
-		else vp->lowmark = 0;
-	}
-
-	// not enough pool space
-	if ((vp->lowmark + size) >= vp->maxmem)
-		Sys_Error ("Pool_Alloc: Overflow");
-
-	// only pass over the commit region otherwise lots of small allocations will pass over
-	// the *entire* *buffer* every time (slooooowwwwww)
-	if ((vp->lowmark + size) >= vp->highmark)
-	{
-		if (pool == POOL_MAP) mapallocs++;
-
-		// alloc in batches
-		int newsize = MemoryRoundSizeToKB (vp->lowmark + size, vp->chunksizekb);
-
-		// this will also set the committed memory to 0 for us
-		if (!VirtualAlloc (vp->membase + vp->lowmark, newsize - vp->lowmark, MEM_COMMIT, PAGE_READWRITE))
-			Sys_Error ("Pool_Alloc: VirtualAlloc Failed");
-
-		vp->highmark = newsize;
-
-		// track peak - only used for reporting
-		if (vp->highmark > vp->peaksize) vp->peaksize = vp->highmark;
-	}
-
-	// set up
-	void *buf = (vp->membase + vp->lowmark);
-	vp->lowmark += size;
-
-	return buf;
-}
-
-
-void Pool_Reset (int pool, int newsizebytes)
-{
-	// graceful failure
-	if (pool < 0 || pool >= NUM_VIRTUAL_POOLS) return;
-
-	// easier access
-	vpool_t *vp = &virtualpools[pool];
-
-	if (newsizebytes < 1)
-	{
-		// do a "fast reset", i.e. just switch the lowmark back to 0
-		// this is used for stuff like file loading where we want to avoid a full reset/realloc
-		vp->lowmark = 0;
-
-		// reset to 0 as much of the loading code will expect this
-		memset (vp->membase, 0, vp->highmark);
-		return;
-	}
-
-	// fully release the memory
-	if (vp->membase) VirtualFree (vp->membase, 0, MEM_RELEASE);
-
-	// fill in
-	vp->lowmark = 0;
-	vp->highmark = 0;
-	vp->maxmem = MemoryRoundSizeToKB (newsizebytes, 1024);
-
-	// reserve the memory for use by this pool
-	vp->membase = (byte *) VirtualAlloc (NULL, vp->maxmem, MEM_RESERVE, PAGE_NOACCESS);
-
-	// commit an initial chunk
-	Pool_Alloc (pool, vp->initialkb * 1024);
-	vp->lowmark = 0;
-}
-
-
-void Pool_Free (int pool)
-{
-	// graceful failure
-	if (pool < 0 || pool >= NUM_VIRTUAL_POOLS) return;
-
-	// easier access
-	vpool_t *vp = &virtualpools[pool];
-
-	// already free
-	if (!vp->highmark) return;
-	if (!vp->membase) return;
-
-	// decommit all of the allocated pool aside from the first chunk in it
-	VirtualFree (vp->membase + (vp->initialkb * 1024), vp->highmark - (vp->initialkb * 1024), MEM_DECOMMIT);
-
-	// wipe the retained chunk
-	memset (vp->membase, 0, (vp->initialkb * 1024));
-
-	// reset lowmark and highmark
-	vp->lowmark = 0;
-	vp->highmark = vp->initialkb * 1024;
-
-	if (pool == POOL_MAP)
-	{
-		Con_DPrintf ("%i map allocations\n", mapallocs);
-		mapallocs = 0;
-	}
-
-	// reinit the cache if that was freed
-	if (pool == POOL_CACHE) Cache_Init ();
-}
-
+CSpaceBuffer *Pool_Game = NULL;
+CSpaceBuffer *Pool_Permanent = NULL;
+CSpaceBuffer *Pool_Map = NULL;
+CSpaceBuffer *Pool_Cache = NULL;
+CSpaceBuffer *Pool_FileLoad = NULL;
+CSpaceBuffer *Pool_Temp = NULL;
+CSpaceBuffer *Pool_PolyVerts = NULL;
 
 void Pool_Init (void)
 {
@@ -328,21 +142,14 @@ void Pool_Init (void)
 	// prevent being called twice (owing to maxmem conversion below)
 	if (vpinit) Sys_Error ("Pool_Init: called twice");
 
-	for (int i = 0; i < NUM_VIRTUAL_POOLS; i++)
-	{
-		// convert maxmem to bytes
-		virtualpools[i].maxmem *= (1024 * 1024);
-
-		// reserve the memory for use by this pool
-		virtualpools[i].membase = (byte *) VirtualAlloc (NULL, virtualpools[i].maxmem, MEM_RESERVE, PAGE_NOACCESS);
-
-		// check
-		if (!virtualpools[i].membase) Sys_Error ("Pool_Init: VirtualAlloc failed");
-
-		// commit one initial chunk
-		Pool_Alloc (i, virtualpools[i].initialkb * 1024);
-		virtualpools[i].lowmark = 0;
-	}
+	// init the pools we want to keep around all the time
+	Pool_Permanent = new CSpaceBuffer ("Permanent", 32, POOL_PERMANENT);
+	Pool_Game = new CSpaceBuffer ("This Game", 2, POOL_GAME);
+	Pool_Map = new CSpaceBuffer ("This Map", 128, POOL_MAP);
+	Pool_Cache = new CSpaceBuffer ("Cache", 256, POOL_CACHE);
+	Pool_FileLoad = new CSpaceBuffer ("File Loads", 128, POOL_FILELOAD);
+	Pool_Temp = new CSpaceBuffer ("Temp Allocs", 128, POOL_TEMP);
+	Pool_PolyVerts = new CSpaceBuffer ("Poly Verts", 16, POOL_MAP);
 
 	// init the cache
 	Cache_Init ();
@@ -397,6 +204,7 @@ void *Zone_Alloc (int size)
 	}
 
 	// force the zone block to be non-executable
+	// (we'll allow this to fail as it's not operationally critical)
 	DWORD dwdummy;
 	BOOL ret = VirtualProtect (zb, size, PAGE_READWRITE, &dwdummy);
 
@@ -426,7 +234,11 @@ void Zone_Free (void *ptr)
 	zoneblocks--;
 
 	// release this back to the OS
-	HeapFree (zoneheap, 0, zptr);
+	if (!HeapFree (zoneheap, 0, zptr))
+	{
+		Sys_Error ("Zone_Free failed on %i bytes", zptr->size);
+		return;
+	}
 
 	// compact ever few frees so as to keep the zone from getting too fragmented
 	if (!(zoneblocks % 32)) HeapCompact (zoneheap, 0);
@@ -439,9 +251,167 @@ void Zone_Compact (void)
 	// this heap has 128K initially allocated and 32 MB reserved from the virtual address space
 	if (!zoneheap) zoneheap = HeapCreate (0, 0x20000, 0x2000000);
 
+	if (!zoneheap)
+	{
+		Sys_Error ("HeapCreate failed");
+		return;
+	}
+
 	// merge contiguous free blocks
 	// call this every map load; it may also be called on demand
+	// (we'll allow this to fail as it's not operationally critical)
 	HeapCompact (zoneheap, 0);
+}
+
+
+/*
+========================================================================================================================
+
+		DYNAMIC SPACE BUFFERS
+
+	A new space buffer can be created on the fly and as required everytime memory space is needed for anything.
+	DirectQ also maintains a number of it's own internal space buffers for use in the game.
+
+========================================================================================================================
+*/
+#define MAX_REGISTERED_BUFFERS	4096
+
+CSpaceBuffer *RegisteredBuffers[MAX_REGISTERED_BUFFERS] = {NULL};
+
+
+int RegisterBuffer (CSpaceBuffer *buffer)
+{
+	for (int i = 0; i < MAX_REGISTERED_BUFFERS; i++)
+	{
+		if (!RegisteredBuffers[i])
+		{
+			RegisteredBuffers[i] = buffer;
+			return i;
+		}
+	}
+
+	Sys_Error ("Too many buffers!");
+	return 0;
+}
+
+
+void UnRegisterBuffer (int buffernum)
+{
+	RegisteredBuffers[buffernum] = NULL;
+}
+
+
+void FreeSpaceBuffers (int usage)
+{
+	for (int i = 0; i < MAX_REGISTERED_BUFFERS; i++)
+	{
+		if (!RegisteredBuffers[i]) continue;
+		if (!(usage & RegisteredBuffers[i]->GetUsage ())) continue;
+
+		RegisteredBuffers[i]->Free ();
+	}
+}
+
+
+CSpaceBuffer::CSpaceBuffer (char *name, int maxsizemb, int usage)
+{
+	// sizes in KB
+	this->MaxSize = maxsizemb * 1024 * 1024;
+	this->LowMark = 0;
+	this->PeakMark = 0;
+	this->HighMark = 0;
+
+	// reserve the full block but do not commit it yet
+	this->BasePtr = (byte *) VirtualAlloc (NULL, this->MaxSize, MEM_RESERVE, PAGE_NOACCESS);
+
+	if (!this->BasePtr)
+	{
+		Sys_Error ("CSpaceBuffer::CSpaceBuffer - VirtualAlloc failed on \"%s\" memory pool", name);
+		return;
+	}
+
+	// commit an initial block
+	this->Initialize ();
+
+	// register the buffer
+	strncpy (this->Name, name, 64);
+
+	this->Usage = usage;
+	this->Registration = RegisterBuffer (this);
+}
+
+
+CSpaceBuffer::~CSpaceBuffer (void)
+{
+	UnRegisterBuffer (this->Registration);
+
+	VirtualFree (this->BasePtr, this->MaxSize, MEM_DECOMMIT);
+	VirtualFree (this->BasePtr, 0, MEM_RELEASE);
+}
+
+
+void *CSpaceBuffer::Alloc (int size)
+{
+	if (this->LowMark + size >= this->MaxSize)
+	{
+		Sys_Error ("CSpaceBuffer::Alloc - overflow on \"%s\" memory pool", this->Name);
+		return NULL;
+	}
+
+	// size might be > the extra alloc size
+	if ((this->LowMark + size) > this->HighMark)
+	{
+		// round to 64K boundaries
+		this->HighMark = (this->LowMark + size + 0xffff) & ~0xffff;
+
+		// this will walk over a previously committed region.  i might fix it...
+		if (!VirtualAlloc (this->BasePtr + this->LowMark, this->HighMark - this->LowMark, MEM_COMMIT, PAGE_READWRITE))
+		{
+			Sys_Error ("CSpaceBuffer::Alloc - VirtualAlloc failed for \"%s\" memory pool", this->Name);
+			return NULL;
+		}
+	}
+
+	// fix up pointers and return what we got
+	byte *buf = this->BasePtr + this->LowMark;
+	this->LowMark += size;
+
+	// peakmark is for reporting only
+	if (this->LowMark > this->PeakMark) this->PeakMark = this->LowMark;
+
+	// ensure set to 0 memory (bug city otherwise)
+	memset (buf, 0, size);
+
+	return buf;
+}
+
+void CSpaceBuffer::Free (void)
+{
+	// decommit all memory
+	VirtualFree (this->BasePtr, this->MaxSize, MEM_DECOMMIT);
+
+	// recommit the initial block
+	this->Initialize ();
+
+	// reinit the cache if that was freed
+	if (this->Usage & POOL_CACHE) Cache_Init ();
+}
+
+
+void CSpaceBuffer::Rewind (void)
+{
+	// just resets the lowmark
+	this->LowMark = 0;
+}
+
+
+void CSpaceBuffer::Initialize (void)
+{
+	// commit an initial page of 64k
+	VirtualAlloc (this->BasePtr, 0x10000, MEM_COMMIT, PAGE_READWRITE);
+
+	this->LowMark = 0;
+	this->HighMark = 0x10000;
 }
 
 
@@ -452,59 +422,81 @@ void Zone_Compact (void)
 
 ========================================================================================================================
 */
-void Virtual_Report_f (void)
+void Pool_Report (int usage, char *desc)
 {
 	int reservedmem = 0;
 	int committedmem = 0;
 	int peakmem = 0;
 	int addrspace = 0;
 
-	Con_Printf ("\n-----------------------------------------------\n");
-	Con_Printf ("Pool           Highmark     Lowmark  Peak Usage\n");
-	Con_Printf ("-----------------------------------------------\n");
-
-	for (int i = 0; i < NUM_VIRTUAL_POOLS; i++)
+	for (int i = 0; i < MAX_REGISTERED_BUFFERS; i++)
 	{
-		addrspace += (virtualpools[i].maxmem / 1024) / 1024;
+		if (!RegisteredBuffers[i]) continue;
+		if (RegisteredBuffers[i]->GetUsage () != usage) continue;
 
-		// don't report on pools which were never used
-		if (!virtualpools[i].peaksize) continue;
-
-		Con_Printf
-		(
-			"%-11s  %7.2f MB  %7.2f MB  %7.2f MB\n",
-			virtualpools[i].name,
-			((float) virtualpools[i].highmark / 1024.0f) / 1024.0f,
-			((float) virtualpools[i].lowmark / 1024.0f) / 1024.0f,
-			((float) virtualpools[i].peaksize / 1024.0f) / 1024.0f
-		);
-
-		reservedmem += virtualpools[i].highmark;
-		committedmem += virtualpools[i].lowmark;
-		peakmem += virtualpools[i].peaksize;
+		addrspace += RegisteredBuffers[i]->GetMaxSize () / 1024;
+		reservedmem += RegisteredBuffers[i]->GetHighMark ();
+		committedmem += RegisteredBuffers[i]->GetLowMark ();
+		peakmem += RegisteredBuffers[i]->GetPeakMark ();
 	}
-
-	Con_Printf ("-----------------------------------------------\n");
 
 	Con_Printf
 	(
-		"%-11s  %7.2f MB  %7.2f MB  %7.2f MB\n",
+		"%-13s  %7.2f MB  %7.2f MB  %7.2f MB\n",
+		desc,
+		((float) reservedmem / 1024.0f) / 1024.0f,
+		((float) committedmem / 1024.0f) / 1024.0f,
+		((float) peakmem / 1024.0f) / 1024.0f
+	);
+}
+
+
+void Virtual_Report_f (void)
+{
+	Con_Printf ("\n-------------------------------------------------\n");
+	Con_Printf ("Pool            Committed      In-Use  Peak Usage\n");
+	Con_Printf ("-------------------------------------------------\n");
+
+	Pool_Report (POOL_PERMANENT, "Permanent");
+	Pool_Report (POOL_GAME, "This Game");
+	Pool_Report (POOL_CACHE, "Cache");
+	Pool_Report (POOL_MAP, "This Map");
+	Pool_Report (POOL_FILELOAD, "File Loads");
+	Pool_Report (POOL_TEMP, "Temp Buffer");
+
+	Con_Printf ("-------------------------------------------------\n");
+
+	int reservedmem = 0;
+	int committedmem = 0;
+	int peakmem = 0;
+	int addrspace = 0;
+
+	for (int i = 0; i < MAX_REGISTERED_BUFFERS; i++)
+	{
+		if (!RegisteredBuffers[i]) continue;
+
+		addrspace += (RegisteredBuffers[i]->GetMaxSize () + 512) / 1024;
+		reservedmem += RegisteredBuffers[i]->GetHighMark ();
+		committedmem += RegisteredBuffers[i]->GetLowMark ();
+		peakmem += RegisteredBuffers[i]->GetPeakMark ();
+	}
+
+	Con_Printf
+	(
+		"%-13s  %7.2f MB  %7.2f MB  %7.2f MB\n",
 		"Total",
 		((float) reservedmem / 1024.0f) / 1024.0f,
 		((float) committedmem / 1024.0f) / 1024.0f,
 		((float) peakmem / 1024.0f) / 1024.0f
 	);
 
-	Con_Printf ("-----------------------------------------------\n");
-	Con_DPrintf ("Reserved address space: %i MB\n", addrspace);
+	Con_Printf ("-------------------------------------------------\n");
+	Con_Printf ("%i MB Reserved address space\n", (addrspace + 512) / 1024);
 	Con_Printf ("%i objects in cache\n", numcacheobjects);
-	Con_Printf ("\nZone current size: %i KB in %i blocks\n", (zonesize + 1023) / 1023, zoneblocks);
-	Con_DPrintf ("Zone peak size: %i KB in %i blocks\n", (zonepeaksize + 1023) / 1023, zonepeakblocks);
-	Con_DPrintf ("%i allocations for POOL_MAP\n", mapallocs);
+	Con_Printf ("-------------------------------------------------\n");
+	Con_Printf ("Zone current size: %i KB in %i blocks\n", (zonesize + 1023) / 1023, zoneblocks);
+	Con_Printf ("Zone peak size: %i KB in %i blocks\n", (zonepeaksize + 1023) / 1023, zonepeakblocks);
 }
 
 
-cmd_t heap_report_cmd ("heap_report", Virtual_Report_f);
-
-
-
+cmd_t Heap_Report_Cmd ("heap_report", Virtual_Report_f);

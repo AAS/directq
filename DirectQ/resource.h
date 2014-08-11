@@ -29,7 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define IDR_QMBTRAIL				270
 
 // shaders
-#define IDR_ALIAS					410
 #define IDR_LIQUID					420
 #define IDR_SKY						430
 
@@ -40,3 +39,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // icons
 #define IDI_APPICON					900
+
+// lookup tables
+#define IDR_ANORMDOTS				1010
+#define IDR_ANORMS					1020
+

@@ -45,16 +45,16 @@ WSADATA		winsockdata;
 
 //=============================================================================
 
-static float blocktime;
+static DWORD blocktime;
 
 BOOL PASCAL FAR BlockingHook(void)  
 { 
     MSG		msg;
     BOOL	ret;
  
-	if ((Sys_FloatTime() - blocktime) > 2.0)
+	if ((Sys_DWORDTime () - blocktime) > 2000)
 	{
-		WSACancelBlockingCall();
+		WSACancelBlockingCall ();
 		return FALSE;
 	}
 
@@ -62,7 +62,8 @@ BOOL PASCAL FAR BlockingHook(void)
     ret = (BOOL) PeekMessage(&msg, NULL, 0, 0, PM_REMOVE); 
  
     /* if we got one, process it */ 
-    if (ret) { 
+    if (ret)
+	{
         TranslateMessage(&msg); 
         DispatchMessage(&msg); 
     } 
@@ -84,7 +85,7 @@ void WINS_GetLocalAddress()
 	if (gethostname(buff, MAXHOSTNAMELEN) == SOCKET_ERROR)
 		return;
 
-	blocktime = Sys_FloatTime();
+	blocktime = Sys_DWORDTime();
 	WSASetBlockingHook(BlockingHook);
 	local = gethostbyname(buff);
 	WSAUnhookBlockingHook();
@@ -176,7 +177,7 @@ int WINS_Init (void)
 
 	if ((net_controlsocket = WINS_OpenSocket (0)) == -1)
 	{
-		Con_Printf("WINS_Init: Unable to open control socket\n");
+		Con_Printf ("WINS_Init: Unable to open control socket\n");
 		if (--winsock_initialized == 0)
 			WSACleanup ();
 		return -1;
@@ -186,7 +187,7 @@ int WINS_Init (void)
 	((struct sockaddr_in *)&broadcastaddr)->sin_addr.s_addr = INADDR_BROADCAST;
 	((struct sockaddr_in *)&broadcastaddr)->sin_port = htons((unsigned short)net_hostport);
 
-	Con_Printf("Winsock TCP/IP Initialized\n");
+	Con_Printf ("Winsock TCP/IP Initialized\n");
 	tcpipAvailable = true;
 
 	return net_controlsocket;
@@ -387,7 +388,7 @@ int WINS_Broadcast (int socket, byte *buf, int len)
 		ret = WINS_MakeSocketBroadcastCapable (socket);
 		if (ret == -1)
 		{
-			Con_Printf("Unable to make socket broadcast capable\n");
+			Con_Printf ("Unable to make socket broadcast capable\n");
 			return ret;
 		}
 	}

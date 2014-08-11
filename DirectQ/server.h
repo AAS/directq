@@ -40,9 +40,11 @@ typedef struct
 	bool	loadgame;			// handle connections specially
 
 	float		time;
-	
+
+	DWORD		dwTime;
+
 	int			lastcheck;			// used by PF_checkclient
-	float		lastchecktime;
+	DWORD		dwLastCheckTime;
 	
 	char		name[64];			// map name
 
@@ -54,11 +56,7 @@ typedef struct
 	struct model_s	*models[MAX_MODELS];
 	char		*sound_precache[MAX_SOUNDS];	// NULL terminated
 	char		*lightstyles[MAX_LIGHTSTYLES];
-	int			num_edicts;
-	int			max_edicts;
-	edict_t		*edicts;			// can NOT be array indexed, because
-									// edict_t is variable sized, but can
-									// be used to reference the world ent
+
 	server_state_t	state;			// some actions are only valid during load
 
 	sizebuf_t	datagram;
@@ -73,6 +71,10 @@ typedef struct
 	int		signondiff;		// Track extra bytes due to >256 model support, kludge
 	int		Protocol;
 } server_t;
+
+// use of accurate DWORD timer wherever possible on the server
+// adjusted for rounding errors
+#define SV_TIME 	(((float) sv.dwTime + 0.5f) / 1000.0f)
 
 
 #define	NUM_PING_TIMES		16
@@ -97,7 +99,7 @@ typedef struct client_s
 	sizebuf_t		message;			// can be added to at any time,
 										// copied and clear once per frame
 	byte			msgbuf[MAX_MSGLEN];
-	edict_t			*edict;				// EDICT_NUM(clientnum+1)
+	edict_t			*edict;				// GetEdictForNumber(clientnum+1)
 	char			name[32];			// for printing to other people
 	int				colors;
 		

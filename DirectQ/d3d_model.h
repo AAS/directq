@@ -48,20 +48,33 @@ BRUSH MODELS
 ==============================================================================
 */
 
-
-//
-// in memory representation
-//
-// !!! if this is changed, it must be changed in asm_draw.h too !!!
-typedef struct
+typedef struct d3d_modelsurf_s
 {
-	vec3_t		position;
-} mvertex_t;
+	struct msurface_s *surf;
+	struct texture_s *tex;
+	D3DMATRIX *matrix;
+
+	struct d3d_modelsurf_s *surfchain;
+} d3d_modelsurf_t;
+
+
+typedef struct d3d_registeredtexture_s
+{
+	struct texture_s *texture;
+	d3d_modelsurf_t *surfchain;
+} d3d_registeredtexture_t;
+
+extern d3d_registeredtexture_t *d3d_RegisteredTextures;
+extern int d3d_NumRegisteredTextures;
 
 #define	SIDE_FRONT	0
 #define	SIDE_BACK	1
 #define	SIDE_ON		2
 
+typedef struct mvertex_s
+{
+	vec3_t position;
+} mvertex_t;
 
 // plane_t structure
 // !!! if this is changed, it must be changed in asm_i386.h too !!!
@@ -81,29 +94,31 @@ typedef struct texture_s
 
 	unsigned	width, height;
 
-	void		*d3d_Texture;
-	void		*d3d_Fullbright;
+	struct image_s *teximage;
+	struct image_s *lumaimage;
+
 	int			visframe;
 
-	struct msurface_s	*texturechain;
-	struct msurface_s	*chaintail;
-
-	int			anim_total;				// total tenths in sequence ( 0 = no)
+	int			anim_total;				// total tenths in sequence (0 = no)
 	int			anim_min, anim_max;		// time for this frame min <=time< max
+
 	struct texture_s *anim_next;		// in the animation sequence
 	struct texture_s *alternate_anims;	// bmodels in frmae 1 use these
-	unsigned	offsets[MIPLEVELS];		// four mip maps stored
 
 	int contentscolor[3];
+
+	// chains for rendering
+	struct msurface_s *texturechain;
+
+	// registered texture used by this texture
+	d3d_registeredtexture_t *registration;
 } texture_t;
 
 
+// basic types
 #define	SURF_PLANEBACK		2
 #define	SURF_DRAWSKY		4
-#define SURF_DRAWSPRITE		8
 #define SURF_DRAWTURB		16
-#define SURF_DRAWTILED		32
-#define SURF_DRAWBACKGROUND	64
 #define SURF_UNDERWATER		128
 
 // contents types
@@ -112,8 +127,8 @@ typedef struct texture_s
 #define SURF_DRAWWATER		1024
 #define SURF_DRAWSLIME		2048
 
-// !!! if this is changed, it must be changed in asm_draw.h too !!!
-typedef struct
+
+typedef struct medge_s
 {
 	unsigned short	v[2];
 	unsigned int	cachededgeoffset;
@@ -127,48 +142,62 @@ typedef struct
 	int			flags;
 } mtexinfo_t;
 
-#define VERTEXSIZE		7
-
-typedef struct glpolyvert_s
+typedef struct brushpolyvert_s
 {
 	float xyz[3];
 	float st[2];
-	float lm[2];
-} glpolyvert_t;
 
-typedef struct glpoly_s
+	union
+	{
+		// warp verts needs to cache the original s/t for non-hlsl updates
+		float lm[2];
+		float st2[2];
+	};
+} brushpolyvert_t;
+
+
+typedef struct polyvert_s
 {
-	int numverts;
-	glpolyvert_t *verts;
-	struct glpoly_s *next;
-} glpoly_t;
+	float *basevert;
+	float st[2];
+
+	union
+	{
+		// warp verts needs to cache the original s/t for non-hlsl updates
+		float lm[2];
+		float st2[2];
+	};
+} polyvert_t;
+
 
 typedef struct msurface_s
 {
+	int			surfnum;
 	int			visframe;		// should be drawn when node is crossed
 
 	mplane_t	*plane;
 	int			flags;
 
-	// 0 to 255 scale
-	int			alpha;
+	int			alphaval;
 
-	int			firstedge;	// look up in model->surfedges[], negative numbers
-	int			numedges;	// are backwards edges
+	int			firstedge;
+	int			numverts;
+
+	polyvert_t	*verts;
+
+	// for bmodel transforms
+	D3DMATRIX	*matrix;
+
+	struct msurface_s *texturechain;
 
 	short		texturemins[2];
 	short		extents[2];
 
-	// changed to bytes as they go 0 to 128
-	// (pegair03 bugs still happen with ints...)
-	byte		light_l, light_t;	// lightmap coordinates (relative to LIGHTMAP_SIZE, not 0 to 1)
-	byte		smax, tmax;			// lightmap extents (width and height) (relative to LIGHTMAP_SIZE, not 0 to 1)
-	byte		light_r, light_b;	// lightmap rect right and bottom (light_s + smax, light_t + tmax)
-	int			maxextent;
-
-	glpoly_t *polys;
-
-	struct	msurface_s	*texturechain;
+	// changed to ints for the new larger lightmap sizes
+	// note - even shorts are too small for the new max surface extents
+	int			light_l, light_t;	// lightmap coordinates (relative to LIGHTMAP_SIZE, not 0 to 1)
+	int			smax, tmax;			// lightmap extents (width and height) (relative to LIGHTMAP_SIZE, not 0 to 1)
+	int			light_r, light_b;	// lightmap rect right and bottom (light_s + smax, light_t + tmax)
 
 	mtexinfo_t	*texinfo;
 
@@ -178,13 +207,11 @@ typedef struct msurface_s
 
 	// direct3d stuff
 	class CD3DLightmap *d3d_Lightmap;
+	LPDIRECT3DTEXTURE9 d3d_LightmapTex;
 
 	// overbright factor for surf
 	int			overbright;
 	int			fullbright;
-
-	// the matrix used for transforming this surf
-	void		*matrix;
 
 	// extents of the surf in world space
 	float		mins[3];
@@ -196,7 +223,6 @@ typedef struct msurface_s
 	byte		*samples;		// [numstyles*surfsize]
 
 	// for alpha sorting
-	float		dist;
 	float		midpoint[3];
 } msurface_t;
 
@@ -241,8 +267,7 @@ typedef struct mleaf_s
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
 
-	// static entities contained in this leaf
-	struct staticent_s *statics;
+	struct efrag_s	*efrags;
 
 	int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
@@ -277,7 +302,7 @@ typedef struct mspriteframe_s
 	int		width;
 	int		height;
 	float	up, down, left, right;
-	void	*texture;
+	struct image_s *texture;
 } mspriteframe_t;
 
 typedef struct
@@ -340,30 +365,26 @@ typedef struct
 	maliasgroupframedesc_t	frames[1];
 } maliasgroup_t;
 
-// !!! if this is changed, it must be changed in asm_draw.h too !!!
-typedef struct mtriangle_s
+typedef struct aliasmesh_s
 {
-	int					facesfront;
-	int					vertindex[3];
-} mtriangle_t;
+	float s;
+	float t;
+	unsigned short vertindex;
+} aliasmesh_t;
 
-
-#define	MAX_SKINS	32
+typedef struct aliasskin_s
+{
+	struct image_s *texture[4];
+	struct image_s *fullbright[4];
+	byte				*texels;
+} aliasskin_t;
 
 typedef struct aliashdr_s
 {
-	int			ident;
-	int			version;
 	vec3_t		scale;
 	vec3_t		scale_origin;
+
 	float		boundingradius;
-	vec3_t		eyeposition;
-	int			numskins;
-	int			skinwidth;
-	int			skinheight;
-	int			numverts;
-	int			numtris;
-	int			numframes;
 	synctype_t	synctype;
 	int			flags;
 	float		size;
@@ -371,19 +392,25 @@ typedef struct aliashdr_s
 	bool		mfdelerp;
 	bool		nolerp;
 
-	int					numposes;
-	int					numorder;
-	void *posedata;	// numposes*poseverts trivert_t
-	int	 *commands;	// gl command list with embedded s/t
-	void				*texture[MAX_SKINS][4];
-	void				*fullbright[MAX_SKINS][4];
-	byte				*texels[MAX_SKINS];	// only for player skins
-	maliasframedesc_t	frames[1];	// variable sized
+	int			nummeshframes;
+	int			numtris;
+	int			nummesh;
+
+	int			vertsperframe;
+	int			numframes;
+
+	aliasmesh_t			*meshverts;
+	unsigned short		*indexes;
+	int					numindexes;
+	struct drawvertx_s	**vertexes;
+	maliasframedesc_t	*frames;
+
+	int			skinwidth;
+	int			skinheight;
+	int			numskins;
+	aliasskin_t *skins;
 } aliashdr_t;
 
-
-extern	stvert_t	*stverts;
-extern	mtriangle_t	*triangles;
 
 //===================================================================
 
@@ -403,7 +430,6 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 #define	EF_TRACER3	128			// purple trail
 
 // mh - special flags
-#define EF_RMQRAIN	(1 << 20)	// remake quake rain
 #define EF_PLAYER	(1 << 21)
 
 // Quake uses 3 (count 'em!) different types of brush model and we need to distinguish between all of them
@@ -413,9 +439,6 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 
 typedef struct brushheader_s
 {
-	// world, inline or instanced
-	int			brushtype;
-
 	int			firstmodelsurface;
 	int			nummodelsurfaces;
 
@@ -492,11 +515,12 @@ typedef struct model_s
 	// could turn these into a union... bit it makes accessing them a bit more awkward...
 	// besides, it's only an extra 8 bytes per model... chickenfeed, really...
 	// it also allows us to be more robust by setting the others to NULL in the loader
-	brushhdr_t	*bh;
-	aliashdr_t	*ah;
-	msprite_t	*sh;
+	brushhdr_t	*brushhdr;
+	aliashdr_t	*aliashdr;
+	msprite_t	*spritehdr;
 
 	// the entity that used this model (inline bmodels only)
+	// kept here so that we can explicitly NULL it for other model types and write more general code as a result
 	struct entity_s *cacheent;
 
 	// true if the model was ever seen

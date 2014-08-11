@@ -20,56 +20,54 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
+#include "d3d_model.h"
 #include "d3d_quake.h"
-
 
 void RotatePointAroundVector (vec3_t dst, const vec3_t dir, const vec3_t point, float degrees);
 void R_AnimateLight (void);
 void V_CalcBlend (void);
-void D3D_DrawSkyChain (void);
-void D3D_DrawWorld (void);
-void D3D_PrepareWorld (void);
-void D3D_PrepareParticles (void);
-void D3D_DrawParticles (int flag);
-void D3D_PrepareWaterSurfaces (void);
+
+void D3D_BuildWorld (void);
+void D3D_AddWorldSurfacesToRender (void);
+
+void R_SetupParticles (void);
+void R_UpdateParticles (void);
+void D3D_InitializeTurb (void);
 void D3D_DrawAlphaWaterSurfaces (void);
 void D3D_DrawOpaqueWaterSurfaces (void);
-void D3D_PrepareAliasModels (void);
-void D3D_DrawOpaqueAliasModels (void);
-void D3D_DrawViewModel (void);
 
-bool R_DrawBrushModel (entity_t *e);
-bool R_PrepareBrushEntity (entity_t *e);
+void R_DrawViewModel (void);
+void D3D_DrawAliasModel (entity_t *ent);
+void D3D_DrawAliasShadow (entity_t *e);
+
+void R_SetupAliasModels (void);
+
+void D3D_PrepareAliasModel (entity_t *e);
 
 void D3D_BeginUnderwaterWarp (void);
 void D3D_EndUnderwaterWarp (void);
 void D3D_AutomapReset (void);
 
-// model drawing funcs
-void D3D_DrawTranslucentAliasModel (entity_t *ent);
-void D3D_DrawSpriteModel (entity_t *e);
+void D3D_FinalizeSky (void);
 
 DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 float d3d_OverbrightModulate = 2.0f;
 
+D3DMATRIX d3d_WorldMatrix;
+D3DMATRIX d3d_ProjMatrix;
+
 // render definition for this frame
 d3d_renderdef_t d3d_RenderDef;
 
-vec3_t		modelorg, r_entorigin;
+mplane_t	frustum[4];
 
-mplane_t	frustum[5];
-
-//
 // view origin
-//
 vec3_t	vup;
 vec3_t	vpn;
 vec3_t	vright;
 vec3_t	r_origin;
 
-//
 // screen size info
-//
 refdef_t	r_refdef;
 
 texture_t	*r_notexture_mip;
@@ -112,11 +110,9 @@ cvar_t gl_fogdensity ("gl_fogdensity", 0.001f, CVAR_ARCHIVE);
 cvar_t gl_underwaterfog ("gl_underwaterfog", 1, CVAR_ARCHIVE);
 
 cvar_t r_lockfrustum ("r_lockfrustum", 0.0f);
-cvar_t r_normqrain ("r_normqrain", 0.0f, CVAR_ARCHIVE);
 cvar_t r_wireframe ("r_wireframe", 0.0f);
 
 // dynamic far clipping plane depending on map size
-// see R_NewMap for calculation, D3D_CheckSurfMinMaxs for evaluation
 float r_clipdist;
 
 extern float r_automap_x;
@@ -125,8 +121,6 @@ extern float r_automap_z;
 extern float r_automap_scale;
 int automap_culls = 0;
 cvar_t r_automap_nearclip ("r_automap_nearclip", "48", CVAR_ARCHIVE);
-
-BOOL d3d_SceneBegun = FALSE;
 
 bool R_AutomapCull (vec3_t emins, vec3_t emaxs)
 {
@@ -148,109 +142,26 @@ bool R_AutomapCull (vec3_t emins, vec3_t emaxs)
 }
 
 
-/*
-===================
-D3D_CheckBeginScene
-
-Used to prevent potential perf penalties by deferring IDirect3DDevice9::BeginScene until
-such a time as we actually come to draw some polys
-===================
-*/
-void D3D_CheckBeginScene (void)
-{
-	if (!d3d_SceneBegun)
-	{
-		d3d_Device->BeginScene ();
-		d3d_SceneBegun = TRUE;
-	}
-}
-
-
-// fixed func drawing
-void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride)
-{
-	D3D_CheckBeginScene ();
-	D3D_CheckDirtyMatrixes ();
-	d3d_Device->DrawPrimitiveUP (PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
-}
-
-
-void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
-{
-	D3D_CheckBeginScene ();
-	D3D_CheckDirtyMatrixes ();
-	d3d_Device->DrawPrimitive (PrimitiveType, StartVertex, PrimitiveCount);
-}
-
-
-void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount)
-{
-	D3D_CheckBeginScene ();
-	D3D_CheckDirtyMatrixes ();
-	d3d_Device->DrawIndexedPrimitive (PrimitiveType, BaseVertexIndex, MinIndex, NumVertices, StartIndex, PrimitiveCount);
-}
-
-
-void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, const void *pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
-{
-	D3D_CheckBeginScene ();
-	D3D_CheckDirtyMatrixes ();
-
-	d3d_Device->DrawIndexedPrimitiveUP
-	(
-		PrimitiveType,
-		MinVertexIndex,
-		NumVertices,
-		PrimitiveCount,
-		pIndexData,
-		IndexDataFormat,
-		pVertexStreamZeroData,
-		VertexStreamZeroStride
-	);
-}
-
-
 void D3D_BeginVisedicts (void)
 {
 	d3d_RenderDef.numvisedicts = 0;
-	d3d_RenderDef.numtransedicts = 0;
 }
 
 
-void D3D_AddVisEdict (entity_t *ent, bool noculledict)
+void D3D_AddVisEdict (entity_t *ent)
 {
-	// set here because cl_main doesn't know what a D3DXMATRIX is.
-	// also cleaner because i only need to check and set in one place rather than every place an entity is alloced
-	// finally, we do it in this function so that we can be certain that every entity will have a matrix
-	if (!ent->matrix) ent->matrix = (D3DXMATRIX *) Pool_Alloc (POOL_MAP, sizeof (D3DXMATRIX));
-
 	// check for entities with no models
 	if (!ent->model) return;
 
 	// only add entities with supported model types
 	if (ent->model->type == mod_alias || ent->model->type == mod_brush || ent->model->type == mod_sprite)
 	{
-		// tough fucking shit
-		if ((ent->model->flags & EF_RMQRAIN) && r_normqrain.integer) return;
+		ent->nocullbox = false;
 
-		ent->nocullbox = noculledict;
-
-		// sprites always have translucency as they need to be drawn with alpha and no depthwriting
-		if (ent->alphaval < 255 || ent->model->type == mod_sprite)
+		if (d3d_RenderDef.numvisedicts < MAX_VISEDICTS)
 		{
-			if (d3d_RenderDef.numtransedicts < MAX_VISEDICTS)
-			{
-				d3d_RenderDef.transedicts[d3d_RenderDef.numtransedicts] = ent;
-				d3d_RenderDef.numtransedicts++;
-			}
-		}
-		else
-		{
-			if (d3d_RenderDef.numvisedicts < MAX_VISEDICTS)
-			{
-				d3d_RenderDef.visedicts[d3d_RenderDef.numvisedicts] = ent;
-				d3d_RenderDef.numvisedicts++;
-			}
+			d3d_RenderDef.visedicts[d3d_RenderDef.numvisedicts] = ent;
+			d3d_RenderDef.numvisedicts++;
 		}
 	}
 	else Con_DPrintf ("D3D_AddVisEdict: Unknown entity model type for %s\n", ent->model->name);
@@ -273,8 +184,8 @@ bool R_CullBox (vec3_t emins, vec3_t emaxs)
 	// different culling for the automap
 	if (d3d_RenderDef.automap) return R_AutomapCull (emins, emaxs);
 
-	// test order is left/right/front/bottom/top
-	for (i = 0; i < 5; i++)
+	// test order is left/right/bottom/top
+	for (i = 0; i < 4; i++)
 	{
 		p = frustum + i;
 
@@ -329,13 +240,26 @@ bool R_CullBox (vec3_t emins, vec3_t emaxs)
 }
 
 
+void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m)
+{
+	D3D_TranslateMatrix (m, e->origin[0], e->origin[1], e->origin[2]);
+	D3D_RotateMatrix (m, 0, 0, 1, e->angles[1]);
+	D3D_RotateMatrix (m, 0, 1, 0, -e->angles[0]);
+	D3D_RotateMatrix (m, 1, 0, 0, e->angles[2]);
+
+	if (e->model->type == mod_alias)
+	{
+		aliashdr_t *hdr = e->model->aliashdr;
+
+		D3D_TranslateMatrix (m, hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2]);
+		D3D_ScaleMatrix (m, hdr->scale[0], hdr->scale[1], hdr->scale[2]);
+	}
+}
+
+
 void D3D_RotateForEntity (entity_t *e)
 {
-	// calculate transforms
-	d3d_WorldMatrixStack->Translate (e->origin[0], e->origin[1], e->origin[2]);
-	d3d_WorldMatrixStack->Rotate (0, 0, 1, e->angles[1]);
-	d3d_WorldMatrixStack->Rotate (0, 1, 0, -e->angles[0]);
-	d3d_WorldMatrixStack->Rotate (1, 0, 0, e->angles[2]);
+	D3D_RotateForEntity (e, &e->matrix);
 }
 
 
@@ -401,23 +325,16 @@ void R_SetFrustum (float fovx, float fovy)
 		return;
 	}
 
-	// frustum cull check order is left/right/front/bottom/top
+	// frustum cull check order is left/right/bottom/top
 	TurnVector (frustum[0].normal, vpn, vright, fovx / 2 - 90);  // left plane
 	TurnVector (frustum[1].normal, vpn, vright, 90 - fovx / 2);  // right plane
-	TurnVector (frustum[3].normal, vpn, vup, 90 - fovy / 2);  // bottom plane
-	TurnVector (frustum[4].normal, vpn, vup, fovy / 2 - 90);  // top plane
+	TurnVector (frustum[2].normal, vpn, vup, 90 - fovy / 2);  // bottom plane
+	TurnVector (frustum[3].normal, vpn, vup, fovy / 2 - 90);  // top plane
 
-	// also build a front clipping plane to cull objects behind the view
-	// this won't be much as the other 4 planes will intersect a little bit behind, but it is effective in some
-	// situations and does provide a minor boost
-	frustum[2].normal[0] = (frustum[0].normal[0] + frustum[1].normal[0] + frustum[3].normal[0] + frustum[4].normal[0]) / 4.0f;
-	frustum[2].normal[1] = (frustum[0].normal[1] + frustum[1].normal[1] + frustum[3].normal[1] + frustum[4].normal[1]) / 4.0f;
-	frustum[2].normal[2] = (frustum[0].normal[2] + frustum[1].normal[2] + frustum[3].normal[2] + frustum[4].normal[2]) / 4.0f;
-
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 4; i++)
 	{
 		// is this necessary???
-		VectorNormalize (frustum[i].normal);
+		// VectorNormalize (frustum[i].normal);
 
 		frustum[i].type = PLANE_ANYZ;
 		frustum[i].dist = DotProduct (r_origin, frustum[i].normal);
@@ -505,7 +422,7 @@ void D3D_PrepareOverbright (void)
 D3D_PrepareRender
 =============
 */
-void D3D_PrepareRender (void)
+void R_SetupD3D (void)
 {
 	// r_wireframe 1 is cheating in multiplayer
 	if (r_wireframe.integer)
@@ -557,14 +474,14 @@ void D3D_PrepareRender (void)
 	// set the viewport
 	d3d_Device->SetViewport (&d3d_3DViewport);
 
-	d3d_ViewMatrixStack->Reset ();
-	d3d_ViewMatrixStack->LoadIdentity ();
+	// keep an identity view matrix at all times; this simplifies the setup and also lets us
+	// skip a matrix multiplication per vertex in our vertex shaders. ;)
+	D3DXMATRIX vm;
+	D3DXMatrixIdentity (&vm);
+	d3d_Device->SetTransform (D3DTS_VIEW, &vm);
 
-	d3d_ProjMatrixStack->Reset ();
-	d3d_ProjMatrixStack->LoadIdentity ();
-
-	d3d_WorldMatrixStack->Reset ();
-	d3d_WorldMatrixStack->LoadIdentity ();
+	D3D_LoadIdentity (&d3d_WorldMatrix);
+	D3D_LoadIdentity (&d3d_ProjMatrix);
 
 	DWORD clearcolor = 0xff000000;
 
@@ -605,11 +522,21 @@ void D3D_PrepareRender (void)
 
 		// set a near clipping plane based on the refdef vieworg
 		// here we retain the same space as the world coords
-		d3d_ProjMatrixStack->Ortho2D (0, vid.width * r_automap_scale, 0, vid.height * r_automap_scale, -maxdepth, maxdepth);
+		D3DXMatrixOrthoOffCenterRH
+		(
+			D3D_MakeD3DXMatrix (&d3d_ProjMatrix),
+			0,
+			vid.width * r_automap_scale,
+			0,
+			vid.height * r_automap_scale,
+			-maxdepth,
+			maxdepth
+		);
 
 		// translate camera by origin
-		d3d_ViewMatrixStack->Translate
+		D3D_TranslateMatrix
 		(
+			&d3d_WorldMatrix,
 			-(r_automap_x - (vid.width / 2) * r_automap_scale),
 			-(r_automap_y - (vid.height / 2) * r_automap_scale),
 			-r_refdef.vieworg[2]
@@ -618,17 +545,35 @@ void D3D_PrepareRender (void)
 	else
 	{
 		// put z going up
-		d3d_ViewMatrixStack->Rotate (1, 0, 0, -90);
-		d3d_ViewMatrixStack->Rotate (0, 0, 1, 90);
+		D3D_RotateMatrix (&d3d_WorldMatrix, 1, 0, 0, -90);
+		D3D_RotateMatrix (&d3d_WorldMatrix, 0, 0, 1, 90);
 
 		// rotate camera by angles
-		d3d_ViewMatrixStack->Rotate (1, 0, 0, -r_refdef.viewangles[2]);
-		d3d_ViewMatrixStack->Rotate (0, 1, 0, -r_refdef.viewangles[0]);
-		d3d_ViewMatrixStack->Rotate (0, 0, 1, -r_refdef.viewangles[1]);
+		D3D_RotateMatrix (&d3d_WorldMatrix, 1, 0, 0, -r_refdef.viewangles[2]);
+		D3D_RotateMatrix (&d3d_WorldMatrix, 0, 1, 0, -r_refdef.viewangles[0]);
+		D3D_RotateMatrix (&d3d_WorldMatrix, 0, 0, 1, -r_refdef.viewangles[1]);
 
 		// translate camera by origin
-		d3d_ViewMatrixStack->Translate (-r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
+		D3D_TranslateMatrix (&d3d_WorldMatrix, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
+
+		// set projection frustum (infinite projection; the value of r_clipdist is now only used for positioning the sky)
+		float xmax = 4.0f * tan ((d3d_RenderDef.fov_x * M_PI) / 360.0);
+		float ymax = 4.0f * tan ((d3d_RenderDef.fov_y * M_PI) / 360.0);
+
+		D3DXMatrixPerspectiveOffCenterRH
+		(
+			D3D_MakeD3DXMatrix (&d3d_ProjMatrix),
+			-xmax, xmax, -ymax, ymax, 4.0f, 4096.0f
+		);
+
+		// hacky infinite projection
+		d3d_ProjMatrix._33 = -1;
+		d3d_ProjMatrix._43 = -1;
 	}
+
+	// set basic transforms (these must always be run)
+	d3d_Device->SetTransform (D3DTS_WORLD, &d3d_WorldMatrix);
+	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjMatrix);
 
 	// we only need to clear if we're rendering 3D
 	d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
@@ -646,80 +591,14 @@ void D3D_PrepareRender (void)
 	// disable all alpha ops
 	D3D_SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
 	D3D_DisableAlphaBlend ();
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 
-	texture_t *t;
-
-	for (int i = 0; i < cl.worldbrush->numtextures; i++)
-	{
-		// e2m3 gets this
-		if (!(t = cl.worldbrush->textures[i])) continue;
-
-		// null it
-		t->texturechain = NULL;
-		t->chaintail = NULL;
-		t->visframe = -1;
-	}
-
-	// renderflags
-	d3d_RenderDef.renderflags = 0;
-
-	// surface drawing chains
-	d3d_RenderDef.skychain = NULL;
-
-	// poly counts for r_speeds 1
-	d3d_RenderDef.brush_polys = 0;
-	d3d_RenderDef.alias_polys = 0;
+	// optionally enable wireframe mode
+	if (r_wireframe.integer) D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_WIREFRAME);
 }
 
 
-// this is basically the "a lof of this goes away" thing in the old gl_refrag...
-// or at least one version of it.  see also CL_FindTouchedLeafs and the various struct defs
-void R_AddStaticEntitiesForLeaf (mleaf_t *leaf)
-{
-	for (staticent_t *se = leaf->statics; se; se = se->next)
-	{
-		// static entity was removed
-		if (se->ent->staticremoved) continue;
-
-		// already added
-		if (se->ent->visframe == d3d_RenderDef.framecount) continue;
-
-		// the leafs containing the entities have already been bbox culled, so there's no need to check the entity!!!
-		D3D_AddVisEdict (se->ent, true);
-
-		// mark as visible for this frame
-		se->ent->visframe = d3d_RenderDef.framecount;
-	}
-}
-
-
-void D3D_PrepareVisedicts (void)
-{
-	// merge entities into d3d_RenderDef.renderflags
-	// so that we know in advance what we need to render
-	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
-	{
-		entity_t *ent = d3d_RenderDef.visedicts[i];
-
-		if (ent->model->type == mod_alias)
-			d3d_RenderDef.renderflags |= R_RENDERALIAS;
-		else if (ent->model->type == mod_sprite)
-			d3d_RenderDef.renderflags |= R_RENDERSPRITE;
-		else if (ent->model->type == mod_brush)
-		{
-			// two different types of brush model - yuck yuck yuck
-			if (ent->model->name[0] == '*')
-				d3d_RenderDef.renderflags |= R_RENDERINLINEBRUSH;
-			else d3d_RenderDef.renderflags |= R_RENDERINSTANCEDBRUSH;
-		}
-	}
-
-	// prepare individual entity types for rendering
-	D3D_PrepareAliasModels ();
-}
-
-
-void D3D_PerpareFog (void)
+void D3D_PrepareFog (void)
 {
 	// no fog
 	if (gl_fogenable.integer <= 0) return;
@@ -821,11 +700,15 @@ void D3D_UpdateContentsColor (void)
 {
 	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY)
 	{
-		// same as cshift_empty
-		cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = 130;
-		cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = 80;
-		cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 50;
-		cl.cshifts[CSHIFT_CONTENTS].percent = 0;
+		// brought to you today by "disgusting hacks 'r' us"...
+		// stuffcmd must be the most EVIL thing ever invented, and as soon as QC 1337 h4x0rz start
+		// doing things RIGHT a lot of good will come into the world.
+		extern cshift_t cshift_empty;
+
+		cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = cshift_empty.destcolor[0];
+		cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = cshift_empty.destcolor[1];
+		cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = cshift_empty.destcolor[2];
+		cl.cshifts[CSHIFT_CONTENTS].percent = cshift_empty.percent;
 	}
 	else if (d3d_RenderDef.viewleaf->contentscolor)
 	{
@@ -854,175 +737,62 @@ void D3D_UpdateContentsColor (void)
 }
 
 
-int D3D_EntityDepthCompare (const void *a, const void *b)
-{
-	entity_t *enta = *((entity_t **) a);
-	entity_t *entb = *((entity_t **) b);
+/*
+================
+R_SetupBrushModels
 
-	// sort back to front
-	if (enta->dist > entb->dist)
-		return 1;
-	else if (enta->dist < entb->dist)
-		return -1;
-	else return 0;
+all brushmodels (including the world) need an initial setup pass to determine
+visibility, update lighting, build texture chains, and so on
+================
+*/
+void R_SetupBrushModels (void)
+{
+	// mark visible leafs
+	R_MarkLeaves ();
+
+	// add fog to the render
+	D3D_PrepareFog ();
+
+	// add visible surfaces to the render
+	D3D_BuildWorld ();
+
+	// upload any lightmaps that were modified
+	d3d_Lightmaps->UploadModified ();
+
+	// some sky modes require extra stuff to be added after the surfs so handle those now
+	D3D_FinalizeSky ();
+
+	// finish solid surfaces by adding any such to the solid buffer
+	D3D_AddWorldSurfacesToRender ();
 }
 
 
-void D3D_DrawTranslucentEntities (void)
+void R_SetupSpriteModels (void)
 {
-	if (!r_drawentities.value) return;
-	if (!d3d_RenderDef.numtransedicts) return;
+	if (!r_drawentities.integer) return;
 
-	// if there's only one then the list is already sorted!
-	if (d3d_RenderDef.numtransedicts > 1)
+	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
 	{
-		// evaluate distances
-		for (int i = 0; i < d3d_RenderDef.numtransedicts; i++)
-		{
-			entity_t *ent = d3d_RenderDef.transedicts[i];
+		entity_t *ent = d3d_RenderDef.visedicts[i];
 
-			// set distance from viewer - no need to sqrt them as the order will be the same
-			// (fixme - should we, and then subtract a radius?)
-			ent->dist = (ent->origin[0] - r_origin[0]) * (ent->origin[0] - r_origin[0]) +
-				(ent->origin[1] - r_origin[1]) * (ent->origin[1] - r_origin[1]) +
-				(ent->origin[2] - r_origin[2]) * (ent->origin[2] - r_origin[2]);
-		}
+		if (!ent->model) continue;
+		if (ent->model->type != mod_sprite) continue;
 
-		if (d3d_RenderDef.numtransedicts == 2)
-		{
-			// trivial case - 2 entities
-			if (d3d_RenderDef.transedicts[0]->dist < d3d_RenderDef.transedicts[1]->dist)
-			{
-				// reorder correctly
-				entity_t *tmp = d3d_RenderDef.transedicts[1];
-				d3d_RenderDef.transedicts[1] = d3d_RenderDef.transedicts[0];
-				d3d_RenderDef.transedicts[0] = tmp;
-			}
-		}
-		else
-		{
-			// general case - depth sort the transedicts from back to front
-			qsort ((void *) d3d_RenderDef.transedicts, d3d_RenderDef.numtransedicts, sizeof (entity_t *), D3D_EntityDepthCompare);
-		}
-	}
-
-	// now draw 'em
-	// we can't state-batch these as they need correct ordering so we'll just live with the state changes...
-	// sprites can have the same z so don't write it
-	for (int i = 0; i < d3d_RenderDef.numtransedicts; i++)
-	{
-		d3d_RenderDef.currententity = d3d_RenderDef.transedicts[i];
-
-		if (d3d_RenderDef.currententity->model->type == mod_sprite)
-		{
-			D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
-			D3D_DrawSpriteModel (d3d_RenderDef.currententity);
-		}
-		else if (d3d_RenderDef.currententity->model->type == mod_alias)
-		{
-			D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA, false);
-			D3D_DrawTranslucentAliasModel (d3d_RenderDef.currententity);
-		}
-		else if (d3d_RenderDef.currententity->model->type == mod_brush)
-		{
-			D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA, false);
-			R_DrawBrushModel (d3d_RenderDef.currententity);
-		}
-		else
-		{
-			// just print a warning
-			Con_DPrintf
-			(
-				"Unknown model type %i for %s\n",
-				d3d_RenderDef.currententity->model->type,
-				d3d_RenderDef.currententity->model->name
-			);
-		}
-	}
-
-	// take down global state
-	D3D_DisableAlphaBlend ();
-}
-
-
-void R_PrepareEntitiesOnList (entity_t **list, int count, int type, entityfunc_t prepfunc)
-{
-	for (int i = 0; i < count; i++)
-	{
-		entity_t *e = list[i];
-
-		// the entity is not visible until we say so!
-		e->visframe = -1;
-
-		// these aren't the models you're looking for
-		if (!e->model) continue;
-		if (e->model->type != type) continue;
-
-		// update the cache even if the model is culled
-		if (e->model->cacheent)
-		{
-			// if we're caching models just store out it's last status
-			// so that the automap can at least draw it at the position/orientation/etc it was
-			// the last time that the player saw it.  this is only done for brush models as
-			// other entities share models.
-			entity_t *e2 = e->model->cacheent;
-			// memcpy (e2, e, sizeof (entity_t));
-
-			// we don't actually need the full contents of the entity_t struct here
-			VectorCopy (e->angles, e2->angles);
-			VectorCopy (e->origin, e2->origin);
-			VectorCopy (e->shadelight, e2->shadelight);
-
-			e2->alphaval = e->alphaval;
-			e2->matrix = e->matrix;
-			e2->model = e->model;
-			e2->frame = e->frame;
-			e2->nocullbox = e->nocullbox;
-
-			e2->visframe = d3d_RenderDef.framecount;
-
-			// set the cached ent back to itself (ensure)
-			e2->model->cacheent = e2;
-		}
-
-		// prep the entity for drawing
-		if (!prepfunc (e)) continue;
-
-		// the entity is visible now
-		e->visframe = d3d_RenderDef.framecount;
-		e->model->wasseen = true;
-
-		// merge renderflags
-		if (e->model->type == mod_alias)
-			d3d_RenderDef.renderflags |= R_RENDERALIAS;
-		else if (e->model->type == mod_sprite)
-			d3d_RenderDef.renderflags |= R_RENDERSPRITE;
-		else if (e->model->type == mod_brush)
-		{
-			// two different types of brush model - yuck yuck yuck
-			if (e->model->name[0] == '*')
-				d3d_RenderDef.renderflags |= R_RENDERINLINEBRUSH;
-			else d3d_RenderDef.renderflags |= R_RENDERINSTANCEDBRUSH;
-		}
+		// sprites always have alpha
+		D3D_AddToAlphaList (ent);
 	}
 }
 
 
-void R_DrawEntitiesOnList (entity_t **list, int count, int type, entityfunc_t drawfunc)
+void R_SetupEntitiesOnList (void)
 {
-	for (int i = 0; i < count; i++)
-	{
-		entity_t *e = list[i];
-
-		// these aren't the models you're looking for
-		if (e->visframe != d3d_RenderDef.framecount) continue;
-		if (!e->model) continue;
-		if (e->model->type != type) continue;
-
-		// draw the model
-		drawfunc (e);
-	}
+	// brush models include the world
+	R_SetupBrushModels ();
+	R_SetupSpriteModels ();
 }
+
+
+int r_speedstime = -1;
 
 
 void D3D_AddExtraInlineModelsToListsForAutomap (void)
@@ -1047,141 +817,8 @@ void D3D_AddExtraInlineModelsToListsForAutomap (void)
 
 		// add it to the list and mark as visible
 		m->cacheent->visframe = d3d_RenderDef.framecount;
-		D3D_AddVisEdict (m->cacheent, false);
+		D3D_AddVisEdict (m->cacheent);
 	}
-}
-
-
-void D3D_CheckVSync (void)
-{
-	extern cvar_t vid_vsync;
-	static int old_vsync = vid_vsync.integer;
-
-	if (old_vsync != vid_vsync.integer)
-	{
-		old_vsync = vid_vsync.integer;
-		Cbuf_AddText ("vid_restart\n");
-	}
-}
-
-
-/*
-================
-R_RenderScene
-
-r_refdef must be set before the first call
-
-FIXMEEEEEEEEEE - bring all entity drawing into the new framework
-================
-*/
-void R_RenderScene (void)
-{
-	// set up to draw
-	D3D_CheckVSync ();
-	R_SetupFrame ();
-	R_SetFrustum (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y);
-
-	// done here so we know if we're in water
-	R_MarkLeaves ();
-
-	// commence to draw (set up the underwater warp if required)
-	if (!d3d_RenderDef.automap) D3D_BeginUnderwaterWarp ();
-
-	// setup to draw
-	D3D_PrepareOverbright ();
-	D3D_PrepareRender ();
-
-	if (r_wireframe.integer)
-		D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_WIREFRAME);
-	else D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
-
-	// add the world and any static entities to the draw lists
-	D3D_PrepareWorld ();
-
-	// prepare brush models here - so that any affected lightmaps can be uploaded in batch below
-	R_PrepareEntitiesOnList (d3d_RenderDef.visedicts, d3d_RenderDef.numvisedicts, mod_brush, R_PrepareBrushEntity);
-	R_PrepareEntitiesOnList (d3d_RenderDef.transedicts, d3d_RenderDef.numtransedicts, mod_brush, R_PrepareBrushEntity);
-
-	// the automap needs to add extra inline models
-	D3D_AddExtraInlineModelsToListsForAutomap ();
-
-	// upload all lightmaps that were modified
-	d3d_Lightmaps->UploadModified ();
-
-	// setup the visedicts for drawing; done after the world so that it will include static entities
-	D3D_PrepareVisedicts ();
-
-	// setup the water warp (global stuff for water render)
-	D3D_PrepareWaterSurfaces ();
-
-	// prepare and sort particles
-	D3D_PrepareParticles ();
-
-	// contents colours are deferred to here as they may be dependent on what was drawn/seen
-	D3D_UpdateContentsColor ();
-
-	// invert the sky/fog order if we're fogging sky or not
-	if (gl_fogsky.integer)
-	{
-		// set up fog
-		D3D_PerpareFog ();
-
-		// draw sky first, otherwise the z-fail technique will flood the framebuffer with sky
-		// rather than just drawing it where skybrushes appear
-		D3D_DrawSkyChain ();
-	}
-	else
-	{
-		// draw sky first, otherwise the z-fail technique will flood the framebuffer with sky
-		// rather than just drawing it where skybrushes appear
-		D3D_DrawSkyChain ();
-
-		// set up fog
-		D3D_PerpareFog ();
-	}
-
-	// the world is done first so that we have a full valid depth buffer for clipping everything else against
-	D3D_DrawWorld ();
-
-	// don't let sound get messed up if going slow
-	S_ExtraUpdate ();
-
-	// draw opaque entities
-	R_DrawEntitiesOnList (d3d_RenderDef.visedicts, d3d_RenderDef.numvisedicts, mod_brush, R_DrawBrushModel);
-	D3D_DrawOpaqueAliasModels ();
-
-	// draw opaque water surfs here so that z writing doesn't screw up
-	D3D_DrawOpaqueWaterSurfaces ();
-
-	// draw particle batch for contents opposite the viewleaf contents
-	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY)
-		D3D_DrawParticles (R_RENDERWATERPARTICLE);
-	else D3D_DrawParticles (R_RENDEREMPTYPARTICLE);
-
-	// draw alpha surfaces (fixme - these will have to integrate with entities and be depth sorted too...)
-	D3D_DrawAlphaWaterSurfaces ();
-
-	// draw alpha entities (sprites always have alpha)
-	D3D_DrawTranslucentEntities ();
-
-	// draw particle batch for contents same as the viewleaf contents
-	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY)
-		D3D_DrawParticles (R_RENDEREMPTYPARTICLE);
-	else D3D_DrawParticles (R_RENDERWATERPARTICLE);
-
-	// the viewmodel is always drawn last and frontmost in the scene
-	D3D_DrawViewModel ();
-
-	// back to solid mode
-	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
-
-	// finish up
-	if (!d3d_RenderDef.automap)
-		D3D_EndUnderwaterWarp ();
-	else D3D_AutomapReset ();
-
-	// disable fog (always)
-	D3D_SetRenderState (D3DRS_FOGENABLE, FALSE);
 }
 
 
@@ -1194,13 +831,10 @@ r_refdef must be set before the first call
 */
 void R_RenderView (void)
 {
-	float time1, time2;
+	int time1, time2;
 
 	if (r_norefresh.value) return;
-	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldbrush) return;
-
-	// always ensure this
-	cl.worldbrush->brushtype = MOD_BRUSH_WORLD;
+	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldmodel->brushhdr) return;
 
 	static float old_frametime = 0;
 
@@ -1208,20 +842,56 @@ void R_RenderView (void)
 	d3d_RenderDef.frametime = cl.time - old_frametime;
 	old_frametime = cl.time;
 
-	if (r_speeds.value) time1 = Sys_FloatTime ();
+	if (r_speeds.value) time1 = Sys_DWORDTime ();
 
-	// render normal view
-	R_RenderScene ();
+	// initialize r_speeds and flags
+	d3d_RenderDef.brush_polys = 0;
+	d3d_RenderDef.alias_polys = 0;
+	d3d_RenderDef.numsss = 0;
+
+	// begin the underwater warp
+	D3D_BeginUnderwaterWarp ();
+
+	// setup to render
+	R_SetupFrame ();
+	R_SetFrustum (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y);
+	R_SetupD3D ();
+	D3D_UpdateContentsColor ();
+	D3D_PrepareOverbright ();
+	D3D_AddExtraInlineModelsToListsForAutomap ();
+
+	// setup everything we're going to draw
+	R_SetupEntitiesOnList ();
+	R_SetupParticles ();
+
+	// upload all lightmaps that were modified (the alpha list might include modified lightmaps too)
+	//d3d_Lightmaps->UploadModified ();
+
+	R_SetupAliasModels ();
+
+	// draw all items on the alpha list
+	D3D_SortAlphaList ();
+
+	// the viewmodel comes last
+	R_DrawViewModel ();
+
+	// ensure
+	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
+
+	// finish up the underwater warp
+	D3D_EndUnderwaterWarp ();
+
+	// update particles
+	R_UpdateParticles ();
+
+	// disable fog (always)
+	D3D_SetRenderState (D3DRS_FOGENABLE, FALSE);
 
 	if (r_speeds.value)
 	{
-		time2 = Sys_FloatTime ();
-		Con_Printf
-		(
-			"%3i ms  %4i wpoly %4i epoly\n",
-			(int) ((time2 - time1) * 1000),
-			d3d_RenderDef.brush_polys,
-			d3d_RenderDef.alias_polys
-		);
+		time2 = Sys_DWORDTime ();
+		r_speedstime = time2 - time1;
 	}
+	else r_speedstime = -1;
 }
+
