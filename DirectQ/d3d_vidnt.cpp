@@ -79,6 +79,7 @@ void D3DHLSL_Shutdown (void);
 // lightmaps
 void D3D_LoseLightmapResources (void);
 void D3D_RecoverLightmapResources (void);
+void D3DRTT_CreateRTTTexture (void);
 
 // fixme - merge these two
 HWND d3d_Window;
@@ -155,12 +156,36 @@ void ClearAllStates (void);
 void AppActivate (BOOL fActive, BOOL minimize);
 
 
-void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
+void D3DVid_Restart_f (void);
+
+
+void D3DVid_ResizeWindow (HWND hWnd)
+{
+	if (!d3d_Device) return;
+	if (d3d_CurrentMode.RefreshRate != 0) return;
+
+	// reset the device to resize the backbuffer
+	RECT clientrect;
+
+	GetClientRect (hWnd, &clientrect);
+
+	d3d_CurrentMode.Width = clientrect.right - clientrect.left;
+	d3d_CurrentMode.Height = clientrect.bottom - clientrect.top;
+
+	d3d_PresentParams.BackBufferWidth = d3d_CurrentMode.Width;
+	d3d_PresentParams.BackBufferHeight = d3d_CurrentMode.Height;
+
+	IN_UpdateClipCursor ();
+	D3DVid_Restart_f ();
+}
+
+
+void D3DVid_SetWindowStyles (D3DDISPLAYMODE *mode)
 {
 	if (mode->RefreshRate == 0)
 	{
 		// windowed mode
-		WindowStyle = WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+		WindowStyle = WS_TILEDWINDOW;//WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 		ExWindowStyle = WS_EX_TOPMOST;
 	}
 	else
@@ -169,6 +194,12 @@ void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
 		WindowStyle = WS_POPUP;
 		ExWindowStyle = WS_EX_TOPMOST;
 	}
+}
+
+
+void D3DVid_ResetWindow (D3DDISPLAYMODE *mode)
+{
+	D3DVid_SetWindowStyles (mode);
 
 	RECT rect;
 	rect.left = 0;
@@ -527,6 +558,7 @@ void D3DVid_Restart_f (void)
 	// make sure that we're ready to reset
 	while (true)
 	{
+		Sys_SendKeyEvents ();
 		Sleep (10);
 		hr = d3d_Device->TestCooperativeLevel ();
 
@@ -560,6 +592,7 @@ void D3DVid_Restart_f (void)
 	// make sure that the reset has completed
 	while (true)
 	{
+		Sys_SendKeyEvents ();
 		Sleep (10);
 		hr = d3d_Device->TestCooperativeLevel ();
 
@@ -1313,6 +1346,7 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 	// set up everything else
 	// (fixme - run through the on-recover code for the loss handlers here instead)
 	D3DHLSL_Init ();
+	D3DRTT_CreateRTTTexture ();
 
 	Con_Printf ("\n");
 
@@ -1329,18 +1363,7 @@ void D3DVid_InitDirect3D (D3DDISPLAYMODE *mode)
 
 void D3DVid_CreateWindow (D3DDISPLAYMODE *mode)
 {
-	if (mode->RefreshRate == 0)
-	{
-		// windowed mode
-		WindowStyle = WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-		ExWindowStyle = 0;
-	}
-	else
-	{
-		// fullscreen mode
-		WindowStyle = WS_POPUP;
-		ExWindowStyle = 0;
-	}
+	D3DVid_SetWindowStyles (mode);
 
 	// the window has already been created so all we need is to update it's properties
 	RECT rect;
@@ -1882,10 +1905,28 @@ void D3DVid_CheckVSync (void)
 }
 
 
+void Host_Frame (DWORD time);
+
 void D3DVid_RecoverLostDevice (void)
 {
+	bool was_blocked = block_drawing;
+	bool was_clpaused = cl.paused;
+	bool was_svpaused = sv.paused;
+
+	// pause everything and block drawing
+	block_drawing = true;
+	cl.paused = true;
+	sv.paused = true;
+
 	while (1)
 	{
+		// run a frame to keep everything ticking along
+		Sys_SendKeyEvents ();
+		Host_Frame (20);
+
+		// yield CPU for a while
+		Sleep (20);
+
 		// see if the device can be recovered
 		hr = d3d_Device->TestCooperativeLevel ();
 
@@ -1900,6 +1941,11 @@ void D3DVid_RecoverLostDevice (void)
 
 			// force an update of areas that aren't normally updated in the main refresh
 			HUD_Changed ();
+
+			// restore states (this is ugly)
+			block_drawing = was_blocked;
+			cl.paused = was_clpaused;
+			sv.paused = was_svpaused;
 
 			// return to normal rendering
 			return;
@@ -1922,9 +1968,6 @@ void D3DVid_RecoverLostDevice (void)
 			Sys_Quit (13);
 			break;
 		}
-
-		// yield CPU for a while
-		Sleep (10);
 	}
 }
 
@@ -1945,6 +1988,9 @@ void D3DVid_BeginRendering (void)
 
 	// force lighting calcs off; this is done every frame and it will be filtered if necessary
 	D3D_SetRenderState (D3DRS_LIGHTING, FALSE);
+
+	// this is called before d3d_Device->BeginScene so that the d3d_Device->BeginScene is called on the correct rendertarget
+	D3DRTT_BeginScene ();
 
 	// SCR_UpdateScreen assumes that this is the last call in this function
 	hr = d3d_Device->BeginScene ();

@@ -34,6 +34,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define _WIN32_WINNT 0x0501
 
 // this is the current version of DirectQ
-#define DIRECTQ_VERSION "1.8.7 (RC1)"
+#define DIRECTQ_VERSION "1.8.7 (RC2)"
 
 #endif

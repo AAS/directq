@@ -110,7 +110,6 @@ typedef struct entity_s
 
 	// light averaging
 	float		shadelight[3];
-	float		ambientlight[3];
 
 	// false if the entity is to be subjected to bbox culling
 	bool		nocullbox;
@@ -169,8 +168,6 @@ typedef struct
 	vec3_t		viewangles;
 
 	float		fov_x, fov_y;
-
-	int			ambientlight;
 } refdef_t;
 
 

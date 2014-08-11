@@ -46,9 +46,6 @@ also contains shadelight and possibly alphaval????
 #include "d3d_quake.h"
 #include "resource.h"
 
-// texture for light lookups to avoid branching in the shader
-LPDIRECT3DTEXTURE9 d3d_ShadedotsTexture = NULL;
-
 // up to 16 color translated skins
 image_t d3d_PlayerSkins[256];
 
@@ -57,8 +54,6 @@ void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
 void D3DLight_LightPoint (entity_t *e, float *c);
 
 cvar_t r_aliaslightscale ("r_aliaslightscale", "1", CVAR_ARCHIVE);
-cvar_t r_aliasambientcutoff ("r_aliasambientcutoff", "128", CVAR_ARCHIVE);
-cvar_t r_aliaslightingcutoff ("r_aliaslightingcutoff", "192", CVAR_ARCHIVE);
 
 /*
 =================================================================
@@ -181,37 +176,14 @@ LPDIRECT3DVERTEXDECLARATION9 d3d_ShadowDecl = NULL;
 
 void D3DAlias_CreateStream0Buffer (aliashdr_t *hdr, aliasbuffers_t *buf)
 {
-	// filled in at runtime
-	hr = d3d_Device->CreateVertexBuffer
-	(
-		hdr->nummesh * sizeof (aliasstream0_t),
-		D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-		0,
-		D3DPOOL_DEFAULT,
-		&buf->Stream0,
-		NULL
-	);
-
-	if (FAILED (hr)) Sys_Error ("D3DAlias_CreateStream0Buffer: d3d_Device->CreateVertexBuffer failed");
-
+	D3DMain_CreateVertexBuffer (hdr->nummesh * sizeof (aliasstream0_t), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &buf->Stream0);
 	D3D_PrelockVertexBuffer (buf->Stream0);
 }
 
 
 void D3DAlias_CreateStream1Buffer (aliashdr_t *hdr, aliasbuffers_t *buf)
 {
-	// filled in at runtime
-	hr = d3d_Device->CreateVertexBuffer
-	(
-		hdr->nummesh * sizeof (aliasstream1_t),
-		D3DUSAGE_WRITEONLY,
-		0,
-		D3DPOOL_DEFAULT,
-		&buf->Stream1,
-		NULL
-	);
-
-	if (FAILED (hr)) Sys_Error ("D3DAlias_CreateStream1Buffer: d3d_Device->CreateVertexBuffer failed");
+	D3DMain_CreateVertexBuffer (hdr->nummesh * sizeof (aliasstream1_t), D3DUSAGE_WRITEONLY, &buf->Stream1);
 
 	aliasstream1_t *st = NULL;
 	aliasmesh_t *src = hdr->meshverts;
@@ -233,17 +205,7 @@ void D3DAlias_CreateStream1Buffer (aliashdr_t *hdr, aliasbuffers_t *buf)
 
 void D3DAlias_CreateIndexBuffer (aliashdr_t *hdr, aliasbuffers_t *buf)
 {
-	hr = d3d_Device->CreateIndexBuffer
-	(
-		hdr->numindexes * sizeof (unsigned short),
-		D3DUSAGE_WRITEONLY,
-		D3DFMT_INDEX16,
-		D3DPOOL_DEFAULT,
-		&buf->Indexes,
-		NULL
-	);
-
-	if (FAILED (hr)) Sys_Error ("D3DAlias_CreateIndexBuffer: d3d_Device->CreateIndexBuffer failed");
+	D3DMain_CreateIndexBuffer (hdr->numindexes, D3DUSAGE_WRITEONLY, &buf->Indexes);
 
 	// now we fill in the index buffer; this is a non-dynamic index buffer and it only needs to be set once
 	unsigned short *ndx = NULL;
@@ -320,26 +282,6 @@ void D3DAlias_CreateBuffers (void)
 		hr = d3d_Device->CreateVertexDeclaration (d3d_shadowlayout, &d3d_ShadowDecl);
 		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateBuffers: d3d_Device->CreateVertexDeclaration failed");
 	}
-
-	if (!d3d_ShadedotsTexture)
-	{
-		hr = d3d_Device->CreateTexture (256, 1, 1, 0, D3DFMT_L8, D3DPOOL_MANAGED, &d3d_ShadedotsTexture, NULL);
-		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateBuffers: d3d_Device->CreateTexture failed");
-
-		D3DLOCKED_RECT lockrect;
-		byte *dots;
-
-		hr = d3d_ShadedotsTexture->LockRect (0, &lockrect, NULL, 0);
-		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateBuffers: failed to lock texture rectangle");
-
-		dots = (byte *) lockrect.pBits;
-
-		for (int i = 0; i < 256; i++)
-			dots[i] = i;
-
-		hr = d3d_ShadedotsTexture->UnlockRect (0);
-		if (FAILED (hr)) Sys_Error ("D3DAlias_CreateBuffers: failed to unlock texture rectangle");
-	}
 }
 
 
@@ -390,9 +332,6 @@ void D3DAlias_TextureChange (aliasstate_t *aliasstate)
 		d3d_AliasState.lasttexture = aliasstate->teximage;
 		d3d_AliasState.lastluma = aliasstate->lumaimage;
 	}
-
-	// always set the shadedots texture (it will be filtered if set more than once)
-	D3DHLSL_SetTexture (2, d3d_ShadedotsTexture);
 }
 
 
@@ -438,35 +377,6 @@ void D3DAlias_InterpolateStreams (entity_t *ent, aliashdr_t *hdr, aliasstate_t *
 	hr = buf->Stream0->Unlock ();
 	d3d_RenderDef.numlock++;
 	if (FAILED (hr)) Sys_Error ("D3DAlias_DrawModel: failed to unlock vertex buffer");
-}
-
-
-void D3DAlias_ClampLighting (float *ambientlight, float *shadelight)
-{
-	// correct rgb to intensity scaling factors
-	float ntsc[] = {0.3f, 0.59f, 0.11f};
-
-	// convert light values to intensity values so that we can preserve the final correct colour balance
-	float ambientintensity = DotProduct (ambientlight, ntsc);
-	float shadeintensity = DotProduct (shadelight, ntsc);
-
-	// prevent division by zero (clamping is not needed at these levels either)
-	if (ambientintensity < 1) return;
-	if (shadeintensity < 1) return;
-
-	// scale down now before we modify the intensities
-	VectorScale (ambientlight, (1.0f / ambientintensity), ambientlight);
-	VectorScale (shadelight, (1.0f / shadeintensity), shadelight);
-
-	// clamp lighting so that it doesn't overbright as much
-	if (ambientintensity > r_aliasambientcutoff.value) ambientintensity = r_aliasambientcutoff.value;
-
-	if (ambientintensity + shadeintensity > r_aliaslightingcutoff.value)
-		shadeintensity = r_aliaslightingcutoff.value - ambientintensity;
-
-	// now scale them back up to the new values preserving colour balance
-	VectorScale (ambientlight, ambientintensity, ambientlight);
-	VectorScale (shadelight, shadeintensity, shadelight);
 }
 
 
@@ -525,52 +435,21 @@ void D3DAlias_DrawModel (entity_t *ent, aliashdr_t *hdr, bool shadowed)
 
 		// copy these out because we need to keep the originals in the entity for frame averaging
 		vec3_t shadelight = {ent->shadelight[0], ent->shadelight[1], ent->shadelight[2]};
-		vec3_t ambientlight = {ent->ambientlight[0], ent->ambientlight[1], ent->ambientlight[2]};
-
-		// clamp lighting so that it doesn't overbright so much
-		// (regular overbright scaling is done in D3DLight_LightPoint
-		D3DAlias_ClampLighting (ambientlight, shadelight);
 
 		// nehahra assumes that fullbrights are not available in the engine
 		if (nehahra)
 		{
 			if (!strcmp (ent->model->name, "progs/flame2.mdl") || !strcmp (ent->model->name, "progs/flame.mdl"))
 			{
-				ambientlight[0] = shadelight[0] = 255;
-				ambientlight[1] = shadelight[1] = 255;
-				ambientlight[2] = shadelight[2] = 255;
+				shadelight[0] = (255 >> r_overbright.integer);
+				shadelight[1] = (255 >> r_overbright.integer);
+				shadelight[2] = (255 >> r_overbright.integer);
 			}
 		}
 
-#if 0
-		// and now scale them by the correct factor; the default scale assumes no overbrighting
-		// we use different scaling on the view ent as it comes out really dark with this light model
-		if (ent == &cl.viewent)
-		{
-			// the software quake lighting model subtracts dot rather than adds it so multiply shadelight by -1 to reflect this
-			// (the shader will still add)
-			VectorScale (shadelight, -(r_aliaslightscale.value / 128.0f), shadelight);
-			VectorScale (ambientlight, (r_aliaslightscale.value / 128.0f), ambientlight);
-		}
-		else
-		{
-			// the software quake lighting model subtracts dot rather than adds it so multiply shadelight by -1 to reflect this
-			// (the shader will still add)
-			VectorScale (shadelight, -(r_aliaslightscale.value / 200.0f), shadelight);
-			VectorScale (ambientlight, (r_aliaslightscale.value / 200.0f), ambientlight);
-		}
-#else
-		// reflect software Quake's lighting more accurately
-		ambientlight[0] = 255.0f - ambientlight[0];
-		ambientlight[1] = 255.0f - ambientlight[1];
-		ambientlight[2] = 255.0f - ambientlight[2];
-
 		VectorScale (shadelight, (r_aliaslightscale.value / 255.0f), shadelight);
-		VectorScale (ambientlight, (r_aliaslightscale.value / 255.0f), ambientlight);
-#endif
 
 		D3DHLSL_SetFloatArray ("ShadeVector", shadevector, 3);
-		D3DHLSL_SetFloatArray ("AmbientLight", ambientlight, 3);
 		D3DHLSL_SetFloatArray ("ShadeLight", shadelight, 3);
 	}
 
@@ -987,12 +866,9 @@ void D3DAlias_SetupAliasModel (entity_t *ent)
 	D3DLight_LightPoint (ent, shadelight);
 
 	// average light between frames
+	// we can't rescale shadelight to the final range here because it will mess with the averaging so instead we do it in the shader
 	for (int i = 0; i < 3; i++)
-	{
-		// we can't rescale shadelight to the range we need here because it will mess with the averaging so instead we do it in the shader
-		shadelight[i] = (shadelight[i] + ent->shadelight[i]) / 2;
-		ent->shadelight[i] = ent->ambientlight[i] = shadelight[i];
-	}
+		ent->shadelight[i] = (shadelight[i] + ent->shadelight[i]) / 2;
 
 	// store out for shadows
 	VectorCopy (lightspot, aliasstate->lightspot);
@@ -1047,8 +923,7 @@ void D3DAlias_DrawAliasBatch (entity_t **ents, int numents)
 		{
 			D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
 			D3D_SetTextureMipmap (1, d3d_TexFilter, d3d_MipFilter);
-			D3D_SetTextureMipmap (2, D3DTEXF_LINEAR, D3DTEXF_NONE);
-			D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
+			D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
 
 			D3D_SetVertexDeclaration (d3d_AliasDecl);
 

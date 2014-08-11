@@ -94,20 +94,8 @@ void D3DBrush_CreateBuffers (void)
 			MaxSurfVertexes = d3d_DeviceCaps.MaxVertexIndex;
 		else MaxSurfVertexes = MAX_SURF_VERTEXES;
 
-		hr = d3d_Device->CreateVertexBuffer
-		(
-			MaxSurfVertexes * sizeof (brushpolyvert_t),
-			D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-			0,
-			D3DPOOL_DEFAULT,
-			&d3d_SurfVBO,
-			NULL
-		);
-
-		if (FAILED (hr)) Sys_Error ("D3DPart_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
-
+		D3DMain_CreateVertexBuffer (MaxSurfVertexes * sizeof (brushpolyvert_t), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &d3d_SurfVBO);
 		D3D_PrelockVertexBuffer (d3d_SurfVBO);
-
 		d3d_SurfState.TotalVertexes = 0;
 	}
 
@@ -118,18 +106,7 @@ void D3DBrush_CreateBuffers (void)
 			MaxSurfIndexes = (d3d_DeviceCaps.MaxPrimitiveCount * 3);
 		else MaxSurfIndexes = MAX_SURF_INDEXES;
 
-		hr = d3d_Device->CreateIndexBuffer
-		(
-			MaxSurfIndexes * sizeof (unsigned short),
-			D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-			D3DFMT_INDEX16,
-			D3DPOOL_DEFAULT,
-			&d3d_SurfIBO,
-			NULL
-		);
-
-		if (FAILED (hr)) Sys_Error ("D3DPart_CreateBuffers: d3d_Device->CreateIndexBuffer failed");
-
+		D3DMain_CreateIndexBuffer (MaxSurfIndexes, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &d3d_SurfIBO);
 		D3D_PrelockIndexBuffer (d3d_SurfIBO);
 		d3d_SurfState.TotalIndexes = 0;
 	}

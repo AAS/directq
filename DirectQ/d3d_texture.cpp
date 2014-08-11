@@ -42,8 +42,6 @@ extern LPDIRECT3DTEXTURE9 char_texture;
 extern LPDIRECT3DTEXTURE9 char_textures[];
 extern LPDIRECT3DTEXTURE9 solidskytexture;
 extern LPDIRECT3DTEXTURE9 alphaskytexture;
-extern LPDIRECT3DTEXTURE9 d3d_ShadedotsTexture;
-LPDIRECT3DTEXTURE9 yahtexture;
 
 // palette hackery
 palettedef_t d3d_QuakePalette;
@@ -888,9 +886,6 @@ void D3D_ReleaseTextures (void)
 	SAFE_RELEASE (solidskytexture);
 	SAFE_RELEASE (alphaskytexture);
 	SAFE_RELEASE (d3d_MapshotTexture);
-	SAFE_RELEASE (r_notexture);
-	SAFE_RELEASE (yahtexture);
-	SAFE_RELEASE (d3d_ShadedotsTexture);
 }
 
 
@@ -1085,6 +1080,7 @@ void D3D_RegisterExternalTexture (char *texname)
 	if (!stricmp (texext, "jpg")) goodext = true;
 	if (!stricmp (texext, "jpeg")) goodext = true;
 	if (!stricmp (texext, "pcx")) goodext = true;
+	if (!stricmp (texext, "wal")) goodext = true;
 
 	// not a supported type
 	if (!goodext) return;
@@ -1208,6 +1204,7 @@ void D3D_RegisterExternalTexture (char *texname)
 	if (!stricmp (texext, "jpg")) {strcpy (texext, "666"); return;}
 	if (!stricmp (texext, "jpeg")) {strcpy (texext, "777"); return;}
 	if (!stricmp (texext, "pcx")) {strcpy (texext, "888"); return;}
+	if (!stricmp (texext, "wal")) {strcpy (texext, "999"); return;}
 }
 
 
@@ -1322,7 +1319,6 @@ void D3D_EnumExternalTextures (void)
 		for (int j = 0;; j++)
 		{
 			if (!et->texpath[j]) break;
-
 			if (et->texpath[j] == '\\') et->texpath[j] = '/';
 		}
 

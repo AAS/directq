@@ -24,6 +24,7 @@ IDR_PARTICLEDOT		RCDATA		"particledot.png"
 
 IDR_CROSSHAIR		RCDATA		"CrosshairFont.png"
 IDR_YOUAREHERE		RCDATA		"YouAreHere.png"
+IDR_UWBLUR			RCDATA		"uwblur.png"
 
 // shaders
 IDR_MASTERFX		RCDATA		"fxMaster.fx"

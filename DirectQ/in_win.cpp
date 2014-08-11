@@ -38,6 +38,10 @@ void Joy_AdvancedUpdate_f (void);
 cmd_t joyadvancedupdate ("joyadvancedupdate", Joy_AdvancedUpdate_f);
 
 
+static int originalmouseparms[3];
+static int newmouseparms[3] = {0, 0, 0};
+
+
 /*
 ========================================================================================================================
 
@@ -447,6 +451,8 @@ void IN_UnacquireMouse (void)
 
 		IN_ClearStates ();
 		in_mouseacquired = false;
+
+		SystemParametersInfo (SPI_SETMOUSE, 0, originalmouseparms, 0);
 	}
 }
 
@@ -455,6 +461,28 @@ void IN_AcquireMouse (void)
 {
 	if (!in_mouseacquired)
 	{
+		// done before bringing on raw input as raw input might disable our ability to do it
+		if (SystemParametersInfo (SPI_GETMOUSE, 0, originalmouseparms, 0))
+		{
+			if (COM_CheckParm ("-noforcemspd"))
+				newmouseparms[2] = originalmouseparms[2];
+
+			if (COM_CheckParm ("-noforcemaccel"))
+			{
+				newmouseparms[0] = originalmouseparms[0];
+				newmouseparms[1] = originalmouseparms[1];
+			}
+
+			if (COM_CheckParm ("-noforcemparms"))
+			{
+				newmouseparms[0] = originalmouseparms[0];
+				newmouseparms[1] = originalmouseparms[1];
+				newmouseparms[2] = originalmouseparms[2];
+			}
+		}
+
+		SystemParametersInfo (SPI_SETMOUSE, 0, newmouseparms, 0);
+
 		ShowCursor (FALSE);
 		IN_RegisterRawInputMouse ();
 

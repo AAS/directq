@@ -143,6 +143,7 @@ int D3DSurf_ModelSurfsSortFunc (d3d_modelsurf_t **ms1, d3d_modelsurf_t **ms2)
 // work we can be doing while we sort, let's run it on another thread
 HANDLE hSurfSortMutex = NULL;
 HANDLE hSurfSortThread = NULL;
+bool SortReady = false;
 
 
 DWORD WINAPI D3DSurf_SortProc (LPVOID blah)
@@ -152,7 +153,8 @@ DWORD WINAPI D3DSurf_SortProc (LPVOID blah)
 		// wait until we've been told that we're ready
 		WaitForSingleObject (hSurfSortMutex, INFINITE);
 
-		if (d3d_NumModelSurfs)
+		// ensure that we only sort once
+		if (d3d_NumModelSurfs && SortReady)
 		{
 			qsort
 			(
@@ -164,6 +166,7 @@ DWORD WINAPI D3DSurf_SortProc (LPVOID blah)
 		}
 
 		// now the sort has completed so let the main thread come back
+		SortReady = false;	// completed
 		ReleaseMutex (hSurfSortMutex);
 	}
 
@@ -646,6 +649,7 @@ void D3D_BuildWorld (void)
 		if (!hSurfSortThread) Sys_Error ("Failed to create Thread object");
 
 		// now we're ready to sort so let the sorting thread take over while we do some other work here
+		SortReady = true;
 		ReleaseMutex (hSurfSortMutex);
 	}
 

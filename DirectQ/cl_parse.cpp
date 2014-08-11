@@ -87,30 +87,36 @@ char *svc_strings[] =
 
 //=============================================================================
 
+
 /*
 ==================
 CL_ReadByteShort2
-==================
-*/
-/*
-==================
-CL_ReadByteShort2
+
+disgusting BJP protocol hackery crap; regular protocols just read a byte, BJP protocols may read a short
 ==================
 */
 int CL_ReadByteShort2 (bool Compatibility)
 {
-	return MSG_ReadByte ();
+	if (cl.Protocol == PROTOCOL_VERSION_NQ || cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
+		return MSG_ReadByte ();
+	else if (cl.Protocol < PROTOCOL_VERSION_BJP2 || Compatibility && cl.Protocol > PROTOCOL_VERSION_BJP2)
+		return MSG_ReadByte (); // Some progs (Marcher) send sound services, maintain compatibility, kludge
+	else return MSG_ReadShort ();
 }
 
 
 /*
 ==================
 CL_ReadByteShort
+
+disgusting BJP protocol hackery crap; regular protocols just read a byte, BJP protocols read a short
 ==================
 */
 int CL_ReadByteShort (void)
 {
-	return cl.Protocol == PROTOCOL_VERSION_NQ ? MSG_ReadByte () : MSG_ReadShort ();
+	if (cl.Protocol == PROTOCOL_VERSION_NQ || cl.Protocol == PROTOCOL_VERSION_FITZ || cl.Protocol == PROTOCOL_VERSION_RMQ)
+		return MSG_ReadByte ();
+	else return MSG_ReadShort ();
 }
 
 
@@ -166,13 +172,11 @@ void CL_ParseStartSoundPacket (void)
 
 	if (field_mask & SND_VOLUME)
 		volume = MSG_ReadByte ();
-	else
-		volume = DEFAULT_SOUND_PACKET_VOLUME;
+	else volume = DEFAULT_SOUND_PACKET_VOLUME;
 
 	if (field_mask & SND_ATTENUATION)
 		attenuation = MSG_ReadByte () / 64.0;
-	else
-		attenuation = DEFAULT_SOUND_PACKET_ATTENUATION;
+	else attenuation = DEFAULT_SOUND_PACKET_ATTENUATION;
 
 	if (field_mask & SND_LARGEENTITY)
 	{
@@ -433,7 +437,9 @@ void CL_ParseServerInfo (void)
 	// parse protocol version number
 	i = MSG_ReadLong ();
 
-	if (i != PROTOCOL_VERSION_NQ && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ)
+	if (i == PROTOCOL_VERSION_BJP || i == PROTOCOL_VERSION_BJP2 || i == PROTOCOL_VERSION_BJP3)
+		Con_Printf ("\nusing BJP demo protocol %i\n", i);
+	else if (i != PROTOCOL_VERSION_NQ && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ)
 	{
 		Host_Error
 		(
@@ -1165,7 +1171,9 @@ void CL_ParseServerMessage (void)
 
 			// svc_version is never used in the engine.  wtf?  maybe it's from an older version of stuff?
 			// don't read flags anyway for compatibility as we have no control over what sent the message
-			if (i != PROTOCOL_VERSION_NQ && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ)
+			if (i == PROTOCOL_VERSION_BJP || i == PROTOCOL_VERSION_BJP2 || i == PROTOCOL_VERSION_BJP3)
+				Con_Printf ("\nusing BJP demo protocol %i\n", i);
+			else if (i != PROTOCOL_VERSION_NQ && i != PROTOCOL_VERSION_FITZ && i != PROTOCOL_VERSION_RMQ)
 			{
 				Host_Error
 				(

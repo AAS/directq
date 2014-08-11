@@ -104,69 +104,6 @@ samplerCUBE cubeSampler : register(s3) = sampler_state
 };
 
 
-struct WorldVert
-{
-	float4 Position : POSITION0;
-	float2 Tex0 : TEXCOORD0;
-	float2 Tex1 : TEXCOORD1;
-};
-
-struct WorldVertPS
-{
-	float4 Position : POSITION0;
-	float2 Tex0 : TEXCOORD0;
-	float2 Tex1 : TEXCOORD1;
-#ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD2;
-#endif
-};
-
-struct VertLiquidInput
-{
-	float4 Position : POSITION0;
-	float2 Texcoord : TEXCOORD0;
-};
-
-struct VertSkyInput
-{
-	float4 Position : POSITION0;
-	float3 Texcoord : TEXCOORD0;
-};
-
-struct VertLiquidOutput
-{
-	float4 Position : POSITION0;
-	float2 Texcoord0 : TEXCOORD0;
-	float2 Texcoord1 : TEXCOORD1;
-#ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD2;
-#endif
-};
-
-struct VertTexturedColoured
-{
-	float4 Position : POSITION0;
-	float4 Color : COLOR0;
-	float2 Tex0 : TEXCOORD0;
-};
-
-struct VertAlias
-{
-	float4 Position : POSITION0;
-	float4 Color : COLOR0;
-	float2 Tex0 : TEXCOORD0;
-	
-#ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD1;
-#endif
-};
-
-struct VertPositionOnly
-{
-	float4 Position : POSITION0;
-};
-
-
 #ifdef hlsl_fog
 float4 FogCalc (float4 color, float4 fogpos)
 {
@@ -218,6 +155,56 @@ DrawVert VSDraw (DrawVert Input)
 
 /*
 ====================
+UNDERWATER WARP
+====================
+*/
+
+struct VSUnderwaterVert
+{
+	float4 Position : POSITION0;
+	float4 Color : COLOR0;
+	float2 Tex0 : TEXCOORD0;
+	float2 Tex1 : TEXCOORD1;
+};
+
+
+struct PSUnderwaterVert
+{
+	float4 Position : POSITION0;
+	float4 Color0 : COLOR0;
+	float4 Color1 : COLOR1;
+	float2 Tex0 : TEXCOORD0;
+	float2 Tex1 : TEXCOORD1;
+	float2 Tex2 : TEXCOORD2;
+};
+
+
+float4 PSDrawUnderwater (PSUnderwaterVert Input) : COLOR0
+{
+	float2 ofs = (((tex2D (tmu2Sampler, Input.Tex2)).rg) - 0.5f) * Scale.z * tex2D (tmu1Sampler, Input.Tex1).ba;
+	return tex2D (tmu0Sampler, Input.Tex0 + ofs) * Input.Color0.a + Input.Color1;
+}
+
+
+PSUnderwaterVert VSDrawUnderwater (VSUnderwaterVert Input)
+{
+	PSUnderwaterVert Output;
+
+	Output.Position = mul (Input.Position, WorldMatrix);
+
+	Output.Color0 = 1.0f - Input.Color;
+	Output.Color1 = float4 (Input.Color.rgb, 1.0f) * Input.Color.a;
+
+	Output.Tex0 = Input.Tex0;
+	Output.Tex1 = Input.Tex1;
+	Output.Tex2 = (Input.Tex1 + (warptime * 0.0625f)) * Scale.xy;
+
+	return (Output);
+}
+
+
+/*
+====================
 ALIAS MODELS
 ====================
 */
@@ -225,7 +212,6 @@ float2 currlerp;
 float2 lastlerp;
 float3 ShadeVector;
 float3 ShadeLight;
-float3 AmbientLight;
 float DepthBias;
 
 struct VertAliasVS
@@ -240,26 +226,24 @@ struct VertAliasVS
 struct VertAliasPS
 {
 	float4 Position : POSITION0;
-	float4 Color : COLOR0;
-	float2 Tex0 : TEXCOORD0;
+	float3 Normal : TEXCOORD0;
+	float2 Tex0 : TEXCOORD1;
 
 #ifdef hlsl_fog
-	float4 FogPosition : TEXCOORD1;
+	float4 FogPosition : TEXCOORD2;
 #endif
 };
 
 
 float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 {
-	// return Input.Color;
-
+	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
 	float4 fullbright = tex2D (tmu1Sampler, Input.Tex0);
 
 #ifdef hlsl_fog
-	float4 color = (tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Input.Color * Overbright);
-	color = FogCalc (color, Input.FogPosition) + fullbright;
+	float4 color = FogCalc ((tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Shade * Overbright), Input.FogPosition) + fullbright;
 #else
-	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Input.Color * Overbright)) + fullbright;
+	float4 color = ((tex2D (tmu0Sampler, Input.Tex0) - fullbright) * (Shade * Overbright)) + fullbright;
 #endif
 
 	color.a = AlphaVal;
@@ -269,10 +253,12 @@ float4 PSAliasLuma (VertAliasPS Input) : COLOR0
 
 float4 PSAliasNoLuma (VertAliasPS Input) : COLOR0
 {
-	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Input.Color * Overbright);
+	float4 Shade = float4 (ShadeLight * (dot (Input.Normal, ShadeVector) * -0.5f + 1.0f), 1.0f);
 
 #ifdef hlsl_fog
-	color = FogCalc (color, Input.FogPosition);
+	float4 color = FogCalc (tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright), Input.FogPosition);
+#else
+	float4 color = tex2D (tmu0Sampler, Input.Tex0) * (Shade * Overbright);
 #endif
 
 	color.a = AlphaVal;
@@ -296,13 +282,8 @@ VertAliasPS VSAliasVS (VertAliasVS Input)
 	Output.FogPosition = mul (BasePosition, ModelViewMatrix);
 #endif
 
-	// interpolate the two sets of normals in the vertex shader; let HLSL optimize this as a mad instruction.
-	float lightcos = dot (((Input.CurrNormal.xyz * currlerp.y) - currlerp.x) + ((Input.LastNormal.xyz * lastlerp.y) - lastlerp.x), ShadeVector);
-
-	if (lightcos < 0)
-		Output.Color = float4 (1, 1, 1, 1) - float4 (AmbientLight + ShadeLight * lightcos, 0);
-	else Output.Color = float4 (1, 1, 1, 1) - float4 (AmbientLight, 0);
-
+	// scale, bias and interpolate the normals in the vertex shader for speed
+	Output.Normal = ((Input.CurrNormal.xyz * currlerp.y) - currlerp.x) + ((Input.LastNormal.xyz * lastlerp.y) - lastlerp.x);
 	Output.Tex0 = Input.Tex0;
 
 	return Output;
@@ -368,7 +349,26 @@ PARTICLES (AND SPRITES)
 ====================
 */
 
-float4 PSParticles (VertAlias Input) : COLOR0
+struct VertParticleNonInstanced
+{
+	float4 Position : POSITION0;
+	float4 Color : COLOR0;
+	float2 Tex0 : TEXCOORD0;
+};
+
+struct PSParticleVert
+{
+	float4 Position : POSITION0;
+	float4 Color : COLOR0;
+	float2 Tex0 : TEXCOORD0;
+	
+#ifdef hlsl_fog
+	float4 FogPosition : TEXCOORD1;
+#endif
+};
+
+
+float4 PSParticles (PSParticleVert Input) : COLOR0
 {
 #ifdef hlsl_fog
 	float4 texcolor = tex2D (tmu0Sampler, Input.Tex0);
@@ -383,9 +383,9 @@ float4 PSParticles (VertAlias Input) : COLOR0
 }
 
 
-VertAlias VSParticles (VertTexturedColoured Input)
+PSParticleVert VSParticles (VertParticleNonInstanced Input)
 {
-	VertAlias Output;
+	PSParticleVert Output;
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
@@ -413,9 +413,9 @@ struct VertParticleInstanced
 float3 upvec;
 float3 rightvec;
 
-VertAlias VSParticlesInstanced (VertParticleInstanced Input)
+PSParticleVert VSParticlesInstanced (VertParticleInstanced Input)
 {
-	VertAlias Output;
+	PSParticleVert Output;
 
 	float4 NewPosition = float4
 	(
@@ -439,11 +439,35 @@ VertAlias VSParticlesInstanced (VertParticleInstanced Input)
 }
 
 
-float4 LiquidPS (VertLiquidOutput Input) : COLOR0
+/*
+====================
+LIQUID TEXTURES
+====================
+*/
+
+struct VSLiquidVert
+{
+	float4 Position : POSITION0;
+	float2 Texcoord : TEXCOORD0;
+};
+
+struct PSLiquidVert
+{
+	float4 Position : POSITION0;
+	float2 Texcoord0 : TEXCOORD0;
+	float2 Texcoord1 : TEXCOORD1;
+#ifdef hlsl_fog
+	float4 FogPosition : TEXCOORD2;
+#endif
+};
+
+float4 LiquidPS (PSLiquidVert Input) : COLOR0
 {
 	// same warp calculation as is used for the fixed pipeline path
 	// a lot of the heavier lifting here has been offloaded to the vs
-	float4 color = tex2D (tmu0Sampler, mul (mul (sin (Input.Texcoord1), warpscale) + Input.Texcoord0, 0.015625f));
+	// fixme - should use the uwblur texture lookup
+	float4 color = tex2D (tmu0Sampler, (Input.Texcoord0 + sin (Input.Texcoord1.yx) * warpscale) * 0.015625f);
+
 #ifdef hlsl_fog
 	color = FogCalc (color, Input.FogPosition);
 #endif
@@ -453,9 +477,9 @@ float4 LiquidPS (VertLiquidOutput Input) : COLOR0
 }
 
 
-VertLiquidOutput LiquidVS (VertLiquidInput Input)
+PSLiquidVert LiquidVS (VSLiquidVert Input)
 {
-	VertLiquidOutput Output;
+	PSLiquidVert Output;
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
@@ -463,13 +487,7 @@ VertLiquidOutput LiquidVS (VertLiquidInput Input)
 	Output.FogPosition = mul (Input.Position, ModelViewMatrix);
 #endif
 	Output.Texcoord0 = Input.Texcoord;
-
-	// we need to switch x and y at some stage; logic says lets do it per vertex to get the ps instructions down
-	Output.Texcoord1.x = mul (Input.Texcoord.y, warpfactor);
-	Output.Texcoord1.y = mul (Input.Texcoord.x, warpfactor);
-
-	// keeping vs instructions down is good as well, of course.
-	Output.Texcoord1 = mul (Output.Texcoord1 + warptime, 0.024543f);
+	Output.Texcoord1 = (Input.Texcoord * warpfactor + warptime) * 0.024543f;
 
 	return (Output);
 }
@@ -481,7 +499,25 @@ WORLD MODEL
 ====================
 */
 
-float4 PSWorldNoLuma (WorldVertPS Input) : COLOR0
+struct VSWorldVert
+{
+	float4 Position : POSITION0;
+	float2 Tex0 : TEXCOORD0;
+	float2 Tex1 : TEXCOORD1;
+};
+
+struct PSWorldVert
+{
+	float4 Position : POSITION0;
+	float2 Tex0 : TEXCOORD0;
+	float2 Tex1 : TEXCOORD1;
+#ifdef hlsl_fog
+	float4 FogPosition : TEXCOORD2;
+#endif
+};
+
+
+float4 PSWorldNoLuma (PSWorldVert Input) : COLOR0
 {
 #ifdef hlsl_fog
 	return FogCalc (tex2D (tmu1Sampler, Input.Tex0) * tex2D (tmu0Sampler, Input.Tex1) * Overbright, Input.FogPosition);
@@ -491,7 +527,7 @@ float4 PSWorldNoLuma (WorldVertPS Input) : COLOR0
 }
 
 
-float4 PSWorldNoLumaAlpha (WorldVertPS Input) : COLOR0
+float4 PSWorldNoLumaAlpha (PSWorldVert Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
 
@@ -506,7 +542,7 @@ float4 PSWorldNoLumaAlpha (WorldVertPS Input) : COLOR0
 }
 
 
-float4 PSWorldLuma (WorldVertPS Input) : COLOR0
+float4 PSWorldLuma (PSWorldVert Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
 	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0);
@@ -520,7 +556,7 @@ float4 PSWorldLuma (WorldVertPS Input) : COLOR0
 }
 
 
-float4 PSWorldLumaAlpha (WorldVertPS Input) : COLOR0
+float4 PSWorldLumaAlpha (PSWorldVert Input) : COLOR0
 {
 	float4 texcolor = tex2D (tmu1Sampler, Input.Tex0);
 	float4 fullbright = tex2D (tmu2Sampler, Input.Tex0);
@@ -537,9 +573,9 @@ float4 PSWorldLumaAlpha (WorldVertPS Input) : COLOR0
 }
 
 
-WorldVertPS VSWorldCommon (WorldVert Input)
+PSWorldVert VSWorldCommon (VSWorldVert Input)
 {
-	WorldVertPS Output;
+	PSWorldVert Output;
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
@@ -560,7 +596,19 @@ SKY
 ====================
 */
 
-float4 SkyWarpPS (VertSkyInput Input) : COLOR0
+struct PSSkyVert
+{
+	float4 Position : POSITION0;
+	float3 Texcoord : TEXCOORD0;
+};
+
+struct VSSkyVert
+{
+	float4 Position : POSITION0;
+};
+
+
+float4 SkyWarpPS (PSSkyVert Input) : COLOR0
 {
 	// same as classic Q1 warp but done per-pixel on the GPU instead
 	Input.Texcoord = mul (Input.Texcoord, 6 * 63 / length (Input.Texcoord));
@@ -579,9 +627,9 @@ float4 SkyWarpPS (VertSkyInput Input) : COLOR0
 }
 
 
-VertSkyInput SkyWarpVS (VertPositionOnly Input)
+PSSkyVert SkyWarpVS (VSSkyVert Input)
 {
-	VertSkyInput Output;
+	PSSkyVert Output;
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, WorldMatrix);
@@ -593,20 +641,7 @@ VertSkyInput SkyWarpVS (VertPositionOnly Input)
 }
 
 
-VertSkyInput SkyBoxVS (VertPositionOnly Input)
-{
-	VertSkyInput Output;
-
-	// this is friendlier for preshaders
-	Output.Position = mul (Input.Position, WorldMatrix);
-
-	// use the untranslated input position as the output texcoord, shift by r_origin
-	Output.Texcoord = Input.Position.xyz - r_origin;
-	return (Output);
-}
-
-
-float4 SkyBoxPS (VertSkyInput Input) : COLOR0
+float4 SkyBoxPS (PSSkyVert Input) : COLOR0
 {
 	float4 color = texCUBE (cubeSampler, Input.Texcoord);
 	color.a = 1.0;
@@ -617,6 +652,25 @@ float4 SkyBoxPS (VertSkyInput Input) : COLOR0
 #endif
 }
 
+
+PSSkyVert SkyBoxVS (VSSkyVert Input)
+{
+	PSSkyVert Output;
+
+	// this is friendlier for preshaders
+	Output.Position = mul (Input.Position, WorldMatrix);
+
+	// use the untranslated input position as the output texcoord, shift by r_origin
+	Output.Texcoord = Input.Position.xyz - r_origin;
+	return (Output);
+}
+
+
+/*
+====================
+FX CRAP
+====================
+*/
 
 technique MasterRefresh
 {
@@ -702,6 +756,12 @@ technique MasterRefresh
 	{
 		VertexShader = compile vs_2_0 VSParticlesInstanced ();
 		PixelShader = compile ps_2_0 PSParticles ();
+	}
+	
+	pass FX_PASS_UNDERWATER
+	{
+		VertexShader = compile vs_2_0 VSDrawUnderwater ();
+		PixelShader = compile ps_2_0 PSDrawUnderwater ();
 	}
 }
 

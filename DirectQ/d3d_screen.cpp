@@ -397,7 +397,6 @@ static void SCR_CalcRefdef (void)
 	r_refdef.vrect.height = vid.height = (d3d_CurrentMode.Height - conheight) * conscale->value + conheight;
 
 	if (r_refdef.vrect.height > vid.height - sb_lines) r_refdef.vrect.height = vid.height - sb_lines;
-
 	if (r_refdef.vrect.height > vid.height) r_refdef.vrect.height = vid.height;
 
 	// always
@@ -678,106 +677,113 @@ void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int 
 
 
 // d3dx doesn't support tga writes (BASTARDS) so we made our own
-void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
+void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fmt)
 {
-	D3DSURFACE_DESC surfdesc;
-	D3DLOCKED_RECT lockrect;
-	LPDIRECT3DSURFACE9 surf;
-
-	// get the surface description
-	hr = rts->GetDesc (&surfdesc);
-
-	if (FAILED (hr))
+	if (fmt == D3DFMT_X8R8G8B8 || fmt == D3DFMT_A8R8G8B8)
 	{
-		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to get backbuffer description\n");
-		return;
-	}
+		D3DSURFACE_DESC surfdesc;
+		D3DLOCKED_RECT lockrect;
+		LPDIRECT3DSURFACE9 surf;
 
-	// create a surface to copy to (ensure the dest surface is the correct format!!!)
-	hr = d3d_Device->CreateOffscreenPlainSurface
-	(
-		surfdesc.Width,
-		surfdesc.Height,
-		D3DFMT_X8R8G8B8,
-		D3DPOOL_SYSTEMMEM,
-		&surf,
-		NULL
-	);
+		// get the surface description
+		hr = rts->GetDesc (&surfdesc);
 
-	if (FAILED (hr))
-	{
-		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to create a surface to copy to\n");
-		return;
-	}
+		if (FAILED (hr))
+		{
+			Con_Printf ("SCR_WriteSurfaceToTGA: Failed to get backbuffer description\n");
+			return;
+		}
 
-	// copy from the rendertarget to system memory
-	hr = D3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
+		// create a surface to copy to (ensure the dest surface is the correct format!!!)
+		hr = d3d_Device->CreateOffscreenPlainSurface
+		(
+			surfdesc.Width,
+			surfdesc.Height,
+			fmt,
+			D3DPOOL_SYSTEMMEM,
+			&surf,
+			NULL
+		);
 
-	if (FAILED (hr))
-	{
-		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to copy backbuffer data\n");
+		if (FAILED (hr))
+		{
+			Con_Printf ("SCR_WriteSurfaceToTGA: Failed to create a surface to copy to\n");
+			return;
+		}
+
+		// copy from the rendertarget to system memory
+		hr = D3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
+
+		if (FAILED (hr))
+		{
+			Con_Printf ("SCR_WriteSurfaceToTGA: Failed to copy backbuffer data\n");
+			surf->Release ();
+			return;
+		}
+
+		// lock the surface rect
+		hr = surf->LockRect (&lockrect, NULL, 0);
+
+		if (FAILED (hr))
+		{
+			Con_Printf ("SCR_WriteSurfaceToTGA: Failed to access backbuffer data\n");
+			surf->Release ();
+			return;
+		}
+
+		// try to open it
+		FILE *f = fopen (filename, "wb");
+
+		// didn't work
+		if (!f) return;
+
+		// allocate space for the header
+		byte buffer[18];
+		memset (buffer, 0, 18);
+
+		int fmtbits = (fmt == D3DFMT_A8R8G8B8) ? 32 : 24;
+		int fmtbytes = fmtbits / 8;
+
+		// compose the header
+		buffer[2] = 2;
+		buffer[12] = surfdesc.Width & 255;
+		buffer[13] = surfdesc.Width >> 8;
+		buffer[14] = surfdesc.Height & 255;
+		buffer[15] = surfdesc.Height >> 8;
+		buffer[16] = fmtbits;
+		buffer[17] = 0x20;
+
+		// write out the header
+		fwrite (buffer, 18, 1, f);
+
+		// do each RGB triplet individually as we want to reduce from 32 bit to 24 bit
+		// (can't create with D3DFMT_R8G8B8 so this is necessary even if suboptimal)
+		for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++)
+		{
+			// retrieve the data
+			byte *data = (byte *) &((unsigned *) lockrect.pBits)[i];
+
+			// write it out
+			fwrite (data, fmtbytes, 1, f);
+		}
+
+		// unlock it
+		surf->UnlockRect ();
 		surf->Release ();
-		return;
+
+		// done
+		fclose (f);
 	}
-
-	// lock the surface rect
-	hr = surf->LockRect (&lockrect, NULL, 0);
-
-	if (FAILED (hr))
-	{
-		Con_Printf ("SCR_WriteSurfaceToTGA: Failed to access backbuffer data\n");
-		surf->Release ();
-		return;
-	}
-
-	// try to open it
-	FILE *f = fopen (filename, "wb");
-
-	// didn't work
-	if (!f) return;
-
-	// allocate space for the header
-	byte buffer[18];
-	memset (buffer, 0, 18);
-
-	// compose the header
-	buffer[2] = 2;
-	buffer[12] = surfdesc.Width & 255;
-	buffer[13] = surfdesc.Width >> 8;
-	buffer[14] = surfdesc.Height & 255;
-	buffer[15] = surfdesc.Height >> 8;
-	buffer[16] = 24;
-	buffer[17] = 0x20;
-
-	// write out the header
-	fwrite (buffer, 18, 1, f);
-
-	// do each RGB triplet individually as we want to reduce from 32 bit to 24 bit
-	// (can't create with D3DFMT_R8G8B8 so this is necessary even if suboptimal)
-	for (int i = 0; i < surfdesc.Width * surfdesc.Height; i++)
-	{
-		// retrieve the data
-		byte *data = (byte *) &((unsigned *) lockrect.pBits)[i];
-
-		// write it out
-		fwrite (data, 3, 1, f);
-	}
-
-	// unlock it
-	surf->UnlockRect ();
-	surf->Release ();
-
-	// done
-	fclose (f);
+	else Con_Printf ("SCR_WriteSurfaceToTGA : invalid surface format %s\n", D3DTypeToString (fmt));
 }
 
 
-void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts)
+void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts, D3DFORMAT fmt)
 {
 	LPDIRECT3DSURFACE9 texsurf;
 	rts->GetSurfaceLevel (0, &texsurf);
 
-	SCR_WriteSurfaceToTGA (filename, texsurf);
+	SCR_WriteSurfaceToTGA (filename, texsurf, fmt);
 	texsurf->Release ();
 }
 
@@ -867,7 +873,7 @@ void SCR_ScreenShot_f (void)
 	// write to file
 	// d3dx doesn't support tga writes (BASTARDS) so we made our own
 	if (ssfmt == D3DXIFF_TGA)
-		SCR_WriteSurfaceToTGA (checkname, Surf);
+		SCR_WriteSurfaceToTGA (checkname, Surf, D3DFMT_X8R8G8B8);
 	else D3DXSaveSurfaceToFileA (checkname, ssfmt, Surf, NULL, NULL);
 
 	// not releasing is a memory leak!!!
@@ -1026,7 +1032,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	}
 
 	// save the surface out to file (use TGA)
-	SCR_WriteSurfaceToTGA (workingname, d3d_MapshotFinalSurf);
+	SCR_WriteSurfaceToTGA (workingname, d3d_MapshotFinalSurf, D3DFMT_X8R8G8B8);
 
 	// reset to the original render target
 	hr = d3d_Device->SetRenderTarget (0, d3d_CurrentRenderTarget);

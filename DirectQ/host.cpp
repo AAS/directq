@@ -671,6 +671,12 @@ void Host_Frame (DWORD time)
 	// attempt to compensate for integer division by rounding to the nearest
 	DWORD dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
 
+	// lock FPS to 72 if we're on a local server or if we're recording a demo
+#ifndef _DEBUG
+	if (sv.active || cls.demorecording)
+		dwLockTime = (DWORD) ((1000.0f / 72.0f) + 0.5f);
+#endif
+
 	if (!cls.timedemo && (dwRealTime - dwOldRealTime) < dwLockTime)
 	{
 		// JPG - if we're not doing a frame, still check for lagged moves to send

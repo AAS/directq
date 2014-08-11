@@ -28,6 +28,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // RMQ
 #define PROTOCOL_VERSION_RMQ	999
 
+// these protocols are read-only on the client and exist for the sole purpose of playing demos
+#define	PROTOCOL_VERSION_BJP	10000	// Extended protocol (models > 256 etc), hopefully no conflict
+#define	PROTOCOL_VERSION_BJP2	10001	// Extended protocol (sounds > 256), problems with Marcher
+#define	PROTOCOL_VERSION_BJP3	10002	// Extended protocol (sounds > 256), more compatible, but less functional
+
 
 // protocol flags
 #define PRFL_SHORTANGLE         (1 << 1)

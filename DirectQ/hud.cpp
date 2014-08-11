@@ -1576,6 +1576,8 @@ void HUD_DrawOSDItems (void)
 
 void HUD_DrawHUD (void)
 {
+	static int old_hud = -1;
+
 	// no HUD conditions
 	if (scr_con_current == vid.height) return;
 	if (scr_viewsize.value > 111) return;
@@ -1587,6 +1589,13 @@ void HUD_DrawHUD (void)
 	// bound sbar
 	if (cl_sbar.integer < 0) Cvar_Set (&cl_sbar, "0");
 	if (cl_sbar.integer > 3) Cvar_Set (&cl_sbar, "3");
+
+	if (old_hud != cl_sbar.integer)
+	{
+		// does this duplicate a test in d3d_screen?
+		old_hud = cl_sbar.integer;
+		HUD_Changed ();
+	}
 
 	// add crosshair drawing here because it's drawn over the main view
 	HUD_DrawCrossHair (scr_vrect.x + scr_vrect.width / 2, scr_vrect.y + scr_vrect.height / 2);

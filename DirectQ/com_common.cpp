@@ -423,7 +423,6 @@ bool COM_FindExtension (char *filename, char *ext)
 	for (int i = 0;; i++)
 	{
 		if (!filename[i]) break;
-
 		if (!stricmp (&filename[i], ext)) return true;
 	}
 
@@ -436,14 +435,12 @@ bool COM_StringContains (char *str1, char *str2)
 {
 	// sanity check args
 	if (!str1) return false;
-
 	if (!str2) return false;
 
 	// OK, perf-wise it sucks, but - hey! - it doesn't really matter for the circumstances it's used in.
 	for (int i = 0;; i++)
 	{
 		if (!str1[i]) break;
-
 		if (!strnicmp (&str1[i], str2, strlen (str2))) return true;
 	}
 

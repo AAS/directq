@@ -35,6 +35,8 @@ int		ramp3[] = {0x6d, 0x6b, 6, 5, 4, 3, -1, -1, -1, -1, -1};
 
 // default particle texture
 LPDIRECT3DTEXTURE9 particledottexture = NULL;
+LPDIRECT3DTEXTURE9 particlesquaretexture = NULL;
+extern cvar_t r_particlestyle;
 
 int	r_numparticles;
 int r_numallocations;
@@ -182,6 +184,11 @@ particle_t *R_NewParticle (particle_type_t *pt)
 
 		// set default drawing parms (may be overwritten as desired)
 		memcpy (p, &r_defaultparticle, sizeof (particle_t));
+
+		// set the correct texture
+		if (r_particlestyle.integer)
+			p->tex = particlesquaretexture;
+		else p->tex = particledottexture;
 
 		// link it in
 		p->next = pt->particles;

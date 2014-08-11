@@ -28,10 +28,9 @@ void D3DMain_CreateBuffers (void);
 extern LPDIRECT3DINDEXBUFFER9 d3d_MainIBO;
 
 
-cvar_t r_newparticles ("r_newparticles", "0", CVAR_ARCHIVE);
 cvar_t r_particlesize ("r_particlesize", "1", CVAR_ARCHIVE);
 cvar_t r_drawparticles ("r_drawparticles", "1", CVAR_ARCHIVE);
-
+cvar_t r_particlestyle ("r_particlestyle", "0", CVAR_ARCHIVE);
 
 #pragma pack (pop, 1)
 
@@ -131,18 +130,7 @@ void D3DPart_CreateBuffers (void)
 		if (!d3d_PartVBOStream0)
 		{
 			// we only need base vertexes for one instance with instancing
-			hr = d3d_Device->CreateVertexBuffer
-			(
-				4 * sizeof (partvertinstanced0_t),
-				D3DUSAGE_WRITEONLY,
-				0,
-				D3DPOOL_DEFAULT,
-				&d3d_PartVBOStream0,
-				NULL
-			);
-
-			if (FAILED (hr)) Sys_Error ("D3DPart_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
-
+			D3DMain_CreateVertexBuffer (4 * sizeof (partvertinstanced0_t), D3DUSAGE_WRITEONLY, &d3d_PartVBOStream0);
 			partvertinstanced0_t *verts = NULL;
 
 			hr = d3d_PartVBOStream0->Lock (0, 0, (void **) &verts, 0);
@@ -169,18 +157,7 @@ void D3DPart_CreateBuffers (void)
 		if (!d3d_PartVBOStream1)
 		{
 			// each full quad is represented by a single vertex in this VB and it contains the properties that are unique to that quad
-			hr = d3d_Device->CreateVertexBuffer
-			(
-				MAX_PART_QUADS * sizeof (partvertinstanced1_t),
-				D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-				0,
-				D3DPOOL_DEFAULT,
-				&d3d_PartVBOStream1,
-				NULL
-			);
-
-			if (FAILED (hr)) Sys_Error ("D3DPart_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
-
+			D3DMain_CreateVertexBuffer (MAX_PART_QUADS * sizeof (partvertinstanced1_t), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &d3d_PartVBOStream1);
 			D3D_PrelockVertexBuffer (d3d_PartVBOStream1);
 			d3d_PartState.TotalVertexes = 0;
 			d3d_PartState.TotalIndexes = 0;
@@ -208,18 +185,7 @@ void D3DPart_CreateBuffers (void)
 	{
 		if (!d3d_PartVBOStream0)
 		{
-			hr = d3d_Device->CreateVertexBuffer
-			(
-				MAX_PART_VERTEXES * sizeof (partvertstream0_t),
-				D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-				0,
-				D3DPOOL_DEFAULT,
-				&d3d_PartVBOStream0,
-				NULL
-			);
-
-			if (FAILED (hr)) Sys_Error ("D3DPart_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
-
+			D3DMain_CreateVertexBuffer (MAX_PART_VERTEXES * sizeof (partvertstream0_t), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &d3d_PartVBOStream0);
 			D3D_PrelockVertexBuffer (d3d_PartVBOStream0);
 			d3d_PartState.TotalVertexes = 0;
 			d3d_PartState.TotalIndexes = 0;
@@ -228,18 +194,7 @@ void D3DPart_CreateBuffers (void)
 
 		if (!d3d_PartVBOStream1)
 		{
-			hr = d3d_Device->CreateVertexBuffer
-			(
-				MAX_PART_VERTEXES * sizeof (partvertstream1_t),
-				D3DUSAGE_WRITEONLY,
-				0,
-				D3DPOOL_DEFAULT,
-				&d3d_PartVBOStream1,
-				NULL
-			);
-
-			if (FAILED (hr)) Sys_Error ("D3DPart_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
-
+			D3DMain_CreateVertexBuffer (MAX_PART_VERTEXES * sizeof (partvertstream1_t), D3DUSAGE_WRITEONLY, &d3d_PartVBOStream1);
 			partvertstream1_t *st = NULL;
 
 			hr = d3d_PartVBOStream1->Lock (0, 0, (void **) &st, 0);
@@ -278,18 +233,7 @@ void D3DPart_CreateBuffers (void)
 
 	if (!d3d_SpriteVBO)
 	{
-		hr = d3d_Device->CreateVertexBuffer
-		(
-			MAX_SPRITE_VERTEXES * sizeof (spritevert_t),
-			D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-			0,
-			D3DPOOL_DEFAULT,
-			&d3d_SpriteVBO,
-			NULL
-		);
-
-		if (FAILED (hr)) Sys_Error ("D3DPart_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
-
+		D3DMain_CreateVertexBuffer (MAX_SPRITE_VERTEXES * sizeof (spritevert_t), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &d3d_SpriteVBO);
 		D3D_PrelockVertexBuffer (d3d_SpriteVBO);
 		d3d_SpriteState.TotalVertexes = 0;
 		d3d_SpriteState.TotalIndexes = 0;

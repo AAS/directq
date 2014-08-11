@@ -23,6 +23,78 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
+#pragma pack (push, 1)
+typedef struct q2wal_s
+{
+	char		name[32];
+	unsigned	width, height;
+	unsigned	offsets[MIPLEVELS];		// four mip maps stored
+	char		animname[32];			// next frame in animation chain
+	int			flags;
+	int			contents;
+	int			value;
+} q2wal_t;
+#pragma pack (pop)
+
+
+unsigned int q2palette_hc[256] =
+{
+	// hard-coded version of the q2 palette for .wal loading; this will break if a .wal uses anything other than the standard q2 palette
+	-16777216, -15790321, -14737633, -13684945, -12632257, -11842741, -10790053, -9737365, -8684677, -7631989, -6579301, -5526613, -4473925, -3421237, -2368549, 
+	-1315861, -10269917, -10796257, -11321569, -11584741, -12110053, -12636393, -12899561, -13424877, -13688045, -13951213, -14214385, -14477553, -15002869, 
+	-15266037, -15528185, -15791353, -10526865, -10790041, -10792097, -11055269, -11318445, -11581621, -12107965, -12633285, -12896457, -13422801, -13685973, 
+	-14211289, -14474461, -15000805, -15263977, -15527149, -7375021, -8690877, -9217221, -10006737, -3172533, -5801157, -7641297, -9481433, -1335513, -3437789, 
+	-5277921, -7118053, -8958185, -10798321, -12638453, -14477561, -5817557, -6344925, -6870245, -7657709, -8446193, -9234677, -10021113, -11070720, -11858176, 
+	-12382464, -12906752, -13432064, -13956352, -14480640, -15005952, -15530240, -8691893, -9218237, -9743553, -10006725, -10533065, -11058381, -11321553, 
+	-11847893, -12373209, -12636381, -13162725, -13688041, -14214381, -14739697, -15266037, -15791353, -9487593, -10537193, -11325673, -12375273, -13163757, 
+	-14214385, -15002869, -15791353, -5022897, -4228241, -3433581, -2638921, -3418145, -4995117, -6309949, -7886921, -9201753, -10778725, -12093557, -13670529, 
+	-15248529, -15512729, -15776933, -16040109, -16304309, -16306369, -16308429, -16769237, -16771297, -16773357, -16775413, -16777216, -7645353, -8171697, 
+	-8698041, -9223357, -9749701, -10276045, -10801361, -11064533, -11853021, -12640481, -13427941, -13954285, -14741745, -15529205, -16054521, -16777216, 
+	-6840453, -7366797, -7894165, -8420509, -8946849, -9211049, -9737393, -10263737, -10790077, -11579589, -12369101, -13158613, -13684957, -14474469, -15263981, 
+	-15790325, -6337729, -7126217, -7652561, -8440025, -8966365, -9753829, -10280169, -11067629, -11592945, -12380405, -13167861, -13955321, -14742777, -15268096, 
+	-16056320, -16777216, -8946737, -9473085, -9999433, -10263641, -10789989, -11315313, -11841665, -12105869, -12632217, -13158569, -13684917, -14211265, -14475473, 
+	-15001821, -15528169, -16054521, -6575237, -7364753, -7891101, -8680617, -9206965, -9996477, -10522821, -11049165, -11838681, -12628197, -13155565, -13681909, 
+	-14471417, -14998784, -15526144, -16052480, -16711936, -14424305, -12594405, -11289817, -10508497, -10514637, -10519757, -1, -45, -89, -129, -173, -217, -5345, 
+	-10473, -16625, -21753, -27904, -1081600, -1873152, -2926848, -3717376, -4769024, -5559552, -6611200, -7399680, -8450304, -9238784, -10551296, -12124160, 
+	-13697024, -15007744, -1114112, -13158401, -65536, -16776961, -13948125, -15000809, -15527153, -1337473, -3968173, -6334669, -8700133, -1322041, -3691621, 
+	-5797001, -7902377, 0
+};
+
+byte *D3D_LoadWAL (byte *f, int *loadsize)
+{
+	q2wal_t *walheader = (q2wal_t *) f;
+	byte *mip0data = (byte *) walheader + walheader->offsets[0];
+	byte *image_rgba = (byte *) MainZone->Alloc (walheader->width * walheader->height * 4 + 18);
+
+	if (!image_rgba)
+	{
+		MainZone->Free (f);
+		return NULL;
+	}
+
+	unsigned int *pbuf = (unsigned int *) (image_rgba + 18);
+
+	for (int i = 0; i < walheader->width * walheader->height; i++)
+		pbuf[i] = q2palette_hc[mip0data[i]];
+
+	// now fill in our fake tga header
+	memset (image_rgba, 0, 18);
+	image_rgba[2] = 2;
+	image_rgba[12] = walheader->width & 255;
+	image_rgba[13] = walheader->width >> 8;
+	image_rgba[14] = walheader->height & 255;
+	image_rgba[15] = walheader->height >> 8;
+	image_rgba[16] = 32;
+	image_rgba[17] = 0x20;
+
+	// need to modify the len also
+	loadsize[0] = walheader->width * walheader->height * 4 + 18;
+
+	MainZone->Free (f);
+	return image_rgba;
+}
+
+
 D3DFORMAT D3D_GetTextureFormat (int flags);
 
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
@@ -54,7 +126,7 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 
 
 // types we're going to support - NOTE - link MUST be first in this list!
-char *TextureExtensions[] = {"link", "dds", "tga", "bmp", "png", "jpg", "pcx", NULL};
+char *TextureExtensions[] = {"link", "dds", "tga", "bmp", "png", "jpg", "pcx", "wal", NULL};
 
 typedef struct pcx_s
 {
@@ -131,7 +203,6 @@ byte *D3D_LoadPCX (byte *f, int *loadsize)
 				dataByte = *fin++;
 
 				if (x2 > image_width) x2 = image_width;
-
 				while (x < x2) a[x++] = dataByte;
 			}
 			else a[x++] = dataByte;
@@ -458,7 +529,6 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 		for (int i = 0;; i++)
 		{
 			if (!texname[i]) break;
-
 			if (texname[i] == '/') texname[i] = '\\';
 		}
 	}
@@ -478,7 +548,6 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 
 			// alias and sprite textures don't null term at the extension
 			if (flags & IMAGE_ALIAS) break;
-
 			if (flags & IMAGE_SPRITE) break;
 
 			// other types do
@@ -615,7 +684,6 @@ ext_tex_load:;
 		// now go round again to load it for real
 		goto ext_tex_load;
 #else
-
 		for (int cc = 0;; cc++)
 		{
 			char fc = COM_FReadChar (fh);
@@ -650,6 +718,11 @@ ext_tex_load:;
 	// D3DX can't load a PCX so we need our own loader
 	if (!strcmp (texext, ".pcx"))
 		if (!(filebuf = D3D_LoadPCX (filebuf, &filelen)))
+			return NULL;
+
+	// ditto for .wal
+	if (!strcmp (texext, ".wal"))
+		if (!(filebuf = D3D_LoadWAL (filebuf, &filelen)))
 			return NULL;
 
 	// attempt to load it (this will generate miplevels for us too)
@@ -689,23 +762,23 @@ ext_tex_load:;
 void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags)
 {
 	hr = D3DXCreateTextureFromResourceExA
-		 (
-			 d3d_Device,
-			 NULL,
-			 MAKEINTRESOURCE (ResourceID),
-			 D3DX_DEFAULT,
-			 D3DX_DEFAULT,
-			 (flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
-			 0,
-			 D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
-			 D3DPOOL_MANAGED,
-			 D3DX_FILTER_LINEAR,
-			 D3DX_FILTER_BOX,
-			 0,
-			 NULL,
-			 NULL,
-			 tex
-		 );
+	(
+		d3d_Device,
+		NULL,
+		MAKEINTRESOURCE (ResourceID),
+		D3DX_DEFAULT,
+		D3DX_DEFAULT,
+		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+		0,
+		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+		D3DPOOL_MANAGED,
+		D3DX_FILTER_LINEAR,
+		D3DX_FILTER_BOX,
+		0,
+		NULL,
+		NULL,
+		tex
+	);
 
 	if (FAILED (hr))
 	{
@@ -714,23 +787,23 @@ void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceI
 		int reslen = Sys_LoadResourceData (ResourceID, (void **) &resdata);
 
 		hr = D3DXCreateTextureFromFileInMemoryEx
-			 (
-				 d3d_Device,
-				 resdata,
-				 reslen,
-				 D3DX_DEFAULT,
-				 D3DX_DEFAULT,
-				 (flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
-				 0,
-				 D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
-				 D3DPOOL_MANAGED,
-				 D3DX_FILTER_LINEAR,
-				 D3DX_FILTER_BOX,
-				 0,
-				 NULL,
-				 NULL,
-				 tex
-			 );
+		(
+			d3d_Device,
+			resdata,
+			reslen,
+			D3DX_DEFAULT,
+			D3DX_DEFAULT,
+			(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+			0,
+			D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+			D3DPOOL_MANAGED,
+			D3DX_FILTER_LINEAR,
+			D3DX_FILTER_BOX,
+			0,
+			NULL,
+			NULL,
+			tex
+		);
 
 		if (FAILED (hr))
 		{

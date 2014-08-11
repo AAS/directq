@@ -190,6 +190,7 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 		case D3D_ALPHATYPE_WATERWARP:
 			D3DWarp_TakeDownTurbState ();
 			D3DAlpha_Cull ();
+			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
 			break;
 
@@ -216,6 +217,7 @@ void D3DAlpha_StageChange (d3d_alphalist_t *oldone, d3d_alphalist_t *newone)
 		case D3D_ALPHATYPE_WATERWARP:
 			D3DWarp_SetupTurbState ();
 			D3DAlpha_NoCull ();
+			D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 			break;
 
 		case D3D_ALPHATYPE_PARTICLE:

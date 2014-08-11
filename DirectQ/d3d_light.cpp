@@ -705,8 +705,7 @@ bool R_RecursiveLightPoint (vec3_t color, mnode_t *node, vec3_t start, vec3_t en
 	float		front, back, frac;
 	vec3_t		mid;
 
-loc0:
-
+loc0:;
 	// didn't hit anything
 	if (node->contents < 0) return false;
 
@@ -755,7 +754,6 @@ loc0:
 		{
 			// no lightmaps
 			if (surf->flags & SURF_DRAWSKY) continue;
-
 			if (surf->flags & SURF_DRAWTURB) continue;
 
 			ds = (int) ((float) DotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
@@ -775,7 +773,6 @@ loc0:
 				// LordHavoc: enhanced to interpolate lighting
 				byte *lightmap;
 				int maps,
-					line3,
 					dsfrac = ds & 15,
 					dtfrac = dt & 15,
 					r00 = 0, g00 = 0, b00 = 0,
@@ -783,16 +780,15 @@ loc0:
 					r10 = 0, g10 = 0, b10 = 0,
 					r11 = 0, g11 = 0, b11 = 0;
 				float scale;
-
-				line3 = ((surf->extents[0] >> 4) + 1) * 3;
+				int line3 = ((surf->extents[0] >> 4) + 1) * 3;
 
 				// LordHavoc: *3 for color
 				lightmap = surf->samples + ((dt >> 4) * ((surf->extents[0] >> 4) + 1) + (ds >> 4)) * 3;
 
 				for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
 				{
-					// consistent scale
-					scale = (float) d_lightstylevalue[surf->styles[maps]] * 1.0 / 264.0f;
+					// keep this consistent with BSP lighting
+					scale = (float) d_lightstylevalue[surf->styles[maps]];
 
 					r00 += (float) lightmap[0] * scale;
 					g00 += (float) lightmap[1] * scale;
@@ -814,14 +810,10 @@ loc0:
 					lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3;
 				}
 
-				color[0] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) -
-													((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
-
-				color[1] += (float) ((int) ((((((((g11 - g10) * dsfrac) >> 4) + g10) -
-													((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)));
-
-				color[2] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) -
-													((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
+				// somebody's just taking the piss here...
+				color[0] += (float) ((int) ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)));
+				color[1] += (float) ((int) ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)));
+				color[2] += (float) ((int) ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)));
 			}
 
 			// success
@@ -856,8 +848,8 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 
 	if (!cl.worldmodel->brushhdr->lightdata)
 	{
-		// no light data
-		c[0] = c[1] = c[2] = 255.0f;
+		// no light data (consistency with world)
+		c[0] = c[1] = c[2] = (256 >> r_overbright.integer);
 		return;
 	}
 
@@ -897,17 +889,9 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 		c[2] += r_ambient.value;
 	}
 
-	// minimum light values (should these be done before or after dynamics???)
-	if (e == &cl.viewent) R_MinimumLight (c, 72);
-	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, 24);
-	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, 72);
-	if (e->model->type == mod_brush) R_MinimumLight (c, 18);
-
 	// add dynamic lights
 	if (r_dynamic.value)
 	{
-		float dlscale = (1.0f / 255.0f) * r_dynamic.value;
-
 		for (int lnum = 0; lnum < MAX_DLIGHTS; lnum++)
 		{
 			if (cl_dlights[lnum].die >= cl.time)
@@ -918,13 +902,26 @@ void D3DLight_LightPoint (entity_t *e, float *c)
 
 				if (add > 0)
 				{
-					c[0] += (add * cl_dlights[lnum].rgb[0]) * dlscale;
-					c[1] += (add * cl_dlights[lnum].rgb[1]) * dlscale;
-					c[2] += (add * cl_dlights[lnum].rgb[2]) * dlscale;
+					c[0] += (add * cl_dlights[lnum].rgb[0]) * r_dynamic.value;
+					c[1] += (add * cl_dlights[lnum].rgb[1]) * r_dynamic.value;
+					c[2] += (add * cl_dlights[lnum].rgb[2]) * r_dynamic.value;
 				}
 			}
 		}
 	}
+
+	// keep MDL lighting consistent with the world
+	for (int i = 0; i < 3; i++)
+	{
+		int rgb = ((int) (c[i] + 0.5f)) >> (7 + r_overbright.integer);
+		c[i] = (float) BYTE_CLAMP (rgb);
+	}
+
+	// minimum light values (should these be done before or after dynamics???)
+	if (e == &cl.viewent) R_MinimumLight (c, 72);
+	if (e->entnum >= 1 && e->entnum <= cl.maxclients) R_MinimumLight (c, 24);
+	if (e->model->flags & EF_ROTATE) R_MinimumLight (c, 72);
+	if (e->model->type == mod_brush) R_MinimumLight (c, 18);
 
 	// clamp minimum to same level as software Quake uses (5)
 	// R_MinimumLight (c, 15);

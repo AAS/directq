@@ -41,7 +41,8 @@ void D3DSky_LoadSkyBox (char *basename, bool feedback);
 
 LPDIRECT3DTEXTURE9 r_notexture = NULL;
 extern LPDIRECT3DTEXTURE9 crosshairtexture;
-extern LPDIRECT3DTEXTURE9 yahtexture;
+LPDIRECT3DTEXTURE9 yahtexture;
+extern LPDIRECT3DTEXTURE9 d3d_WaterWarpTexture;
 
 
 /*
@@ -71,13 +72,18 @@ void R_InitTextures (void)
 
 // textures to load from resources
 extern LPDIRECT3DTEXTURE9 particledottexture;
+extern LPDIRECT3DTEXTURE9 particlesquaretexture;
 
 void Draw_FreeCrosshairs (void);
 
 void R_ReleaseResourceTextures (void)
 {
+	SAFE_RELEASE (particlesquaretexture);
 	SAFE_RELEASE (particledottexture);
 	SAFE_RELEASE (crosshairtexture);
+	SAFE_RELEASE (d3d_WaterWarpTexture);
+	SAFE_RELEASE (yahtexture);
+	SAFE_RELEASE (r_notexture);
 
 	// and replacement crosshairs too
 	Draw_FreeCrosshairs ();
@@ -87,9 +93,14 @@ void R_ReleaseResourceTextures (void)
 void R_InitResourceTextures (void)
 {
 	// load any textures contained in exe resources
-	D3D_LoadResourceTexture ("particle", &particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture ("particledot", &particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
 	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, 0);
 	D3D_LoadResourceTexture ("YAH", &yahtexture, IDR_YOUAREHERE, 0);
+	D3D_LoadResourceTexture ("UWBLUR", &d3d_WaterWarpTexture, IDR_UWBLUR, 0);
+
+	// because this is just a square we can upload it as a 1x1 texture and save a lot of performance
+	unsigned int squaredata = 0xffffffff;
+	D3D_UploadTexture (&particlesquaretexture, &squaredata, 1, 1, IMAGE_32BIT);
 
 	// load the notexture properly
 	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->width, r_notexture_mip->height, IMAGE_MIPMAP | IMAGE_NOCOMPRESS);

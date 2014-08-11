@@ -17,8 +17,14 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf);
+void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf);
+
 void D3D_PrelockVertexBuffer (LPDIRECT3DVERTEXBUFFER9 vb);
 void D3D_PrelockIndexBuffer (LPDIRECT3DINDEXBUFFER9 ib);
+
+void D3DRTT_BeginScene (void);
+void D3DRTT_EndScene (void);
 
 // palette hackery
 typedef struct palettedef_s
@@ -104,6 +110,7 @@ void D3DHLSL_SetLastLerp (float val);
 #define FX_PASS_WORLD_NOLUMA_ALPHA		11
 #define FX_PASS_WORLD_LUMA_ALPHA		12
 #define FX_PASS_PARTICLES_INSTANCED		13
+#define FX_PASS_UNDERWATER				14
 
 void D3DHLSL_Init (void);
 void D3DHLSL_Shutdown (void);
@@ -360,8 +367,8 @@ typedef struct d3d_ModeDesc_s
 
 bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory);
 
-void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts);
-void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts);
+void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts, D3DFORMAT fmt);
+void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts, D3DFORMAT fmt);
 
 // modulation factors for overbrights; the first is for fixed, the second for HLSL
 extern DWORD D3D_OVERBRIGHT_MODULATE;

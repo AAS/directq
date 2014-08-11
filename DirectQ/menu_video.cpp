@@ -528,7 +528,7 @@ void Menu_VideoBuild (void)
 	menu_Video.AddOption (new CQMenuTitle ("Configure Video Options"));
 
 	menu_Video.AddOption (new CQMenuSpinControl ("Texture Filter", &texfiltermode, &filtermodes[1]));
-	menu_Video.AddOption (new CQMenuSpinControl ("Mipmapping", &mipfiltermode, filtermodes));
+	menu_Video.AddOption (new CQMenuSpinControl ("Mipmap Filter", &mipfiltermode, filtermodes));
 
 	if (d3d_DeviceCaps.MaxAnisotropy > 1)
 	{

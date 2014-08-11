@@ -160,7 +160,6 @@ void Cvar_MakeCompatLayer (void)
 	cvar_t *r_timegraph_compat = new cvar_t ("r_timegraph", "0", CVAR_COMPAT);
 	cvar_t *r_graphheight_compat = new cvar_t ("r_graphheight", "0", CVAR_COMPAT);
 	cvar_t *r_clearcolor_compat = new cvar_t ("r_clearcolor", "0", CVAR_COMPAT);
-	cvar_t *r_waterwarp_compat = new cvar_t ("r_waterwarp", "0", CVAR_COMPAT);
 	cvar_t *r_aliasstats_compat = new cvar_t ("r_polymodelstats", "0", CVAR_COMPAT);
 	cvar_t *r_dspeeds_compat = new cvar_t ("r_dspeeds", "0", CVAR_COMPAT);
 	cvar_t *r_drawflat_compat = new cvar_t ("r_drawflat", "0", CVAR_COMPAT);

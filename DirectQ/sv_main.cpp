@@ -395,6 +395,7 @@ void SV_SendServerinfo (client_t *client)
 	// happens on maps where you do impulse 255 but the map doesn't have a quad
 	for (int i = 1; i < MAX_SOUNDS; i++)
 	{
+		// this is just the first free slot and the items/damage2.wav sound is inserted into it
 		if (!sv.sound_precache[i])
 		{
 			// Con_Printf ("Forcing precache of %s\n", Damage2Hack);
@@ -402,6 +403,7 @@ void SV_SendServerinfo (client_t *client)
 			break;
 		}
 
+		// this catches cases where the sound has already been set up for precaching
 		if (!stricmp (sv.sound_precache[i], Damage2Hack)) break;
 	}
 
@@ -411,6 +413,7 @@ void SV_SendServerinfo (client_t *client)
 	MSG_WriteByte (&client->message, 0);
 
 	// send music
+	// (sent twice - eh???)
 	MSG_WriteByte (&client->message, svc_cdtrack);
 	MSG_WriteByte (&client->message, SVProgs->EdictPointers[0]->v.sounds);
 	MSG_WriteByte (&client->message, SVProgs->EdictPointers[0]->v.sounds);

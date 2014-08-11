@@ -82,18 +82,7 @@ void D3DDraw_CreateBuffers (void)
 {
 	if (!d3d_DrawVBO)
 	{
-		hr = d3d_Device->CreateVertexBuffer
-		(
-			MAX_DRAW_VERTEXES * sizeof (d3d_drawvertex_t),
-			D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-			0,
-			D3DPOOL_DEFAULT,
-			&d3d_DrawVBO,
-			NULL
-		);
-
-		if (FAILED (hr)) Sys_Error ("D3DDraw_CreateBuffers: d3d_Device->CreateVertexBuffer failed");
-
+		D3DMain_CreateVertexBuffer (MAX_DRAW_VERTEXES * sizeof (d3d_drawvertex_t), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, &d3d_DrawVBO);
 		D3D_PrelockVertexBuffer (d3d_DrawVBO);
 		d3d_DrawState.TotalVertexes = 0;
 		d3d_DrawState.TotalIndexes = 0;
@@ -1452,15 +1441,21 @@ void Draw_TileClear (float x, float y, float w, float h)
 void Draw_TileClear (void)
 {
 	extern cvar_t cl_sbar;
+	extern cvar_t scr_centersbar;
 
 	if (cls.state != ca_connected) return;
 	if (cl_sbar.integer) return;
 
-	int width = (vid.width - 320) >> 1;
-	int offset = width + 320;
+	// do it proper for left-aligned HUDs
+	if (scr_centersbar.integer)
+	{
+		int width = (vid.width - 320) >> 1;
+		int offset = width + 320;
 
-	Draw_TileClear (0, vid.height - sb_lines, width, sb_lines);
-	Draw_TileClear (offset, vid.height - sb_lines, width, sb_lines);
+		Draw_TileClear (0, vid.height - sb_lines, width, sb_lines);
+		Draw_TileClear (offset, vid.height - sb_lines, width, sb_lines);
+	}
+	else Draw_TileClear (320, vid.height - sb_lines, vid.width - 320, sb_lines);
 }
 
 
@@ -1579,6 +1574,9 @@ void D3DDraw_Begin2D (void)
 	// alwats switch to a full-sized viewport even if we're drawing nothing so that
 	// IDirect3DDevice9::Clear can do a fast clear in the next frame
 	D3D_SetViewport (0, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 1);
+
+	// end our RTT scene here first
+	D3DRTT_EndScene ();
 
 	D3DMATRIX m;
 

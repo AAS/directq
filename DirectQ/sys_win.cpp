@@ -637,7 +637,7 @@ void AllowAccessibilityShortcutKeys (bool bAllowKeys)
 }
 
 
-void IN_ReadRawInput (HRAWINPUT ri_Handle);
+void D3DVid_ResizeWindow (HWND hWnd);
 
 /* main window procedure */
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
@@ -647,7 +647,10 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	switch (Msg)
 	{
 		// events we want to discard
-	case WM_SIZE: return 0;
+	case WM_SIZE:
+		D3DVid_ResizeWindow (hWnd);
+		return 0;
+
 	case WM_CREATE: return 0;
 	case WM_ERASEBKGND: return 1; // treachery!!! see your MSDN!
 	case WM_SYSCHAR: return 0;

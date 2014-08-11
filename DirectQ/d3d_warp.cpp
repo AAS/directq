@@ -28,6 +28,8 @@ void D3DBrush_FlushSurfaces (void);
 void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent);
 
 
+LPDIRECT3DTEXTURE9 d3d_WaterWarpTexture = NULL;
+
 
 /*
 ==============================================================================================================================
@@ -105,10 +107,13 @@ int previouswarpalpha = -1;
 void D3DWarp_SetupTurbState (void)
 {
 	D3D_SetTextureMipmap (0, d3d_TexFilter, d3d_MipFilter);
-	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
+	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
 
 	D3DBrush_SetBuffers ();
 	D3DHLSL_SetPass (FX_PASS_LIQUID);
+
+	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// warping
 
 	previouswarptexture = NULL;
 	previouswarpalpha = -1;
@@ -233,6 +238,268 @@ void D3DWarp_DrawWaterSurfaces (d3d_modelsurf_t **modelsurfs, int nummodelsurfs)
 
 	// determine if we need to take down state
 	if (stateset) D3DWarp_TakeDownTurbState ();
+}
+
+
+/*
+==============================================================================================================================
+
+		UNDERWATER WARP
+
+==============================================================================================================================
+*/
+
+
+LPDIRECT3DTEXTURE9 d3d_RTTTexture = NULL;
+LPDIRECT3DSURFACE9 d3d_RTTSurface = NULL;
+LPDIRECT3DSURFACE9 d3d_RTTBackBuffer = NULL;
+LPDIRECT3DVERTEXDECLARATION9 d3d_UnderwaterDecl = NULL;
+
+
+typedef struct rttverts_s
+{
+	float xyz[3];
+	D3DCOLOR c;
+	float st1[2];
+	float st2[2];
+} rttverts_t;
+
+
+rttverts_t d3d_RTTVerts[4];
+
+
+void D3DRTT_SetVertex (rttverts_t *dst, float x, float y, float s1, float t1, float s2, float t2)
+{
+	// correct the half-pixel offset
+	dst->xyz[0] = x + 0.5f;
+	dst->xyz[1] = y + 0.5f;
+	dst->xyz[2] = 0;
+
+	dst->st1[0] = s1;
+	dst->st1[1] = t1;
+
+	dst->st2[0] = s2;
+	dst->st2[1] = t2;
+}
+
+
+void D3DRTT_CreateRTTTexture (void)
+{
+	hr = d3d_Device->CreateTexture
+	(
+		d3d_CurrentMode.Width,
+		d3d_CurrentMode.Height,
+		1,
+		D3DUSAGE_RENDERTARGET,
+		D3DFMT_X8R8G8B8,
+		D3DPOOL_DEFAULT,
+		&d3d_RTTTexture,
+		NULL
+	);
+
+	if (FAILED (hr) || !d3d_RTTTexture)
+	{
+		SAFE_RELEASE (d3d_RTTTexture);
+		return;
+	}
+
+	if (!d3d_UnderwaterDecl)
+	{
+		D3DVERTEXELEMENT9 d3d_underwaterlayout[] =
+		{
+			{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+			{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+			{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+			{0, 24, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},
+			D3DDECL_END ()
+		};
+
+		hr = d3d_Device->CreateVertexDeclaration (d3d_underwaterlayout, &d3d_UnderwaterDecl);
+		if (FAILED (hr)) Sys_Error ("D3DRTT_CreateRTTTexture: d3d_Device->CreateVertexDeclaration failed");
+	}
+}
+
+
+void D3DRTT_ReleaseRTTTexture (void)
+{
+	SAFE_RELEASE (d3d_UnderwaterDecl);
+	SAFE_RELEASE (d3d_RTTBackBuffer);
+	SAFE_RELEASE (d3d_RTTSurface);
+	SAFE_RELEASE (d3d_RTTTexture);
+}
+
+
+CD3DDeviceLossHandler d3d_RTTHandler (D3DRTT_ReleaseRTTTexture, D3DRTT_CreateRTTTexture);
+
+
+cvar_t r_waterwarp ("r_waterwarp", 1, CVAR_ARCHIVE);
+cvar_t r_waterwarpspeed ("r_waterwarpspeed", 1.0f, CVAR_ARCHIVE);
+cvar_t r_waterwarpscale ("r_waterwarpscale", 16.0f, CVAR_ARCHIVE);
+cvar_t r_waterwarpfactor ("r_waterwarpfactor", 12.0f, CVAR_ARCHIVE);
+
+
+void D3DRTT_BeginScene (void)
+{
+	// ensure that this fires only if we're actually running a map
+	if (cls.state != ca_connected) return;
+
+	// check if we're underwater first
+	if (r_waterwarp.integer != 666)
+	{
+		if (r_waterwarp.value > 1) return;
+
+		// r_refdef.vieworg is set in V_RenderView so it can be reliably tested here
+		// fixme - only eval this once
+		mleaf_t *viewleaf = Mod_PointInLeaf (r_refdef.vieworg, cl.worldmodel);
+
+		// these content types don't have a warp
+		// we can't check cl.inwater because it's true if partially submerged and it may have some latency from the server
+		if (viewleaf->contents == CONTENTS_EMPTY) return;
+		if (viewleaf->contents == CONTENTS_SOLID) return;
+		if (viewleaf->contents == CONTENTS_SKY) return;
+	}
+
+	// ensure that we can do this
+	if (!d3d_RTTTexture)
+	{
+		// switch to alternate warp
+		Cvar_Set (&r_waterwarp, 2.0f);
+		return;
+	}
+
+	// testing
+	// Con_Printf ("doing rtt\n");
+
+	// store out the original backbuffer
+	d3d_Device->GetRenderTarget (0, &d3d_RTTBackBuffer);
+
+	// switch the render target
+	d3d_RTTTexture->GetSurfaceLevel (0, &d3d_RTTSurface);
+	d3d_Device->SetRenderTarget (0, d3d_RTTSurface);
+}
+
+
+void D3DRTT_EndScene (void)
+{
+	// ensure that we're set up for rendering
+	if (!d3d_RTTBackBuffer) return;
+	if (!d3d_RTTSurface) return;
+
+	// end rendering to the RTT texture
+	d3d_Device->EndScene ();
+
+	// restore the original render target
+	d3d_Device->SetRenderTarget (0, d3d_RTTBackBuffer);
+
+	// release our other objects
+	SAFE_RELEASE (d3d_RTTSurface);
+	SAFE_RELEASE (d3d_RTTBackBuffer);
+
+	// begin rendering on the original render target
+	d3d_Device->BeginScene ();
+
+	// to do - actually draw it here!!!
+	D3DMATRIX m;
+	D3DMatrix_Identity (&m);
+	D3DMatrix_OrthoOffCenterRH (&m, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
+
+	// disable depth testing and writing
+	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
+	D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+
+	// no backface culling
+	D3D_BackfaceCull (D3DCULL_NONE);
+
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP);
+
+	// enable alpha blending (always)
+	D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+	// set up shader for drawing
+	D3DHLSL_SetWorldMatrix (&m);
+
+	D3DHLSL_SetPass (FX_PASS_UNDERWATER);
+	D3DHLSL_SetTexture (0, d3d_RTTTexture);
+	D3DHLSL_SetTexture (1, d3d_WaterWarpTexture);	// edge biasing
+	D3DHLSL_SetTexture (2, d3d_WaterWarpTexture);	// warping
+
+	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (2, D3DTEXF_LINEAR, D3DTEXF_NONE);
+
+	// unbind because we're going to use DPUP here
+	D3D_SetStreamSource (0, NULL, 0, 0);
+	D3D_SetStreamSource (0, NULL, 0, 0);
+	D3D_SetStreamSource (0, NULL, 0, 0);
+	D3D_SetIndices (NULL);
+
+	// default blend for when there is no v_blend
+	DWORD blendcolor = D3DCOLOR_ARGB (0, 255, 255, 255);
+
+	// and add the v_blend if there is one
+	if (v_blend[3])
+	{
+		blendcolor = D3DCOLOR_ARGB
+		(
+			BYTE_CLAMP (v_blend[3]),
+			BYTE_CLAMP (v_blend[0]),
+			BYTE_CLAMP (v_blend[1]),
+			BYTE_CLAMP (v_blend[2])
+		);
+	}
+
+	// figure the sbar height at the active mode scale
+	int sbheight = sb_lines;
+	sbheight *= d3d_CurrentMode.Height;
+	sbheight /= vid.height;
+
+	float th = (float) (d3d_CurrentMode.Height - sbheight) / (float) d3d_CurrentMode.Height;
+
+	// update our RTT verts
+	D3DRTT_SetVertex (&d3d_RTTVerts[0], 0, 0, 0, 0, 0, 0);
+	D3DRTT_SetVertex (&d3d_RTTVerts[1], d3d_CurrentMode.Width, 0, 1, 0, 1, 0);
+	D3DRTT_SetVertex (&d3d_RTTVerts[2], d3d_CurrentMode.Width, d3d_CurrentMode.Height - sbheight, 1, th, 1, 1);
+	D3DRTT_SetVertex (&d3d_RTTVerts[3], 0, d3d_CurrentMode.Height - sbheight, 0, th, 0, 1);
+
+	// set up the correct color for the RTT
+	d3d_RTTVerts[0].c = blendcolor;
+	d3d_RTTVerts[1].c = blendcolor;
+	d3d_RTTVerts[2].c = blendcolor;
+	d3d_RTTVerts[3].c = blendcolor;
+
+	D3DHLSL_SetFloat ("warptime", d3d_RenderDef.time * r_waterwarpspeed.value);
+
+	// prevent division by 0 in the shader
+	if (r_waterwarpscale.value < 1) Cvar_Set (&r_waterwarpscale, 1.0f);
+	if (r_waterwarpfactor.value < 1) Cvar_Set (&r_waterwarpfactor, 1.0f);
+
+	float Scale[3] =
+	{
+		// this is the correct value to divide the rtt texture into squares as sbheight has already been subtracted from
+		// the incoming texcoord
+		r_waterwarpscale.value * (float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height * 0.2f,
+		r_waterwarpscale.value * 0.2f,
+		(r_waterwarpfactor.value / 1000.0f)
+	};
+
+	D3DHLSL_SetFloatArray ("Scale", Scale, 3);
+
+	// ensure that everything is up to date
+	D3D_SetVertexDeclaration (d3d_UnderwaterDecl);
+	D3DHLSL_CheckCommit ();
+
+	// maintaining a VBO for this seems too much like hard work so we won't
+	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, d3d_RTTVerts, sizeof (rttverts_t));
+	d3d_RenderDef.numdrawprim++;
+
+	// disable polyblend because we're going to get it for free with RTT
+	v_blend[3] = 0;
+
+	// ensure that the HUD draws properly
+	HUD_Changed ();
 }
 
 

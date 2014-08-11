@@ -376,9 +376,7 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 	for (int i = 1;; i++)
 	{
 		if (fpath2[i] == 0) break;
-
 		if (fpath2[i] == '/') fpath2[i] = '_';
-
 		if (fpath2[i] == '\\') fpath2[i] = '_';
 	}
 
@@ -709,8 +707,8 @@ int COM_FOpenFile (char *filename, void *hf)
 
 void COM_FCloseFile (void *fh)
 {
-	CloseHandle (* ((HANDLE *) fh));
-	* ((HANDLE *) fh) = INVALID_HANDLE_VALUE;
+	CloseHandle (*((HANDLE *) fh));
+	*((HANDLE *) fh) = INVALID_HANDLE_VALUE;
 }
 
 
@@ -841,11 +839,8 @@ void COM_InitFilesystem (void)
 	// (these are only checked at startup as the player might want to switch them off during gameplay; otherwise
 	// they would be enforced on always)
 	if (COM_CheckParm ("-rogue")) Cvar_Set ("com_rogue", 1);
-
 	if (COM_CheckParm ("-hipnotic")) Cvar_Set ("com_hipnotic", 1);
-
 	if (COM_CheckParm ("-quoth")) Cvar_Set ("com_quoth", 1);
-
 	if (COM_CheckParm ("-nehahra")) Cvar_Set ("com_nehahra", 1);
 
 	// -game <gamedir>

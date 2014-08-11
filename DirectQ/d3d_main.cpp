@@ -22,6 +22,69 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
+void D3DMain_CreateVertexBuffer (UINT length, DWORD usage, LPDIRECT3DVERTEXBUFFER9 *buf)
+{
+	DWORD swprocflag = d3d_GlobalCaps.supportHardwareTandL ? 0 : D3DUSAGE_SOFTWAREPROCESSING;
+
+	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
+	hr = d3d_Device->CreateVertexBuffer (length, usage | swprocflag, 0, D3DPOOL_DEFAULT, buf, NULL);
+	if (SUCCEEDED (hr)) return;
+
+	hr = d3d_Device->CreateVertexBuffer (length, D3DUSAGE_WRITEONLY | swprocflag, 0, D3DPOOL_MANAGED, buf, NULL);
+	if (SUCCEEDED (hr)) return;
+
+	hr = d3d_Device->CreateVertexBuffer (length, swprocflag, 0, D3DPOOL_MANAGED, buf, NULL);
+	if (SUCCEEDED (hr)) return;
+
+	if (!d3d_GlobalCaps.supportHardwareTandL)
+	{
+		hr = d3d_Device->CreateVertexBuffer (length, usage, 0, D3DPOOL_DEFAULT, buf, NULL);
+		if (SUCCEEDED (hr)) return;
+
+		hr = d3d_Device->CreateVertexBuffer (length, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, buf, NULL);
+		if (SUCCEEDED (hr)) return;
+
+		hr = d3d_Device->CreateVertexBuffer (length, 0, 0, D3DPOOL_MANAGED, buf, NULL);
+		if (SUCCEEDED (hr)) return;
+	}
+
+	// nope, can't do it
+	Sys_Error ("D3DMain_CreateVertexBuffer : IDirect3DDevice9::CreateVertexBuffer failed");
+}
+
+
+void D3DMain_CreateIndexBuffer (UINT numindexes, DWORD usage, LPDIRECT3DINDEXBUFFER9 *buf)
+{
+	DWORD swprocflag = d3d_GlobalCaps.supportHardwareTandL ? 0 : D3DUSAGE_SOFTWAREPROCESSING;
+	UINT length = numindexes * sizeof (unsigned short);
+
+	// make attempts to create the vertex buffer with various combinations of usage flags and memory pools
+	hr = d3d_Device->CreateIndexBuffer (length, usage | swprocflag, D3DFMT_INDEX16, D3DPOOL_DEFAULT, buf, NULL);
+	if (SUCCEEDED (hr)) return;
+
+	hr = d3d_Device->CreateIndexBuffer (length, D3DUSAGE_WRITEONLY | swprocflag, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
+	if (SUCCEEDED (hr)) return;
+
+	hr = d3d_Device->CreateIndexBuffer (length, swprocflag, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
+	if (SUCCEEDED (hr)) return;
+
+	if (!d3d_GlobalCaps.supportHardwareTandL)
+	{
+		hr = d3d_Device->CreateIndexBuffer (length, usage, D3DFMT_INDEX16, D3DPOOL_DEFAULT, buf, NULL);
+		if (SUCCEEDED (hr)) return;
+
+		hr = d3d_Device->CreateIndexBuffer (length, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
+		if (SUCCEEDED (hr)) return;
+
+		hr = d3d_Device->CreateIndexBuffer (length, 0, D3DFMT_INDEX16, D3DPOOL_MANAGED, buf, NULL);
+		if (SUCCEEDED (hr)) return;
+	}
+
+	// nope, can't do it
+	Sys_Error ("D3DMain_CreateIndexBuffer : IDirect3DDevice9::CreateIndexBuffer failed");
+}
+
+
 // this must be big enough for the largest of draw, sprite or particles
 #define MAX_MAIN_INDEXES	90000
 
@@ -31,17 +94,7 @@ void D3DMain_CreateBuffers (void)
 {
 	if (!d3d_MainIBO)
 	{
-		hr = d3d_Device->CreateIndexBuffer
-		(
-			MAX_MAIN_INDEXES * sizeof (unsigned short),
-			D3DUSAGE_WRITEONLY,
-			D3DFMT_INDEX16,
-			D3DPOOL_DEFAULT,
-			&d3d_MainIBO,
-			NULL
-		);
-
-		if (FAILED (hr)) Sys_Error ("D3DMain_CreateBuffers: d3d_Device->CreateIndexBuffer failed");
+		D3DMain_CreateIndexBuffer (MAX_MAIN_INDEXES, D3DUSAGE_WRITEONLY, &d3d_MainIBO);
 
 		// now we fill in the index buffer; this is a non-dynamic index buffer and it only needs to be set once
 		unsigned short *ndx = NULL;
@@ -205,7 +258,6 @@ void Key_Automap (int key)
 	}
 
 	if (r_automap_scale < 0.5) r_automap_scale = 0.5;
-
 	if (r_automap_scale > 20) r_automap_scale = 20;
 }
 
@@ -295,13 +347,13 @@ cvar_t	gl_affinemodels ("gl_affinemodels", "0");
 cvar_t	gl_polyblend ("gl_polyblend", "1");
 cvar_t	gl_nocolors ("gl_nocolors", "0");
 cvar_t	gl_doubleeyes ("gl_doubleeys", "1");
+cvar_t	gl_clear ("gl_clear", "0");
 
 // hmmm- this does nothing yet...
 cvar_t gl_underwaterfog ("gl_underwaterfog", 1, CVAR_ARCHIVE);
 
 cvar_t r_lockfrustum ("r_lockfrustum", 0.0f);
 cvar_t r_wireframe ("r_wireframe", 0.0f);
-cvar_t r_waterwarp ("r_waterwarp", 1, CVAR_ARCHIVE);
 
 extern float r_automap_x;
 extern float r_automap_y;
@@ -577,11 +629,11 @@ void D3D_SetupProjection (float fovx, float fovy)
 	d3d_ProjMatrix._34 = -1;
 	d3d_ProjMatrix._44 = 0;
 
-	if (r_waterwarp.value)
+	if (r_waterwarp.value > 1)
 	{
 		int contents = Mod_PointInLeaf (r_origin, cl.worldmodel)->contents;
 
-		if ((contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.inwater) && v_blend[3] || (r_waterwarp.integer == 666))
+		if (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA)
 		{
 			d3d_ProjMatrix._21 = sin (d3d_RenderDef.time * 1.125f) * 0.0666f;
 			d3d_ProjMatrix._12 = cos (d3d_RenderDef.time * 1.125f) * 0.0666f;
@@ -686,23 +738,31 @@ void D3DMain_SetupD3D (void)
 
 	// select correct color clearing mode
 	// and mode that clears the color buffer needs to change the HUD
-	if (d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID)
+	if (!d3d_RenderDef.viewleaf || d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID || !d3d_RenderDef.viewleaf->compressed_vis)
 	{
 		// match winquake's grey if we're noclipping
+		// (note - this should really be a palette index)
 		clearcolor = 0xff1f1f1f;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
 		HUD_Changed ();
+		// Con_Printf ("Clear to grey\n");
 	}
 	else if (r_wireframe.integer)
 	{
-		d3d_ClearFlags |= D3DCLEAR_TARGET;
 		clearcolor = 0xff1f1f1f;
+		d3d_ClearFlags |= D3DCLEAR_TARGET;
 		HUD_Changed ();
 	}
 	else if (r_lockfrustum.integer || r_lockpvs.integer)
 	{
 		// set to orange for r_lockfrustum, r_lockpvs, etc tests
 		clearcolor = 0xffff8000;
+		d3d_ClearFlags |= D3DCLEAR_TARGET;
+		HUD_Changed ();
+	}
+	else if (gl_clear.value)
+	{
+		clearcolor = 0xff000000;
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
 		HUD_Changed ();
 	}
@@ -741,8 +801,8 @@ void D3DMain_SetupD3D (void)
 		D3DMatrix_Translate
 		(
 			&d3d_WorldMatrix,
-			- (r_automap_x - (vid.width / 2) * r_automap_scale),
-			- (r_automap_y - (vid.height / 2) * r_automap_scale),
+			-(r_automap_x - (vid.width / 2) * r_automap_scale),
+			-(r_automap_y - (vid.height / 2) * r_automap_scale),
 			-r_refdef.vieworg[2]
 		);
 	}
@@ -926,7 +986,6 @@ void R_SetupSpriteModels (void)
 		entity_t *ent = d3d_RenderDef.visedicts[i];
 
 		if (!ent->model) continue;
-
 		if (ent->model->type != mod_sprite) continue;
 
 		// sprites always have alpha
@@ -1042,6 +1101,7 @@ void D3DRMain_HLSLSetup (void)
 	extern float d3d_FogColor[];
 	extern float d3d_FogDensity;
 	extern cvar_t gl_fogenable;
+	extern cvar_t gl_fogdensityscale;
 
 	// basic params for drawing the world
 	D3DHLSL_SetWorldMatrix (&d3d_ModelViewProjMatrix);
@@ -1061,7 +1121,9 @@ void D3DRMain_HLSLSetup (void)
 		else D3DHLSL_SetFloat ("SkyFog", 1.0f);
 
 		// nehahra fog divides by 100
-		D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 100.0f));
+		if (gl_fogdensityscale.value > 0)
+			D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
+		else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 100.0f));
 	}
 	else
 	{
@@ -1070,7 +1132,9 @@ void D3DRMain_HLSLSetup (void)
 		else D3DHLSL_SetFloat ("SkyFog", 1.0f);
 
 		// fitz fog divides by 64
-		D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 64.0f));
+		if (gl_fogdensityscale.value > 0)
+			D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / gl_fogdensityscale.value));
+		else D3DHLSL_SetFloat ("FogDensity", (d3d_FogDensity / 64.0f));
 	}
 }
 

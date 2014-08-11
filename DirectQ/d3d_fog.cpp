@@ -33,10 +33,19 @@ cvar_t gl_fogred ("gl_fogred", 0.3f);
 cvar_t gl_foggreen ("gl_foggreen", 0.3f);
 cvar_t gl_fogblue ("gl_fogblue", 0.3f);
 cvar_t gl_fogdensity ("gl_fogdensity", 0.0f);
+cvar_t gl_fogdensityscale ("gl_fogdensityscale", 0.0f);
 
 void Fog_Update (float density, float r, float g, float b)
 {
 	d3d_FogDensity = density > 1 ? 1 : (density < 0 ? 0 : density);
+
+	if ((r > 1 && g > 1) || (r > 1 && b > 1) || (g > 1 && b > 1))
+	{
+		// fucking content bug workaround for maps that send fog on a 0..255 scale
+		r /= 255.0f;
+		g /= 255.0f;
+		b /= 255.0f;
+	}
 
 	d3d_FogColor[0] = r > 1 ? 1 : (r < 0 ? 0 : r);
 	d3d_FogColor[1] = g > 1 ? 1 : (g < 0 ? 0 : g);

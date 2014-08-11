@@ -191,11 +191,8 @@ void Key_PrintMatch (char *cmd)
 void Key_PrintContentMatch (char *matchedcontent)
 {
 	// find the text position after the command
-	for (int i = 0;; i++)
+	for (int i = 254; i >= 0; i--)
 	{
-		// this should never happen
-		if (!key_lines[edit_line][i]) return;
-
 		if (key_lines[edit_line][i] == ' ')
 		{
 			// switch the next to 0 so we can strcat it
@@ -218,11 +215,9 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 	{
 		// grab the text after the command
 		// we need to store this for subsequent commands
-		for (int i = 0;; i++)
+		for (int i = 254; i > 0; i--)
 		{
-			// this should never happen
-			if (!key_lines[edit_line][i]) return;
-
+			//  find the first valid char
 			if (key_lines[edit_line][i] == ' ')
 			{
 				// we can't just store the pointer as the text may have changed due to autocompletion
@@ -246,7 +241,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 			{
 				// no match (should this gracefully fail or inform the user of no match?)
 				cycle[0] = 0;
-				Key_PrintContentMatch ("** (No Match)");
+				// Key_PrintContentMatch ("** (No Match)");
 				return;
 			}
 

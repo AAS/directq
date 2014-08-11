@@ -66,6 +66,8 @@ extern cvar_t s_khz;
 extern cvar_t scr_sbaralpha;
 extern cvar_t scr_centersbar;
 extern cvar_t r_aliaslightscale;
+extern cvar_t r_particlesize;
+extern cvar_t r_particlestyle;
 
 CQMenu menu_Main (m_main);
 CQMenu menu_Singleplayer (m_other);
@@ -699,7 +701,6 @@ int skybox_menunumber = 0;
 int old_skybox_menunumber = 0;
 
 #define TAG_SKYBOXAPPLY		1
-#define TAG_WATERWARP		2
 #define TAG_WATERALPHA		4
 
 void Menu_LoadAvailableSkyboxes (void)
@@ -815,6 +816,12 @@ char *overbright_options[] = {"Off", "2 x Overbright", "4 x Overbright", NULL};
 int overbright_num = 1;
 extern cvar_t r_overbright;
 
+char *waterwarp_options[] = {"Off", "Classic", "Perspective", NULL};
+int waterwarp_num = 1;
+
+char *particle_options[] = {"Dots", "Squares", NULL};
+int particle_num = 0;
+
 int Menu_WarpCustomDraw (int y)
 {
 	if (skybox_menunumber != old_skybox_menunumber)
@@ -837,12 +844,9 @@ int Menu_WarpCustomDraw (int y)
 		menu_WarpSurf.EnableMenuOptions (TAG_WATERALPHA);
 	}
 
-	// water warp
-	if (r_waterwarp.value)
-		menu_WarpSurf.EnableMenuOptions (TAG_WATERWARP);
-	else menu_WarpSurf.DisableMenuOptions (TAG_WATERWARP);
-
 	Cvar_Set (&r_overbright, overbright_num);
+	Cvar_Set (&r_waterwarp, waterwarp_num);
+	Cvar_Set (&r_particlestyle, particle_num);
 
 	// hud style
 	Cvar_Get (hudstyle, "cl_sbar");
@@ -895,6 +899,16 @@ void Menu_WarpCustomEnter (void)
 
 	if (overbright_num < 0) overbright_num = 0;
 	if (overbright_num > 2) overbright_num = 2;
+
+	waterwarp_num = r_waterwarp.integer;
+
+	if (waterwarp_num < 0) waterwarp_num = 0;
+	if (waterwarp_num > 2) waterwarp_num = 2;
+
+	particle_num = r_particlestyle.integer;
+
+	if (particle_num < 0) particle_num = 0;
+	if (particle_num > 2) particle_num = 2;
 
 	extern char CachedSkyBoxName[];
 
@@ -1131,12 +1145,15 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Frame", &r_lerpframe, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Light Style", &r_lerplightstyle, 0, 1));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Lighting"));
-	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Overbrighting", &overbright_num, overbright_options));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Overbright Light", &overbright_num, overbright_options));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
-	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("MDL Light Scaling", &r_aliaslightscale, 0.5, 3, 0.25));
+	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("MDL Light Scale", &r_aliaslightscale, 0, 5, 0.1));
+	menu_EffectsSimple.AddOption (new CQMenuTitle ("Particles"));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Particle Style", &particle_num, particle_options));
+	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Particle Size", &r_particlesize, 0.5, 10, 0.5));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Water and Liquids"));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("Water Alpha", &r_wateralpha, 0, 1, 0.1));
-	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Underwater Warp", &r_waterwarp, 0, 1));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Underwater Warp", &waterwarp_num, waterwarp_options));
 	menu_EffectsSimple.AddOption (new CQMenuTitle ("Heads-Up Display"));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("HUD Style", &hudstyleselection, hudstylelist));
 	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Show Inventory", &hud_invshownum, hud_invshow));

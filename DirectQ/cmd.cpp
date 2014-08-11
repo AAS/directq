@@ -95,7 +95,7 @@ typedef struct complist_s
 	// note - !!!if the order here is changed then the struct inits below also need to be changed!!!
 	// search for every occurance of bsearch and do the necessary...
 	char *name;
-	cmdalias_t *als;
+	cmdalias_t *alias;
 	cmd_t *cmd;
 	cvar_t *var;
 } complist_t;
@@ -121,11 +121,8 @@ void Cmd_BuildCompletionList (void)
 
 	// count the number of cvars and cmds we have
 	for (cvar_t *var = cvar_vars; var; var = var->next) numcomplist++;
-
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next) numcomplist++;
-
 	for (cmdalias_t *ali = cmd_alias; ali; ali = ali->next) numcomplist++;
-
 	for (cvar_alias_t *ali = cvar_alias_vars; ali; ali = ali->next) numcomplist++;
 
 	// alloc space for the completion list (add some overshoot here; we need 1 to NULL terminate the list)
@@ -141,7 +138,7 @@ void Cmd_BuildCompletionList (void)
 	for (cvar_t *var = cvar_vars; var; var = var->next, complistcurrent++)
 	{
 		complistcurrent->name = var->name;
-		complistcurrent->als = NULL;
+		complistcurrent->alias = NULL;
 		complistcurrent->cmd = NULL;
 		complistcurrent->var = var;
 	}
@@ -150,7 +147,7 @@ void Cmd_BuildCompletionList (void)
 	for (cvar_alias_t *ali = cvar_alias_vars; ali; ali = ali->next, complistcurrent++)
 	{
 		complistcurrent->name = ali->name;
-		complistcurrent->als = NULL;
+		complistcurrent->alias = NULL;
 		complistcurrent->cmd = NULL;
 		complistcurrent->var = ali->var;
 	}
@@ -166,7 +163,7 @@ void Cmd_BuildCompletionList (void)
 		}
 
 		complistcurrent->name = cmd->name;
-		complistcurrent->als = NULL;
+		complistcurrent->alias = NULL;
 		complistcurrent->cmd = cmd;
 		complistcurrent->var = NULL;
 	}
@@ -175,7 +172,7 @@ void Cmd_BuildCompletionList (void)
 	for (cmdalias_t *als = cmd_alias; als; als = als->next, complistcurrent++)
 	{
 		complistcurrent->name = als->name;
-		complistcurrent->als = als;
+		complistcurrent->alias = als;
 		complistcurrent->cmd = NULL;
 		complistcurrent->var = NULL;
 	}
@@ -185,7 +182,7 @@ void Cmd_BuildCompletionList (void)
 
 	// terminate the list
 	complistcurrent->name = NULL;
-	complistcurrent->als = NULL;
+	complistcurrent->alias = NULL;
 	complistcurrent->cmd = NULL;
 	complistcurrent->var = NULL;
 }
@@ -204,7 +201,7 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 
 	if (conout) Con_Printf ("]%s\n", partial);
 
-	for (cl = complist, nummatches = 0; cl->name && (cl->cmd || cl->var || cl->als); cl++)
+	for (cl = complist, nummatches = 0; cl->name && (cl->cmd || cl->var || cl->alias); cl++)
 	{
 		// skip nehahra if we're not running nehahra
 		if (cl->var && !nehahra && (cl->var->usage & CVAR_NEHAHRA)) continue;
@@ -216,7 +213,7 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 		if (cl->cmd && (cl->cmd->usage == CMD_COMPAT)) continue;
 
 		assert (cl->name);
-		assert ((cl->als || cl->cmd || cl->var));
+		assert ((cl->alias || cl->cmd || cl->var));
 
 		if (!strnicmp (partial, cl->name, len))
 		{
@@ -226,11 +223,15 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 					Con_Printf ("  (cmd) ");
 				else if (cl->var)
 					Con_Printf (" (cvar) ");
-				else if (cl->als)
+				else if (cl->alias)
 					Con_Printf ("(alias) ");
 				else Con_Printf ("  (bad) ");
 
-				Con_Printf ("%s\n", cl->name);
+				if (cl->var)
+					Con_Printf ("%s (value \"%s\")\n", cl->name, cl->var->string);
+				else if (cl->alias)
+					Con_Printf ("%s (value \"%s\")\n", cl->name, cl->alias->value);
+				else Con_Printf ("%s\n", cl->name);
 			}
 
 			// copy to the current position in the cycle
@@ -684,10 +685,10 @@ void Cmd_Alias_f (void)
 		{
 			// protect us oh lord from stupid programmer errors
 			assert (cl->name);
-			assert ((cl->als || cl->cmd || cl->var));
+			assert ((cl->alias || cl->cmd || cl->var));
 
-			if (cl->als)
-				Con_Printf ("\"%s\" : \"%s\"\n", cl->als->name, cl->als->value);
+			if (cl->alias)
+				Con_Printf ("\"%s\" : \"%s\"\n", cl->alias->name, cl->alias->value);
 			else if (cl->cmd)
 				Con_Printf ("\"%s\" is a command\n", s);
 			else if (cl->var)
@@ -702,14 +703,14 @@ void Cmd_Alias_f (void)
 	{
 		// protect us oh lord from stupid programmer errors
 		assert (cl->name);
-		assert ((cl->als || cl->cmd || cl->var));
+		assert ((cl->alias || cl->cmd || cl->var));
 
-		if (cl->als)
+		if (cl->alias)
 		{
 			// if the alias already exists we reuse it, just free the value
-			Zone_Free (cl->als->value);
-			cl->als->value = NULL;
-			a = cl->als;
+			Zone_Free (cl->alias->value);
+			cl->alias->value = NULL;
+			a = cl->alias;
 		}
 		else if (cl->cmd)
 		{
@@ -974,7 +975,7 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 	else
 	{
 		assert (cl->name);
-		assert ((cl->als || cl->cmd || cl->var));
+		assert ((cl->alias || cl->cmd || cl->var));
 
 		if (cl->cmd)
 		{
@@ -998,9 +999,9 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 				}
 			}
 		}
-		else if (cl->als)
+		else if (cl->alias)
 		{
-			Cbuf_InsertText (cl->als->value);
+			Cbuf_InsertText (cl->alias->value);
 			return;
 		}
 		else if (cl->var)
