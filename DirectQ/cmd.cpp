@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // cmd.c -- Quake script command processing module
 
@@ -100,6 +102,7 @@ void Cmd_BuildCompletionList (void)
 	for (cvar_t *var = cvar_vars; var; var = var->next) numcomplist++;
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next) numcomplist++;
 	for (cmdalias_t *ali = cmd_alias; ali; ali = ali->next) numcomplist++;
+	for (cvar_alias_t *ali = cvar_alias_vars; ali; ali = ali->next) numcomplist++;
 
 	// alloc space for the completion list (add some overshoot here; we need 1 to NULL terminate the list)
 	// place in zone so that we can rebuild the list if we ever need to.
@@ -116,6 +119,15 @@ void Cmd_BuildCompletionList (void)
 		complistcurrent->als = NULL;
 		complistcurrent->cmd = NULL;
 		complistcurrent->var = var;
+	}
+
+	// write in alias cvars
+	for (cvar_alias_t *ali = cvar_alias_vars; ali; ali = ali->next, complistcurrent++)
+	{
+		complistcurrent->name = ali->name;
+		complistcurrent->als = NULL;
+		complistcurrent->cmd = NULL;
+		complistcurrent->var = ali->var;
 	}
 
 	// write in cmds
@@ -185,7 +197,7 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 
 			// copy to the current position in the cycle
 			if (nummatches == matchcycle)
-				strncpy (currentmatch, cl->name, 127);
+				Q_strncpy (currentmatch, cl->name, 127);
 
 			nummatches++;
 		}
@@ -551,7 +563,7 @@ void Cmd_Exec_f (void)
 	}
 
 	char cfgfile[128];
-	strncpy (cfgfile, Cmd_Argv (1), 127);
+	Q_strncpy (cfgfile, Cmd_Argv (1), 127);
 	char *f = (char *) COM_LoadTempFile (cfgfile);
 
 	if (!f)
@@ -827,7 +839,7 @@ void Cmd_TokenizeString (char *text)
 		if (cmd_argc < MAX_ARGS)
 		{
 			// prevent overflow
-			strncpy (cmd_argv[cmd_argc], com_token, 1023);
+			Q_strncpy (cmd_argv[cmd_argc], com_token, 1023);
 			cmd_argc++;
 		}
 	}

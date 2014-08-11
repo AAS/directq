@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // r_misc.c
 
@@ -395,7 +397,7 @@ LPD3DXEFFECT d3d_SkyFX;
 LPDIRECT3DVERTEXDECLARATION9 d3d_LiquidDeclaration = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_SkyDeclaration = NULL;
 
-bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff)
+bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff, int vsver, int psver)
 {
 	char *EffectString = NULL;
 	LPD3DXBUFFER errbuf = NULL;
@@ -403,6 +405,26 @@ bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff)
 	// load the resource - note - we don't use D3DXCreateEffectFromResource as importing an RCDATA resource
 	// from a text file in Visual Studio doesn't NULL terminate the file, causing it to blow up.
 	int len = Sys_LoadResourceData (resourceid, (void **) &EffectString);
+
+	if (vsver >= 3 && psver >= 3)
+	{
+		for (int i = 0; ; i++)
+		{
+			if (!EffectString[i]) break;
+
+			if (!strnicmp (&EffectString[i], " vs_2_0 ", 8))
+			{
+				EffectString[i + 4] = '3';
+				continue;
+			}
+
+			if (!strnicmp (&EffectString[i], " ps_2_0 ", 8))
+			{
+				EffectString[i + 4] = '3';
+				continue;
+			}
+		}
+	}
 
 	hr = D3DXCreateEffect
 	(
@@ -493,8 +515,8 @@ void D3D_InitHLSL (void)
 	}
 
 	// load effects - if we get this far we know that pixel shaders are available
-	if (!D3D_LoadEffect ("Liquid Shader", IDR_LIQUID, &d3d_LiquidFX)) return;
-	if (!D3D_LoadEffect ("Sky Shader", IDR_SKY, &d3d_SkyFX)) return;
+	if (!D3D_LoadEffect ("Liquid Shader", IDR_LIQUID, &d3d_LiquidFX, vsvermaj, psvermaj)) return;
+	if (!D3D_LoadEffect ("Sky Shader", IDR_SKY, &d3d_SkyFX, vsvermaj, psvermaj)) return;
 
 	if (!SilentLoad) Con_Printf ("Created Shaders OK\n");
 
@@ -1196,8 +1218,8 @@ void R_ParseWorldSpawn (void)
 
 		// allow keys with a leading _
 		if (com_token[0] == '_')
-			strncpy (key, &com_token[1], 39);
-		else strncpy (key, com_token, 39);
+			Q_strncpy (key, &com_token[1], 39);
+		else Q_strncpy (key, com_token, 39);
 
 		// remove trailing spaces
 		while (key[strlen (key) - 1] == ' ') key[strlen (key) - 1] = 0;
@@ -1229,7 +1251,7 @@ void R_ParseWorldSpawn (void)
 			Cvar_Set (&gl_fogblue, gl_fogblue.value);
 			Cvar_Set (&gl_fogdensity, gl_fogdensity.value / 50);
 
-			// set to per-vertex linear fog
+			// set to per-pixel linear fog
 			Cvar_Set (&gl_fogenable, 1);
 
 			continue;
@@ -1447,8 +1469,8 @@ void SHOWLMP_decodeshow (void)
 
 	char lmplabel[256], picname[256];
 
-	strncpy (lmplabel, MSG_ReadString (), 255);
-	strncpy (picname, MSG_ReadString (), 255);
+	Q_strncpy (lmplabel, MSG_ReadString (), 255);
+	Q_strncpy (picname, MSG_ReadString (), 255);
 
 	float x = MSG_ReadByte ();
 	float y = MSG_ReadByte ();
@@ -1478,8 +1500,8 @@ void SHOWLMP_decodeshow (void)
 
 	// change existing one
 	showlmp[k].isactive = true;
-	strncpy (showlmp[k].label, lmplabel, 255);
-	strncpy (showlmp[k].pic, picname, 255);
+	Q_strncpy (showlmp[k].label, lmplabel, 255);
+	Q_strncpy (showlmp[k].pic, picname, 255);
 	showlmp[k].x = x;
 	showlmp[k].y = y;
 }

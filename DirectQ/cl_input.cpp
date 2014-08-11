@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // cl.input.c  -- builds an intended movement command to send to the server
 
@@ -293,6 +295,9 @@ cvar_t	cl_anglespeedkey ("cl_anglespeedkey","1.5");
 
 cvar_t cl_fullpitch ("cl_fullpitch", "0", CVAR_ARCHIVE);
 
+// ProQuake compatibility
+cvar_alias_t pq_fullpitch ("pq_fullpitch", &cl_fullpitch);
+
 void CL_BoundViewPitch (void)
 {
 	if (cl_fullpitch.integer)
@@ -382,15 +387,13 @@ void CL_BaseMove (usercmd_t *cmd)
 	cmd->upmove += cl_upspeed.value * CL_KeyState (&in_up);
 	cmd->upmove -= cl_upspeed.value * CL_KeyState (&in_down);
 
-	if (! (in_klook.state & 1) )
+	if (!(in_klook.state & 1))
 	{	
 		cmd->forwardmove += cl_forwardspeed.value * CL_KeyState (&in_forward);
 		cmd->forwardmove -= cl_backspeed.value * CL_KeyState (&in_back);
 	}	
 
-//
-// adjust for speed key
-//
+	// adjust for speed key
 	if (in_speed.state & 1)
 	{
 		cmd->forwardmove *= cl_movespeedkey.value;

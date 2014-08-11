@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // world.c -- world query functions
 
@@ -396,7 +398,7 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 
 	if (ent->area.prev)
 		SV_UnlinkEdict (ent);	// unlink from old position
-		
+
 	if (ent == SVProgs->Edicts)
 		return;		// don't add the world
 

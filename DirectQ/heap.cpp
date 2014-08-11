@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 // directq memory functions.  funny how things come full-circle, isn't it?
@@ -45,6 +47,29 @@ typedef struct cacheobject_s
 
 cacheobject_t *cachehead = NULL;
 int numcacheobjects = 0;
+
+void Cache_Invalidate (char *name)
+{
+	extern bool signal_cacheclear;
+
+	for (cacheobject_t *cache = cachehead; cache; cache = cache->next)
+	{
+		// these should never happen
+		if (!cache->name) continue;
+		if (!cache->data) continue;
+
+		if (!stricmp (cache->name, name))
+		{
+			// invalidate the cached object name
+			cache->name[0] = 0;
+
+			// clear the cache on the next map change to prevent it leaking
+			signal_cacheclear = true;
+			return;
+		}
+	}
+}
+
 
 void *Cache_Check (char *name)
 {
@@ -144,7 +169,7 @@ void Pool_Init (void)
 
 	// init the pools we want to keep around all the time
 	Pool_Permanent = new CSpaceBuffer ("Permanent", 32, POOL_PERMANENT);
-	Pool_Game = new CSpaceBuffer ("This Game", 2, POOL_GAME);
+	Pool_Game = new CSpaceBuffer ("This Game", 32, POOL_GAME);
 	Pool_Map = new CSpaceBuffer ("This Map", 128, POOL_MAP);
 	Pool_Cache = new CSpaceBuffer ("Cache", 256, POOL_CACHE);
 	Pool_FileLoad = new CSpaceBuffer ("File Loads", 128, POOL_FILELOAD);
@@ -190,7 +215,7 @@ void *Zone_Alloc (int size)
 {
 	// create an initial heap for use with the zone
 	// this heap has 128K initially allocated and 32 MB reserved from the virtual address space
-	if (!zoneheap) zoneheap = HeapCreate (0, 0x20000, 0x2000000);
+	if (!zoneheap) zoneheap = HeapCreate (0, 0x20000, 0);
 
 	size += sizeof (zblock_t);
 	size = (size + 7) & ~7;
@@ -334,7 +359,7 @@ CSpaceBuffer::CSpaceBuffer (char *name, int maxsizemb, int usage)
 	this->Initialize ();
 
 	// register the buffer
-	strncpy (this->Name, name, 64);
+	Q_strncpy (this->Name, name, 64);
 
 	this->Usage = usage;
 	this->Registration = RegisterBuffer (this);
@@ -422,6 +447,7 @@ void CSpaceBuffer::Initialize (void)
 
 ========================================================================================================================
 */
+
 void Pool_Report (int usage, char *desc)
 {
 	int reservedmem = 0;

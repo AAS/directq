@@ -16,10 +16,14 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // wad.c
 
 #include "quakedef.h"
+#include "d3d_model.h"
+#include "d3d_quake.h"
 
 int			wad_numlumps;
 lumpinfo_t	*wad_lumps;
@@ -91,10 +95,29 @@ bool W_LoadWadFile (char *filename)
 		W_CleanupName (lump_p->name, lump_p->name);
 
 		if (lump_p->type == TYP_QPIC)
-			SwapPic ( (qpic_t *)(wad_base + lump_p->filepos));
+		{
+			qpic_t *pic = (qpic_t *) (wad_base + lump_p->filepos);
+			SwapPic (pic);
+		}
 	}
 
 	return true;
+}
+
+
+void W_DumpWADLumps (void)
+{
+	int i;
+	lumpinfo_t *lump_p;
+
+	for (i = 0, lump_p = wad_lumps; i < wad_numlumps; i++, lump_p++)
+	{
+		if (lump_p->type == TYP_QPIC)
+		{
+			qpic_t *pic = (qpic_t *) (wad_base + lump_p->filepos);
+			SCR_WriteDataToTGA (va ("%s.tga", lump_p->name), pic->data, pic->width, pic->height, 8, 24);
+		}
+	}
 }
 
 

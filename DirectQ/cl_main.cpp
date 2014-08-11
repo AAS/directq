@@ -16,11 +16,16 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
 #include "d3d_model.h"
+
+cvar_t	cl_web_download		("cl_web_download", "1");
+cvar_t	cl_web_download_url	("cl_web_download_url", "http://bigfoot.quake1.net/"); // the quakeone.com link is dead //"http://downloads.quakeone.com/");
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -82,6 +87,8 @@ void CL_ClearState (void)
 
 	SZ_Clear (&cls.message);
 
+	cl.teamscores = (teamscore_t *) Pool_Map->Alloc (sizeof (teamscore_t) * 14);
+
 	// clear down anything that was allocated one-time-only at startup
 	memset (cl_dlights, 0, MAX_DLIGHTS * sizeof (dlight_t));
 	memset (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
@@ -123,6 +130,13 @@ void CL_Disconnect (void)
 
 	SHOWLMP_clear ();
 
+	// We have to shut down webdownloading first
+	if (cls.download.web)
+	{
+		cls.download.disconnect = true;
+		return;
+	}
+
 	cl.worldmodel = NULL;
 
 	// if running a local server, shut it down
@@ -154,7 +168,14 @@ void CL_Disconnect (void)
 
 void CL_Disconnect_f (void)
 {
+	if (cls.download.web)
+	{
+		cls.download.disconnect = true;
+		return;
+	}
+
 	CL_Disconnect ();
+
 	if (sv.active)
 		Host_ShutdownServer (false);
 }

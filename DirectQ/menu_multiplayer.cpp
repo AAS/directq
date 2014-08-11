@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 
@@ -38,7 +40,7 @@ extern cvar_t cl_natfix;
 
 #define TAG_ID1OPTIONS			1
 #define TAG_HIPNOTICOPTIONS		2
-#define TAG_ROGUEOPTIONS		3
+#define TAG_ROGUEOPTIONS		4
 
 /*
 ========================================================================================================================
@@ -140,8 +142,8 @@ int Menu_SetupCustomDraw (int y)
 	// check for an apply change
 	if (setup_shirt != setup_oldshirt || setup_pants != setup_oldpants ||
 		strcmp (dummy_name.string, cl_name.string) || strcmp (dummy_hostname.string, hostname.string))
-		menu_Setup.EnableOptions (TAG_SETUPAPPLY);
-	else menu_Setup.DisableOptions (TAG_SETUPAPPLY);
+		menu_Setup.EnableMenuOptions (TAG_SETUPAPPLY);
+	else menu_Setup.DisableMenuOptions (TAG_SETUPAPPLY);
 
 	return newy;
 }
@@ -301,9 +303,9 @@ void Menu_GameConfigCustomEnter (void)
 	// show/hide options depending on selected game
 	if (rogue)
 	{
-		menu_GameConfig.ShowOptions (TAG_ROGUEOPTIONS);
-		menu_GameConfig.HideOptions (TAG_HIPNOTICOPTIONS);
-		menu_GameConfig.HideOptions (TAG_ID1OPTIONS);
+		menu_GameConfig.ShowMenuOptions (TAG_ROGUEOPTIONS);
+		menu_GameConfig.HideMenuOptions (TAG_HIPNOTICOPTIONS);
+		menu_GameConfig.HideMenuOptions (TAG_ID1OPTIONS);
 
 		// fix up spin controls in case the game has changed and we now have an invalid selection
 		Menu_FixupSpin (&map_number, spinbox_maps);
@@ -311,9 +313,9 @@ void Menu_GameConfigCustomEnter (void)
 	}
 	else if (hipnotic)
 	{
-		menu_GameConfig.HideOptions (TAG_ROGUEOPTIONS);
-		menu_GameConfig.ShowOptions (TAG_HIPNOTICOPTIONS);
-		menu_GameConfig.HideOptions (TAG_ID1OPTIONS);
+		menu_GameConfig.HideMenuOptions (TAG_ROGUEOPTIONS);
+		menu_GameConfig.ShowMenuOptions (TAG_HIPNOTICOPTIONS);
+		menu_GameConfig.HideMenuOptions (TAG_ID1OPTIONS);
 
 		// fix up spin controls in case the game has changed and we now have an invalid selection
 		Menu_FixupSpin (&map_number, spinbox_maps);
@@ -321,9 +323,9 @@ void Menu_GameConfigCustomEnter (void)
 	}
 	else
 	{
-		menu_GameConfig.HideOptions (TAG_ROGUEOPTIONS);
-		menu_GameConfig.HideOptions (TAG_HIPNOTICOPTIONS);
-		menu_GameConfig.ShowOptions (TAG_ID1OPTIONS);
+		menu_GameConfig.HideMenuOptions (TAG_ROGUEOPTIONS);
+		menu_GameConfig.HideMenuOptions (TAG_HIPNOTICOPTIONS);
+		menu_GameConfig.ShowMenuOptions (TAG_ID1OPTIONS);
 
 		// fix up spin controls in case the game has changed and we now have an invalid selection
 		Menu_FixupSpin (&map_number, spinbox_maps);
@@ -427,7 +429,7 @@ void Menu_SListOnHover (int initialy, int y, int itemnum)
 	hostcache_t *hc = &hostcache[itemnum];
 
 	// rest of info
-	Draw_Mapshot (va ("%s/maps/%s", com_gamedir, hc->map), (vid.width - 320) / 2 + 208, initialy + 8);
+	Draw_Mapshot (va ("maps/%s", hc->map), (vid.width - 320) / 2 + 208, initialy + 8);
 	Menu_PrintWhite (228, initialy + 145, "Server Info");
 	Menu_Print (218, initialy + 160, DIVIDER_LINE);
 
@@ -749,7 +751,7 @@ void Menu_CustomNameCustomEnter (void)
 	menu_soundlevel = m_sound_enter;
 
 	// copy cvars out
-	strncpy (funname, cl_name.string, 1023);
+	Q_strncpy (funname, cl_name.string, 1023);
 
 	custnamechanged = false;
 	if (custnamerow == 9) custnamerow = 8;

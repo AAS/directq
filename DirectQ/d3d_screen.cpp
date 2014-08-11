@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
@@ -100,7 +102,6 @@ cvar_t		scr_showpause ("showpause", 1);
 cvar_t		scr_printspeed ("scr_printspeed", 20);
 
 cvar_t		scr_screenshotformat ("scr_screenshotformat", "tga", CVAR_ARCHIVE);
-cvar_t		scr_screenshotdir ("scr_screenshotdir", "screenshot", CVAR_ARCHIVE);
 cvar_t		scr_shotnamebase ("scr_shotnamebase", "Quake", CVAR_ARCHIVE);
 
 cvar_t	r_automapshot ("r_automapshot", "0", CVAR_ARCHIVE);
@@ -177,7 +178,7 @@ void SCR_CenterPrint (char *str)
 		Con_ClearNotify ();
 	}
 
-	strncpy (scr_centerstring, str, sizeof (scr_centerstring) - 1);
+	Q_strncpy (scr_centerstring, str, sizeof (scr_centerstring) - 1);
 	scr_centertime_off = scr_centertime.value;
 	scr_centertime_start = cl.time;
 
@@ -815,9 +816,6 @@ void SCR_ScreenShot_f (void)
 	char		checkname[MAX_PATH];
 	int			i, c, temp;
 
-	// check the screenshot directory
-	COM_CheckContentDirectory (&scr_screenshotdir, true);
-
 	// try the screenshot format
 	if (scr_screenshotformat.string[0] == '.')
 	{
@@ -860,9 +858,8 @@ void SCR_ScreenShot_f (void)
 		(
 			checkname,
 			128,
-			"%s/%s/%s%04i.%s",
+			"%s/screenshot/%s%04i.%s",
 			com_gamedir,
-			scr_screenshotdir.string,
 			scr_shotnamebase.string,
 			i,
 			scr_screenshotformat.string
@@ -891,7 +888,7 @@ void SCR_ScreenShot_f (void)
 	// d3dx doesn't support tga writes (BASTARDS) so we made our own
 	if (ssfmt == D3DXIFF_TGA)
 		SCR_WriteSurfaceToTGA (checkname, Surf);
-	else D3DXSaveSurfaceToFile (checkname, ssfmt, Surf, NULL, NULL);
+	else D3DXSaveSurfaceToFileA (checkname, ssfmt, Surf, NULL, NULL);
 
 	// not releasing is a memory leak!!!
 	Surf->Release ();
@@ -911,7 +908,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	char workingname[256];
 
 	// copy the name out so that we can safely modify it
-	strncpy (workingname, shotname, 255);
+	Q_strncpy (workingname, shotname, 255);
 
 	// ensure that we have some kind of extension on it - anything will do
 	COM_DefaultExtension (workingname, ".blah");
@@ -991,6 +988,20 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 		SAFE_RELEASE (d3d_MapshotRenderSurf);
 		Con_Printf ("SCR_Mapshot_f: failed to set render target surface\n");
 		return;
+	}
+
+	// build the directory
+	for (int i = strlen (workingname) - 1; i; i--)
+	{
+		if (workingname[i] == '/' || workingname[i] == '\\')
+		{
+			char c = workingname[i];
+			workingname[i] = 0;
+
+			Sys_mkdir (workingname);
+			workingname[i] = c;
+			break;
+		}
 	}
 
 	// go into mapshot mode
@@ -1250,6 +1261,8 @@ Displays a text string in the center of the screen and waits for a Y or N
 keypress.  
 ==================
 */
+void ClearAllStates (void);
+
 int SCR_ModalMessage (char *text, char *caption, int flags)
 {
 	scr_notifytext = text;
@@ -1266,12 +1279,15 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 
 	do
 	{
-		key_count = -1;		// wait for a key down and up
+		key_count = -1;	// wait for a key down and up
+		key_lastpress = 0;	// clear last pressed key
 		Sys_SendKeyEvents ();
 
-		if (key_lastpress == K_ENTER) {key_accept = true; break;}
-		if (key_lastpress == K_ESCAPE) {key_accept = false; break;}
+		// this was trying to be too clever...
+		//if (key_lastpress == K_ENTER) {key_accept = true; break;}
+		//if (key_lastpress == K_ESCAPE) {key_accept = false; break;}
 
+		// allow ESC key to cancel for options that have a cancel
 		if (flags == MB_OK)
 		{
 			if (key_lastpress == 'o' || key_lastpress == 'O') {key_accept = true; break;}
@@ -1280,16 +1296,19 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 		{
 			if (key_lastpress == 'y' || key_lastpress == 'Y') {key_accept = true; break;}
 			if (key_lastpress == 'n' || key_lastpress == 'N') {key_accept = false; break;}
+			if (key_lastpress == K_ESCAPE) {key_accept = false; break;}
 		}
 		else if (flags == MB_OKCANCEL)
 		{
 			if (key_lastpress == 'o' || key_lastpress == 'O') {key_accept = true; break;}
 			if (key_lastpress == 'c' || key_lastpress == 'C') {key_accept = false; break;}
+			if (key_lastpress == K_ESCAPE) {key_accept = false; break;}
 		}
 		else if (flags == MB_RETRYCANCEL)
 		{
 			if (key_lastpress == 'r' || key_lastpress == 'R') {key_accept = true; break;}
 			if (key_lastpress == 'c' || key_lastpress == 'C') {key_accept = false; break;}
+			if (key_lastpress == K_ESCAPE) {key_accept = false; break;}
 		}
 		else
 		{

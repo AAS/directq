@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // net_dgrm.c
 
@@ -1278,7 +1280,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	{
 		reason = MSG_ReadString();
 		Con_Printf (reason);
-		strncpy(m_return_reason, reason, 31);
+		Q_strncpy(m_return_reason, reason, 31);
 		goto ErrorReturn;
 	}
 

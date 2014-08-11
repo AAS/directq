@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // sound.h -- client sound i/o functions
 
@@ -43,8 +45,13 @@ typedef struct
 	int 	speed;
 	int 	width;
 	int 	stereo;
+	int		memsize;
 	byte	data[1];		// variable sized
 } sfxcache_t;
+
+
+#define	MAX_SFX		512
+
 
 typedef struct sfx_s
 {
@@ -162,6 +169,7 @@ extern int		snd_blocked;
 
 void S_LocalSound (char *s);
 sfxcache_t *S_LoadSound (sfx_t *s);
+void S_BlockSound (bool block);
 
 wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength);
 

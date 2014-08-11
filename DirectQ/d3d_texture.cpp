@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 
@@ -272,131 +274,253 @@ bool D3D_LoadPCX (HANDLE fh, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 }
 
 
+char *D3D_FindExternalTexture (char *basename);
+
 bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags)
 {
 	// allow disabling of check for external replacement (speed)
 	if (flags & IMAGE_NOEXTERN) return false;
 
-	// add 3 for handling links.
-	char workingname[259];
+	char texname[256];
 
-	if (flags & IMAGE_ALIAS)
+	// initial copy
+	Q_strncpy (texname, filename, 255);
+
+	if (!(flags & IMAGE_MAPSHOT))
 	{
-		// DP non-standard bullshit
-		_snprintf (workingname, 255, "%s.blah", filename);
+		// remove path
+		for (int i = strlen (filename); i; i--)
+		{
+			if (filename[i] == '/' || filename[i] == '\\')
+			{
+				Q_strncpy (texname, &filename[i + 1], 255);
+				break;
+			}
+		}
 	}
 	else
 	{
-		// copy the name out so that we can safely modify it
-		strncpy (workingname, filename, 255);
-
-		// ensure that we have some kind of extension on it - anything will do
-		COM_DefaultExtension (workingname, ".blah");
-	}
-
-	// change * to #
-	for (int c = 0; ; c++)
-	{
-		if (workingname[c] == 0) break;
-		if (workingname[c] == '*') workingname[c] = '#';
-	}
-
-	for (int i = 0; ; i++)
-	{
-		// ran out of extensions
-		if (!TextureExtensions[i]) break;
-
-		// set the correct extension
-		for (int c = strlen (workingname) - 1; c; c--)
+		// sigh - more path seperator consistency here
+		for (int i = 0; ; i++)
 		{
-			if (workingname[c] == '.')
+			if (!texname[i]) break;
+			if (texname[i] == '/') texname[i] = '\\';
+		}
+	}
+
+	int extpos = 0;
+
+	// remove extension (unless it's an alias model which is in the format "%s_%i", loadmodel->name, i
+	// in which case we just store it's position
+	for (int i = strlen (texname); i; i--)
+	{
+		if (texname[i] == '/' || texname[i] == '\\') break;
+
+		if (texname[i] == '.')
+		{
+			// store ext position
+			extpos = i;
+
+			// alias and sprite textures don't null term at the extension
+			if (flags & IMAGE_ALIAS) break;
+			if (flags & IMAGE_SPRITE) break;
+
+			// other types do
+			texname[i] = 0;
+			break;
+		}
+	}
+
+	// convert to lowercase
+	strlwr (texname);
+
+	// prevent infinite looping
+	bool abort_retry = false;
+
+	// this is used as a goto target for alias and sprite models
+retry_nonstd:;
+
+	// locate the texture
+	char *extpath = D3D_FindExternalTexture (texname);
+
+	if (!extpath)
+	{
+		if ((flags & IMAGE_ALIAS) || (flags & IMAGE_SPRITE))
+		{
+			// already retried
+			if (abort_retry) return false;
+
+			// mark that we're retrying
+			abort_retry = true;
+
+			// find the extension part
+			char *mdlstring = NULL;
+
+			if (flags & IMAGE_ALIAS) mdlstring = strstr (texname, ".mdl_");
+			if (flags & IMAGE_SPRITE) mdlstring = strstr (texname, ".spr_");
+
+			// didn't find it
+			if (!mdlstring) return false;
+
+			// jump past .ext to the _
+			mdlstring += 4;
+
+			// remove the ".ext" part
+			for (int i = 0; ; i++)
 			{
-				strcpy (&workingname[c + 1], TextureExtensions[i]);
+				// replace
+				texname[i + extpos] = mdlstring[i];
+
+				// done after so that texname will null term properly
+				if (!mdlstring[i]) break;
+			}
+
+			// try it again
+			goto retry_nonstd;
+		}
+
+		return false;
+	}
+
+	// this is used as a goto target for .link files
+ext_tex_load:;
+
+	HANDLE fh = INVALID_HANDLE_VALUE;
+	int filelen = 0;
+
+	// only if it's a full path
+	if (extpath[1] == ':' && extpath[2] == '\\')
+	{
+		// attempt to open it direct
+		fh = CreateFile
+		(
+			extpath,
+			GENERIC_READ,
+			FILE_SHARE_READ,
+			NULL,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+			NULL
+		);
+
+		filelen = GetFileSize (fh, NULL);
+	}
+	else
+	{
+		// attempt it through the filesystem
+		filelen = COM_FOpenFile (extpath, &fh);
+	}
+
+	// didn't get it
+	if (fh == INVALID_HANDLE_VALUE) return false;
+
+	// retrieve the extension we're using
+	char *texext = NULL;
+
+	for (int i = strlen (extpath); i; i--)
+	{
+		if (extpath[i] == '.')
+		{
+			texext = &extpath[i];
+			break;
+		}
+	}
+
+	if (!stricmp (texext, ".link"))
+	{
+#if 0
+		// copy out the name
+		Q_strncpy (texname, extpath, 255);
+
+		// now build the new name from the same path as the link file
+		for (int c = strlen (texname) - 1; c; c--)
+		{
+			if (texname[c] == '/' || texname[c] == '\\')
+			{
+				for (int cc = 0; ; cc++)
+				{
+					char fc = COM_FReadChar (fh);
+
+					if (fc == '\n' || fc < 1 || fc == '\r') break;
+
+					texname[c + cc + 1] = fc;
+					texname[c + cc + 2] = 0;
+				}
+
 				break;
 			}
 		}
 
-		HANDLE fh = INVALID_HANDLE_VALUE;
-		int filelen = COM_FOpenFile (workingname, &fh);
+		// done with the file
+		COM_FCloseFile (&fh);
 
-		if (fh == INVALID_HANDLE_VALUE) continue;
+		// set the new path
+		extpath = texname;
 
-		// make this a bit more robust that i == 0
-		if (!strcmp (TextureExtensions[i], "link"))
+		// now go round again to load it for real
+		goto ext_tex_load;
+#else
+		for (int cc = 0; ; cc++)
 		{
-			// handle link format
-			for (int c = strlen (workingname) - 1; c; c--)
-			{
-				if (workingname[c] == '/' || workingname[c] == '\\')
-				{
-					for (int cc = 0; ; cc++)
-					{
-						char fc = COM_FReadChar (fh);
+			char fc = COM_FReadChar (fh);
 
-						if (fc == '\n' || fc < 1 || fc == '\r') break;
+			if (fc == '\n' || fc < 1 || fc == '\r') break;
 
-						workingname[c + cc + 1] = fc;
-						workingname[c + cc + 2] = 0;
-					}
-
-					break;
-				}
-			}
-
-			// done with the file
-			COM_FCloseFile (&fh);
-
-			// the system needs an extension so let's just give it a dummy one
-			// (the above process causes the extension to be lost
-			COM_DefaultExtension (workingname, ".blah");
-
-			// skip the rest; we check link first so that it will fall through to the other standard types
-			continue;
-		}
-		else if (!strcmp (TextureExtensions[i], "pcx"))
-		{
-			// D3DX can't handle PCX formats so we have our own loader
-			if (D3D_LoadPCX (fh, tex, flags, filelen)) return true;
-
-			// we may want to add other formats after PCX...
-			COM_FCloseFile (&fh);
-			continue;
+			// ensure NULL termination
+			texname[cc] = fc;
+			texname[cc + 1] = 0;
 		}
 
-		// allocate a buffer to hold it
-		Pool_Temp->Rewind ();
-		byte *filebuf = (byte *) Pool_Temp->Alloc (filelen);
-
-		// read it all in
-		COM_FReadFile (fh, filebuf, filelen);
+		// handle special names
+		if (texname[0] == '#') texname[0] = '*';
 
 		// done with the file
 		COM_FCloseFile (&fh);
 
-		// attempt to load it (this will generate miplevels for us too)
-		hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
+		return D3D_LoadExternalTexture (tex, texname, flags);
+#endif
+	}
+	else if (!strcmp (texext, ".pcx"))
+	{
+		// D3DX can't handle PCX formats so we have our own loader
+		if (D3D_LoadPCX (fh, tex, flags, filelen)) return true;
 
-		if (FAILED (hr))
-		{
-			// the reason for failure may be because the compressed format was unsupported for the texture dimensions,
-			// so try it again without compression before giving up
-			hr = D3D_CreateExternalTexture (tex, filelen, filebuf, (flags | IMAGE_NOCOMPRESS));
-
-			if (FAILED (hr)) continue;
-		}
-
-		// load succeeded
-		return true;
+		// failed (the PCX loader will close the file for us if it succeeds)
+		COM_FCloseFile (&fh);
+		return false;
 	}
 
-	// didn't find it
-	return false;
+	// all other supported formats
+	// allocate a buffer to hold it
+	Pool_Temp->Rewind ();
+	byte *filebuf = (byte *) Pool_Temp->Alloc (filelen);
+
+	// read it all in
+	COM_FReadFile (fh, filebuf, filelen);
+
+	// done with the file
+	COM_FCloseFile (&fh);
+
+	// attempt to load it (this will generate miplevels for us too)
+	hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
+
+	if (FAILED (hr))
+	{
+		// the reason for failure may be because the compressed format was unsupported for the texture dimensions,
+		// so try it again without compression before giving up
+		hr = D3D_CreateExternalTexture (tex, filelen, filebuf, (flags | IMAGE_NOCOMPRESS));
+
+		if (FAILED (hr)) return false;
+	}
+
+	// load succeeded
+	return true;
 }
 
 
 void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags)
 {
-	hr = D3DXCreateTextureFromResourceEx
+	hr = D3DXCreateTextureFromResourceExA
 	(
 		d3d_Device,
 		NULL,
@@ -758,11 +882,7 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 	COM_CheckContentDirectory (&gl_texturedir, false);
 
 	// try to load an external texture
-	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, va ("%s/%s", gl_texturedir.string, tex->identifier), flags);
-
-	// DP alias skin texture dir non-standard bullshit support
-	if (/*(flags & IMAGE_ALIAS) &&*/ !externalloaded)
-		externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, tex->identifier, flags);
+	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, tex->identifier, flags);
 
 	if (!externalloaded)
 	{
@@ -1072,4 +1192,5 @@ void D3D_RescaleLumas (void)
 		}
 	}
 }
+
 

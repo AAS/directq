@@ -20,10 +20,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  
 */
 
+typedef bool (*DOWNLOADPROGRESSPROC) (int, int);
+DWORD Web_DoDownload (char *url, char *file, DOWNLOADPROGRESSPROC progress);
 
-#define	SBAR_HEIGHT		24
-
-extern	int			sb_lines;			// scan lines to draw
-
-void HUD_Init (void);
-
+#define DL_ERR_NO_ERROR				0
+#define DL_ERR_NOT_IMPLEMENTED		1
+#define DL_ERR_ABORT				2
+#define DL_ERR_UNKNOWN				3

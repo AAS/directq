@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // in_win.c -- windows 95 mouse and joystick code
 // 02/21/97 JCB Added extended DirectInput code to support external controllers.
@@ -33,7 +35,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // statically link
 #pragma comment (lib, "dinput8.lib")
-#pragma comment (lib, "xinput.lib")
+
+void IN_ShutdownXInput (void);
+
+DWORD (WINAPI *QXInputGetCapabilities)
+(
+    DWORD                dwUserIndex,   // [in] Index of the gamer associated with the device
+    DWORD                dwFlags,       // [in] Input flags that identify the device type
+    XINPUT_CAPABILITIES* pCapabilities  // [out] Receives the capabilities
+) = NULL;
+
+DWORD (WINAPI *QXInputGetState)
+(
+    DWORD         dwUserIndex,  // [in] Index of the gamer associated with the device
+    XINPUT_STATE* pState        // [out] Receives the current state
+) = NULL;
+
+HINSTANCE hInstXInput = NULL;
 
 // xinput stuff
 int xiActiveController = -1;
@@ -43,11 +61,14 @@ int xi_olddpadstate = 0;
 int xi_oldbuttonstate = 0;
 
 static bool restore_spi;
-static int originalmouseparms[3], newmouseparms[3] = {0, 0, 1};
+
+// keep this consistent with dinput behaviour
+static int originalmouseparms[3], newmouseparms[3] = {0, 0, 0};
 
 // mouse variables
 cvar_t m_filter ("m_filter", "0", CVAR_ARCHIVE);
-cvar_t m_look ("m_look", "1", CVAR_ARCHIVE);
+cvar_t m_look ("freelook", "1", CVAR_ARCHIVE);
+cvar_alias_t freelook ("m_look", &m_look);
 cvar_t m_boost ("m_boost", "1", CVAR_ARCHIVE);
 cvar_t m_directinput ("m_directinput", "1", CVAR_ARCHIVE);
 
@@ -461,6 +482,8 @@ void IN_Shutdown (void)
 
 	SAFE_RELEASE (di_Mouse);
 	SAFE_RELEASE (di_Object);
+
+	IN_ShutdownXInput ();
 }
 
 
@@ -495,17 +518,18 @@ void IN_MouseMove (usercmd_t *cmd)
 	int i;
 	int mx = 0;
 	int my = 0;
+	extern bool keybind_grab;
 
 	RECT cliprect;
 
 	GetWindowRect (d3d_Window, &cliprect);
 
-	if (!mouseactive) return;
+	if (!mouseactive && !keybind_grab) return;
 
 	// ensure that we have a device and it's actually acquired!!!
 	if (m_directinput.integer && di_Mouse && dinput_acquired)
 	{
-		if (cls.demoplayback || cls.timedemo || key_dest != key_game)
+		if ((cls.demoplayback || cls.timedemo || key_dest != key_game) && !keybind_grab)
 		{
 			// in a demo, the menu or the console we just flush the buffers and reset state always
 			IN_FlushDInput ();
@@ -1218,23 +1242,48 @@ void IN_JoyMove (usercmd_t *cmd)
 }
 
 
+void IN_ShutdownXInput (void)
+{
+	if (hInstXInput) FreeLibrary (hInstXInput);
+
+	hInstXInput = NULL;
+	QXInputGetState = NULL;
+	QXInputGetCapabilities = NULL;
+}
+
+
 void IN_StartupXInput (void)
 {
+	// explicitly null library inst and pointers in case this gets called more than once
+	IN_ShutdownXInput ();
+
+	// attempt to load the best xinput DLL we can find
+	for (int i = 9; i >= 0; i--)
+	{
+		hInstXInput = LoadLibrary (va ("xinput1_%i.dll", i));
+
+		if (hInstXInput) break;
+	}
+
+	if (!hInstXInput) goto no_xinput;
+
+	QXInputGetState = (DWORD (__stdcall *) (DWORD, XINPUT_STATE *)) GetProcAddress (hInstXInput, "XInputGetState");
+	QXInputGetCapabilities = (DWORD (__stdcall *) (DWORD, DWORD, XINPUT_CAPABILITIES *)) GetProcAddress (hInstXInput, "XInputGetCapabilities");
+
+	if (!QXInputGetCapabilities || !QXInputGetState)
+		goto no_xinput;
+
 	XINPUT_CAPABILITIES xiCaps;
 
 	// reset to -1 each time as this can be called at runtime
 	xiActiveController = -1;
-
-	if (xiActive)
-	{
-		xiActive = false;
-	}
+	xiActive = false;
 
 	// only support up to 4 controllers (in a PC scenario usually just one will be attached)
 	for (int c = 0; c < 4; c++)
 	{
 		memset (&xiCaps, 0, sizeof (XINPUT_CAPABILITIES));
-		DWORD gc = XInputGetCapabilities (c, XINPUT_FLAG_GAMEPAD, &xiCaps);
+		DWORD gc = QXInputGetCapabilities (c, XINPUT_FLAG_GAMEPAD, &xiCaps);
 
 		if (gc == ERROR_SUCCESS)
 		{
@@ -1243,10 +1292,12 @@ void IN_StartupXInput (void)
 
 			// store to global active controller
 			xiActiveController = c;
-			break;
+			return;
 		}
 	}
 
+no_xinput:;
+	IN_ShutdownXInput ();
 	Con_Printf ("No XInput Devices Found\n");
 }
 
@@ -1274,6 +1325,10 @@ cvar_t xi_usecontroller ("xi_usecontroller", "1", CVAR_ARCHIVE);
 
 void IN_ControllerAxisMove (usercmd_t *cmd, int axisval, int dz, int axismax, cvar_t *axisaction)
 {
+	if (!hInstXInput) return;
+	if (!QXInputGetState) return;
+	if (!QXInputGetCapabilities) return;
+
 	// not using this axis
 	if (axisaction->integer <= XI_AXIS_NONE) return;
 
@@ -1338,11 +1393,15 @@ void IN_ControllerMove (usercmd_t *cmd)
 	if (xiActiveController < 0) return;
 	if (!xi_usecontroller.integer) return;
 
+	if (!hInstXInput) return;
+	if (!QXInputGetState) return;
+	if (!QXInputGetCapabilities) return;
+
 	XINPUT_STATE xiState;
 	static DWORD xiLastPacket = 666;
 
 	// get current state
-	DWORD xiResult = XInputGetState (xiActiveController, &xiState);
+	DWORD xiResult = QXInputGetState (xiActiveController, &xiState);
 
 	if (xiResult != ERROR_SUCCESS)
 	{

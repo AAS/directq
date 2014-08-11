@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 // VBO interface
@@ -174,6 +176,7 @@ extern D3DDISPLAYMODE d3d_CurrentMode;
 #define IMAGE_NOCOMPRESS	512
 #define IMAGE_NOEXTERN		2048
 #define IMAGE_HALFLIFE		4096
+#define IMAGE_MAPSHOT		8192
 
 
 typedef struct image_s
@@ -229,6 +232,7 @@ typedef struct d3d_global_caps_s
 	bool supportOcclusion;
 	DWORD deviceCreateFlags;
 	int videoRAMMB;
+	int NumTMUs;
 } d3d_global_caps_t;
 
 extern d3d_global_caps_t d3d_GlobalCaps;
@@ -243,6 +247,7 @@ typedef struct d3d_renderdef_s
 
 	// r_speeds counts
 	int	brush_polys;
+	int last_alias_polys;
 	int alias_polys;
 	int numsss;
 

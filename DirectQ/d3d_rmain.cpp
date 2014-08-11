@@ -16,12 +16,128 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // r_main.c
 
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+
+// use unit scales that are also used in most map editors
+cvar_t r_automapscroll_x ("r_automapscroll_x", -64.0f, CVAR_ARCHIVE);
+cvar_t r_automapscroll_y ("r_automapscroll_y", -64.0f, CVAR_ARCHIVE);
+cvar_t r_automapscroll_z ("r_automapscroll_z", 32.0f, CVAR_ARCHIVE);
+
+bool r_automap;
+extern bool scr_drawmapshot;
+
+// default automap viewpoint
+// x and y are updated on entry to the automap
+float r_automap_x = 0;
+float r_automap_y = 0;
+float r_automap_z = 0;
+float r_automap_scale = 5;
+int automap_key = -1;
+int screenshot_key = -1;
+
+void Cmd_ToggleAutomap_f (void)
+{
+	if (cls.state != ca_connected) return;
+
+	r_automap = !r_automap;
+
+	// toggle a paused state
+	if (key_dest == key_automap)
+		key_dest = key_game;
+	else key_dest = key_automap;
+
+	// find which key is bound to the automap
+	automap_key = Key_GetBinding ("toggleautomap");
+
+	// find any other key defs we want to allow
+	screenshot_key = Key_GetBinding ("screenshot");
+
+	r_automap_x = r_refdef.vieworg[0];
+	r_automap_y = r_refdef.vieworg[1];
+	r_automap_z = 0;
+}
+
+
+void Key_Automap (int key)
+{
+	switch (key)
+	{
+	case K_PGUP:
+		r_automap_z += r_automapscroll_z.value;
+		break;
+
+	case K_PGDN:
+		r_automap_z -= r_automapscroll_z.value;
+		break;
+
+	case K_UPARROW:
+		r_automap_y -= r_automapscroll_y.value;
+		break;
+
+	case K_DOWNARROW:
+		r_automap_y += r_automapscroll_y.value;
+		break;
+
+	case K_LEFTARROW:
+		r_automap_x += r_automapscroll_x.value;
+		break;
+
+	case K_RIGHTARROW:
+		r_automap_x -= r_automapscroll_x.value;
+		break;
+
+	case K_HOME:
+		r_automap_scale -= 0.5f;
+		break;
+
+	case K_END:
+		r_automap_scale += 0.5f;
+		break;
+
+	default:
+		if (key == automap_key)
+			Cmd_ToggleAutomap_f ();
+		else if (key == screenshot_key)
+		{
+			Cbuf_InsertText ("screenshot\n");
+			Cbuf_Execute ();
+		}
+		break;
+	}
+
+	if (r_automap_scale < 0.5) r_automap_scale = 0.5;
+	if (r_automap_scale > 20) r_automap_scale = 20;
+}
+
+
+cmd_t Cmd_ToggleAutomap ("toggleautomap", Cmd_ToggleAutomap_f);
+
+int c_automapsurfs = 0;
+
+bool D3D_DrawAutomap (void)
+{
+	if (!r_automap) return false;
+	if (cls.state != ca_connected) return false;
+	if (scr_drawmapshot) return false;
+	if (cl.intermission == 1 && key_dest == key_game) return false;
+	if (cl.intermission == 2 && key_dest == key_game) return false;
+
+	c_automapsurfs = 0;
+	return true;
+}
+
+
+void D3D_AutomapReset (void)
+{
+}
+
 
 void RotatePointAroundVector (vec3_t dst, const vec3_t dir, const vec3_t point, float degrees);
 void R_AnimateLight (void);
@@ -784,11 +900,63 @@ void R_SetupSpriteModels (void)
 }
 
 
+/*
+================
+R_ModParanoia
+
+mods sometimes send skin, frame and other numbers that are not valid for the model
+so here we need to fix them up...
+================
+*/
+void R_ModParanoia (entity_t *ent)
+{
+	model_t *mod = ent->model;
+
+	switch (mod->type)
+	{
+	case mod_alias:
+		// fix up skins
+		if (ent->skinnum >= mod->aliashdr->numskins) ent->skinnum = 0;
+		if (ent->skinnum < 0) ent->skinnum = 0;
+
+		// fix up frame
+		if (ent->frame >= mod->aliashdr->numframes) ent->frame = 0;
+		if (ent->frame < 0) ent->frame = 0;
+		break;
+
+	case mod_brush:
+		// only 2 frames in brushmodels for regular and alternate anims
+		if (ent->frame) ent->frame = 1;
+		break;
+
+	case mod_sprite:
+		// fix up frame
+		if (ent->frame >= mod->spritehdr->numframes) ent->frame = 0;
+		if (ent->frame < 0) ent->frame = 0;
+		break;
+
+	default:
+		// do nothing
+		break;
+	}
+}
+
+
 void R_SetupEntitiesOnList (void)
 {
 	// brush models include the world
 	R_SetupBrushModels ();
 	R_SetupSpriteModels ();
+
+	// deferred until after the world so that we get statics on the list too
+	for (int i = 0; i < d3d_RenderDef.numvisedicts; i++)
+	{
+		entity_t *ent = d3d_RenderDef.visedicts[i];
+
+		if (!ent->model) continue;
+
+		R_ModParanoia (ent);
+	}
 }
 
 
@@ -846,6 +1014,7 @@ void R_RenderView (void)
 
 	// initialize r_speeds and flags
 	d3d_RenderDef.brush_polys = 0;
+	d3d_RenderDef.last_alias_polys = d3d_RenderDef.alias_polys;
 	d3d_RenderDef.alias_polys = 0;
 	d3d_RenderDef.numsss = 0;
 

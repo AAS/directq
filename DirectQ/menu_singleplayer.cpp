@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 
@@ -25,8 +27,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 cvar_t host_savenamebase ("host_savenamebase", "save_", CVAR_ARCHIVE);
-extern cvar_t host_savedir;
 extern char *SkillNames[];
+
+extern CQMenu menu_Maps;
+extern CQMenu menu_Demo;
+
 
 /*
 ========================================================================================================================
@@ -162,7 +167,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	}
 
 	// copy in the map name
-	strncpy (si->mapname, str, SAVEGAME_COMMENT_LENGTH);
+	Q_strncpy (si->mapname, str, SAVEGAME_COMMENT_LENGTH);
 
 	// these exist to soak up data we skip over
 	float fsoak;
@@ -187,7 +192,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	if (!si->mapname[0] || si->mapname[0] == 32)
 	{
 		// not every map has a friendly name
-		strncpy (si->mapname, str, SAVEGAME_COMMENT_LENGTH);
+		Q_strncpy (si->mapname, str, SAVEGAME_COMMENT_LENGTH);
 		si->mapname[22] = 0;
 	}
 
@@ -264,7 +269,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 				if (!start) break;
 
 				// copy out key
-				strncpy (keyname, com_token, 63);
+				Q_strncpy (keyname, com_token, 63);
 
 				// parse the value
 				start = COM_Parse (start);
@@ -299,7 +304,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	SYSTEMTIME st;
 
 	// set up the file name for opening
-	_snprintf (name2, 256, "%s/%s/%s", com_gamedir, host_savedir.string, filename);
+	_snprintf (name2, 256, "%s/save/%s", com_gamedir, filename);
 
 	// open it again (isn't the Windows API beautiful?)
 	HANDLE hFile = CreateFile (name2, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -389,8 +394,7 @@ void Menu_SaveLoadAddSave (WIN32_FIND_DATA *savefile)
 	if (savefile->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return;
 
 	// attempt to open it
-	// FUCK YOU!  I forgot to add in host_savedir here...
-	FILE *f = fopen (va ("%s\\%s\\%s", com_gamedir, host_savedir.string, savefile->cFileName), "r");
+	FILE *f = fopen (va ("%s\\save\\%s", com_gamedir, savefile->cFileName), "r");
 	int version;
 
 	// failed to open (we don't expect this to happen)
@@ -459,14 +463,11 @@ void Menu_SaveLoadScanSaves (void)
 	// no saves yet
 	NumSaves = 0;
 
-	// make the save directory
-	COM_CheckContentDirectory (&host_savedir, true);
-
 	WIN32_FIND_DATA FindFileData;
 	HANDLE hFind = INVALID_HANDLE_VALUE;
 
 	// look for a file
-	hFind = FindFirstFile (va ("%s\\%s\\*.sav", com_gamedir, host_savedir.string), &FindFileData);
+	hFind = FindFirstFile (va ("%s\\save\\*.sav", com_gamedir), &FindFileData);
 
 	if (hFind == INVALID_HANDLE_VALUE)
 	{
@@ -547,21 +548,6 @@ void Menu_SaveLoadScanSaves (void)
 }
 
 
-void Menu_SaveLoadCheckSavedir (void)
-{
-	static char oldsavedir[128] = {0};
-
-	// no change here
-	if (!stricmp (oldsavedir, host_savedir.string)) return;
-
-	// copy out
-	strncpy (oldsavedir, host_savedir.string, 127);
-
-	// dirty the list
-	savelistchanged = true;
-}
-
-
 void Menu_SaveCustomEnter (void)
 {
 	if (!sv.active || cl.intermission || svs.maxclients != 1 || cl.stats[STAT_HEALTH] <= 0)
@@ -572,7 +558,6 @@ void Menu_SaveCustomEnter (void)
 	}
 
 	// scan the saves
-	Menu_SaveLoadCheckSavedir ();
 	Menu_SaveLoadScanSaves ();
 
 	// set the active array to the full list
@@ -584,7 +569,6 @@ void Menu_SaveCustomEnter (void)
 void Menu_LoadCustomEnter (void)
 {
 	// scan the saves
-	Menu_SaveLoadCheckSavedir ();
 	Menu_SaveLoadScanSaves ();
 
 	// begin the active array at the second item (skip over the "new savegame" item)
@@ -618,8 +602,8 @@ void Menu_SaveLoadOnHover (int initialy, int y, int itemnum)
 
 		// remake quake compatibility
 		if (cl.stats[STAT_TOTALSECRETS] == 0)
-			Menu_Print (220, initialy + 175, va ("Secrets: %i", cl.stats[STAT_SECRETS]));
-		else Menu_Print (220, initialy + 175, va ("Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]));
+			Menu_Print (220, initialy + 187, va ("Secrets: %i", cl.stats[STAT_SECRETS]));
+		else Menu_Print (220, initialy + 187, va ("Secrets: %i/%i", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]));
 
 		Menu_Print (220, initialy + 199, va ("Skill:   %s", SkillNames[(int) skill.value]));
 		Menu_Print (220, initialy + 211, va ("Time:    %02i:%02i", (int) (cl.time / 60), (int) (cl.time - (int) (cl.time / 60) * 60)));
@@ -627,14 +611,14 @@ void Menu_SaveLoadOnHover (int initialy, int y, int itemnum)
 	else
 	{
 		// existing save game
-		Draw_Mapshot (va ("%s/%s", host_savedir.string, ActiveSaveInfoArray[itemnum]->SaveInfo.filename), (vid.width - 320) / 2 + 208, initialy + 8);
+		Draw_Mapshot (va ("save/%s", ActiveSaveInfoArray[itemnum]->SaveInfo.filename), (vid.width - 320) / 2 + 208, initialy + 8);
 		Menu_PrintWhite (220, initialy + 145, "Savegame Info");
 		Menu_Print (218, initialy + 160, DIVIDER_LINE);
 		Menu_Print (220, initialy + 175, va ("Kills:   %s", ActiveSaveInfoArray[itemnum]->SaveInfo.kills));
 		Menu_Print (220, initialy + 187, va ("Secrets: %s", ActiveSaveInfoArray[itemnum]->SaveInfo.secrets));
 		Menu_Print (220, initialy + 199, va ("Skill:   %s", SkillNames[ActiveSaveInfoArray[itemnum]->SaveInfo.skill]));
 		Menu_Print (220, initialy + 211, va ("Time:    %s", ActiveSaveInfoArray[itemnum]->SaveInfo.time));
-		Menu_Print (220, initialy + 221, va ("%s", ActiveSaveInfoArray[itemnum]->SaveInfo.savetime));
+		Menu_Print (220, initialy + 223, va ("%s", ActiveSaveInfoArray[itemnum]->SaveInfo.savetime));
 	}
 }
 
@@ -674,7 +658,7 @@ void Menu_SaveLoadOnDelete (int itemnum)
 		// delete the save
 		char delfile[MAX_PATH];
 
-		_snprintf (delfile, MAX_PATH, "%s\\%s\\%s", com_gamedir, host_savedir.string, ActiveSaveInfoArray[itemnum]->SaveInfo.filename);
+		_snprintf (delfile, MAX_PATH, "%s\\save\\%s", com_gamedir, ActiveSaveInfoArray[itemnum]->SaveInfo.filename);
 
 		// change / to \\ 
 		for (int i = 0; ; i++)
@@ -704,9 +688,6 @@ void Menu_SaveLoadOnDelete (int itemnum)
 
 void Menu_SaveLoadOnEnter (int itemnum)
 {
-	// ensure the folder exists
-	COM_CheckContentDirectory (&host_savedir, true);
-
 	if (m_state == m_save)
 	{
 		if (itemnum == 0)
@@ -716,7 +697,7 @@ void Menu_SaveLoadOnEnter (int itemnum)
 			// generate a new save name
 			for (i = 0; i < 99999; i++)
 			{
-				FILE *f = fopen (va ("%s/%s/%s%05i.sav", com_gamedir, host_savedir.string, host_savenamebase.string, i), "r");
+				FILE *f = fopen (va ("%s/save/%s%05i.sav", com_gamedir, host_savenamebase.string, i), "r");
 
 				if (!f)
 				{
@@ -913,7 +894,6 @@ void Menu_InitSaveLoadMenu (void)
 
 	// the initial scan at runtime can be slow owing to filesystem first access, so
 	// run a pre-scan to speed that up a little...
-	Menu_SaveLoadCheckSavedir ();
 	Menu_SaveLoadScanSaves ();
 }
 
@@ -924,7 +904,6 @@ void Menu_SaveLoadInvalidate (void)
 	savelistchanged = true;
 
 	// rescan
-	Menu_SaveLoadCheckSavedir ();
 	Menu_SaveLoadScanSaves ();
 }
 

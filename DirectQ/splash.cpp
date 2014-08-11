@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 #include "quakedef.h"
@@ -88,8 +90,13 @@ LRESULT CALLBACK SplashProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 }
 
 
+bool splashon = false;
+
 void Splash_Init (void)
 {
+	// prevent the splash from being shown twice
+	if (splashon) return;
+
 	WNDCLASSEX wc;
 
 	wc.cbClsExtra = 0;
@@ -130,13 +137,20 @@ void Splash_Init (void)
 
 	// give the window the focus
 	SetForegroundWindow (SplashWindow);
+
+	// prevent the splash from being shown twice
+	splashon = true;
 }
 
 
 void Splash_Destroy (void)
 {
+	if (!splashon) return;
+
 	DestroyWindow (SplashWindow);
 	UnregisterClass (SPLASH_CLASS_NAME, GetModuleHandle (NULL));
+
+	splashon = false;
 }
 
 

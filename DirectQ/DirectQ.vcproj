@@ -69,7 +69,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib d3d9.lib d3dx9.lib odbc32.lib odbccp32.lib"
+				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
 				LinkIncremental="1"
 				EnableUAC="false"
@@ -159,7 +159,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib d3d9.lib d3dx9.lib odbc32.lib odbccp32.lib"
+				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
 				LinkIncremental="1"
 				EnableUAC="false"
@@ -241,6 +241,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\cl_webdownload.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\cmd.cpp"
 				>
 			</File>
@@ -262,10 +266,6 @@
 			</File>
 			<File
 				RelativePath=".\d3d_alias.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\d3d_automap.cpp"
 				>
 			</File>
 			<File
@@ -358,6 +358,10 @@
 			</File>
 			<File
 				RelativePath=".\mathlib.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\md5.c"
 				>
 			</File>
 			<File
@@ -527,6 +531,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\global.h"
+				>
+			</File>
+			<File
 				RelativePath=".\heap.h"
 				>
 			</File>
@@ -548,6 +556,10 @@
 			</File>
 			<File
 				RelativePath=".\mathlib.h"
+				>
+			</File>
+			<File
+				RelativePath=".\md5.h"
 				>
 			</File>
 			<File
@@ -644,6 +656,10 @@
 			</File>
 			<File
 				RelativePath=".\wad.h"
+				>
+			</File>
+			<File
+				RelativePath=".\webdownload.h"
 				>
 			</File>
 			<File

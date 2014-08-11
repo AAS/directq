@@ -16,11 +16,14 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // cl_parse.c  -- parse a message received from the server
 
 #include "quakedef.h"
 #include "d3d_model.h"
+#include "webdownload.h"
 
 void D3D_TranslatePlayerSkin (int playernum);
 
@@ -211,7 +214,7 @@ When the client is taking a long time to load stuff, send keepalive messages
 so the server doesn't disconnect.
 ==================
 */
-void CL_KeepaliveMessage (void)
+void CL_KeepaliveMessage (bool showmsg = true)
 {
 	DWORD	time;
 	static DWORD lastmsg;
@@ -258,12 +261,70 @@ void CL_KeepaliveMessage (void)
 	lastmsg = time;
 
 	// write out a nop
-	Con_Printf ("--> client to server keepalive\n");
+	if (showmsg) Con_Printf ("--> client to server keepalive\n");
 
 	MSG_WriteByte (&cls.message, clc_nop);
 	NET_SendMessage (cls.netcon, &cls.message);
 	SZ_Clear (&cls.message);
 }
+
+void Host_Frame (DWORD time);
+
+static bool CL_WebDownloadProgress (int DownloadSize, int PercentDown)
+{
+	static DWORD time, oldtime, newtime;
+	static int lastpercent = 666;
+	int thispercent = (PercentDown / 10);
+
+	CL_KeepaliveMessage (false);
+
+	if (!DownloadSize || !PercentDown)
+	{
+		lastpercent = 666;
+		return true;
+	}
+
+	if (lastpercent > thispercent) Con_Printf ("Downloading %i bytes\n", DownloadSize);
+
+	cls.download.percent = PercentDown;
+
+	newtime = Sys_DWORDTime ();
+	time = newtime - oldtime;
+
+	if (lastpercent != thispercent)
+	{
+		// give an indication of time
+		Con_Printf ("...Downloaded %i%%\n", PercentDown);
+		lastpercent = thispercent;
+	}
+
+	Host_Frame (time);
+
+	oldtime = newtime;
+
+	// abort if we disconnect
+	return !cls.download.disconnect;
+}
+
+
+char *COM_GetFolderForFile (char *filename)
+{
+	static char foldername[MAX_PATH];
+
+	strcpy (foldername, filename);
+
+	for (int i = strlen (foldername) - 1; i; i--)
+	{
+		if (foldername[i] == '/' || foldername[i] == '\\')
+		{
+			foldername[i] = 0;
+			break;
+		}
+	}
+
+	return foldername;
+}
+
 
 /*
 ==================
@@ -275,6 +336,81 @@ static char	**model_precache = NULL;
 static char	**sound_precache = NULL;
 static model_t **static_cl_model_precache = NULL;
 static sfx_t **static_cl_sfx_precache = NULL;
+
+extern cvar_t cl_web_download;
+extern cvar_t cl_web_download_url;
+
+void CL_DoWebDownload (char *filename)
+{
+	// create the directory for the target
+	Sys_mkdir (COM_GetFolderForFile (filename));
+
+	// to do - this will go into the progress display
+	Con_Printf ("Downloading from %s%s\n\n", cl_web_download_url.string, filename);
+
+	// this needs a screen update
+	SCR_UpdateScreen ();
+
+	// default download params
+	cls.download.web = true;
+	cls.download.disconnect = false;
+	cls.download.percent = 0;
+
+	// let the Windows API do it's magic!!
+	DWORD DLResult = Web_DoDownload
+	(
+		va ("%s%s", cl_web_download_url.string, filename),
+		va ("%s/%s", com_gamedir, filename),
+		CL_WebDownloadProgress
+	);
+
+	// we're not downloading any more
+	cls.download.web = false;
+	cls.download.percent = 0;
+
+	// true if the user type disconnect in the middle of the download
+	// moved up to here because it could never be called in the old code!!!
+	if (cls.download.disconnect)
+	{
+		Con_Printf ("Download aborted\n");
+		cls.download.disconnect = false;
+		CL_Disconnect_f ();
+		return;
+	}
+
+	// check the result
+	if (DLResult == DL_ERR_NO_ERROR)
+	{
+		// now we know it worked
+		Con_Printf ("\nDownload succesful\n");
+
+		// reconnect after each success
+		extern char server_name[MAX_QPATH];
+		extern int net_hostport;
+
+		Cbuf_AddText (va ("connect %s:%u\n", server_name, net_hostport));
+		return;
+	}
+	else
+	{
+		switch (DLResult)
+		{
+		case DL_ERR_NOT_IMPLEMENTED:
+			Con_Printf ("Download unavailable\n");
+			break;
+
+		case DL_ERR_ABORT:
+			Con_Printf ("Download aborted\n");
+			break;
+
+		default:
+			Con_Printf ("Download failed\n");
+			break;
+		}
+		return;
+	}
+}
+
 
 void CL_ParseServerInfo (void)
 {
@@ -301,6 +437,11 @@ void CL_ParseServerInfo (void)
 	// alloc these in permanent memory first time they're needed
 	if (!static_cl_model_precache) static_cl_model_precache = (model_t **) Pool_Permanent->Alloc (MAX_MODELS * sizeof (model_t *));
 	if (!static_cl_sfx_precache) static_cl_sfx_precache = (sfx_t **) Pool_Permanent->Alloc (MAX_SOUNDS * sizeof (sfx_t *));
+
+	// wipe the model and sounds precaches fully so that an attempt to reference one beyond
+	// the limit of what's loaded will always fail
+	for (i = 0; i < MAX_MODELS; i++) static_cl_model_precache[i] = NULL;
+	for (i = 0; i < MAX_SOUNDS; i++) static_cl_sfx_precache[i] = NULL;
 
 	Con_DPrintf ("Serverinfo packet received.\n");
 
@@ -334,18 +475,20 @@ void CL_ParseServerInfo (void)
 		return;
 	}
 
-	cl.scores = (scoreboard_t *) Pool_Map->Alloc (cl.maxclients * sizeof (*cl.scores));
+	cl.scores = (scoreboard_t *) Pool_Map->Alloc (cl.maxclients * sizeof (scoreboard_t));
 
 	// parse gametype
 	cl.gametype = MSG_ReadByte ();
 
 	// parse signon message
 	str = MSG_ReadString ();
-	strncpy (cl.levelname, str, sizeof (cl.levelname) - 1);
+	cl.levelname = (char *) Pool_Map->Alloc (strlen (str) + 1);
+	strcpy (cl.levelname, str);
 
 	// seperate the printfs so the server message can have a color
 	Con_Printf ("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
-	Con_Printf ("%c%s\n", 2, str);
+	Con_Printf ("%c%s", 2, str);
+	Con_Printf ("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
 
 	// set up model and sound precache lists
 	cl.model_precache = static_cl_model_precache;
@@ -369,7 +512,7 @@ void CL_ParseServerInfo (void)
 			return;
 		}
 
-		strncpy (model_precache[nummodels], str, MAX_QPATH - 1);
+		Q_strncpy (model_precache[nummodels], str, MAX_QPATH - 1);
 		Mod_TouchModel (str);
 	}
 
@@ -384,13 +527,14 @@ void CL_ParseServerInfo (void)
 			return;
 		}
 
-		strncpy (sound_precache[numsounds], str, MAX_QPATH - 1);
+		Q_strncpy (sound_precache[numsounds], str, MAX_QPATH - 1);
 		S_TouchSound (str);
 	}
 
 	// now we try to load everything else until a cache allocation fails
 	for (i = 1; i < nummodels; i++)
 	{
+		// don't crash because we're attempting downloads here
 		cl.model_precache[i] = Mod_ForName (model_precache[i], false);
 
 		// avoid memset 0 requirement
@@ -398,13 +542,29 @@ void CL_ParseServerInfo (void)
 
 		if (cl.model_precache[i] == NULL)
 		{
-			Con_Printf ("Model %s not found\n", model_precache[i]);
+			// no web download on a local server or in demos
+			if (sv.active || cls.demoplayback || !cl_web_download.value || !cl_web_download_url.string || !cl_web_download_url.string[0])
+			{
+				// if web download is not being used we don't bother with it
+				Con_Printf ("Model %s not found\n", model_precache[i]);
+				return;
+			}
+
+			// attempt a web download
+			CL_DoWebDownload (model_precache[i]);
+
+			// always
 			return;
 		}
 
-		CL_KeepaliveMessage ();
+		// send a keep-alive after each model
+		CL_KeepaliveMessage (false);
 	}
 
+	// ensure that the worldmodel loads OK and crash it if not
+	cl.model_precache[1] = Mod_ForName (model_precache[1], true);
+
+	// now we do sounds
 	S_BeginPrecaching ();
 
 	for (i = 1; i < numsounds; i++)
@@ -424,19 +584,22 @@ void CL_ParseServerInfo (void)
 	cl_entities[0]->model = cl.worldmodel = cl.model_precache[1];
 
 	char mapname[MAX_PATH];
-	strncpy (mapname, cl.worldmodel->name, MAX_PATH - 1);
+	Q_strncpy (mapname, cl.worldmodel->name, MAX_PATH - 1);
 
 	for (int i = strlen (cl.worldmodel->name); i; i--)
 	{
 		if (cl.worldmodel->name[i] == '/' || cl.worldmodel->name[i] == '\\')
 		{
-			strncpy (mapname, &cl.worldmodel->name[i + 1], MAX_PATH - 1);
+			Q_strncpy (mapname, &cl.worldmodel->name[i + 1], MAX_PATH - 1);
 			break;
 		}
 	}
 
 	extern HWND d3d_Window;
-	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s - %s (%s)", DIRECTQ_VERSION, com_gamename, cl.levelname, mapname));
+
+	if (cls.demoplayback)
+		SetWindowText (d3d_Window, va ("DirectQ Release %s - %s - %s (%s)", DIRECTQ_VERSION, com_gamename, cl.levelname, cls.demoname));
+	else SetWindowText (d3d_Window, va ("DirectQ Release %s - %s - %s (%s)", DIRECTQ_VERSION, com_gamename, cl.levelname, mapname));
 
 	// clean up zone allocations
 	Zone_Compact ();
@@ -502,6 +665,8 @@ void CL_ParseUpdate (int bits)
 	if (ent->msgtime != cl.mtime[1])
 	{
 		// entity was not present on the previous frame
+		// assume it's not occluded until such a time as we prove otherwise
+		ent->occluded = false;
 		forcelink = true;
 	}
 	else forcelink = false;
@@ -624,6 +789,9 @@ void CL_ParseUpdate (int bits)
 		// if (model && ent->model) Con_Printf ("Change from %s to %s\n", ent->model->name, model->name);
 		ent->model = model;
 
+		// the new model will most likely have different bbox dimensions
+		ent->occluded = false;
+
 		// automatic animation (torches, etc) can be either all together
 		// or randomized
 		if (model)
@@ -649,8 +817,9 @@ void CL_ParseUpdate (int bits)
 		ent->angles1[0] = ent->angles1[1] = ent->angles1[2] = 0;
 		ent->angles2[0] = ent->angles2[1] = ent->angles2[2] = 0;
 
-		// reset frame too...!
+		// reset frame and skin too...!
 		if (!(bits & U_FRAME)) ent->frame = 0;
+		if (!(bits & U_SKIN)) ent->skinnum = 0;
 	}
 
 	if (forcelink)
@@ -733,16 +902,16 @@ void CL_ParseClientdata (void)
 	else cl.idealpitch = 0;
 
 	VectorCopy (cl.mvelocity[0], cl.mvelocity[1]);
+
 	for (i=0 ; i<3 ; i++)
 	{
 		if (bits & (SU_PUNCH1<<i) )
 			cl.punchangle[i] = MSG_ReadChar();
-		else
-			cl.punchangle[i] = 0;
+		else cl.punchangle[i] = 0;
+
 		if (bits & (SU_VELOCITY1<<i) )
 			cl.mvelocity[0][i] = MSG_ReadChar()*16;
-		else
-			cl.mvelocity[0][i] = 0;
+		else cl.mvelocity[0][i] = 0;
 	}
 
 // [always sent]	if (bits & SU_ITEMS)
@@ -888,7 +1057,7 @@ void R_AddEfrags (entity_t *ent);
 
 void CL_ParseStatic (int version)
 {
-	if (!cl.worldmodel->brushhdr)
+	if (!cl.worldmodel || !cl.worldmodel->brushhdr)
 	{
 		Host_Error ("CL_ParseStatic: spawn static without a world\n(are you missing a mod directory?)");
 		return;
@@ -953,8 +1122,8 @@ void SHOWLMP_decodeshow (void);
 void D3D_DeleteTranslation (int playernum);
 
 int MSG_PeekByte (void);
-//void CL_ParseProQuakeMessage (void);
-//void CL_ParseProQuakeString (char *string);
+void CL_ParseProQuakeMessage (void);
+void CL_ParseProQuakeString (char *string);
 
 /*
 =====================
@@ -1051,9 +1220,14 @@ void CL_ParseServerMessage (void)
 			Host_EndGame ("Server disconnected\n");
 
 		case svc_print:
+			if (!cls.download.web)
 			{
 				char *str = MSG_ReadString ();
-				// CL_ParseProQuakeString (str);
+
+				// proquake messaging only exists with protocol 15
+				if (cl.Protocol == PROTOCOL_VERSION)
+					CL_ParseProQuakeString (str);
+
 				Con_Printf ("%s", str);
 			}
 			break;
@@ -1065,7 +1239,10 @@ void CL_ParseServerMessage (void)
 		case svc_stufftext:
 			{
 				// check for proquake messages
-				// if (MSG_PeekByte () == MOD_PROQUAKE) CL_ParseProQuakeMessage ();
+				// proquake messaging only exists with protocol 15
+				if ((cl.Protocol == PROTOCOL_VERSION) && (MSG_PeekByte () == MOD_PROQUAKE))
+					CL_ParseProQuakeMessage ();
+
 				char *stufftxt = MSG_ReadString ();
 
 				// Still want to add text, even on ProQuake messages.  This guarantees compatibility;
@@ -1110,7 +1287,7 @@ void CL_ParseServerMessage (void)
 			}
 
 			// note - 64, not 63, is intentional here
-			strncpy (cl_lightstyle[i].map,  MSG_ReadString(), 64);
+			Q_strncpy (cl_lightstyle[i].map,  MSG_ReadString(), 64);
 			cl_lightstyle[i].length = strlen(cl_lightstyle[i].map);
 			break;
 
@@ -1133,7 +1310,7 @@ void CL_ParseServerMessage (void)
 				break;
 			}
 
-			strncpy (cl.scores[i].name, MSG_ReadString (), 31);
+			Q_strncpy (cl.scores[i].name, MSG_ReadString (), 31);
 			break;
 
 		case svc_updatefrags:
@@ -1239,10 +1416,11 @@ void CL_ParseServerMessage (void)
 		case svc_cdtrack:
 			cl.cdtrack = MSG_ReadByte ();
 			cl.looptrack = MSG_ReadByte ();
-			if ( (cls.demoplayback || cls.demorecording) && (cls.forcetrack != -1) )
-				CDAudio_Play ((byte)cls.forcetrack, true);
+
+			if ((cls.demoplayback || cls.demorecording) && (cls.forcetrack != -1))
+				CDAudio_Play ((byte) cls.forcetrack, true);
 			else
-				CDAudio_Play ((byte)cl.cdtrack, true);
+				CDAudio_Play ((byte) cl.cdtrack, true);
 			break;
 
 		case svc_intermission:
@@ -1359,7 +1537,6 @@ CL_ParseProQuakeMessage
 */
 void CL_ParseProQuakeMessage (void)
 {
-#if 0
 	int cmd, i;
 	int team, frags, shirt, ping;
 
@@ -1376,6 +1553,8 @@ void CL_ParseProQuakeMessage (void)
 		shirt = MSG_ReadByte() - 16;
 		cl.teamgame = true;
 
+		if (!cl.teamscores) break;
+
 		// cl.teamscores[team].frags = 0;	// JPG 3.20 - removed this
 		cl.teamscores[team].colors = 16 * shirt + team;
 		break;
@@ -1384,6 +1563,8 @@ void CL_ParseProQuakeMessage (void)
 		team = MSG_ReadByte() - 16;
 		if (team < 0 || team > 13)
 			Host_Error ("CL_ParseProQuakeMessage: pqc_erase_team invalid team");
+
+		if (!cl.teamscores) break;
 
 		cl.teamscores[team].colors = 0;
 		cl.teamscores[team].frags = 0;		// JPG 3.20 - added this
@@ -1398,6 +1579,7 @@ void CL_ParseProQuakeMessage (void)
 
 		if (frags & 32768) frags = frags - 65536;
 
+		if (!cl.teamscores) break;
 		cl.teamscores[team].frags = frags;
 		break;
 
@@ -1408,6 +1590,8 @@ void CL_ParseProQuakeMessage (void)
 		break;
 
 	case pqc_match_reset:
+		if (!cl.teamscores) break;
+
 		for (i = 0; i < 14; i++)
 		{
 			cl.teamscores[i].colors = 0;
@@ -1428,7 +1612,6 @@ void CL_ParseProQuakeMessage (void)
 		cl.last_ping_time = cl.time;
 		break;
 	}
-#endif
 }
 
 
@@ -1466,9 +1649,17 @@ void Q_Version (char *s)
 CL_ParseProQuakeString
 ======================
 */
+cvar_t pq_scoreboard_pings ("pq_scoreboard_pings", "1", CVAR_ARCHIVE);
+
+// no iplog in directq
+#define iplog_size 0
+
+void IPLog_Add (int blah1, char *blah2)
+{
+}
+
 void CL_ParseProQuakeString (char *string)
 {
-#if 0
 	static int checkping = -1;
 	int ping, i;
 	char *s, *s2, *s3;
@@ -1624,5 +1815,4 @@ void CL_ParseProQuakeString (char *string)
 	}
 
 	Q_Version (string); //R00k: look for "q_version" requests
-#endif
 }

@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // comndef.h  -- general definitions
 
@@ -23,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 typedef unsigned char 		byte;
 #define BYTE_DEFINED 1
 #endif
+
+char *Q_strncpy (char *dst, const char *src, int len);
 
 
 //============================================================================
@@ -176,4 +180,9 @@ void COM_HashData (byte *hash, const void *data, int size);
 #define COM_CheckHash(h1, h2) !(memcmp ((h1), (h2), 16))
 
 void COM_SortStringList (char **stringlist, bool ascending);
+
+#define COM_MAXGAMES 256
+
+extern int com_numgames;
+extern char *com_games[];
 

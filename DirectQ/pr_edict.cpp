@@ -16,11 +16,14 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // sv_edict.c -- entity dictionary
 
 #include "quakedef.h"
 #include "pr_class.h"
+#include "d3d_model.h"
 
 CProgsDat *SVProgs = NULL;
 
@@ -501,6 +504,8 @@ ED_Print
 For debugging
 =============
 */
+char *edprintstring = NULL;
+
 void ED_Print (edict_t *ed)
 {
 	int		l;
@@ -609,6 +614,7 @@ void ED_PrintEdicts (void)
 	int		i;
 	
 	Con_Printf ("%i entities\n", SVProgs->NumEdicts);
+
 	for (i=0 ; i<SVProgs->NumEdicts ; i++)
 		ED_PrintNum (i);
 }
@@ -961,6 +967,167 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 }
 
 
+typedef struct entitystat_s
+{
+	char *name;
+	char *firstword;
+	int num_easy;
+	int num_normal;
+	int num_hard;
+	int num_dm;
+	struct entitystat_s *next;
+} entitystat_t;
+
+typedef struct levelstats_s
+{
+	int numents;
+	int numenttypes;
+	int nummodels;
+	int numeasy;
+	int numnormal;
+	int numhard;
+	int numdm;
+	entitystat_t *entitystats;
+	entitystat_t **sorted;
+} levelstats_t;
+
+levelstats_t sv_levelstats;
+
+void SV_LevelStats_f (void)
+{
+	bool hasskills = false;
+
+	if (sv_levelstats.numeasy != sv_levelstats.numnormal || sv_levelstats.numnormal != sv_levelstats.numhard || sv_levelstats.numeasy != sv_levelstats.numhard)
+		hasskills = true;
+
+	Con_Printf ("\nMap name:     %s\n", cl.levelname);
+	Con_Printf ("File name:    %s\n", cl.worldmodel->name);
+	Con_Printf ("Skill Modes:  %s\n", hasskills ? "Yes" : "No");
+	Con_Printf ("CD Track:     %i\n", cl.cdtrack);
+	Con_Printf ("Surfaces:     %i\n", cl.worldmodel->brushhdr->numsurfaces);
+	Con_Printf ("Entities:     %i\n", sv_levelstats.numents);
+	Con_Printf ("Models:       %i\n", sv_levelstats.nummodels);
+
+	Con_Printf ("\n");
+
+	Con_Printf ("%-32s  +------+------+------+------+\n", " ");
+	Con_Printf ("%-32s  | EASY | NORM | HARD |  DM  |\n", " ");
+
+	char lastent[256] = {0};
+
+	for (entitystat_t *find = sv_levelstats.entitystats; find; find = find->next)
+	{
+		if (stricmp (lastent, find->firstword))
+		{
+			Con_Printf ("%-32s  +------+------+------+------+\n", " ");
+			strcpy (lastent, find->firstword);
+		}
+
+		Con_Printf ("%-32s  | %3i  | %3i  | %3i  | %3i  |\n", find->name, find->num_easy, find->num_normal, find->num_hard, find->num_dm);
+	}
+
+	Con_Printf ("%-32s  +------+------+------+------+\n", " ");
+
+	Con_Printf
+	(
+		"%-32s  | %3i  | %3i  | %3i  | %3i  |\n",
+		"Totals",
+		sv_levelstats.numeasy,
+		sv_levelstats.numnormal,
+		sv_levelstats.numhard,
+		sv_levelstats.numdm
+	);
+
+	Con_Printf ("%-32s  +------+------+------+------+\n", " ");
+}
+
+
+cmd_t sv_levelstats_cmd ("levelstats", SV_LevelStats_f);
+
+void SV_AddEntityStat (edict_t *ed)
+{
+	// no classname
+	if (!ed->v.classname) return;
+
+	entitystat_t *es = NULL;
+	char *classname = SVProgs->Strings + ed->v.classname;
+
+	for (entitystat_t *find = sv_levelstats.entitystats; find; find = find->next)
+	{
+		if (!stricmp (find->name, classname))
+		{
+			es = find;
+			break;
+		}
+	}
+
+	if (!es)
+	{
+		es = (entitystat_t *) Pool_Map->Alloc (sizeof (entitystat_t));
+
+		es->next = sv_levelstats.entitystats;
+		sv_levelstats.entitystats = es;
+
+		es->name = (char *) Pool_Map->Alloc (strlen (classname) + 1);
+		strcpy (es->name, classname);
+
+		es->firstword = (char *) Pool_Map->Alloc (strlen (classname) + 1);
+		strcpy (es->firstword, classname);
+
+		for (int i = 0; ; i++)
+		{
+			if (!es->firstword[i]) break;
+
+			if (es->firstword[i] == '_')
+			{
+				es->firstword[i] = 0;
+				break;
+			}
+		}
+
+		es->num_dm = es->num_easy = es->num_hard = es->num_normal = 0;
+
+		sv_levelstats.numenttypes++;
+	}
+
+	int spflags = (int) ed->v.spawnflags;
+
+	if (!(spflags & SPAWNFLAG_NOT_EASY))
+	{
+		es->num_easy++;
+		sv_levelstats.numeasy++;
+	}
+
+	if (!(spflags & SPAWNFLAG_NOT_MEDIUM))
+	{
+		es->num_normal++;
+		sv_levelstats.numnormal++;
+	}
+
+	if (!(spflags & SPAWNFLAG_NOT_HARD))
+	{
+		es->num_hard++;
+		sv_levelstats.numdm++;
+	}
+
+	if (!(spflags & SPAWNFLAG_NOT_DEATHMATCH))
+	{
+		es->num_dm++;
+		sv_levelstats.numdm++;
+	}
+
+	sv_levelstats.numents++;
+
+	if (ed->v.model) sv_levelstats.nummodels++;
+}
+
+
+int SV_EntityStatSortFunc (entitystat_t **es1, entitystat_t **es2)
+{
+	return stricmp (es1[0]->name, es2[0]->name);
+}
+
+
 /*
 ================
 ED_LoadFromFile
@@ -977,7 +1144,9 @@ to call ED_CallSpawnFunctions () to let the objects initialize themselves.
 ================
 */
 void ED_LoadFromFile (char *data)
-{	
+{
+	memset (&sv_levelstats, 0, sizeof (levelstats_t));
+
 	edict_t		*ent;
 	int			inhibit;
 	dfunction_t	*func;
@@ -992,7 +1161,7 @@ void ED_LoadFromFile (char *data)
 	// parse ents
 	while (1)
 	{
-		// parse the opening brace	
+		// parse the opening brace
 		data = COM_Parse (data);
 		if (!data)
 			break;
@@ -1006,19 +1175,21 @@ void ED_LoadFromFile (char *data)
 
 		data = ED_ParseEdict (data, ent);
 
+		SV_AddEntityStat (ent);
+
 		// remove things from different skill levels or deathmatch
 		if (deathmatch.value)
 		{
-			if (((int)ent->v.spawnflags & SPAWNFLAG_NOT_DEATHMATCH))
+			if (((int) ent->v.spawnflags & SPAWNFLAG_NOT_DEATHMATCH))
 			{
 				ED_Free (ent);	
 				inhibit++;
 				continue;
 			}
 		}
-		else if ((current_skill == 0 && ((int)ent->v.spawnflags & SPAWNFLAG_NOT_EASY))
-				|| (current_skill == 1 && ((int)ent->v.spawnflags & SPAWNFLAG_NOT_MEDIUM))
-				|| (current_skill >= 2 && ((int)ent->v.spawnflags & SPAWNFLAG_NOT_HARD)) )
+		else if ((current_skill == 0 && ((int) ent->v.spawnflags & SPAWNFLAG_NOT_EASY))
+				|| (current_skill == 1 && ((int) ent->v.spawnflags & SPAWNFLAG_NOT_MEDIUM))
+				|| (current_skill >= 2 && ((int) ent->v.spawnflags & SPAWNFLAG_NOT_HARD)) )
 		{
 			ED_Free (ent);	
 			inhibit++;
@@ -1036,13 +1207,15 @@ void ED_LoadFromFile (char *data)
 			continue;
 		}
 
+		char *classname = SVProgs->Strings + ent->v.classname;
+
 		// look for the spawn function
-		func = ED_FindFunction (SVProgs->Strings + ent->v.classname);
+		func = ED_FindFunction (classname);
 
 		if (!func)
 		{
 			// made the console spamming developer only...
-			Con_Printf ("No spawn function for: %s\n", (SVProgs->Strings + ent->v.classname));
+			Con_Printf ("No spawn function for: %s\n", classname);
 			ed_warning++;
 			if (developer.value) ED_Print (ent);
 			ED_Free (ent);
@@ -1064,6 +1237,31 @@ void ED_LoadFromFile (char *data)
 	}
 
 	Con_DPrintf ("%i entities with %i inhibited\n", ed_number, inhibit);
+
+	sv_levelstats.sorted = (entitystat_t **) Pool_Map->Alloc (sv_levelstats.numenttypes * sizeof (entitystat_t *));
+	int nument = 0;
+
+	for (entitystat_t *find = sv_levelstats.entitystats; find; find = find->next)
+	{
+		sv_levelstats.sorted[nument] = find;
+		nument++;
+	}
+
+	qsort
+	(
+		sv_levelstats.sorted,
+		sv_levelstats.numenttypes,
+		sizeof (entitystat_t *),
+		(int (*) (const void *, const void *)) SV_EntityStatSortFunc
+	);
+
+	for (int i = 1; i < sv_levelstats.numenttypes; i++)
+	{
+		sv_levelstats.sorted[i - 1]->next = sv_levelstats.sorted[i];
+		sv_levelstats.sorted[i]->next = NULL;
+	}
+
+	sv_levelstats.entitystats = sv_levelstats.sorted[0];
 }
 
 

@@ -16,10 +16,13 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
-#define MENU_TAG_SIMPLE			666
-#define MENU_TAG_FULL			1313
+// these need to be kept high enough so that they don't interfere with other options
+#define MENU_TAG_SIMPLE			(1 << 28)
+#define MENU_TAG_FULL			(1 << 29)
 
 typedef enum
 {
@@ -92,9 +95,9 @@ public:
 	void SetOptionNumber (int optionnum);
 	void SetParentMenu (class CQMenu *parent);
 
-	void SetTag (int Tag);
-	void CheckEnable (int Tag, bool enable);
-	void CheckVisible (int Tag, bool shown);
+	void SetTag (unsigned int Tag);
+	void CheckEnable (unsigned int Tag, bool enable);
+	void CheckVisible (unsigned int Tag, bool shown);
 
 	bool IsVisible (void);
 	bool IsEnabled (void);
@@ -103,7 +106,7 @@ protected:
 	void AllocCommandText (char *commandtext);
 	char *MenuCommandText;
 	bool AcceptsInput;
-	int OptionTag;
+	unsigned int OptionTag;
 	bool Enabled;
 	bool Visible;
 	class CQMenu *Parent;
@@ -368,13 +371,13 @@ public:
 	void Draw (void);
 	void Key (int k);
 	void AddOption (CQMenuOption *opt);
-	void AddOption (int OptionTag, CQMenuOption *opt);
+	void AddOption (unsigned int OptionTag, CQMenuOption *opt);
 	void EnterMenu (void);
 	CQMenuOption *MenuOptions;
-	void EnableOptions (int Tag);
-	void DisableOptions (int Tag);
-	void ShowOptions (int Tag);
-	void HideOptions (int Tag);
+	void EnableMenuOptions (unsigned int Tag);
+	void DisableMenuOptions (unsigned int Tag);
+	void ShowMenuOptions (unsigned int Tag);
+	void HideMenuOptions (unsigned int Tag);
 	int NumCursorOptions;
 
 private:
@@ -387,12 +390,14 @@ private:
 class CQMenuSubMenu : public CQMenuOption
 {
 public:
-	CQMenuSubMenu (char *cmdtext, CQMenu *submenu);
+	CQMenuSubMenu (char *cmdtext, CQMenu *submenu, bool narrow = false);
 	void Draw (int y);
 	void Key (int k);
+	void DrawCurrentOptionHighlight (int y);
 
 private:
 	CQMenu *SubMenu;
+	bool Narrow;
 };
 
 

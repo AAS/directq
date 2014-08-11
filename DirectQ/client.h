@@ -15,7 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
 */
 // client.h
 
@@ -116,6 +115,15 @@ typedef enum
 } cactive_t;
 
 
+typedef struct
+{
+	bool			web;
+	char			*name;	
+	int				percent;	
+	bool			disconnect;			// set when user tries to disconnect, to allow cleaning up webdownload	
+} download_t;
+
+
 //
 // the client_static_t structure is persistant through an arbitrary number
 // of server connections
@@ -137,11 +145,14 @@ typedef struct
 	bool	demorecording;
 	bool	demoplayback;
 	bool	timedemo;
+	char	demoname[MAX_DEMONAME];	// current demo
 	int			forcetrack;			// -1 = use normal cd track
 	int			td_lastframe;		// to meter out one message a frame
 	int			td_startframe;		// host_framecount at start
 	float		td_starttime;		// realtime at second frame of timedemo
 
+
+	download_t	download;
 
 // connection information
 	int			signon;			// 0 to SIGNONS
@@ -218,7 +229,7 @@ typedef struct
 	struct model_s		**model_precache;
 	struct sfx_s		**sound_precache;
 
-	char		levelname[128];	// for display on solo scoreboard
+	char		*levelname;	// for display on solo scoreboard
 	int			viewentity;		// cl_entitites[cl.viewentity] = player
 	int			maxclients;
 	int			gametype;

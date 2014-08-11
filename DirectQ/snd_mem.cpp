@@ -16,10 +16,109 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // snd_mem.c: sound caching
 
 #include "quakedef.h"
+
+
+typedef struct soundcache_s
+{
+	char name[128];
+	sfxcache_t *data;
+	struct soundcache_s *next;
+} soundcache_t;
+
+
+soundcache_t *soundcache = NULL;
+
+
+sfxcache_t *Sound_CacheAlloc (char *name, int len)
+{
+	soundcache_t *sc = NULL;
+
+	for (soundcache_t *find = soundcache; find; find = find->next)
+	{
+		if (!find->data || !find->name[0])
+		{
+			if (find->data)
+			{
+				Zone_Free (find->data);
+				find->data = NULL;
+			}
+
+			find->name[0] = 0;
+
+			sc = find;
+			break;
+		}
+	}
+
+	if (!sc)
+	{
+		sc = (soundcache_t *) Zone_Alloc (sizeof (soundcache_t));
+
+		sc->next = soundcache;
+		soundcache = sc;
+	}
+
+	Q_strncpy (sc->name, name, 127);
+
+	sc->data = (sfxcache_t *) Zone_Alloc (len);
+
+	return sc->data;
+}
+
+
+sfxcache_t *Sound_CacheCheck (char *name)
+{
+	for (soundcache_t *find = soundcache; find; find = find->next)
+	{
+		if (!find->data || !find->name[0]) continue;
+
+		if (!stricmp (name, find->name)) return find->data;
+	}
+
+	return NULL;
+}
+
+
+void Sound_CacheFree (void)
+{
+	for (soundcache_t *find = soundcache; find; find = find->next)
+	{
+		if (find->data)
+		{
+			Zone_Free (find->data);
+			find->data = NULL;
+		}
+
+		find->name[0] = 0;
+	}
+}
+
+
+void Sound_CacheFree (char *name)
+{
+	for (soundcache_t *find = soundcache; find; find = find->next)
+	{
+		if (!find->data || !find->name[0]) continue;
+
+		if (!stricmp (name, find->name))
+		{
+			if (find->data)
+			{
+				Zone_Free (find->data);
+				find->data = NULL;
+			}
+
+			find->name[0] = 0;
+			return;
+		}
+	}
+}
 
 
 /*
@@ -45,15 +144,17 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 		return;
 	}
 
-	stepscale = (float)inrate / shm->speed;	// this is usually 0.5, 1, or 2
+	stepscale = (float) inrate / shm->speed;	// this is usually 0.5, 1, or 2
 
 	outcount = sc->length / stepscale;
 	sc->length = outcount;
+
 	if (sc->loopstart != -1)
 		sc->loopstart = sc->loopstart / stepscale;
 
 	sc->speed = shm->speed;
-	if (loadas8bit.value)
+
+	if (loadas8bit.integer)
 		sc->width = 1;
 	else
 		sc->width = inwidth;
@@ -63,28 +164,28 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 	// resample / decimate to the current source rate
 	if (stepscale == 1 && inwidth == 1 && sc->width == 1)
 	{
-		// fast special case
-		for (i=0 ; i<outcount ; i++)
-			((signed char *)sc->data)[i]
-			= (int)( (unsigned char)(data[i]) - 128);
+		// fast special case - 8 bit source, no resampling is needed
+		for (i = 0; i < outcount; i++)
+			((signed char *) sc->data)[i] = (int) ((unsigned char) (data[i]) - 128);
 	}
 	else
 	{
 		// general case
 		samplefrac = 0;
-		fracstep = stepscale*256;
-		for (i=0 ; i<outcount ; i++)
+		fracstep = stepscale * 256;
+
+		for (i = 0; i < outcount; i++)
 		{
 			srcsample = samplefrac >> 8;
 			samplefrac += fracstep;
+
 			if (inwidth == 2)
-				sample = LittleShort ( ((short *)data)[srcsample] );
-			else
-				sample = (int)( (unsigned char)(data[srcsample]) - 128) << 8;
+				sample = LittleShort (((short *) data)[srcsample]);
+			else sample = (int) ((unsigned char) (data[srcsample]) - 128) << 8;
+
 			if (sc->width == 2)
-				((short *)sc->data)[i] = sample;
-			else
-				((signed char *)sc->data)[i] = sample >> 8;
+				((short *) sc->data)[i] = sample;
+			else ((signed char *) sc->data)[i] = sample >> 8;
 		}
 	}
 }
@@ -108,13 +209,19 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	// already loaded
 	if (s->sndcache) return s->sndcache;
 
+	// look for a cached copy
+	sc = (sfxcache_t *) Sound_CacheCheck (s->name);
+
+	if (sc)
+	{
+		// use the cached version if it was found
+		s->sndcache = sc;
+		return sc;
+	}
+
 	// load it in
     strcpy (namebuffer, "sound/");
     strcat (namebuffer, s->name);
-
-	// look for a cached copy
-	sc = (sfxcache_t *) Cache_Check (namebuffer);
-	if (sc) return sc;
 
 	// don't load as a stack file!!!  no way!!!  never!!!
 	data = COM_LoadTempFile (namebuffer);
@@ -130,7 +237,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	if (info.channels != 1)
 	{
 		// we'll fix this later by converting it to mono
-		Con_DPrintf ("%s is a stereo sample\n",s->name);
+		Con_DPrintf ("%s is a stereo sample\n", s->name);
 		return NULL;
 	}
 
@@ -139,8 +246,8 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 	len = len * info.width * info.channels;
 
-	// alloc directly on the cache
-	sc = (sfxcache_t *) Cache_Alloc (namebuffer, NULL, len + sizeof (sfxcache_t));
+	// alloc in the cache using s->name so that Cache_Invalidate is valid
+	sc = (sfxcache_t *) Sound_CacheAlloc (s->name, len + sizeof (sfxcache_t));
 	s->sndcache = sc;
 
 	if (!sc) return NULL;

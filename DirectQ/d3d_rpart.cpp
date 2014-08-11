@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 #include "quakedef.h"
@@ -677,6 +679,87 @@ void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count)
 
 void R_SpawnSmoke (vec3_t org, float jitter, float time)
 {
+}
+
+
+void R_SpawnRainParticle (particle_type_t *pt, vec3_t mins, vec3_t maxs, int color, vec3_t vel, float time, float z)
+{
+	particle_t *p = R_NewParticle (pt);
+
+	if (!p) return;
+
+	p->org[0] = Q_Random (mins[0], maxs[0]);
+	p->org[1] = Q_Random (mins[1], maxs[1]);
+	p->org[2] = z;
+
+	p->vel[0] = vel[0];
+	p->vel[1] = vel[1];
+	p->vel[2] = vel[2];
+
+	p->color = color;
+	p->grav = -1;
+
+	p->die = cl.time + time;
+}
+
+
+void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorbase, int type)
+{
+	particle_type_t *pt = R_NewParticleType (mins);
+
+	// increase the number of particles
+	count *= 2;
+
+	vec3_t		vel;
+	float		t, z;
+
+	if (maxs[0] <= mins[0]) {t = mins[0]; mins[0] = maxs[0]; maxs[0] = t;}
+	if (maxs[1] <= mins[1]) {t = mins[1]; mins[1] = maxs[1]; maxs[1] = t;}
+	if (maxs[2] <= mins[2]) {t = mins[2]; mins[2] = maxs[2]; maxs[2] = t;}
+
+	if (dir[2] < 0) // falling
+	{
+		t = (maxs[2] - mins[2]) / -dir[2];
+		z = maxs[2];
+	}
+	else // rising??
+	{
+		t = (maxs[2] - mins[2]) / dir[2];
+		z = mins[2];
+	}
+
+	if (t < 0 || t > 2) // sanity check
+		t = 2;
+
+	switch (type)
+	{
+	case 0:
+		while (count--)
+		{
+			vel[0] = dir[0] + Q_Random (-16, 16);
+			vel[1] = dir[1] + Q_Random (-16, 16);
+			vel[2] = dir[2] + Q_Random (-32, 32);
+
+			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z);
+		}
+
+		break;
+
+	case 1:
+		while (count--)
+		{
+			vel[0] = dir[0] + Q_Random (-16, 16);
+			vel[1] = dir[1] + Q_Random (-16, 16);
+			vel[2] = dir[2] + Q_Random (-32, 32);
+
+			R_SpawnRainParticle (pt, mins, maxs, colorbase + (rand () & 3), vel, t, z);
+		}
+
+		break;
+
+	default:
+		Con_DPrintf ("R_ParticleRain: unknown type %i (0 = rain, 1 = snow)\n", type);
+	}
 }
 
 

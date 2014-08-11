@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // cl_tent.c -- client side temporary entities
 
@@ -155,15 +157,19 @@ CL_ParseTEnt
 =================
 */
 void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count);
+void R_ParticleRain (vec3_t mins, vec3_t maxs, vec3_t dir, int count, int colorbase, int type);
 
 void CL_ParseTEnt (void)
 {
-	int		type;
+	int type;
+	int count;
 	vec3_t	pos;
+	vec3_t	pos2;
+	vec3_t	dir;
 
-	dlight_t	*dl;
-	int		rnd;
-	int		colorStart, colorLength;
+	dlight_t *dl;
+	int rnd;
+	int colorStart, colorLength;
 
 	// lightning needs this
 	int ent;
@@ -489,6 +495,44 @@ void CL_ParseTEnt (void)
 	case TE_NEW2:
 		break;
 
+	case TE_PARTICLESNOW:	// general purpose particle effect
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+
+		pos2[0] = MSG_ReadCoord ();
+		pos2[1] = MSG_ReadCoord ();
+		pos2[2] = MSG_ReadCoord ();
+
+		dir[0] = MSG_ReadCoord ();
+		dir[1] = MSG_ReadCoord ();
+		dir[2] = MSG_ReadCoord ();
+
+		count = MSG_ReadShort (); // number of particles
+		colorStart = MSG_ReadByte (); // color
+
+		R_ParticleRain (pos, pos2, dir, count, colorStart, 1);
+		break;
+
+	case TE_PARTICLERAIN:	// general purpose particle effect
+		pos[0] = MSG_ReadCoord ();
+		pos[1] = MSG_ReadCoord ();
+		pos[2] = MSG_ReadCoord ();
+
+		pos2[0] = MSG_ReadCoord ();
+		pos2[1] = MSG_ReadCoord ();
+		pos2[2] = MSG_ReadCoord ();
+
+		dir[0] = MSG_ReadCoord ();
+		dir[1] = MSG_ReadCoord ();
+		dir[2] = MSG_ReadCoord ();
+
+		count = MSG_ReadShort (); // number of particles
+		colorStart = MSG_ReadByte (); // color
+
+		R_ParticleRain (pos, pos2, dir, count, colorStart, 0);
+		break;
+
 	default:
 		// no need to crash the engine but we will crash the map, as it means we have
 		// a malformed packet
@@ -584,8 +628,8 @@ void CL_UpdateTEnts (void)
 
 			if (yaw < 0) yaw += 360;
 	
-			forward = sqrt (dist[0]*dist[0] + dist[1]*dist[1]);
-			pitch = (int) (atan2(dist[2], forward) * 180 / M_PI);
+			forward = sqrt (dist[0] * dist[0] + dist[1] * dist[1]);
+			pitch = (int) (atan2 (dist[2], forward) * 180 / M_PI);
 
 			if (pitch < 0) pitch += 360;
 		}
@@ -620,6 +664,8 @@ void CL_UpdateTEnts (void)
 			d -= 30;
 		}
 	}
+
+	// if (num_beams) Con_Printf ("%i beams\n", num_beams);
 }
 
 

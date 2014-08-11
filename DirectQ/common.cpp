@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // common.c -- misc functions used in client and server
 
@@ -60,8 +62,12 @@ void COM_SortStringList (char **stringlist, bool ascending)
 
 
 // MD5 hashes
+extern "C" void MD5_Checksum (unsigned char *data, int dataLen, unsigned char *checksum);
+
 void COM_HashData (byte *hash, const void *data, int size)
 {
+#if 0
+	// wincrypt library seems to crash on 64-bit Windows
 	// generate an MD5 hash of an image's data
 	HCRYPTPROV hCryptProv;
 	HCRYPTHASH hHash;
@@ -109,6 +115,10 @@ void COM_HashData (byte *hash, const void *data, int size)
 		// oh crap
 		Sys_Error ("COM_HashData: CryptAcquireContext failed");
 	}
+#else
+	// old RSA MD5 functions
+	MD5_Checksum ((unsigned char *) data, size, hash);
+#endif
 }
 
 
@@ -686,7 +696,7 @@ void COM_FileBase (char *in, char *out)
 	else
 	{
 		s--;
-		strncpy (out,s2+1, s-s2);
+		Q_strncpy (out,s2+1, s-s2);
 		out[s-s2] = 0;
 	}
 }
@@ -998,7 +1008,7 @@ char *va (char *format, ...)
 
 
 /// just for debugging
-int     memsearch (byte *start, int count, int search)
+int memsearch (byte *start, int count, int search)
 {
 	int             i;
 	
@@ -1007,6 +1017,27 @@ int     memsearch (byte *start, int count, int search)
 			return i;
 	return -1;
 }
+
+
+char *Q_strncpy (char *dst, const char *src, int len)
+{
+	// version of strncpy that ensures NULL terming of the dst string
+	for (int i = 0; i < len; i++)
+	{
+		if (!src[i])
+		{
+			dst[i] = 0;
+			break;
+		}
+
+		// ensure NULL termination
+		dst[i] = src[i];
+		dst[i + 1] = 0;
+	}
+
+	return dst;
+}
+
 
 /*
 =============================================================================
@@ -1662,13 +1693,13 @@ pack_t *COM_LoadPackFile (char *packfile)
 	// parse the directory
 	for (i = 0; i < numpackfiles; i++)
 	{
-		strncpy (newfiles[i].name, info[i].name, 63);
+		Q_strncpy (newfiles[i].name, info[i].name, 63);
 		newfiles[i].filepos = LittleLong (info[i].filepos);
 		newfiles[i].filelen = LittleLong (info[i].filelen);
 	}
 
 	pack = (pack_t *) Pool_Game->Alloc (sizeof (pack_t));
-	strncpy (pack->filename, packfile, 127);
+	Q_strncpy (pack->filename, packfile, 127);
 	pack->numfiles = numpackfiles;
 	pack->files = newfiles;
 
@@ -1702,14 +1733,17 @@ Sets com_gamedir, adds the directory to the head of the path,
 then loads and adds pak1.pak pak2.pak ... 
 ================
 */
+int com_numgames = 0;
+char *com_games[COM_MAXGAMES] = {NULL};
+
 void COM_AddGameDirectory (char *dir)
 {
 	searchpath_t *search;
 	char pakfile[MAX_PATH];
 
 	// copy to com_gamedir so that the last gamedir added will be the one used
-	strncpy (com_gamedir, dir, 127);
-	strncpy (com_gamename, dir, 127);
+	Q_strncpy (com_gamedir, dir, 127);
+	Q_strncpy (com_gamename, dir, 127);
 
 	for (int i = strlen (com_gamedir); i; i--)
 	{
@@ -1718,6 +1752,15 @@ void COM_AddGameDirectory (char *dir)
 			strcpy (com_gamename, &com_gamedir[i + 1]);
 			break;
 		}
+	}
+
+	// store out the names of all currently loaded games
+	if (com_numgames != COM_MAXGAMES)
+	{
+		com_games[com_numgames] = (char *) Pool_Game->Alloc (strlen (com_gamename) + 1);
+		strcpy (com_games[com_numgames], com_gamename);
+		com_numgames++;
+		com_games[com_numgames] = NULL;
 	}
 
 	// update the window titlebar
@@ -1808,7 +1851,7 @@ void COM_AddGameDirectory (char *dir)
 					int good_files = 0;
 
 					pk3->numfiles = gi.number_entry;
-					strncpy (pk3->filename, pakfile, 127);
+					Q_strncpy (pk3->filename, pakfile, 127);
 					pk3->files = (packfile_t *) Pool_Game->Alloc (sizeof (packfile_t) * pk3->numfiles);
 
 					unzGoToFirstFile (uf);
@@ -1820,7 +1863,7 @@ void COM_AddGameDirectory (char *dir)
 						if (err == UNZ_OK)
 						{
 							// pos is unused
-							strncpy (pk3->files[i].name, filename_inzip, 63);
+							Q_strncpy (pk3->files[i].name, filename_inzip, 63);
 							pk3->files[i].filelen = file_info.uncompressed_size;
 							pk3->files[i].filepos = 0;
 
@@ -1862,7 +1905,7 @@ void COM_AddGameDirectory (char *dir)
 	// this is done last as using a linked list will search in the reverse order to which they
 	// are added, so we ensure that the filesystem overrides pak files
 	search = (searchpath_t *) Pool_Game->Alloc (sizeof(searchpath_t));
-	strncpy (search->filename, dir, 127);
+	Q_strncpy (search->filename, dir, 127);
 	search->next = com_searchpaths;
 	search->pack = NULL;
 	search->pk3 = NULL;
@@ -1903,6 +1946,7 @@ void SHOWLMP_newgame (void);
 void D3D_VidRestart_f (void);
 void D3D_InitHLSL (void);
 void R_UnloadSkybox (void);
+void Sound_CacheFree (void);
 
 bool COM_StringContains (char *str1, char *str2)
 {
@@ -1925,10 +1969,14 @@ bool COM_StringContains (char *str1, char *str2)
 void COM_UnloadAllStuff (void)
 {
 	extern bool scr_initialized;
+	extern bool signal_cacheclear;
 
 	// prevent screen updates while changing
 	scr_disabled_for_loading = true;
 	scr_initialized = false;
+
+	// clear cached models
+	signal_cacheclear = true;
 
 	// start with a clean filesystem
 	com_searchpaths = NULL;
@@ -1944,6 +1992,9 @@ void COM_UnloadAllStuff (void)
 	S_StopAllSounds (true);
 	Mod_ClearAll ();
 	S_ClearSounds ();
+
+	// clear sounds from cache memory too
+	Sound_CacheFree ();
 
 	// do this too...
 	Host_ClearMemory ();
@@ -1969,8 +2020,15 @@ void COM_LoadAllStuff (void)
 }
 
 
+void D3D_EnumExternalTextures (void);
+
 void COM_LoadGame (char *gamename)
 {
+	// no games to begin with
+	com_numgames = 0;
+
+	for (int i = 0; i < COM_MAXGAMES; i++) com_games[i] = NULL;
+
 	if (host_initialized)
 	{
 		// store out our configuration before we go to the new game
@@ -1988,8 +2046,8 @@ void COM_LoadGame (char *gamename)
 	int i = COM_CheckParm ("-basedir");
 
 	if (i && i < com_argc-1)
-		strncpy (basedir, com_argv[i + 1], 127);
-	else strncpy (basedir, host_parms.basedir, 127);
+		Q_strncpy (basedir, com_argv[i + 1], 127);
+	else Q_strncpy (basedir, host_parms.basedir, 127);
 
 	int j = strlen (basedir);
 
@@ -2094,6 +2152,13 @@ void COM_LoadGame (char *gamename)
 		thisgame = nextgame;
 	}
 
+	// make directories we need
+	Sys_mkdir ("save");
+	Sys_mkdir ("screenshot");
+
+	// enum and register external textures
+	D3D_EnumExternalTextures ();
+
 	// if the host isn't already up, don't bring anything up yet
 	// (fixme - bring the host loader through here as well)
 	if (!host_initialized) return;
@@ -2109,6 +2174,7 @@ void COM_LoadGame (char *gamename)
 	Cbuf_InsertText ("exec directq.cfg\n");
 	Cbuf_InsertText ("exec config.cfg\n");
 	Cbuf_InsertText ("exec default.cfg\n");
+
 	Cbuf_Execute ();
 
 	// not disabled any more
@@ -2172,5 +2238,342 @@ void COM_InitFilesystem (void)
 	if (i && i < com_argc - 1)
 		COM_LoadGame (com_argv[i + 1]);
 	else COM_LoadGame (NULL);
+}
+
+
+/*
+======================================================================================================================================================
+
+		EXTERNAL TEXTURE LOADING/ETC/BLAH/YADDA YADDA YADDA
+
+	These need to be in common as they need access to the search paths
+
+======================================================================================================================================================
+*/
+
+
+typedef struct d3d_externaltexture_s
+{
+	char basename[256];
+	char texpath[256];
+} d3d_externaltexture_t;
+
+
+d3d_externaltexture_t *d3d_ExternalTextures = NULL;
+int d3d_NumExternalTextures = 0;
+
+int d3d_ExternalTextureTable[256] = {-1};
+
+char *D3D_FindExternalTexture (char *basename)
+{
+	// find the first texture
+	int texnum = d3d_ExternalTextureTable[basename[0]];
+
+	// no textures
+	if (texnum == -1) return NULL;
+
+	for (int i = texnum; i < d3d_NumExternalTextures; i++)
+	{
+		// retrieve texture def
+		d3d_externaltexture_t *et = &d3d_ExternalTextures[i];
+
+		// first char changes
+		if (et->basename[0] != basename[0]) break;
+
+		// if it came from a screenshot we ignore it
+		if (strstr (et->texpath, "/screenshot/")) continue;
+
+		// if basenames match return the path at which it can be found
+		if (!stricmp (et->basename, basename)) return et->texpath;
+	}
+
+	// not found
+	return NULL;
+}
+
+
+void D3D_RegisterExternalTexture (char *texname)
+{
+	char *texext = NULL;
+	bool goodext = false;
+
+	// find the extension
+	for (int i = strlen (texname); i; i--)
+	{
+		if (texname[i] == '/') break;
+		if (texname[i] == '\\') break;
+
+		if (texname[i] == '.')
+		{
+			texext = &texname[i + 1];
+			break;
+		}
+	}
+
+	// didn't find an extension
+	if (!texext) return;
+
+	// check for supported types
+	if (!stricmp (texext, "link")) goodext = true;
+	if (!stricmp (texext, "dds")) goodext = true;
+	if (!stricmp (texext, "tga")) goodext = true;
+	if (!stricmp (texext, "bmp")) goodext = true;
+	if (!stricmp (texext, "png")) goodext = true;
+	if (!stricmp (texext, "jpg")) goodext = true;
+	if (!stricmp (texext, "jpeg")) goodext = true;
+	if (!stricmp (texext, "pcx")) goodext = true;
+
+	// not a supported type
+	if (!goodext) return;
+
+	d3d_externaltexture_t *et = NULL;
+
+	// alloc space in the per-game pool for the texture
+	if (!d3d_ExternalTextures)
+	{
+		// alloc the first and set the pointer
+		d3d_ExternalTextures = (d3d_externaltexture_t *) Pool_Game->Alloc (sizeof (d3d_externaltexture_t));
+		et = d3d_ExternalTextures;
+	}
+	else
+	{
+		// alloc linear space to expand the array
+		Pool_Game->Alloc (sizeof (d3d_externaltexture_t));
+		et = &d3d_ExternalTextures[d3d_NumExternalTextures];
+	}
+
+	// register a new external texture
+	d3d_NumExternalTextures++;
+
+	// fill in the path (also copy to basename in case the next stage doesn't get it)
+	Q_strncpy (et->texpath, texname, 255);
+	Q_strncpy (et->basename, texname, 255);
+	strlwr (et->texpath);
+
+	// check for special handling of some types
+	char *checkstuff = strstr (et->texpath, "\\save\\");
+
+	if (!checkstuff) checkstuff = strstr (et->texpath, "\\maps\\");
+	if (!checkstuff) checkstuff = strstr (et->texpath, "\\screenshot\\");
+
+	if (!checkstuff)
+	{
+		// base name is the path without directories or extension; first remove directories.
+		// we leave extension alone for now so that we can sort on basename properly
+		for (int i = strlen (et->texpath); i; i--)
+		{
+			if (et->texpath[i] == '/' || et->texpath[i] == '\\')
+			{
+				Q_strncpy (et->basename, &et->texpath[i + 1], 255);
+				break;
+			}
+		}
+	}
+	else
+	{
+		for (checkstuff = checkstuff - 1;; checkstuff--)
+		{
+			if (checkstuff[0] == ':') break;
+
+			if (checkstuff[0] == '/' || checkstuff[0] == '\\')
+			{
+				Q_strncpy (et->basename, &checkstuff[1], 255);
+				break;
+			}
+		}
+	}
+
+	// switch basename to lower case
+	strlwr (et->basename);
+
+	// make path seperators consistent
+	for (int i = 0; ; i++)
+	{
+		if (!et->basename[i]) break;
+		if (et->basename[i] == '/') et->basename[i] = '\\';
+	}
+
+	// switch extension to a dummy to establish the preference sort order; this is for
+	// cases where a texture may be present more than once in different formats.
+	// we'll remove it after we've sorted
+	texext = NULL;
+
+	// find the extension
+	for (int i = strlen (et->basename); i; i--)
+	{
+		if (et->basename[i] == '/') break;
+		if (et->basename[i] == '\\') break;
+
+		if (et->basename[i] == '.')
+		{
+			texext = &et->basename[i + 1];
+			break;
+		}
+	}
+
+	// didn't find an extension (should never happen at this stage)
+	if (!texext) return;
+
+	// check for supported types and replace the extension to get the sort order
+	if (!stricmp (texext, "link")) {strcpy (texext, "111"); return;}
+	if (!stricmp (texext, "dds")) {strcpy (texext, "222"); return;}
+	if (!stricmp (texext, "tga")) {strcpy (texext, "333"); return;}
+	if (!stricmp (texext, "bmp")) {strcpy (texext, "444"); return;}
+	if (!stricmp (texext, "png")) {strcpy (texext, "555"); return;}
+	if (!stricmp (texext, "jpg")) {strcpy (texext, "666"); return;}
+	if (!stricmp (texext, "jpeg")) {strcpy (texext, "777"); return;}
+	if (!stricmp (texext, "pcx")) {strcpy (texext, "888"); return;}
+}
+
+
+void D3D_ExternalTextureDirectoryRecurse (char *dirname)
+{
+	WIN32_FIND_DATA FindFileData;
+	HANDLE hFind = INVALID_HANDLE_VALUE;
+	char find_filter[MAX_PATH];
+
+	_snprintf (find_filter, 260, "%s/*.*", dirname);
+
+	for (int i = 0; ; i++)
+	{
+		if (find_filter[i] == 0) break;
+		if (find_filter[i] == '/') find_filter[i] = '\\';
+	}
+
+	hFind = FindFirstFile (find_filter, &FindFileData);
+
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		// found no files
+		FindClose (hFind);
+		return;
+	}
+
+	do
+	{
+		// not interested
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
+
+		// never these
+		if (!strcmp (FindFileData.cFileName, ".")) continue;
+		if (!strcmp (FindFileData.cFileName, "..")) continue;
+
+		// make the new directory or texture name
+		char newname[256];
+
+		_snprintf (newname, 255, "%s\\%s", dirname, FindFileData.cFileName);
+
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			// prefix dirs with _ to skip them
+			if (FindFileData.cFileName[0] != '_')
+				D3D_ExternalTextureDirectoryRecurse (newname);
+
+			continue;
+		}
+
+		// register the texture
+		D3D_RegisterExternalTexture (newname);
+	} while (FindNextFile (hFind, &FindFileData));
+
+	// done
+	FindClose (hFind);
+}
+
+
+int D3D_ExternalTextureSortFunc (d3d_externaltexture_t *t1, d3d_externaltexture_t *t2)
+{
+	return stricmp (t1->basename, t2->basename);
+}
+
+
+void D3D_EnumExternalTextures (void)
+{
+	// explicitly none to start with
+	d3d_ExternalTextures = NULL;
+	d3d_NumExternalTextures = 0;
+
+	// we need 256 of these because textures can - in theory - begin with any allowable byte value
+	// add the extra 1 to allow the list to be NULL terminated
+	// as for unicode - let's not even go there.
+	for (int i = 0; i < 257; i++) d3d_ExternalTextureTable[i] = -1;
+
+	for (searchpath_t *search = com_searchpaths; search; search = search->next)
+	{
+		if (search->pack)
+		{
+			pack_t *pak = search->pack;
+
+			for (int i = 0; i < pak->numfiles; i++)
+			{
+				D3D_RegisterExternalTexture (pak->files[i].name);
+			}
+		}
+		else if (search->pk3)
+		{
+			pk3_t *pak = search->pk3;
+
+			for (int i = 0; i < pak->numfiles; i++)
+			{
+				D3D_RegisterExternalTexture (pak->files[i].name);
+			}
+		}
+		else D3D_ExternalTextureDirectoryRecurse (search->filename);
+	}
+
+	// no external textures were found
+	if (!d3d_NumExternalTextures) return;
+
+	for (int i = 0; i < d3d_NumExternalTextures; i++)
+	{
+		d3d_externaltexture_t *et = &d3d_ExternalTextures[i];
+
+		for (int j = 0; ; j++)
+		{
+			if (!et->texpath[j]) break;
+			if (et->texpath[j] == '\\') et->texpath[j] = '/';
+		}
+
+		// restore drive signifier
+		if (et->texpath[1] == ':' && et->texpath[2] == '/') et->texpath[2] = '\\';
+		strlwr (et->texpath);
+	}
+
+	// sort the list
+	qsort
+	(
+		d3d_ExternalTextures,
+		d3d_NumExternalTextures,
+		sizeof (d3d_externaltexture_t),
+		(int (*) (const void *, const void *)) D3D_ExternalTextureSortFunc
+	);
+
+	// set up byte pointers and remove dummy sort order extensions
+	for (int i = 0; i < d3d_NumExternalTextures; i++)
+	{
+		d3d_externaltexture_t *et = &d3d_ExternalTextures[i];
+
+		// swap non-printing chars
+		if (et->basename[0] == '#') et->basename[0] = '*';
+
+		// set up the table pointer
+		if (d3d_ExternalTextureTable[et->basename[0]] == -1)
+			d3d_ExternalTextureTable[et->basename[0]] = i;
+
+		// remove the extension
+		for (int e = strlen (et->basename); e; e--)
+		{
+			if (et->basename[e] == '.')
+			{
+				et->basename[e] = 0;
+				break;
+			}
+		}
+
+		// Con_SafePrintf ("registered %s\n", et->basename);
+	}
 }
 

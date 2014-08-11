@@ -16,10 +16,17 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 #include "quakedef.h"
 #include "pr_class.h"
+
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes  start
+cvar_t	pr_builtin_find ("pr_builtin_find", "0");
+cvar_t	pr_builtin_remap ("pr_builtin_remap", "0");
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes  end
 
 
 char *pr_opnames[] =
@@ -61,6 +68,12 @@ CProgsDat::CProgsDat (void)
 
 void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 {
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+	int 	j;
+	int		funcno;
+	char	*funcname;
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
+
 	// this can't be in a constructor yet because we need the instance already created in order to do
 	// FindEdictFieldOffsets without crashing.  When we get everything on the server gone to OOP we'll
 	// do it right.
@@ -141,6 +154,35 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 		this->Statements[i].c = LittleShort (this->Statements[i].c);
 	}
 
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+	// initialize function numbers for PROGS.DAT
+	pr_numbuiltins = 0;
+	pr_builtins = NULL;
+
+	if (pr_builtin_remap.value)
+	{
+		// remove all previous assigned function numbers
+		for (j = 1; j < pr_ebfs_numbuiltins; j++)
+		{
+			pr_ebfs_builtins[j].funcno = 0;
+		}
+	}
+	else
+	{
+		// use default function numbers
+		for (j = 1; j < pr_ebfs_numbuiltins; j++)
+		{
+			pr_ebfs_builtins[j].funcno = pr_ebfs_builtins[j].default_funcno;
+
+			// determine highest builtin number (when NOT remapped)
+			if (pr_ebfs_builtins[j].funcno > pr_numbuiltins)
+			{
+				pr_numbuiltins = pr_ebfs_builtins[j].funcno;
+			}
+		}
+	}
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
+
 	for (int i = 0; i < this->QC.numfunctions; i++)
 	{
 		this->Functions[i].first_statement = LittleLong (this->Functions[i].first_statement);
@@ -149,7 +191,110 @@ void CProgsDat::LoadProgs (char *progsname, cvar_t *overridecvar)
 		this->Functions[i].s_file = LittleLong (this->Functions[i].s_file);
 		this->Functions[i].numparms = LittleLong (this->Functions[i].numparms);
 		this->Functions[i].locals = LittleLong (this->Functions[i].locals);
-	}	
+
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+		if (pr_builtin_remap.value)
+		{
+			if (this->Functions[i].first_statement < 0)	// builtin function
+			{
+				funcno = -this->Functions[i].first_statement;
+				funcname = this->Strings + this->Functions[i].s_name;
+
+				// search function name
+				for (j = 1; j < pr_ebfs_numbuiltins; j++)
+				{
+					if (!(stricmp (funcname, pr_ebfs_builtins[j].funcname)))
+					{
+						break;	// found
+					}
+				}
+
+				if (j < pr_ebfs_numbuiltins)	// found
+				{
+					pr_ebfs_builtins[j].funcno = funcno;
+				}
+				else
+				{
+					Con_DPrintf ("Can not assign builtin number #%i to %s - function unknown\n", funcno, funcname);
+				}
+			}
+		}
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
+	}
+
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  start
+	if (pr_builtin_remap.value)
+	{
+		// check for unassigned functions and try to assign their default function number
+		for (int i = 1; i < pr_ebfs_numbuiltins; i++)
+		{
+			if ((!pr_ebfs_builtins[i].funcno) && (pr_ebfs_builtins[i].default_funcno))	// unassigned and has a default number
+			{
+				// check if default number is already assigned to another function
+				for (j = 1; j < pr_ebfs_numbuiltins; j++)
+				{
+					if (pr_ebfs_builtins[j].funcno == pr_ebfs_builtins[i].default_funcno)
+					{
+						break;	// number already assigned to another builtin function
+					}
+				}
+
+				if (j < pr_ebfs_numbuiltins)	// already assigned
+				{
+					Con_DPrintf
+					(
+						"Can not assign default builtin number #%i to %s - number is already assigned to %s\n",
+						pr_ebfs_builtins[i].default_funcno, pr_ebfs_builtins[i].funcname, pr_ebfs_builtins[j].funcname
+					);
+				}
+				else
+				{
+					pr_ebfs_builtins[i].funcno = pr_ebfs_builtins[i].default_funcno;
+				}
+			}
+
+			// determine highest builtin number (when remapped)
+			if (pr_ebfs_builtins[i].funcno > pr_numbuiltins)
+			{
+				pr_numbuiltins = pr_ebfs_builtins[i].funcno;
+			}
+		}
+	}
+
+	pr_numbuiltins++;
+
+	// allocate and initialize builtin list for execution time
+	pr_builtins = (builtin_t *) Pool_Map->Alloc (pr_numbuiltins * sizeof (builtin_t));
+
+	for (int i = 0; i < pr_numbuiltins; i++)
+	{
+		pr_builtins[i] = pr_ebfs_builtins[0].function;
+	}
+
+	// create builtin list for execution time and set cvars accordingly
+	Cvar_Set ("pr_builtin_find", "0");
+	Cvar_Set ("pr_checkextension", "0");	// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)
+
+	for (j = 1; j < pr_ebfs_numbuiltins; j++)
+	{
+		if (pr_ebfs_builtins[j].funcno)	// only put assigned functions into builtin list
+		{
+			pr_builtins[pr_ebfs_builtins[j].funcno] = pr_ebfs_builtins[j].function;
+		}
+
+		if (pr_ebfs_builtins[j].default_funcno == PR_DEFAULT_FUNCNO_BUILTIN_FIND)
+		{
+			Cvar_Set ("pr_builtin_find", pr_ebfs_builtins[j].funcno);
+		}
+
+// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  start
+		if (pr_ebfs_builtins[j].default_funcno == PR_DEFAULT_FUNCNO_EXTENSION_FIND)
+		{
+			Cvar_Set ("pr_checkextension", pr_ebfs_builtins[j].funcno);
+		}
+// 2001-10-20 Extension System by Lord Havoc/Maddes (DP compatibility)  end
+	}
+// 2001-09-14 Enhanced BuiltIn Function System (EBFS) by Maddes/Firestorm  end
 
 	for (int i = 0; i < this->QC.numglobaldefs; i++)
 	{
@@ -448,6 +593,8 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 
 			if (newf->first_statement < 0)
 			{
+				char *blah = this->Strings + newf->s_name;
+
 				// negative statements are built in functions
 				i = -newf->first_statement;
 

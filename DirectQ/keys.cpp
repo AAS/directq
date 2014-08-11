@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 #include "quakedef.h"
 
@@ -1001,6 +1003,7 @@ void Key_Event (int key, bool down)
 		// (this function doesn't exist anymore, but we leave the
 		// check in case it has unknown consequences or assumptions
 		// are made that it still exists elsewhere).
+		// OK, it's also in SCR_ModalMessage
 		return;
 	}
 

@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // host.c -- coordinates spawning and killing of local servers
 
@@ -51,11 +53,8 @@ jmp_buf 	host_abortserver;
 byte		*host_basepal;
 byte		*host_colormap;
 
-cvar_t	host_savedir ("host_savedir", "save", CVAR_ARCHIVE);
-
 cvar_t	host_framerate ("host_framerate","0");	// set for slow motion
-
-cvar_t	sys_ticrate ("sys_ticrate","0.05");
+cvar_t	sys_ticrate ("sys_ticrate", "0.05");
 
 cvar_t	fraglimit ("fraglimit","0",CVAR_SERVER);
 cvar_t	timelimit ("timelimit","0",CVAR_SERVER);
@@ -205,7 +204,7 @@ void Host_InitLocal (void)
 ===============
 Host_WriteConfiguration
 
-Writes key bindings and archived cvars to directq.cfg
+Writes key bindings and archived cvars
 ===============
 */
 extern cvar_t hud_defaulthud;
@@ -220,17 +219,29 @@ void Host_WriteConfiguration (void)
 		// force all open buffers to commit and close
 		while (_fcloseall ());
 
+#if 1
 		if (!(f = fopen (va ("%s/directq.cfg", com_gamedir), "w")))
+#else
+		if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
+#endif
 		{
 			// if we failed to open it, we sleep for a bit, then attempt it again.  windows or something seems to
 			// lock on to a file handle for a while even after it's been closed, so this might help giving it a
 			// hint that it needs to unlock
 			Sleep (1000);
 
+#if 1
 			if (!(f = fopen (va ("%s/directq.cfg", com_gamedir), "w")))
+#else
+			if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
+#endif
 			{
 				// if after this amount of time it's still locked open, something has gone askew
+#if 1
 				Con_SafePrintf ("Couldn't write directq.cfg.\n");
+#else
+				Con_SafePrintf ("Couldn't write config.cfg.\n");
+#endif
 				return;
 			}
 		}
@@ -240,7 +251,11 @@ void Host_WriteConfiguration (void)
 
 		fclose (f);
 
+#if 1
 		Con_SafePrintf ("Wrote directq.cfg\n");
+#else
+		Con_SafePrintf ("Wrote config.cfg\n");
+#endif
 	}
 
 	if (hud_autosave.value)
@@ -518,9 +533,9 @@ Host_FilterTime
 Returns false if the time is too short to run a frame
 ===================
 */
-// changed to host_maxfps for compatibility reasons.
-// really need to find a way to have 2 names refer to the same variable here...
 cvar_t host_maxfps ("host_maxfps", 72, CVAR_ARCHIVE | CVAR_SERVER);
+cvar_alias_t cl_maxfps ("cl_maxfps", &host_maxfps);
+cvar_alias_t pq_maxfps ("pq_maxfps", &host_maxfps);
 
 DWORD dwRealTime = 0;
 DWORD dwHostFrameTime = 0;
@@ -627,6 +642,7 @@ void Host_SetRefreshRate (int rate)
 
 
 void D3D_UpdateOcclusionQueries (void);
+void S_FrameCheck (void);
 
 void Host_Frame (DWORD time)
 {
@@ -687,6 +703,9 @@ void Host_Frame (DWORD time)
 		host_refreshtime = 0;
 	}
 
+	// check for changes in the sound state
+	S_FrameCheck ();
+
 	// update dlights (should this move to the end of SCR_UpdateScreen?)
 	if (cls.signon == SIGNONS)
 	{
@@ -734,7 +753,7 @@ void Host_Init (quakeparms_t *parms)
 	com_argc = parms->argc;
 	com_argv = parms->argv;
 
-	PR_InitBuiltIns ();
+	//PR_InitBuiltIns ();
 	Cbuf_Init ();
 	Cmd_Init ();	
 	V_Init ();
@@ -789,8 +808,9 @@ void Host_Init (quakeparms_t *parms)
 	// everythings up now
 	full_initialized = true;
 
-	// load the configs fully (reverse order)
-	Cbuf_InsertText ("togglemenu\n");
+	// contents of ID Quake.rc
+	Cbuf_InsertText ("startdemos demo1 demo2 demo3\n");
+	Cbuf_InsertText ("stuffcmds\n");
 	Cbuf_InsertText ("exec autoexec.cfg\n");
 	Cbuf_InsertText ("exec directq.cfg\n");
 	Cbuf_InsertText ("exec config.cfg\n");
@@ -800,9 +820,6 @@ void Host_Init (quakeparms_t *parms)
 	host_initialized = true;
 
 	SetWindowText (d3d_Window, va ("DirectQ Release %s - %s", DIRECTQ_VERSION, com_gamename));
-
-	// play intermission tune
-	CDAudio_Play (3, true);
 }
 
 
@@ -826,7 +843,7 @@ void Host_ShutdownGame (void)
 	NET_Shutdown ();
 	S_Shutdown();
 	IN_Shutdown ();
-	VID_Shutdown();
+	VID_Shutdown ();
 }
 
 

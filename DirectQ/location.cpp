@@ -17,6 +17,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 #include "quakedef.h"
@@ -90,14 +92,14 @@ void LOC_LoadLocations (void)
 				if (!com_token[i])
 				{
 					// there may not be a first quote...
-					strncpy (l->name, com_token, 31);
+					Q_strncpy (l->name, com_token, 31);
 					break;
 				}
 
 				if (com_token[i] == '\"')
 				{
 					// the valid first character is after the quote
-					strncpy (l->name, &com_token[i + 1], 31);
+					Q_strncpy (l->name, &com_token[i + 1], 31);
 					break;
 				}
 			}

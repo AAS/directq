@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // quakedef.h -- primary header for client
 
@@ -26,7 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define WINVER 0x0500
 #define _WIN32_WINNT 0x0500
 
-#define DIRECTQ_VERSION "1.8.1"
+#define DIRECTQ_VERSION "1.8.2"
 
 // let's be able to do assertions everywhere
 #include <assert.h>

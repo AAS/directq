@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // console.c
 
@@ -30,7 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 int 		con_linewidth;
 
-float		con_cursorspeed = 4;
+#define		CON_CURSORSPEED		4.0f
 
 #define		CON_TEXTSIZE	0x40000
 
@@ -287,7 +289,7 @@ static void Con_Print (char *txt, bool silent)
 	int		c, l;
 	static int	cr;
 	int		mask;
-	
+
 	con_backscroll = 0;
 
 	if (txt[0] == 1)
@@ -365,14 +367,72 @@ static void Con_Print (char *txt, bool silent)
 Con_DebugLog
 ================
 */
-void Con_DebugLog (char *file, char *fmt)
+#define	MAXPRINTMSG	4096
+
+char *ConDebugBuffer = NULL;
+int ConDebugBufferLen = 0;
+
+void Con_DebugFlush (char *file, char *fmt)
 {
+	if (!fmt[0]) return;
+
 	FILE *f = fopen (file, "a");
 
 	if (!f) return;
 
+	// switch off buffering in mode 2 or if developer 1
+	// (there doesn't seem to be much difference in these)
+	if (condebug.integer > 1 || developer.integer)
+		setvbuf (f, NULL, _IONBF, 0);
+
 	fprintf (f, "%s", fmt);
+
+	if (condebug.integer > 1 || developer.integer)
+		fflush (f);
+
 	fclose (f);
+}
+
+
+void Con_DebugLog (char *file, char *fmt)
+{
+	if (!ConDebugBuffer)
+	{
+		// alloc at MAXPRINTMSG so it won't ever need to be expanded
+		ConDebugBuffer = (char *) Pool_Permanent->Alloc (MAXPRINTMSG);
+		ConDebugBuffer[0] = 0;
+		ConDebugBufferLen = 0;
+	}
+
+	// use fast in-memory buffering if connected
+	if (cls.state == ca_connected)
+	{
+		if (!(condebug.integer > 1 || developer.integer))
+		{
+			int len = strlen (fmt);
+
+			if (len + ConDebugBufferLen + 1 >= MAXPRINTMSG)
+			{
+				// flush a full buffer
+				Con_DebugFlush (file, ConDebugBuffer);
+				ConDebugBuffer[0] = 0;
+				ConDebugBufferLen = 0;
+			}
+
+			// append current text to the buffer
+			strcat (ConDebugBuffer, fmt);
+			ConDebugBufferLen += len;
+			return;
+		}
+	}
+
+	// flush anything from the current buffer
+	Con_DebugFlush (file, ConDebugBuffer);
+	ConDebugBuffer[0] = 0;
+	ConDebugBufferLen = 0;
+
+	// write the current message
+	Con_DebugFlush (file, fmt);
 }
 
 
@@ -384,9 +444,6 @@ Handles cursor positioning, line wrapping, etc
 ================
 */
 void Menu_PutConsolePrintInbuffer (char *text);
-
-#define	MAXPRINTMSG	4096
-
 
 static void Con_PrintfCommon (char *msg, bool silent)
 {
@@ -428,20 +485,6 @@ void Con_Printf (char *fmt, ...)
 
 	// take a copy for the menus
 	if (key_dest == key_menu) Menu_PutConsolePrintInbuffer (msg);
-
-	// update the screen if the console is displayed
-	if (cls.signon != SIGNONS && !scr_disabled_for_loading)
-	{
-		// protect against infinite loop if something in SCR_UpdateScreen calls Con_Printf
-		if (!inupdate)
-		{
-			// only needed during game startup to flush safeprints...
-			// but also gets called at runtime in inappropriate places...
-			inupdate = true;
-			//SCR_UpdateScreen ();
-			inupdate = false;
-		}
-	}
 }
 
 
@@ -519,10 +562,10 @@ void Con_DrawInput (void)
 	if (key_dest != key_console && !con_forcedup) return;
 
 	// fill out remainder with spaces (those of a nervous disposition should look away now)
-	for (i = strlen ((text = strncpy (editlinecopy, key_lines[edit_line], 255))); i < 256; text[i++] = ' ');
+	for (i = strlen ((text = Q_strncpy (editlinecopy, key_lines[edit_line], 255))); i < 256; text[i++] = ' ');
 
 	// add the cursor frame
-	if ((int) (realtime * con_cursorspeed) & 1) text[key_linepos] = 11 + 130 * key_insert;
+	if ((int) (realtime * CON_CURSORSPEED) & 1) text[key_linepos] = 11 + 130 * key_insert;
 
 	//	prestep if horizontally scrolling
 	if (key_linepos >= con_linewidth) text += 1 + key_linepos - con_linewidth;
@@ -593,7 +636,7 @@ void Con_DrawNotify (void)
 			x++;
 		}
 
-		Draw_Character ((x + 5) << 3, v, 10 + ((int) (realtime * con_cursorspeed) & 1));
+		Draw_Character ((x + 5) << 3, v, 10 + ((int) (realtime * CON_CURSORSPEED) & 1));
 		v += con_lineheight.value;
 	}
 

@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 
@@ -36,11 +38,9 @@ extern cvar_t xi_axislt;
 extern cvar_t xi_axisrt;
 extern cvar_t gl_texturedir;
 extern cvar_t scr_screenshotformat;
-extern cvar_t scr_screenshotdir;
 extern cvar_t r_lerporient;
 extern cvar_t r_lerpframe;
 extern cvar_t r_lerplightstyle;
-extern cvar_t host_savedir;
 extern cvar_t m_filter;
 extern cvar_t m_look;
 extern cvar_t m_boost;
@@ -87,6 +87,9 @@ extern cvar_t r_wateralpha;
 extern cvar_t hud_sbaralpha;
 extern cvar_t hud_overlay;
 extern cvar_t hud_centerhud;
+extern cvar_t loadas8bit;
+extern cvar_t s_khz;
+extern cvar_t r_fastlightmaps;
 
 CQMenu menu_Main (m_main);
 CQMenu menu_Singleplayer (m_other);
@@ -152,37 +155,37 @@ void Menu_ToggleSimpleMenus (void)
 {
 	if (!menu_advanced.integer)
 	{
-		menu_Main.ShowOptions (MENU_TAG_SIMPLE);
-		menu_Main.HideOptions (MENU_TAG_FULL);
+		menu_Main.ShowMenuOptions (MENU_TAG_SIMPLE);
+		menu_Main.HideMenuOptions (MENU_TAG_FULL);
 
-		menu_Singleplayer.ShowOptions (MENU_TAG_SIMPLE);
-		menu_Singleplayer.HideOptions (MENU_TAG_FULL);
+		menu_Singleplayer.ShowMenuOptions (MENU_TAG_SIMPLE);
+		menu_Singleplayer.HideMenuOptions (MENU_TAG_FULL);
 
-		menu_Multiplayer.ShowOptions (MENU_TAG_SIMPLE);
-		menu_Multiplayer.HideOptions (MENU_TAG_FULL);
+		menu_Multiplayer.ShowMenuOptions (MENU_TAG_SIMPLE);
+		menu_Multiplayer.HideMenuOptions (MENU_TAG_FULL);
 
-		menu_Options.ShowOptions (MENU_TAG_SIMPLE);
-		menu_Options.HideOptions (MENU_TAG_FULL);
+		menu_Options.ShowMenuOptions (MENU_TAG_SIMPLE);
+		menu_Options.HideMenuOptions (MENU_TAG_FULL);
 
-		menu_Video.ShowOptions (MENU_TAG_SIMPLE);
-		menu_Video.HideOptions (MENU_TAG_FULL);
+		menu_Video.ShowMenuOptions (MENU_TAG_SIMPLE);
+		menu_Video.HideMenuOptions (MENU_TAG_FULL);
 	}
 	else
 	{
-		menu_Main.ShowOptions (MENU_TAG_FULL);
-		menu_Main.HideOptions (MENU_TAG_SIMPLE);
+		menu_Main.ShowMenuOptions (MENU_TAG_FULL);
+		menu_Main.HideMenuOptions (MENU_TAG_SIMPLE);
 
-		menu_Singleplayer.ShowOptions (MENU_TAG_FULL);
-		menu_Singleplayer.HideOptions (MENU_TAG_SIMPLE);
+		menu_Singleplayer.ShowMenuOptions (MENU_TAG_FULL);
+		menu_Singleplayer.HideMenuOptions (MENU_TAG_SIMPLE);
 
-		menu_Multiplayer.ShowOptions (MENU_TAG_FULL);
-		menu_Multiplayer.HideOptions (MENU_TAG_SIMPLE);
+		menu_Multiplayer.ShowMenuOptions (MENU_TAG_FULL);
+		menu_Multiplayer.HideMenuOptions (MENU_TAG_SIMPLE);
 
-		menu_Options.ShowOptions (MENU_TAG_FULL);
-		menu_Options.HideOptions (MENU_TAG_SIMPLE);
+		menu_Options.ShowMenuOptions (MENU_TAG_FULL);
+		menu_Options.HideMenuOptions (MENU_TAG_SIMPLE);
 
-		menu_Video.ShowOptions (MENU_TAG_FULL);
-		menu_Video.HideOptions (MENU_TAG_SIMPLE);
+		menu_Video.ShowMenuOptions (MENU_TAG_FULL);
+		menu_Video.HideMenuOptions (MENU_TAG_SIMPLE);
 	}
 }
 
@@ -503,6 +506,8 @@ bool IsGameDir (char *path)
 	if (CheckKnownContent (va ("%s/%s/maps/*.bsp", basedir, path))) return true;
 	if (CheckKnownContent (va ("%s/%s/progs/*.mdl", basedir, path))) return true;
 	if (CheckKnownContent (va ("%s/%s/*.pak", basedir, path))) return true;
+	if (CheckKnownContent (va ("%s/%s/*.pk3", basedir, path))) return true;
+	if (CheckKnownContent (va ("%s/%s/*.zip", basedir, path))) return true;
 
 	// some gamedirs are just used for keeping stuff separate
 	if (CheckKnownContent (va ("%s/%s/*.sav", basedir, path))) return true;
@@ -724,7 +729,7 @@ int old_skybox_menunumber = 0;
 
 #define TAG_SKYBOXAPPLY		1
 #define TAG_WATERWARP		2
-#define TAG_WATERALPHA		3
+#define TAG_WATERALPHA		4
 
 void Menu_LoadAvailableSkyboxes (void)
 {
@@ -826,26 +831,29 @@ void Menu_LoadAvailableSkyboxes (void)
 }
 
 
+char *fastlmmodes[] = {"Off", "Fast Dynamic", "Fast Styles", "Full", NULL};
+int fastlmmode = 0;
+
 int Menu_WarpCustomDraw (int y)
 {
 	if (skybox_menunumber != old_skybox_menunumber)
 	{
-		menu_WarpSurf.EnableOptions (TAG_SKYBOXAPPLY);
+		menu_WarpSurf.EnableMenuOptions (TAG_SKYBOXAPPLY);
 		// this broke the enable/disable switch - it's now done at load time instead
 		//old_skybox_menunumber = skybox_menunumber;
 	}
-	else menu_WarpSurf.DisableOptions (TAG_SKYBOXAPPLY);
+	else menu_WarpSurf.DisableMenuOptions (TAG_SKYBOXAPPLY);
 
 	// this is a little cleaner now...
 	if (r_lockalpha.value)
 	{
-		menu_EffectsSimple.DisableOptions (TAG_WATERALPHA);
-		menu_WarpSurf.DisableOptions (TAG_WATERALPHA);
+		menu_EffectsSimple.DisableMenuOptions (TAG_WATERALPHA);
+		menu_WarpSurf.DisableMenuOptions (TAG_WATERALPHA);
 	}
 	else
 	{
-		menu_EffectsSimple.EnableOptions (TAG_WATERALPHA);
-		menu_WarpSurf.EnableOptions (TAG_WATERALPHA);
+		menu_EffectsSimple.EnableMenuOptions (TAG_WATERALPHA);
+		menu_WarpSurf.EnableMenuOptions (TAG_WATERALPHA);
 	}
 
 	// sky warp style
@@ -854,8 +862,10 @@ int Menu_WarpCustomDraw (int y)
 
 	// water warp
 	if (r_waterwarp.value)
-		menu_WarpSurf.EnableOptions (TAG_WATERWARP);
-	else menu_WarpSurf.DisableOptions (TAG_WATERWARP);
+		menu_WarpSurf.EnableMenuOptions (TAG_WATERWARP);
+	else menu_WarpSurf.DisableMenuOptions (TAG_WATERWARP);
+
+	Cvar_Set (&r_fastlightmaps, fastlmmode);
 
 	// keep y
 	return y;
@@ -866,6 +876,11 @@ void Menu_WarpCustomEnter (void)
 {
 	skybox_menunumber = 0;
 	old_skybox_menunumber = 0;
+
+	fastlmmode = r_fastlightmaps.integer;
+
+	if (fastlmmode < 0) fastlmmode = 0;
+	if (fastlmmode > 3) fastlmmode = 3;
 
 	extern char CachedSkyBoxName[];
 
@@ -922,7 +937,7 @@ int fogquality = 0;
 int fogmode = 0;
 #define TAG_FOGDISABLED	1
 #define TAG_LINEARONLY	2
-#define TAG_EXPONLY		3
+#define TAG_EXPONLY		4
 
 extern cvar_t gl_fogenable;
 extern cvar_t gl_fogred;
@@ -939,43 +954,43 @@ void Menu_FogCustomEnter (void)
 	switch (gl_fogenable.integer)
 	{
 	case 2:
-		menu_Fog.EnableOptions (TAG_EXPONLY);
-		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
+		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
 		fogquality = 0;
 		fogmode = 1;
 		break;
 
 	case 3:
-		menu_Fog.EnableOptions (TAG_EXPONLY);
-		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
+		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
 		fogquality = 0;
 		fogmode = 2;
 		break;
 
 	case 4:
-		menu_Fog.DisableOptions (TAG_EXPONLY);
-		menu_Fog.EnableOptions (TAG_LINEARONLY);
+		menu_Fog.DisableMenuOptions (TAG_EXPONLY);
+		menu_Fog.EnableMenuOptions (TAG_LINEARONLY);
 		fogquality = 1;
 		fogmode = 0;
 		break;
 
 	case 5:
-		menu_Fog.EnableOptions (TAG_EXPONLY);
-		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
+		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
 		fogquality = 1;
 		fogmode = 1;
 		break;
 
 	case 6:
-		menu_Fog.EnableOptions (TAG_EXPONLY);
-		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		menu_Fog.EnableMenuOptions (TAG_EXPONLY);
+		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
 		fogquality = 1;
 		fogmode = 2;
 		break;
 
 	default:
-		menu_Fog.DisableOptions (TAG_EXPONLY);
-		menu_Fog.EnableOptions (TAG_LINEARONLY);
+		menu_Fog.DisableMenuOptions (TAG_EXPONLY);
+		menu_Fog.EnableMenuOptions (TAG_LINEARONLY);
 		fogquality = 0;
 		fogmode = 0;
 		break;
@@ -984,14 +999,14 @@ void Menu_FogCustomEnter (void)
 	if (gl_fogenable.integer)
 	{
 		fogenable = 1;
-		menu_Fog.EnableOptions (TAG_FOGDISABLED);
+		menu_Fog.EnableMenuOptions (TAG_FOGDISABLED);
 	}
 	else
 	{
 		fogenable = 0;
-		menu_Fog.DisableOptions (TAG_FOGDISABLED);
-		menu_Fog.DisableOptions (TAG_EXPONLY);
-		menu_Fog.DisableOptions (TAG_LINEARONLY);
+		menu_Fog.DisableMenuOptions (TAG_FOGDISABLED);
+		menu_Fog.DisableMenuOptions (TAG_EXPONLY);
+		menu_Fog.DisableMenuOptions (TAG_LINEARONLY);
 	}
 }
 
@@ -1040,19 +1055,116 @@ int Menu_FogColourBox (int y)
 }
 
 
+char *soundspeedlist[] = {"11025", "22050", "44100", "48000", NULL};
+int soundspeednum = 0;
+
+void Menu_SoundCustomEnter (void)
+{
+	switch (s_khz.integer)
+	{
+	case 48:
+	case 48000:
+		soundspeednum = 3;
+		break;
+
+	case 44:
+	case 44100:
+		soundspeednum = 2;
+		break;
+
+	case 22:
+	case 22100:
+		soundspeednum = 1;
+		break;
+
+	default:
+		soundspeednum = 0;
+		break;
+	}
+}
+
+
+int Menu_SoundCustomDraw (int y)
+{
+	switch (soundspeednum)
+	{
+	case 3:
+		Cvar_Set (&s_khz, 48);
+		break;
+
+	case 2:
+		Cvar_Set (&s_khz, 44);
+		break;
+
+	case 1:
+		Cvar_Set (&s_khz, 22);
+		break;
+
+	default:
+		Cvar_Set (&s_khz, 11);
+		break;
+	}
+
+	return y;
+}
+
+
+cvar_t dummy_speed;
+int dummy_speed_backup = 0;
+
+void Menu_SpeedEnterCheck (void)
+{
+	if (cl_forwardspeed.value > 200)
+		Cvar_Set (&dummy_speed, 1);
+	else Cvar_Set (&dummy_speed, 0.0f);
+
+	dummy_speed_backup = dummy_speed.integer;
+}
+
+
+int Menu_SpeedDrawCheck (int y)
+{
+	// only change the cvars if it actually changes
+	if (dummy_speed_backup != dummy_speed.integer)
+	{
+		if (dummy_speed.integer)
+		{
+			// only reset these if they are less than the base speed, otherwise keep the higher value
+			if (cl_forwardspeed.value < 400) Cvar_Set (&cl_forwardspeed, 400);
+			if (cl_backspeed.value < 400) Cvar_Set (&cl_backspeed, 400);
+		}
+		else
+		{
+			// only reset these if they are higher than the base speed, otherwise keep the lower value
+			if (cl_forwardspeed.value > 200) Cvar_Set (&cl_forwardspeed, 200);
+			if (cl_backspeed.value > 200) Cvar_Set (&cl_backspeed, 200);
+		}
+
+		dummy_speed_backup = dummy_speed.integer;
+	}
+
+	return y;
+}
+
+
 void Menu_InitOptionsMenu (void)
 {
 	// options
 	menu_Options.AddOption (new CQMenuCustomDraw (Menu_OptionsCustomDraw));
+	menu_Options.AddOption (new CQMenuCustomEnter (Menu_SpeedEnterCheck));
+	menu_Options.AddOption (new CQMenuCustomDraw (Menu_SpeedDrawCheck));
 	menu_Options.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuTitle ("Configure Game Options"));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configuration Management"));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Customize Controls", &menu_Keybindings));
-	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Change Game Directory", &menu_Game));
 	menu_Options.AddOption (new CQMenuCommand ("Go to Console", Menu_OptionsGoToConsole));
 	menu_Options.AddOption (new CQMenuCommand ("Reset to Defaults", Menu_OptionsResetToDefaults));
 	menu_Options.AddOption (new CQMenuCommand ("Save Current Configuration", Host_WriteConfiguration));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Options"));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Change Game Directory", &menu_Game));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Load a Map", &menu_Maps));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Run or Record a Demo", &menu_Demo));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Video and View Options", &menu_Video));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuSubMenu ("Special Effects Options", &menu_Effects));
@@ -1068,13 +1180,14 @@ void Menu_InitOptionsMenu (void)
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarSlider ("Music Volume", &bgmvolume, 0, 1, 0.05));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarSlider ("Sound Volume", &volume, 0, 1, 0.05));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarToggle ("Always Run", &cl_forwardspeed, 200, 400));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarToggle ("Always Run", &dummy_speed, 0, 1));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarToggle ("Mouse Look", &m_look, 0, 1));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuCvarToggle ("Invert Mouse", &m_pitch, 0.022, -0.022));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Menu Configuration"));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuColourBar ("Highlight Colour", &menu_fillcolor.integer));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSpacer (DIVIDER_LINE));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Video Options", &menu_Video));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Sound Options", &menu_Sound));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Special Effects Options", &menu_EffectsSimple));
 
 	// fog
@@ -1124,13 +1237,19 @@ void Menu_InitOptionsMenu (void)
 	menu_WarpSurf.AddOption (TAG_WATERWARP, new CQMenuCvarSlider ("Warp Scale", &r_waterwarpscale, 0, 0.25, 0.025));
 
 	// sound
+	menu_Sound.AddOption (new CQMenuCustomEnter (Menu_SoundCustomEnter));
+	menu_Sound.AddOption (new CQMenuCustomDraw (Menu_SoundCustomDraw));
 	menu_Sound.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
 	menu_Sound.AddOption (new CQMenuTitle ("Sound Options"));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Music Volume", &bgmvolume, 0, 1, 0.05));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Sound Volume", &volume, 0, 1, 0.05));
+	menu_Sound.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Clip Distance", &sound_nominal_clip_dist, 500, 2000, 100));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Ambient Level", &ambient_level, 0, 1, 0.05));
 	menu_Sound.AddOption (new CQMenuCvarSlider ("Ambient Fade", &ambient_fade, 50, 200, 10));
+	menu_Sound.AddOption (new CQMenuSpacer (DIVIDER_LINE));
+	menu_Sound.AddOption (new CQMenuSpinControl ("Sound Speed", &soundspeednum, soundspeedlist));
+	menu_Sound.AddOption (new CQMenuCvarToggle ("8-Bit Sounds", &loadas8bit));
 
 	// chase cam - now that it's fixed, let's expose the wee bugger
 	menu_Chase.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
@@ -1161,7 +1280,9 @@ void Menu_InitOptionsMenu (void)
 	menu_Input.AddOption (new CQMenuCvarToggle ("Mouse Filter", &m_filter, 0, 1));
 	menu_Input.AddOption (new CQMenuCvarToggle ("Invert Mouse", &m_pitch, 0.022, -0.022));
 	menu_Input.AddOption (new CQMenuTitle ("Movement Options"));
-	menu_Input.AddOption (new CQMenuCvarToggle ("Always Run", &cl_forwardspeed, 200, 400));
+	menu_Input.AddOption (new CQMenuCustomEnter (Menu_SpeedEnterCheck));
+	menu_Input.AddOption (new CQMenuCustomDraw (Menu_SpeedDrawCheck));
+	menu_Input.AddOption (new CQMenuCvarToggle ("Always Run", &dummy_speed, 0, 1));
 	menu_Input.AddOption (new CQMenuCvarToggle ("Lookspring", &lookspring, 0, 1));
 	menu_Input.AddOption (new CQMenuCvarToggle ("Lookstrafe", &lookstrafe, 0, 1));
 
@@ -1194,6 +1315,10 @@ void Menu_InitOptionsMenu (void)
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Draw as Overlay", &hud_overlay));
 	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Center-align HUD", &hud_centerhud));
 	menu_EffectsSimple.AddOption (new CQMenuCvarSlider ("HUD Alpha", &hud_sbaralpha, 0, 1, 0.1));
+	menu_EffectsSimple.AddOption (new CQMenuTitle ("Other"));
+	menu_EffectsSimple.AddOption (new CQMenuSpinControl ("Fast Lightmaps", &fastlmmode, fastlmmodes));
+	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Extra Dynamic Light", &r_extradlight, 0, 1));
+	menu_EffectsSimple.AddOption (new CQMenuCvarToggle ("Automatic Mapshots", &r_automapshot, 0, 1));
 
 	// this is to give users some control over where content items go as they're not standardised per engine
 	// in the case of music we always fall back to /sound/cdtracks, then /music in addition to what the user
@@ -1203,11 +1328,9 @@ void Menu_InitOptionsMenu (void)
 	menu_ContentDir.AddOption (new CQMenuTitle ("General Content Options"));
 	menu_ContentDir.AddOption (new CQMenuCvarToggle ("Automatic Mapshots", &r_automapshot, 0, 1));
 	menu_ContentDir.AddOption (new CQMenuTitle ("Screenshot Content Options"));
-	menu_ContentDir.AddOption (new CQMenuCvarTextbox ("Shot Directory", &scr_screenshotdir, TBFLAGS_FOLDERNAMEFLAGS));
 	menu_ContentDir.AddOption (new CQMenuCvarTextbox ("Shot Base Name", &scr_shotnamebase, TBFLAGS_FILENAMEFLAGS));
 	menu_ContentDir.AddOption (new CQMenuSpinControl ("Shot Format", &shottype_number, ShotTypes));
 	menu_ContentDir.AddOption (new CQMenuTitle ("Save Game Content Options"));
-	menu_ContentDir.AddOption (new CQMenuCvarTextbox ("Save Directory", &host_savedir, TBFLAGS_FOLDERNAMEFLAGS));
 	menu_ContentDir.AddOption (new CQMenuCvarTextbox ("Save Base Name", &host_savenamebase, TBFLAGS_FILENAMEFLAGS));
 	menu_ContentDir.AddOption (new CQMenuTitle ("Other Content Options"));
 	menu_ContentDir.AddOption (new CQMenuCvarTextbox ("Textures Directory", &gl_texturedir, TBFLAGS_FOLDERNAMEFLAGS));
@@ -1263,10 +1386,30 @@ void Menu_InitOptionsMenu (void)
 
 int menu_HelpPage = 0;
 #define	NUM_HELP_PAGES	6
-
+bool nehdemo = false;
 
 void Menu_HelpCustomEnter (void)
 {
+	if (nehahra && !menu_advanced.integer)
+	{
+		nehdemo = false;
+		FILE *f = fopen (va ("%s/endcred.dem", com_gamedir), "rb");
+
+		if (f)
+		{
+			nehdemo = true;
+			fclose (f);
+			key_dest = key_game;
+
+			// endcred.dem is not actually present in the nehahra download!
+			if (sv.active)
+				Cbuf_AddText ("disconnect\n");
+			Cbuf_AddText ("playdemo endcred\n");
+
+			return;
+		}
+	}
+
 	// switch the help page depending on whether we're playing the registered version or not
 	if (registered.value)
 		menu_HelpPage = 1;
@@ -1276,9 +1419,17 @@ void Menu_HelpCustomEnter (void)
 
 int Menu_HelpCustomDraw (int y)
 {
-	qpic_t *pic = Draw_CachePic (va ("gfx/help%i.lmp", menu_HelpPage));
-	Draw_Pic ((vid.width - pic->width) >> 1, y, pic);
-	return y + pic->height + 10;
+	if (nehahra && !menu_advanced.integer && !nehdemo)
+	{
+		Menu_PrintCenterWhite (vid.height / 2 - 32, "Nehahra Credits Unavailable");
+		return y;
+	}
+	else
+	{
+		qpic_t *pic = Draw_CachePic (va ("gfx/help%i.lmp", menu_HelpPage));
+		Draw_Pic ((vid.width - pic->width) >> 1, y, pic);
+		return y + pic->height + 10;
+	}
 }
 
 
@@ -1448,8 +1599,8 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 
 		// allow keys with a leading _
 		if (com_token[0] == '_')
-			strncpy (key, &com_token[1], 39);
-		else strncpy (key, com_token, 39);
+			Q_strncpy (key, &com_token[1], 39);
+		else Q_strncpy (key, com_token, 39);
 
 		// remove trailing spaces
 		while (key[strlen (key) - 1] == ' ') key[strlen (key) - 1] = 0;
@@ -1466,6 +1617,24 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 		{
 			info->mapname = (char *) Pool_Game->Alloc (strlen (com_token) + 1);
 			strcpy (info->mapname, com_token);
+
+			// evil maps with looooonnggg messages
+			for (int i = 0; ; i++)
+			{
+				if (!info->mapname[i]) break;
+
+				if (i > 0 && info->mapname[i - 1] == '\\' && info->mapname[i] == 'n')
+				{
+					info->mapname[i - 1] = 0;
+					break;
+				}
+
+				if (i == 39)
+				{
+					info->mapname[i] = 0;
+					break;
+				}
+			}
 		}
 		else if (!stricmp (key, "sounds"))
 		{
@@ -1676,10 +1845,24 @@ void Menu_MapsPopulate (void)
 
 	for (int i = 0; i < num_menumaps; i++)
 	{
-		// just copy in the pointers rather than allocating new memory.
-		// also set the following item to NULL so that the list is always NULL termed
-		spinbox_maps[i] = menu_mapslist[i].mapname;
-		spinbox_maps[i + 1] = NULL;
+		// skip if the bsp name is unavailable
+		if (!menu_mapslist[i].bspname[0]) continue;
+
+		if (menu_mapslist[i].mapname && menu_mapslist[i].mapname[0])
+		{
+			// just copy in the pointers rather than allocating new memory.
+			// also set the following item to NULL so that the list is always NULL termed
+			spinbox_maps[i] = menu_mapslist[i].mapname;
+			spinbox_maps[i + 1] = NULL;
+		}
+		else
+		{
+			// just copy in the pointers rather than allocating new memory.
+			// also set the following item to NULL so that the list is always NULL termed
+			// if the map name is unavailable we use the bsp name instead
+			spinbox_maps[i] = menu_mapslist[i].bspname;
+			spinbox_maps[i + 1] = NULL;
+		}
 
 		// we need map names as well as bsp names here...
 		spinbox_bsps[i] = menu_mapslist[i].bspname;
@@ -1768,10 +1951,10 @@ void Menu_DemoPopulate (void)
 
 #define TAG_PLAYTIME	1
 #define TAG_RECORD		2
-#define TAG_RECORDCMD	3
-#define TAG_PLAYONLY	4
-#define TAG_TIMEONLY	5
-#define TAG_SELECTMODE	6
+#define TAG_RECORDCMD	4
+#define TAG_PLAYONLY	8
+#define TAG_TIMEONLY	16
+#define TAG_SELECTMODE	32
 
 int Menu_DemoCustomDraw1 (int y)
 {
@@ -1779,40 +1962,40 @@ int Menu_DemoCustomDraw1 (int y)
 	if (!demolist[0])
 	{
 		// also disable the mode selection so that we don't inadvertently trigger invalid modes
-		menu_Demo.DisableOptions (TAG_SELECTMODE);
+		menu_Demo.DisableMenuOptions (TAG_SELECTMODE);
 		democmd_num = 2;
 	}
-	else menu_Demo.EnableOptions (TAG_SELECTMODE);
+	else menu_Demo.EnableMenuOptions (TAG_SELECTMODE);
 
 	// fix up control visibility
 	if (democmd_num == 2)
 	{
 		if (dummy_demoname.string[0])
-			menu_Demo.EnableOptions (TAG_RECORDCMD);
-		else menu_Demo.DisableOptions (TAG_RECORDCMD);
+			menu_Demo.EnableMenuOptions (TAG_RECORDCMD);
+		else menu_Demo.DisableMenuOptions (TAG_RECORDCMD);
 
-		menu_Demo.HideOptions (TAG_PLAYONLY);
-		menu_Demo.HideOptions (TAG_TIMEONLY);
-		menu_Demo.HideOptions (TAG_PLAYTIME);
-		menu_Demo.ShowOptions (TAG_RECORD);
-		menu_Demo.ShowOptions (TAG_RECORDCMD);
+		menu_Demo.HideMenuOptions (TAG_PLAYONLY);
+		menu_Demo.HideMenuOptions (TAG_TIMEONLY);
+		menu_Demo.HideMenuOptions (TAG_PLAYTIME);
+		menu_Demo.ShowMenuOptions (TAG_RECORD);
+		menu_Demo.ShowMenuOptions (TAG_RECORDCMD);
 	}
 	else
 	{
 		if (democmd_num == 0)
 		{
-			menu_Demo.HideOptions (TAG_TIMEONLY);
-			menu_Demo.ShowOptions (TAG_PLAYONLY);
+			menu_Demo.HideMenuOptions (TAG_TIMEONLY);
+			menu_Demo.ShowMenuOptions (TAG_PLAYONLY);
 		}
 		else
 		{
-			menu_Demo.ShowOptions (TAG_TIMEONLY);
-			menu_Demo.HideOptions (TAG_PLAYONLY);
+			menu_Demo.ShowMenuOptions (TAG_TIMEONLY);
+			menu_Demo.HideMenuOptions (TAG_PLAYONLY);
 		}
 
-		menu_Demo.HideOptions (TAG_RECORD);
-		menu_Demo.HideOptions (TAG_RECORDCMD);
-		menu_Demo.ShowOptions (TAG_PLAYTIME);
+		menu_Demo.HideMenuOptions (TAG_RECORD);
+		menu_Demo.HideMenuOptions (TAG_RECORDCMD);
+		menu_Demo.ShowMenuOptions (TAG_PLAYTIME);
 	}
 
 	// y doesn't change

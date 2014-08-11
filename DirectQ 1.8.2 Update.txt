@@ -1,0 +1,26 @@
+DIRECTQ 1.8.2 UPDATE
+====================
+
+I've been somewhat remiss in keeping my change log up to date for this so what you see below is a fraction of the full thing.
+Visit http://mhquake.blogspot.com for the whole story of what's happened over the past two months since 1.8.1
+
+Credit is due to everyone who received and tested a build of this for me; there were quite a few of you and I don't want to
+single out anyone here so I'll just say that you know who you are and the help was appreciated.  This build would have been a
+lesser thing without you.
+
+- Optimized water warp shader (possibly quite significantly, hardware dependent).
+- Fixed "Current Stats" display for new save games.
+- Fine-tuned occlusion queries for better correctness.
+- Added Shader Model 3 profile support on appropriate hardware (automatic).
+- Resolved several issues with level names (server messages) > 128 chars.
+- Added Maps and Demos submenus to Options menu.
+- Reworked external texture loader for better flexibility and faster loading (especially where the external texture doesn't exist).
+- Fixed view weirdness with cl_bobcycle 0.
+- Fixed Sys_Error on MD5 operations in some versions of Windows.
+- Fixed cursor in console is broken.
+- Fixed maps that do not have a server message prematurely terminating the map list in the multiplayer menus.
+- Added elapsed time to multiplayer scoreboard.
+- Lots of other stuff.
+
+
+

@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // mathlib.h
 
@@ -71,3 +73,6 @@ float	anglemod(float a);
 
 #define CLAMP(min, x, max) ((x) < (min) ? (min) : (x) > (max) ? (max) : (x)) //johnfitz
 #define Q_rint(x) ((x) > 0 ? (int)((x) + 0.5) : (int)((x) - 0.5)) //johnfitz -- from joequake
+
+#define Q_Random(MIN,MAX) ((rand() & 32767) * (((MAX) - (MIN)) * (1.0f / 32767.0f)) + (MIN))
+

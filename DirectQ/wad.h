@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // wad.h
 
@@ -71,5 +73,6 @@ void	W_CleanupName (char *in, char *out);
 lumpinfo_t	*W_GetLumpinfo (char *name);
 void	*W_GetLumpName (char *name);
 void	*W_GetLumpNum (int num);
+void W_DumpWADLumps (void);
 
 void SwapPic (qpic_t *pic);

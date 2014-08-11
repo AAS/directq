@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 #include "quakedef.h"
 #include "winquake.h"
@@ -31,7 +33,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 bool dsound_init = false;
 static int	sample16;
 static int	snd_sent, snd_completed;
+bool snd_firsttime = true;
 
+cvar_t s_khz ("s_khz", 11, CVAR_ARCHIVE);
 
 /* 
  * Global variables. Must be visible to window-procedure function 
@@ -160,8 +164,8 @@ BOOL CALLBACK DSEnumCallback (LPGUID lpGuid, LPCSTR lpcstrDescription, LPCSTR lp
 		if (ds_FakeCaps.dwMaxSecondarySampleRate > ds_BestSampleRate && ds_FakeCaps.dwMaxHwMixingAllBuffers > ds_BestBuffers)
 		{
 			// if both buffers and sample rate are better than anything we've got so far, it's no contest
-			strncpy (ds_BestDescription, lpcstrDescription, 127);
-			strncpy (ds_BestModule, lpcstrModule, 63);
+			Q_strncpy (ds_BestDescription, lpcstrDescription, 127);
+			Q_strncpy (ds_BestModule, lpcstrModule, 63);
 			memcpy (&ds_BestGuid, lpGuid, sizeof (GUID));
 			ds_BestSampleRate = ds_FakeCaps.dwMaxSecondarySampleRate;
 			ds_BestBuffers = ds_FakeCaps.dwMaxHwMixingAllBuffers;
@@ -182,6 +186,7 @@ Direct-Sound support
 ==================
 */
 bool S_GetBufferLock (DWORD dwOffset, DWORD dwBytes, void **pbuf, DWORD *dwSize, void **pbuf2, DWORD *dwSize2, DWORD dwFlags);
+extern bool snd_firsttime;
 
 sndinitstat SNDDMA_InitDirect (void)
 {
@@ -190,7 +195,15 @@ sndinitstat SNDDMA_InitDirect (void)
 	DWORD			dwSize, dwWrite;
 	WAVEFORMATEX	format, pformat;
 
-	CoInitialize (NULL);
+	// this is safe to do multiple times as subsequent calls will just return S_FALSE without initializing
+	// if COM fails to initialize we have bigger problems than just not having sound!!!  (Windows itself won't work)
+	hr = CoInitialize (NULL);
+
+	if (!(hr == S_OK || hr == S_FALSE))
+	{
+		Sys_Error ("SNDDMA_InitDirect - CoInitialize failure");
+		return SIS_FAILURE;
+	}
 
 	memset ((void *) &sn, 0, sizeof (sn));
 
@@ -199,9 +212,54 @@ sndinitstat SNDDMA_InitDirect (void)
 	// defaults
 	shm->channels = 2;
 	shm->samplebits = 16;
-	shm->speed = 11025;
 
-	memset (&format, 0, sizeof(format));
+	// default speed
+	int speed = COM_CheckParm ("-sndspeed");
+
+	// override from cmdline (only the first time we load)
+	if (speed && snd_firsttime)
+	{
+		speed = atoi (com_argv[speed + 1]);
+		Cvar_Set (&s_khz, speed);
+	}
+	else speed = COM_CheckParm ("-sspeed");
+
+	// second test against -sspeed for DOS Quake compatibility
+	if (speed && snd_firsttime)
+	{
+		speed = atoi (com_argv[speed + 1]);
+		Cvar_Set (&s_khz, speed);
+	}
+
+	// get from cvar
+	speed = s_khz.integer;
+
+	// set final speed
+	switch (speed)
+	{
+	case 48:
+	case 48000:
+		shm->speed = 48000;
+		break;
+
+	case 44:
+	case 44100:
+		shm->speed = 44100;
+		break;
+
+	case 22:
+	case 22050:
+		shm->speed = 22050;
+		break;
+
+	default:
+		shm->speed = 11025;
+	}
+
+	// set back to cvar
+	Cvar_Set (&s_khz, shm->speed);
+
+	memset (&format, 0, sizeof (format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
     format.nChannels = shm->channels;
     format.wBitsPerSample = shm->samplebits;
@@ -238,6 +296,9 @@ sndinitstat SNDDMA_InitDirect (void)
 		// success
 		if (SUCCEEDED (hr)) break;
 
+		// if this isn't the first time just fail
+		if (!snd_firsttime) return SIS_FAILURE;
+
 		if (hr != DSERR_ALLOCATED)
 		{
 			// something other than already allocated caused it to fail
@@ -261,19 +322,22 @@ sndinitstat SNDDMA_InitDirect (void)
 		}
 	}
 
-	Con_SafePrintf ("DirectSound Device OK\n");
-	Con_SafePrintf ("Using %s", ds_BestDescription);
-	if (ds_BestModule[0]) Con_SafePrintf (" (%s)\n", ds_BestModule); else Con_SafePrintf ("\n");
+	if (snd_firsttime)
+	{
+		Con_SafePrintf ("DirectSound Device OK\n");
+		Con_SafePrintf ("Using %s", ds_BestDescription);
+		if (ds_BestModule[0]) Con_SafePrintf (" (%s)\n", ds_BestModule); else Con_SafePrintf ("\n");
+	}
 
 	// get the caps for reporting
 	ds_DeviceCaps.dwSize = sizeof (ds_DeviceCaps);
 
 	if (DS_OK != ds_Device->GetCaps (&ds_DeviceCaps))
-		Con_SafePrintf ("Couldn't get DS caps\n");
+		if (snd_firsttime) Con_SafePrintf ("Couldn't get DS caps\n");
 	else
 	{
-		if (ds_DeviceCaps.dwFlags & DSCAPS_CERTIFIED) Con_SafePrintf ("Using Certified Sound Device\n");
-		if (ds_DeviceCaps.dwFlags & DSCAPS_EMULDRIVER) Con_SafePrintf ("Using Emulated Sound Device\n");
+		if ((ds_DeviceCaps.dwFlags & DSCAPS_CERTIFIED) && snd_firsttime) Con_SafePrintf ("Using Certified Sound Device\n");
+		if ((ds_DeviceCaps.dwFlags & DSCAPS_EMULDRIVER) && snd_firsttime) Con_SafePrintf ("Using Emulated Sound Device\n");
 	}
 
 	// DSSCL_EXCLUSIVE is deprecated in 8.0 or later
@@ -284,9 +348,9 @@ sndinitstat SNDDMA_InitDirect (void)
 		return SIS_FAILURE;
 	}
 
-	Con_SafePrintf ("Priority Co-operative Level Set OK\n");
+	if (snd_firsttime) Con_SafePrintf ("Priority Co-operative Level Set OK\n");
 
-	// no need to create a primry buffer; directsound will do it automatically for us
+	// no need to create a primary buffer; directsound will do it automatically for us
 	// create the secondary buffer we'll actually work with
 	memset (&ds_BufferDesc, 0, sizeof (ds_BufferDesc));
 	ds_BufferDesc.dwSize = sizeof (DSBUFFERDESC);
@@ -303,7 +367,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	// create it
 	if (DS_OK != ds_Device->CreateSoundBuffer (&ds_BufferDesc, &ds_LegacyBuffer, NULL))
 	{
-		Con_SafePrintf ("DS:CreateSoundBuffer Failed");
+		if (snd_firsttime) Con_SafePrintf ("DS:CreateSoundBuffer Failed\n");
 		FreeSound ();
 		return SIS_FAILURE;
 	}
@@ -313,7 +377,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	{
 		// failed to create it
 		ds_LegacyBuffer->Release ();
-		Con_SafePrintf ("DS:CreateSoundBuffer Failed");
+		if (snd_firsttime) Con_SafePrintf ("DS:CreateSoundBuffer Failed\n");
 		FreeSound ();
 		return SIS_FAILURE;
 	}
@@ -328,19 +392,19 @@ sndinitstat SNDDMA_InitDirect (void)
 
 	if (DS_OK != ds_SecondaryBuffer8->GetCaps (&ds_BufferCaps))
 	{
-		Con_SafePrintf ("DS:GetCaps failed\n");
+		if (snd_firsttime) Con_SafePrintf ("DS:GetCaps failed\n");
 		FreeSound ();
 		return SIS_FAILURE;
 	}
 
-	Con_SafePrintf ("Created Secondary Sound Buffer OK\n");
+	if (snd_firsttime) Con_SafePrintf ("Created Secondary Sound Buffer OK\n");
 
 	// Make sure mixer is active
 	ds_SecondaryBuffer8->Play (0, 0, DSBPLAY_LOOPING);
 
-	Con_SafePrintf ("   %d channel(s)\n", shm->channels);
-	Con_SafePrintf ("   %d bits/sample\n", shm->samplebits);
-	Con_SafePrintf ("   %d bytes/sec\n", shm->speed);
+	if (snd_firsttime) Con_SafePrintf ("   %d channel(s)\n", shm->channels);
+	if (snd_firsttime) Con_SafePrintf ("   %d bits/sample\n", shm->samplebits);
+	if (snd_firsttime) Con_SafePrintf ("   %d bytes/sec\n", shm->speed);
 
 	ds_SoundBufferSize = ds_BufferCaps.dwBufferBytes;
 
@@ -348,7 +412,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	if (!S_GetBufferLock (0, ds_SoundBufferSize, (LPVOID *) &lpData, &dwSize, NULL, NULL, 0))
 	{
 		// this should never happen
-		Con_SafePrintf ("SNDDMA_InitDirect: DS::Lock Sound Buffer Failed\n");
+		if (snd_firsttime) Con_SafePrintf ("SNDDMA_InitDirect: DS::Lock Sound Buffer Failed\n");
 		FreeSound ();
 		return SIS_FAILURE;
 	}
@@ -388,7 +452,7 @@ Try to find a sound device to mix for.
 Returns false if nothing is found.
 ==================
 */
-bool SNDDMA_Init(void)
+bool SNDDMA_Init (void)
 {
 	sndinitstat	stat;
 
@@ -400,16 +464,31 @@ bool SNDDMA_Init(void)
 
 	stat = SNDDMA_InitDirect ();;
 
-	if (stat == SIS_SUCCESS)
-		Con_SafePrintf ("DirectSound Initialization Complete\n");
+	if (snd_firsttime)
+	{
+		if (stat == SIS_SUCCESS)
+			Con_SafePrintf ("DirectSound Initialization Complete\n");
+		else Con_SafePrintf ("DirectSound failed to init\n");
+	}
 	else
-		Con_SafePrintf ("DirectSound failed to init\n");
+	{
+		if (stat == SIS_SUCCESS)
+			Con_SafePrintf ("DirectSound Restart OK\n");
+		else Con_SafePrintf ("DirectSound Restart Failed\n");
+	}
 
 	if (!dsound_init)
 	{
-		Con_SafePrintf ("No sound device initialized\n");
+		if (snd_firsttime)
+		{
+			Con_SafePrintf ("No sound device initialized\n");
+			snd_firsttime = false;
+		}
+
 		return false;
 	}
+
+	snd_firsttime = false;
 
 	return true;
 }
@@ -457,4 +536,61 @@ void SNDDMA_Shutdown(void)
 {
 	FreeSound ();
 }
+
+
+void Sound_CacheFree (char *name);
+
+void Snd_Restart_f (void)
+{
+	extern sfx_t *known_sfx;
+
+	// flush all sounds from the buffer
+	S_ClearBuffer ();
+	S_BlockSound (true);
+
+	// clear loaded sounds
+	for (int i = 0; i < MAX_SFX; i++)
+	{
+		// clear the name and set the pointer to null
+		Sound_CacheFree (known_sfx[i].name);
+
+		// clear down cached data
+		known_sfx[i].sndcache = NULL;
+	}
+
+	// now restart the sound system
+	S_Shutdown ();
+	S_Startup ();
+
+	// unblock sound
+	S_BlockSound (false);
+}
+
+
+void S_FrameCheck (void)
+{
+	// initial values
+	static int oldkhz = s_khz.integer;
+	static int oldbits = loadas8bit.integer;
+
+	// do it this way so that we can switch multiple params
+	bool restart_sound = false;
+
+	// check for changed state
+	if (s_khz.integer != oldkhz) restart_sound = true;
+	if (loadas8bit.integer != oldbits) restart_sound = true;
+
+	// no need to switch
+	if (!restart_sound) return;
+
+	// store back params
+	oldkhz = s_khz.integer;
+	oldbits = loadas8bit.integer;
+
+	// restart sound
+	Snd_Restart_f ();
+}
+
+
+cmd_t S_Restart_Cmd ("snd_restart", Snd_Restart_f);
 

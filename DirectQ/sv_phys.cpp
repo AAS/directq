@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // sv_phys.c
 
@@ -100,7 +102,7 @@ void SV_CheckVelocity (edict_t *ent)
 
 		if (IS_NAN (ent->v.origin[i]))
 		{
-			Con_Printf ("Got a NaN origin on %s\n", SVProgs->Strings + ent->v.classname);
+			Con_DPrintf ("Got a NaN origin on %s\n", SVProgs->Strings + ent->v.classname);
 			ent->v.origin[i] = 0;
 		}
 
@@ -248,7 +250,8 @@ Returns the clipflags if the velocity was modified (hit something solid)
 If steptrace is not NULL, the trace of any vertical wall hit will be stored
 ============
 */
-#define	MAX_CLIP_PLANES	5
+#define	MAX_CLIP_PLANES	20
+
 int SV_FlyMove (edict_t *ent, float time, trace_t *steptrace)
 {
 	int			bumpcount, numbumps;
@@ -634,6 +637,7 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 // see if any solid entities are inside the final position
 	num_moved = 0;
 	check = NEXT_EDICT(SVProgs->Edicts);
+
 	for (e=1 ; e<SVProgs->NumEdicts ; e++, check = NEXT_EDICT(check))
 	{
 		if (check->free)
@@ -677,13 +681,15 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 		org2[2] = DotProduct (org, up);
 		VectorSubtract (org2, org, move);
 
-		// try moving the contacted entity 
+		// try moving the contacted entity
+		float oldsolid = pusher->v.solid;
 		pusher->v.solid = SOLID_NOT;
 		SV_PushEntity (check, move);
-		pusher->v.solid = SOLID_BSP;
+		pusher->v.solid = oldsolid;
 
 	// if it is still inside the pusher, block
 		block = SV_TestEntityPosition (check);
+
 		if (block)
 		{	// fail the move
 			if (check->v.mins[0] == check->v.maxs[0])
@@ -753,12 +759,17 @@ void SV_Physics_Pusher (edict_t *ent)
 	else movetime = host_frametime;
 
 	// advances ent->v.ltime if not blocked
-	if (movetime)
+#if 1
+	if (movetime) SV_PushMove (ent, movetime);
+#else
+	// this gives bad results with the end.bsp spiked ball
+	if (movetime) SV_PushMove (ent, movetime);
 	{
 		if (ent->v.avelocity[0] || ent->v.avelocity[1] || ent->v.avelocity[2])
-	        SV_PushRotate (ent, host_frametime);
+	        SV_PushRotate (ent, movetime);
 		else SV_PushMove (ent, movetime);
 	}
+#endif
 
 	if (thinktime > oldltime && thinktime <= ent->v.ltime)
 	{

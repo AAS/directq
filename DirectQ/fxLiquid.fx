@@ -19,38 +19,46 @@ float warpfactor;
 float Alpha;
 
 
-struct VS_INPUT_OUTPUT 
+struct VS_INPUT
 {
 	float4 Position : POSITION0;
 	float2 Texcoord : TEXCOORD0;
 };
 
 
-float4 LiquidPS (VS_INPUT_OUTPUT Input) : COLOR0
+struct VS_OUTPUT
 {
-	float2 stwarp = Input.Texcoord;
-	float4 color;
+	float4 Position : POSITION0;
+	float2 Texcoord0 : TEXCOORD0;
+	float2 Texcoord1 : TEXCOORD1;
+};
 
+
+float4 LiquidPS (VS_OUTPUT Input) : COLOR0
+{
 	// same warp calculation as is used for the fixed pipeline path
-	stwarp.x += sin (((Input.Texcoord.y * warpfactor) + warptime) * 0.024543f) * warpscale;
-	stwarp.y += sin (((Input.Texcoord.x * warpfactor) + warptime) * 0.024543f) * warpscale;
-
-	stwarp.xy = mul (stwarp.xy, 0.015625);
-
-	color.rgb = tex2D (baseMap, stwarp);
+	// a lot of the heavier lifting here has been offloaded to the vs
+	float4 color = tex2D (baseMap, mul (mul (sin (Input.Texcoord1), warpscale) + Input.Texcoord0, 0.015625f));
 	color.a = Alpha;
 
 	return color;
 }
 
 
-VS_INPUT_OUTPUT LiquidVS (VS_INPUT_OUTPUT Input)
+VS_OUTPUT LiquidVS (VS_INPUT Input)
 {
-	VS_INPUT_OUTPUT Output;
+	VS_OUTPUT Output;
 
 	// this is friendlier for preshaders
 	Output.Position = mul (Input.Position, mul (WorldMatrix, ProjMatrix));
-	Output.Texcoord = Input.Texcoord;
+	Output.Texcoord0 = Input.Texcoord;
+
+	// we need to switch x and y at some stage; logic says lets do it per vertex to get the ps instructions down
+	Output.Texcoord1.x = mul (Input.Texcoord.y, warpfactor);
+	Output.Texcoord1.y = mul (Input.Texcoord.x, warpfactor);
+
+	// keeping vs instructions down is good as well, of course.
+	Output.Texcoord1 = mul (Output.Texcoord1 + warptime, 0.024543f);
 
 	return (Output);
 }

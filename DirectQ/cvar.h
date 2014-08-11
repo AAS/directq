@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // cvar.h
 
@@ -102,6 +104,18 @@ public:
 };
 
 
+// allow cvars to be referenced by multiple names
+class cvar_alias_t
+{
+public:
+	cvar_alias_t (char *cvarname, cvar_t *cvarvar);
+	char *name;
+	cvar_t *var;
+
+	cvar_alias_t *next;
+};
+
+
 // overloads - set by name or variable and take float or string
 void Cvar_Set (char *var_name, char *value);
 void Cvar_Set (char *var_name, float value);
@@ -121,3 +135,4 @@ void 	Cvar_WriteVariables (FILE *f);
 cvar_t *Cvar_FindVar (char *var_name);
 
 extern cvar_t	*cvar_vars;
+extern cvar_alias_t *cvar_alias_vars;

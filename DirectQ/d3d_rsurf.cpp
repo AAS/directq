@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 
@@ -30,6 +32,8 @@ void D3D_DrawWaterSurfaces (void);
 
 cvar_t r_lockpvs ("r_lockpvs", "0");
 cvar_t r_maxvertexsubmission ("r_maxvertexsubmission", "65000", CVAR_ARCHIVE);
+
+cvar_alias_t bleeble ("bleeble", &r_lockpvs);
 
 void D3D_RotateForEntity (entity_t *e);
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
@@ -61,7 +65,7 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, D3DMATRIX *matrix)
 }
 
 
-void D3D_DrawModelSurfs (bool fbon)
+void D3D_DrawModelSurfs (bool fbon, bool pass2 = false)
 {
 	int cachedlightmap = 0;
 	int cachedtexture = 0;
@@ -89,6 +93,33 @@ void D3D_DrawModelSurfs (bool fbon)
 
 		if (!stateset)
 		{
+			if (pass2)
+			{
+				// enable blend mode for 2nd pass
+				D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+				D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+				D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+
+				if (D3D_OVERBRIGHT_MODULATE == D3DTOP_MODULATE)
+				{
+					// GLQuake style non-overbright blending
+					D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
+					D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_ZERO);
+				}
+				else
+				{
+					// overbright blending; unfortunately we can't differentiate between 2x and 4x
+					// too well here, so we need an evil hack further down below...
+					D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
+					D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR);
+				}
+
+				// set correct filtering and indexing
+				D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+				D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
+				D3D_SetTexCoordIndexes (0);
+			}
+
 			D3D_BeginVertexes ((void **) &brushverts, (void **) &brushindexes, sizeof (brushpolyvert_t));
 			stateset = true;
 		}
@@ -122,16 +153,39 @@ void D3D_DrawModelSurfs (bool fbon)
 
 				// update textures (D3D_SetTexture will soak up state changes here)
 				// this needs to be done here otherwise we won't get correct textures set owing to moving the cache outside the main loop
-				if (tex->lumaimage)
+				if (tex->lumaimage && d3d_GlobalCaps.NumTMUs > 2)
 				{
+					// 3 TMUs with luma
 					D3D_SetVBOColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
 					D3D_SetVBOColorMode (2, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
 
 					D3D_SetVBOTexture (1, tex->lumaimage->d3d_Texture);
 					D3D_SetVBOTexture (2, tex->teximage->d3d_Texture);
 				}
+				else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && !pass2)
+				{
+					// 2 TMUs first pass blends lightmap with luma
+					D3D_SetVBOColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
+					D3D_SetVBOColorMode (2, D3DTOP_DISABLE);
+
+					D3D_SetVBOTexture (1, tex->lumaimage->d3d_Texture);
+				}
+				else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && pass2)
+				{
+					// 2 TMUs 2nd pass blends texture with first pass
+					// if we're doing 4x overbright we need to double the texture intensity.
+					if (D3D_OVERBRIGHT_MODULATE == D3DTOP_MODULATE4X)
+						D3D_SetVBOColorMode (0, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_TEXTURE);
+					else D3D_SetVBOColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
+
+					D3D_SetVBOColorMode (1, D3DTOP_DISABLE);
+
+					// texture goes into TMU0 for this one...
+					D3D_SetVBOTexture (0, tex->teximage->d3d_Texture);
+				}
 				else
 				{
+					// no luma common path
 					D3D_SetVBOColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
 					D3D_SetVBOColorMode (2, D3DTOP_DISABLE);
 
@@ -139,8 +193,12 @@ void D3D_DrawModelSurfs (bool fbon)
 				}
 
 				// and the lightmap
-				D3D_SetVBOColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
-				D3D_SetVBOTexture (0, surf->d3d_LightmapTex);
+				if (!pass2)
+				{
+					// this is valid if we're not doing the 2nd pass for 2 TMU devices
+					D3D_SetVBOColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
+					D3D_SetVBOTexture (0, surf->d3d_LightmapTex);
+				}
 
 				// store back cached stuff
 				cachedlightmap = (int) surf->d3d_LightmapTex;
@@ -194,7 +252,20 @@ void D3D_DrawModelSurfs (bool fbon)
 
 	// set indexes for the last primitive (if any)
 	// required always so that the buffer will unlock
-	if (stateset) D3D_EndVertexes ();
+	if (stateset)
+	{
+		D3D_EndVertexes ();
+
+		if (pass2)
+		{
+			// disable blend mode
+			D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+			D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+			D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+			D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+			D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+		}
+	}
 }
 
 
@@ -261,7 +332,17 @@ void D3D_AddWorldSurfacesToRender (void)
 
 	// now emit from the list of registered textures in two passes for fb/no fb
 	D3D_DrawModelSurfs (false);
-	D3D_DrawModelSurfs (true);
+
+	if (d3d_GlobalCaps.NumTMUs < 3)
+	{
+		// with only 2 TMUs available we need to draw in 2 passes
+		// first pass is the regular to establish the baseline
+		D3D_DrawModelSurfs (true);
+
+		// second pass draws the texture at the correct modulation scale
+		D3D_DrawModelSurfs (true, true);
+	}
+	else D3D_DrawModelSurfs (true);
 
 	// draw opaque water here
 	D3D_DrawWaterSurfaces ();
@@ -434,6 +515,64 @@ void R_RecursiveWorldNode (mnode_t *node)
 }
 
 
+void R_NoRecursiveWorldNode (void)
+{
+	// don't bother depth-sorting these
+	// some Quake weirdness here
+	// this info taken from qbsp source code:
+	// leaf 0 is a common solid with no faces
+	for (int i = 1; i <= cl.worldmodel->brushhdr->numleafs; i++)
+	{
+		mleaf_t *leaf = &cl.worldmodel->brushhdr->leafs[i];
+
+		// leaf not visible
+		if (leaf->contents == CONTENTS_SOLID) continue;
+		if (leaf->visframe != d3d_RenderDef.visframecount) continue;
+
+		// need to cull here too otherwise we'll get static ents we shouldn't
+		if (R_CullBox (leaf->minmaxs, leaf->minmaxs + 3)) continue;
+
+		// mark the surfs
+		R_MarkLeafSurfs (leaf, d3d_RenderDef.framecount);
+
+		// add static entities contained in the leaf to the list
+		R_StoreEfrags (&leaf->efrags);
+	}
+
+	int side;
+	float dot;
+
+	for (int i = 0; i < cl.worldmodel->brushhdr->numnodes; i++)
+	{
+		mnode_t *node = &cl.worldmodel->brushhdr->nodes[i];
+
+		// node culling
+		if (node->contents == CONTENTS_SOLID) continue;
+		if (node->visframe != d3d_RenderDef.visframecount) continue;
+		if (R_CullBox (node->minmaxs, node->minmaxs + 3)) continue;
+
+		// find which side of the node we are on
+		R_PlaneSide (node->plane, &dot, &side);
+
+		// check max dot
+		if (dot > r_clipdist) r_clipdist = dot;
+		if (-dot > r_clipdist) r_clipdist = -dot;
+
+		for (int j = 0; j < node->numsurfaces; j++)
+		{
+			msurface_t *surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface + j;
+
+			// surf culling
+			if (surf->visframe != d3d_RenderDef.framecount) continue;
+			if ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)) continue;
+			if (R_CullBox (surf->mins, surf->maxs)) continue;
+
+			D3D_AddSurfToDrawLists (surf);
+		}
+	}
+}
+
+
 void R_AutomapSurfaces (void)
 {
 	// don't bother depth-sorting these
@@ -531,8 +670,10 @@ void D3D_DrawAlphaBrushModel (entity_t *ent)
 		texture_t *tex = R_TextureAnimation (ent, surf->texinfo->texture);
 
 		// these surfs aren't backfaced
-		if (tex->lumaimage)
+		if (tex->lumaimage && d3d_GlobalCaps.NumTMUs > 2)
 		{
+			// only with 3+ TMU cards; we don't bother with fullbrights on alpha surfs if we have less
+			// (hopefully they will be rare enough...)
 			D3D_SetTextureColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
 			D3D_SetTextureColorMode (2, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
 
@@ -766,6 +907,8 @@ void D3D_BuildWorld (void)
 	// the automap has a different viewpoint so R_RecursiveWorldNode is not valid for it
 	if (d3d_RenderDef.automap)
 		R_AutomapSurfaces ();
+	else if (0)
+		R_NoRecursiveWorldNode ();
 	else R_RecursiveWorldNode (cl.worldmodel->brushhdr->nodes);
 
 	if (r_drawentities.integer)

@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 
@@ -62,8 +64,14 @@ extern d3d_ModeDesc_t *d3d_ModeList;
 #define TAG_VIDMODEAPPLY	1
 
 // if these are changed they need to be changed in menu_other.cpp as well
-#define MENU_TAG_SIMPLE		666
-#define MENU_TAG_FULL		1313
+// these need to be kept high enough so that they don't interfere with other options
+#ifndef MENU_TAG_SIMPLE
+#define MENU_TAG_SIMPLE			(1 << 30)
+#endif
+
+#ifndef MENU_TAG_FULL
+#define MENU_TAG_FULL			(1 << 31)
+#endif
 
 
 char **filterrefreshstrings = NULL;
@@ -104,8 +112,8 @@ int Menu_VideoCustomDraw (int y)
 
 	// check for "Apply" on d3d_mode change
 	if (!Menu_VideoCheckNeedApply ())
-		menu_Video.DisableOptions (TAG_VIDMODEAPPLY);
-	else menu_Video.EnableOptions (TAG_VIDMODEAPPLY);
+		menu_Video.DisableMenuOptions (TAG_VIDMODEAPPLY);
+	else menu_Video.EnableMenuOptions (TAG_VIDMODEAPPLY);
 
 	d3d_ModeDesc_t *mode;
 	int nummodes;
@@ -287,7 +295,7 @@ void Menu_VideoBuild (void)
 					menu_anisotropicmodes[m] = (char *) Pool_Permanent->Alloc (32);
 
 					if (f == 1)
-						strncpy (menu_anisotropicmodes[m], "Off", 32);
+						Q_strncpy (menu_anisotropicmodes[m], "Off", 32);
 					else _snprintf (menu_anisotropicmodes[m], 32, "%i x Filtering", f);
 				}
 

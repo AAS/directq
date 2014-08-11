@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 // draw.c -- this is the only file outside the refresh that touches the
@@ -24,6 +26,85 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d3d_model.h"
 #include "d3d_quake.h"
+
+char *gfxlmps[] =
+{
+	"bigbox.lmp",
+	"box_bl.lmp",
+	"box_bm.lmp",
+	"box_br.lmp",
+	"box_ml.lmp",
+	"box_mm.lmp",
+	"box_mm2.lmp",
+	"box_mr.lmp",
+	"box_tl.lmp",
+	"box_tm.lmp",
+	"box_tr.lmp",
+	"colormap.lmp",
+	"complete.lmp",
+	"conback.lmp",
+	"dim_drct.lmp",
+	"dim_ipx.lmp",
+	"dim_modm.lmp",
+	"dim_mult.lmp",
+	"dim_tcp.lmp",
+	"finale.lmp",
+	"help0.lmp",
+	"help1.lmp",
+	"help2.lmp",
+	"help3.lmp",
+	"help4.lmp",
+	"help5.lmp",
+	"inter.lmp",
+	"loading.lmp",
+	"mainmenu.lmp",
+	"menudot1.lmp",
+	"menudot2.lmp",
+	"menudot3.lmp",
+	"menudot4.lmp",
+	"menudot5.lmp",
+	"menudot6.lmp",
+	"menuplyr.lmp",
+	"mp_menu.lmp",
+	"netmen1.lmp",
+	"netmen2.lmp",
+	"netmen3.lmp",
+	"netmen4.lmp",
+	"netmen5.lmp",
+	"palette.lmp",
+	"pause.lmp",
+	"p_load.lmp",
+	"p_multi.lmp",
+	"p_option.lmp",
+	"p_save.lmp",
+	"qplaque.lmp",
+	"ranking.lmp",
+	"sell.lmp",
+	"sp_menu.lmp",
+	"ttl_cstm.lmp",
+	"ttl_main.lmp",
+	"ttl_sgl.lmp",
+	"vidmodes.lmp",
+	NULL
+};
+
+
+void Draw_DumpLumps (void)
+{
+	for (int i = 0; ; i++)
+	{
+		if (!gfxlmps[i]) break;
+
+		// load the pic from disk
+		qpic_t *dat = (qpic_t *) COM_LoadTempFile (va ("gfx/%s", gfxlmps[i]));
+
+		if (dat->width > 1024) continue;
+		if (dat->height > 1024) continue;
+
+		SCR_WriteDataToTGA (va ("%s.tga", gfxlmps[i]), dat->data, dat->width, dat->height, 8, 24);
+	}
+}
+
 
 PALETTEENTRY lumapal[256];
 
@@ -93,6 +174,19 @@ typedef struct coloredpolyvert_s
 } coloredpolyvert_t;
 
 coloredpolyvert_t verts2dcolored[4];
+
+void D3D_ScissorRect (float l, float t, float r, float b)
+{
+	RECT SRect;
+
+	SRect.bottom = b * vert2dscale_y;
+	SRect.left = l * vert2dscale_x;
+	SRect.right = r * vert2dscale_x;
+	SRect.top = t * vert2dscale_y;
+
+	d3d_Device->SetScissorRect (&SRect);
+}
+
 
 __inline void D3D_EmitFlatPolyVert (int vertnum, float x, float y, D3DCOLOR c, float s, float t)
 {
@@ -190,40 +284,6 @@ byte *failsafedata = NULL;
 qpic_t *draw_failsafe = NULL;
 
 
-qpic_t *Draw_PicFromWad (char *name)
-{
-	qpic_t	*p;
-	glpic_t	*gl;
-
-	p = (qpic_t *) W_GetLumpName (name);
-
-	if (!p) p = draw_failsafe;
-
-	if (p->width < 1 || p->height < 1)
-	{
-		// this occasionally gets hosed, dunno why yet...
-		// seems preferable to crashing
-		Con_Printf ("Draw_PicFromWad: p->width < 1 || p->height < 1 for %s\n(I fucked up - sorry)\n", name);
-		p = draw_failsafe;
-
-#ifdef _DEBUG
-		// prevent an exception in release builds
-		DebugBreak ();
-#endif
-	}
-
-	gl = (glpic_t *) p->data;
-
-	gl->tex = D3D_LoadTexture (name, p->width, p->height, p->data, 0);
-	gl->sl = 0;
-	gl->sh = 1;
-	gl->tl = 0;
-	gl->th = 1;
-
-	return p;
-}
-
-
 /*
 ================
 Draw_CachePic
@@ -257,7 +317,7 @@ qpic_t *Draw_CachePic (char *path)
 		menu_cachepics = pic;
 	}
 
-	strncpy (pic->name, path, 63);
+	Q_strncpy (pic->name, path, 63);
 
 	// load the pic from disk
 	dat = (qpic_t *) COM_LoadTempFile (path);
@@ -302,7 +362,7 @@ qpic_t *Draw_CachePic (char *path)
 
 	gl = (glpic_t *) pic->pic.data;
 
-	gl->tex = D3D_LoadTexture (path, dat->width, dat->height, dat->data, 0);
+	gl->tex = D3D_LoadTexture (path, dat->width, dat->height, dat->data, IMAGE_ALPHA);
 	gl->sl = 0;
 	gl->sh = 1;
 	gl->tl = 0;
@@ -312,6 +372,48 @@ qpic_t *Draw_CachePic (char *path)
 	Pool_Temp->Free ();
 
 	return &pic->pic;
+}
+
+
+qpic_t *Draw_PicFromWad (char *name)
+{
+	qpic_t	*p;
+	glpic_t	*gl;
+
+	// this should never happen
+	if (!name) return NULL;
+
+	// look for it in the gfx.wad
+	p = (qpic_t *) W_GetLumpName (name);
+
+	if (!p) p = draw_failsafe;
+
+	if (p->width < 1 || p->height < 1)
+	{
+		// this occasionally gets hosed, dunno why yet...
+		// seems preferable to crashing
+		Con_Printf ("Draw_PicFromWad: p->width < 1 || p->height < 1 for %s\n(I fucked up - sorry)\n", name);
+		p = draw_failsafe;
+
+#ifdef _DEBUG
+		// prevent an exception in release builds
+		DebugBreak ();
+#endif
+	}
+
+	gl = (glpic_t *) p->data;
+
+	char picloadname[256];
+
+	_snprintf (picloadname, 255, "gfx/%s.blah", name);
+
+	gl->tex = D3D_LoadTexture (picloadname, p->width, p->height, p->data, IMAGE_ALPHA);
+	gl->sl = 0;
+	gl->sh = 1;
+	gl->tl = 0;
+	gl->th = 1;
+
+	return p;
 }
 
 
@@ -401,7 +503,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 			newchars[i] = 255;
 
 	// now turn them into textures
-	D3D_UploadTexture (&char_texture, newchars, 256, 256, 0);
+	D3D_UploadTexture (&char_texture, newchars, 256, 256, IMAGE_ALPHA);
 }
 
 
@@ -416,6 +518,8 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype);
 
 void Draw_Init (void)
 {
+	// Draw_DumpLumps ();
+
 	qpic_t	*cb;
 	byte	*dest;
 	int		x, y;
@@ -593,9 +697,9 @@ Draw_String
 */
 void Draw_String (int x, int y, char *str, int ofs)
 {
-	while (*str)
+	while (str[0])
 	{
-		Draw_Character (x, y, (*str) + ofs);
+		Draw_Character (x, y, str[0] + ofs);
 		str++;
 		x += 8;
 	}
@@ -793,23 +897,33 @@ void Draw_Mapshot (char *name, int x, int y)
 	if (stricmp (name, cached_name))
 	{
 		// save to cached name
-		strncpy (cached_name, name, 255);
+		Q_strncpy (cached_name, name, 255);
 
 		// texture has changed, release the existing one
 		SAFE_RELEASE (d3d_MapshotTexture);
 
-		// attempt to load a new one
-		// note - D3DX won't allow us to save TGAs (BASTARDS!), but we'll still attempt to load them
-		if (!D3D_LoadExternalTexture (&d3d_MapshotTexture, cached_name, 0))
+		for (int i = COM_MAXGAMES - 1; ; i--)
 		{
-			// ensure release
-			SAFE_RELEASE (d3d_MapshotTexture);
+			// not registered
+			if (!com_games[i]) continue;
 
-			// if we didn't load it, call recursively to display the console
-			Draw_Mapshot (NULL, x, y);
+			// attempt to load it
+			if (D3D_LoadExternalTexture (&d3d_MapshotTexture, va ("%s\\%s", com_games[i], cached_name), IMAGE_MAPSHOT))
+			{
+				break;
+			}
 
-			// done
-			return;
+			if (!i)
+			{
+				// ensure release
+				SAFE_RELEASE (d3d_MapshotTexture);
+
+				// if we didn't load it, call recursively to display the console
+				Draw_Mapshot (NULL, x, y);
+
+				// done
+				return;
+			}
 		}
 	}
 

@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 #include "quakedef.h"
@@ -444,7 +446,7 @@ bool CL_DoPlayDemo (void)
 	CL_Disconnect ();
 
 	// open the demo file
-	strncpy (name, Cmd_Argv(1), 127);
+	Q_strncpy (name, Cmd_Argv(1), 127);
 	COM_DefaultExtension (name, ".dem");
 
 	if (demohandle != INVALID_HANDLE_VALUE)
@@ -468,6 +470,8 @@ bool CL_DoPlayDemo (void)
 	cls.demoplayback = true;
 	cls.state = ca_connected;
 	cls.forcetrack = 0;
+
+	Q_strncpy (cls.demoname, name, 63);
 
 	while ((c = COM_FReadChar (demohandle)) != '\n')
 	{

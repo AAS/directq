@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // gl_mesh.c: triangle model functions
 
@@ -492,7 +494,15 @@ void D3D_SetupAliasModel (entity_t *ent)
 		;	// no bbox culling on certain entities
 	else if (ent->nocullbox)
 		;	// no bbox culling on certain entities
-	else if (R_CullBox (mins, maxs)) return;
+	else if (R_CullBox (mins, maxs))
+	{
+		// if it was culled set it's occlusion status to false so that next time it comes into the view frustum
+		// it will be visible until such a time as we prove otherwise
+		ent->occluded = false;
+
+		// no further setup needed
+		return;
+	}
 
 	// the model has not been culled now
 	ent->visframe = d3d_RenderDef.framecount;
@@ -644,6 +654,10 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 		// take pointers for easier access
 		aliasstate_t *aliasstate = &ent->aliasstate;
 
+		// prydon gets this
+		if (!aliasstate->teximage) continue;
+		if (!aliasstate->teximage->d3d_Texture) continue;
+
 		// a change of texture signifies a new batch
 		if ((int) aliasstate->teximage != cachedtexture || (int) aliasstate->lumaimage != cachedfullbright || 
 			D3D_AreBuffersFull (numverts + hdr->nummesh, numindexes + hdr->numindexes))
@@ -741,9 +755,22 @@ int numoccluded = 0;
 
 void D3D_RegisterOcclusionQuery (entity_t *ent)
 {
-	// already has one
-	if (ent->occlusion) return;
+	// occlusions not supported
 	if (!d3d_GlobalCaps.supportOcclusion) return;
+
+	// already has one
+	if (ent->occlusion)
+	{
+		if (ent->occlusion->Entity != ent)
+		{
+			// if this changes we need to remove the occlusion from the entity
+			ent->occlusion = NULL;
+			ent->occluded = false;
+		}
+
+		// still OK
+		if (ent->occlusion) return;
+	}
 
 	if (!Pool_Occlusions)
 	{
@@ -751,13 +778,41 @@ void D3D_RegisterOcclusionQuery (entity_t *ent)
 		d3d_OcclusionQueries = (d3d_occlusionquery_t *) Pool_Occlusions->Alloc (1);
 		d3d_NumOcclusionQueries = 0;
 	}
+	else
+	{
+		// look for an idle query object
+		for (int i = 0; i < d3d_NumOcclusionQueries; i++)
+		{
+			if (d3d_OcclusionQueries[i].State == QUERY_IDLE)
+			{
+				// remove the occlusion from the entity
+				d3d_OcclusionQueries[i].Entity->occlusion = NULL;
 
+				// this query can now be reused for this entity
+				ent->occlusion = &d3d_OcclusionQueries[i];
+
+				// don't NULL the query object as it already exists
+				ent->occlusion->Entity = ent;
+
+				// entity is not occluded
+				ent->occluded = false;
+
+				// got it
+				return;
+			}
+		}
+	}
+
+	// create a new query
 	Pool_Occlusions->Alloc (sizeof (d3d_occlusionquery_t));
 	ent->occlusion = &d3d_OcclusionQueries[d3d_NumOcclusionQueries++];
 
 	ent->occlusion->Query = NULL;
 	ent->occlusion->State = QUERY_IDLE;
 	ent->occlusion->Entity = ent;
+
+	// entity is not occluded be default
+	ent->occluded = false;
 }
 
 
@@ -769,6 +824,7 @@ void D3D_ClearOcclusionQueries (void)
 	for (int i = 0; i < d3d_NumOcclusionQueries; i++)
 	{
 		d3d_OcclusionQueries[i].Entity->occlusion = NULL;
+		d3d_OcclusionQueries[i].Entity->occluded = false;
 		SAFE_RELEASE (d3d_OcclusionQueries[i].Query);
 	}
 
@@ -850,21 +906,52 @@ void D3D_RunOcclusionQueries (entity_t **ents, int numents)
 	if (!d3d_GlobalCaps.supportOcclusion) return;
 
 	bool stateset = false;
+	int occlusion_cutoff = 0;
 
-	//if (numoccluded) Con_Printf ("occluded %i entities\n", numoccluded);
+	// if (numoccluded) Con_Printf ("occluded %i entities\n", numoccluded);
 
+#define MAX_OCCLUSION_CUTOFF 1048576
+
+	// set a dynamic occlusion cutoff point based on the number of tris rendered in the previous frame
+	// (we assume this won't change too much from frame to frame) so that lighter scenes aren't bogged
+	// down with queries whereas heavier scenes get the benefit of them.  this way performs better than
+	// using the number of tris that would have been rendered in this frame if we had no queries.
+	// complex view models may give abberant results here, but in practice it doesn't seem to matter.
+	if (d3d_RenderDef.last_alias_polys < 1)
+		occlusion_cutoff = MAX_OCCLUSION_CUTOFF;
+	else
+	{
+		// value is arbitrary and non-scientific but seems to work well
+		occlusion_cutoff = MAX_OCCLUSION_CUTOFF / d3d_RenderDef.last_alias_polys;
+
+		// always cutoff at really small models
+		if (occlusion_cutoff < 96) occlusion_cutoff = 96;
+	}
+
+	//Con_Printf ("last: %i   cutoff: %i\n", d3d_RenderDef.last_alias_polys, occlusion_cutoff);
 	numoccluded = 0;
+
+	// if (d3d_NumOcclusionQueries) Con_Printf ("%i occlusion queries\n", d3d_NumOcclusionQueries);
 
 	for (int i = 0; i < numents; i++)
 	{
+		// don't bother with entities that are so simple the overhead would be too high
+		if (ents[i]->model->aliashdr->numtris < occlusion_cutoff)
+		{
+			ents[i]->occluded = false;
+			continue;
+		}
+
 		// register a query for the entity
 		D3D_RegisterOcclusionQuery (ents[i]);
 
 		// no occlusion object
-		if (!ents[i]->occlusion) continue;
-
-		// don't bother with entities that are so simple the overhead would be too high
-		if (ents[i]->model->aliashdr->numtris < 24) continue;
+		if (!ents[i]->occlusion)
+		{
+			// not occluded
+			ents[i]->occluded = false;
+			continue;
+		}
 
 		if (!stateset)
 		{
@@ -929,6 +1016,7 @@ void D3D_UpdateOcclusionQueries (void)
 
 		d3d_occlusionquery_t *q = ent->occlusion;
 
+		// query has not yet been issued
 		if (!q->Query) continue;
 		if (q->State != QUERY_WAITING) continue;
 

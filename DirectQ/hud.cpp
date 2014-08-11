@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // gpl blah etc, just read "gnu.txt" that comes with this...
 
@@ -407,7 +409,7 @@ void HUD_SaveHUD (void)
 
 	char hudscript[128];
 
-	strncpy (hudscript, Cmd_Argv (1), 127);
+	Q_strncpy (hudscript, Cmd_Argv (1), 127);
 
 	COM_DefaultExtension (hudscript, ".cfg");
 
@@ -469,7 +471,7 @@ void HUD_LoadHUD (void)
 
 	char hudscript[128];
 
-	strncpy (hudscript, Cmd_Argv (1), 127);
+	Q_strncpy (hudscript, Cmd_Argv (1), 127);
 
 	COM_DefaultExtension (hudscript, ".cfg");
 
@@ -602,8 +604,7 @@ void HUD_DrawNum (int x, int y, int num, int digits, int color)
 	{
 		if (*ptr == '-')
 			frame = STAT_MINUS;
-		else
-			frame = *ptr - '0';
+		else frame = *ptr - '0';
 
 		Draw_Pic (x, y, sb_nums[color][frame]);
 		x += 24;
@@ -635,7 +636,7 @@ void HUD_DividerLine (int y, int len)
 }
 
 
-char hud_scoreboardtext[MAX_SCOREBOARD][20];
+char hud_scoreboardtext[MAX_SCOREBOARD][64];
 int hud_fragsort[MAX_SCOREBOARD];
 int hud_scoreboardtop[MAX_SCOREBOARD];
 int hud_scoreboardbottom[MAX_SCOREBOARD];
@@ -741,9 +742,100 @@ void HUD_DrawFrags (void)
 }
 
 
+void D3D_ScissorRect (float l, float t, float r, float b);
+
+void HUD_DrawLevelName (int x, int y)
+{
+	// matches max com_token
+	char str[1024];
+
+	// level name
+	Q_strncpy (str, cl.levelname, 1023);
+
+	// deal with 'cute' messages in the level name (die die die)
+	for (int i = 0; ; i++)
+	{
+		if (!str[i]) break;
+
+		if (str[i] == '\n')
+		{
+			str[i] = 0;
+			break;
+		}
+
+		if (i == 39)
+		{
+			str[i] = 0;
+			break;
+		}
+	}
+
+	int l = strlen (str);
+
+	for (int i = 0; ; i++)
+	{
+		if (str[i])
+			str[i] += 128;
+		else break;
+	}
+
+	if (l < 40)
+		Draw_String (x - l * 4, y, str);
+	else
+	{
+		// this never actually happens as we force-truncate cl.levelname to 40 chars when loading
+		D3D_SetRenderState (D3DRS_SCISSORTESTENABLE, TRUE);
+		D3D_ScissorRect (x - 20 * 8, y - 2, x + 20 * 8, y + 10);
+
+		int ofs = ((int) (realtime * 30)) % (l * 8);
+
+		Draw_String (x - ofs, y, str);
+
+		D3D_SetRenderState (D3DRS_SCISSORTESTENABLE, FALSE);
+	}
+}
+
+
+void HUD_DrawElapsedTime (int x, int y, float time)
+{
+	char str[64];
+
+	// calculate time
+	int minutes = time / 60;
+	int seconds = time - 60 * minutes;
+	int tens = seconds / 10;
+	int units = seconds - 10 * tens;
+
+	_snprintf (str, 80, "Time: %i:%i%i", minutes, tens, units);
+
+	int l = strlen (str);
+
+	Draw_String (x - l * 4, y, str);
+}
+
+
+void HUD_CenterMessage (int x, int y, char *str)
+{
+	int l = strlen (str);
+
+	Draw_String (x - l * 4, y, str);
+}
+
+
 void HUD_DeathmatchOverlay (void)
 {
-	char str[127];
+	extern cvar_t pq_scoreboard_pings;
+
+	// update scoreboard pings every 5 seconds; force immediate update if we haven't had one at all yet
+	if (((cl.last_ping_time < cl.time - 5) || (cl.last_ping_time < 0.1)) && pq_scoreboard_pings.value && cl.Protocol == PROTOCOL_VERSION)
+	{
+		// send a ping command to the server
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		SZ_Print (&cls.message, "ping\n");
+		cl.last_ping_time = cl.time;
+	}
+
+	char str[128];
 	int l, i, x, y, f, k;
 	qpic_t *pic;
 	scoreboard_t *s;
@@ -759,28 +851,45 @@ void HUD_DeathmatchOverlay (void)
 	// starting Y
 	y = 32 + pic->height + 8;
 
-	// level name
-	strncpy (str, cl.levelname, 127);
+	HUD_DrawLevelName (x, y);
 
-	l = strlen (str);
+	y += 12;
+	HUD_DividerLine (y, 16);
 
-	for (i = 0; ; i++)
+	// time elapsed
+	y += 12;
+	HUD_DrawElapsedTime (x, y, cl.time);
+
+	// need to get this up here so that we have valid values for ping checking
+	HUD_SortFrags ();
+	l = hud_scoreboardlines;
+
+	// determine if we have pings
+	bool have_cl_pings = false;
+
+	// only ping on prot 15 servers
+	if (pq_scoreboard_pings.value && cl.Protocol == PROTOCOL_VERSION)
 	{
-		if (str[i])
-			str[i] += 128;
-		else break;
-	}
+		for (i = 0; i < l; i++)
+		{
+			k = hud_fragsort[i];
+			s = &cl.scores[k];
 
-	Draw_String (x - l * 4, y, str);
+			if (!s->name[0]) continue;
+
+			if (s->ping)
+			{
+				have_cl_pings = true;
+				break;
+			}
+		}
+	}
 
 	y += 12;
 	HUD_DividerLine (y, 16);
 
 	x = 80 + ((vid.width - 320) >> 1);
 	y += 12;
-
-	HUD_SortFrags ();
-	l = hud_scoreboardlines;
 
 	for (i = 0; i < l; i++)
 	{
@@ -811,8 +920,23 @@ void HUD_DeathmatchOverlay (void)
 			Draw_Character (x + 32, y, 17);
 		}
 
-		// draw name
-		Draw_String (x + 64, y, s->name);
+		// pings
+		// if we don't have ping times that means that the server didn't send them so don't show them at all
+		if (have_cl_pings)
+		{
+			_snprintf (num, 12, "%4ims", s->ping > 9999 ? 9999 : s->ping);
+
+			Draw_Character (x + 56 , y, num[0]);
+			Draw_Character (x + 64 , y, num[1]);
+			Draw_Character (x + 72 , y, num[2]);
+			Draw_Character (x + 80 , y, num[3]);
+			Draw_Character (x + 88 , y, num[4]);
+			Draw_Character (x + 96 , y, num[5]);
+
+			// draw name
+			Draw_String (x + 128, y, s->name);
+		}
+		else Draw_String (x + 64, y, s->name);
 
 		y += 12;
 	}
@@ -822,7 +946,6 @@ void HUD_DeathmatchOverlay (void)
 void HUD_SoloScoreboard (char *picname, float solotime)
 {
 	char str[128];
-	int minutes, seconds, tens, units;
 	int l;
 	int i;
 	int SBX;
@@ -832,12 +955,6 @@ void HUD_SoloScoreboard (char *picname, float solotime)
 	pic = Draw_CachePic (picname);
 	Draw_Pic ((vid.width - pic->width) / 2, 48, pic);
 
-	// calculate time
-	minutes = solotime / 60;
-	seconds = solotime - 60 * minutes;
-	tens = seconds / 10;
-	units = seconds - 10 * tens;
-
 	// base X
 	SBX = vid.width / 2;
 
@@ -845,18 +962,7 @@ void HUD_SoloScoreboard (char *picname, float solotime)
 	SBY = 48 + pic->height + 10;
 
 	// level name
-	strncpy (str, cl.levelname, 127);
-
-	l = strlen (str);
-
-	for (i = 0; ; i++)
-	{
-		if (str[i])
-			str[i] += 128;
-		else break;
-	}
-
-	Draw_String (SBX - l * 4, SBY, str);
+	HUD_DrawLevelName (SBX, SBY);
 
 	SBY += 12;
 	HUD_DividerLine (SBY, 16);
@@ -883,10 +989,8 @@ void HUD_SoloScoreboard (char *picname, float solotime)
 	}
 
 	// time elapsed
-	_snprintf (str, 80, "Time: %i:%i%i", minutes, tens, units);
-	l = strlen (str);
 	SBY += 12;
-	Draw_String (SBX - l * 4, SBY, str);
+	HUD_DrawElapsedTime (SBX, SBY, solotime);
 
 	if (cl.gametype == GAME_DEATHMATCH) return;
 
@@ -1633,7 +1737,7 @@ void HUD_DrawHUD (void)
 		Cbuf_Execute ();
 
 		// store back
-		strncpy (oldhud, hud_defaulthud.string, 127);
+		Q_strncpy (oldhud, hud_defaulthud.string, 127);
 
 		// go back to normal console mode
 		con_initialized = true;
@@ -1686,16 +1790,23 @@ void HUD_DrawHUD (void)
 
 void HUD_IntermissionOverlay (void)
 {
-	HUD_SoloScoreboard ("gfx/complete.lmp", cl.completed_time);
+	if (cl.gametype == GAME_DEATHMATCH)
+		HUD_DeathmatchOverlay ();
+	else HUD_SoloScoreboard ("gfx/complete.lmp", cl.completed_time);
 }
 
 
 void HUD_FinaleOverlay (void)
 {
-	qpic_t	*pic;
+	if (cl.gametype == GAME_DEATHMATCH)
+		HUD_DeathmatchOverlay ();
+	else
+	{
+		qpic_t	*pic;
 
-	pic = Draw_CachePic ("gfx/finale.lmp");
-	Draw_Pic ((vid.width - pic->width) / 2, 16, pic);
+		pic = Draw_CachePic ("gfx/finale.lmp");
+		Draw_Pic ((vid.width - pic->width) / 2, 16, pic);
+	}
 }
 
 
@@ -1738,24 +1849,24 @@ char *crosshairnames[] =
 
 
 // menu tags for hiding/showing items
-#define TAG_SBAR		1
-#define TAG_IBAR		2
-#define TAG_FACE		3
-#define TAG_HEALTH		4
-#define TAG_ARMORPIC	5
-#define TAG_ARMORVAL	6
-#define TAG_AMMOPIC		7
-#define TAG_AMMOVAL		8
-#define TAG_SIGILS		9
-#define TAG_KEYS		10
-#define TAG_ITEMS		11
-#define TAG_WEAPONS		12
-#define TAG_AMMOCNT		13
-#define TAG_TEAM		14
-#define TAG_OSD			15
-#define TAG_CROSSHAIR	16
-#define TAG_DMOVERLAY	17
-#define TAG_HIPNOKEYS	20
+#define TAG_SBAR		(1 << 0)
+#define TAG_IBAR		(1 << 1)
+#define TAG_FACE		(1 << 2)
+#define TAG_HEALTH		(1 << 3)
+#define TAG_ARMORPIC	(1 << 4)
+#define TAG_ARMORVAL	(1 << 5)
+#define TAG_AMMOPIC		(1 << 6)
+#define TAG_AMMOVAL		(1 << 7)
+#define TAG_SIGILS		(1 << 8)
+#define TAG_KEYS		(1 << 9)
+#define TAG_ITEMS		(1 << 10)
+#define TAG_WEAPONS		(1 << 11)
+#define TAG_AMMOCNT		(1 << 12)
+#define TAG_TEAM		(1 << 13)
+#define TAG_OSD			(1 << 14)
+#define TAG_CROSSHAIR	(1 << 15)
+#define TAG_DMOVERLAY	(1 << 16)
+#define TAG_HIPNOKEYS	(1 << 17)
 
 
 char *hud_items[] =
@@ -1834,10 +1945,10 @@ int Menu_HUDCustomDraw (int y)
 
 	// hide all tags
 	for (int i = 1; i < 21; i++)
-		menu_HUD.HideOptions (i);
+		menu_HUD.HideMenuOptions (1 << i);
 
 	// show selected tag (the defines are the num + 1 because 0 is the default tag)
-	menu_HUD.ShowOptions (real_huditemnum + 1);
+	menu_HUD.ShowMenuOptions (1 << (real_huditemnum + 1));
 
 	return y;
 }

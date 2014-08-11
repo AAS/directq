@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // view.c -- player eye positioning
 // renamed to cl_view to keep it grouped with the rest of the client code
@@ -62,6 +64,7 @@ cvar_t	cl_crossx ("cl_crossx", "0", CVAR_ARCHIVE);
 cvar_t	cl_crossy ("cl_crossy", "0", CVAR_ARCHIVE);
 cvar_t	scr_crosshairscale ("scr_crosshairscale", 1, CVAR_ARCHIVE);
 cvar_t	scr_crosshaircolor ("scr_crosshaircolor", "0", CVAR_ARCHIVE);
+cvar_alias_t	crosshaircolor ("crosshaircolor", &scr_crosshaircolor);
 
 cvar_t	gl_cshiftpercent ("gl_cshiftpercent", "100");
 
@@ -114,22 +117,28 @@ V_CalcBob
 */
 float V_CalcBob (void)
 {
+	// prevent division by 0 weirdness
+	if (!cl_bobcycle.value) return 0;
+	if (!cl_bobup.value) return 0;
+
+	// bound bob up
+	if (cl_bobup.value >= 0.99f) Cvar_Set (&cl_bobup, 0.99f);
+
 	float	bob;
 	float	cycle;
-	
-	cycle = cl.time - (int)(cl.time/cl_bobcycle.value)*cl_bobcycle.value;
+
+	cycle = cl.time - (int) (cl.time / cl_bobcycle.value) * cl_bobcycle.value;
 	cycle /= cl_bobcycle.value;
+
 	if (cycle < cl_bobup.value)
 		cycle = M_PI * cycle / cl_bobup.value;
-	else
-		cycle = M_PI + M_PI*(cycle-cl_bobup.value)/(1.0 - cl_bobup.value);
+	else cycle = M_PI + M_PI * (cycle - cl_bobup.value) / (1.0 - cl_bobup.value);
 
-// bob is proportional to velocity in the xy plane
-// (don't count Z, or jumping messes it up)
+	// bob is proportional to velocity in the xy plane
+	// (don't count Z, or jumping messes it up)
+	bob = sqrt (cl.velocity[0] * cl.velocity[0] + cl.velocity[1] * cl.velocity[1]) * cl_bob.value;
+	bob = bob * 0.3 + bob * 0.7 * sin (cycle);
 
-	bob = sqrt(cl.velocity[0]*cl.velocity[0] + cl.velocity[1]*cl.velocity[1]) * cl_bob.value;
-//Con_Printf ("speed: %5.1f\n", Length(cl.velocity));
-	bob = bob*0.3 + bob*0.7*sin(cycle);
 	if (bob > 4)
 		bob = 4;
 	else if (bob < -7)
@@ -788,12 +797,17 @@ void V_CalcRefdef (void)
 	view->colormap = vid.colormap;
 
 	// set up the refresh position
-	if (v_gunkick.value) VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
+	vec3_t kickangle;
+
+	VectorScale (cl.punchangle, v_gunkick.value, kickangle);
+
+	if (v_gunkick.value) VectorAdd (r_refdef.viewangles, kickangle, r_refdef.viewangles);
 
 	static float old_steptime = 0;
+	extern cvar_t m_look;
 
-	// smooth out stair step ups
-	if (cl.onground && ent->origin[2] - oldz > 0)
+	// smooth out stair step ups (if not mouselooking)
+	if (cl.onground && ent->origin[2] - oldz > 0) // && !((in_mlook.state & 1) || m_look.integer))
 	{
 		float steptime;
 

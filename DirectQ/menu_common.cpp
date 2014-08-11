@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 #include "quakedef.h"
@@ -203,7 +205,7 @@ void Menu_PutConsolePrintInbuffer (char *text)
 	extern cvar_t scr_centertime;
 
 	// copy to console buffer
-	strncpy (menu_ConBuffer, text, 1023);
+	Q_strncpy (menu_ConBuffer, text, 1023);
 
 	// display time
 	old_ConBufferTime = realtime;
@@ -852,11 +854,12 @@ int CQMenuCvarTextbox::GetYAdvance (void)
 =====================================================================================================================================
 */
 
-CQMenuSubMenu::CQMenuSubMenu (char *cmdtext, CQMenu *submenu)
+CQMenuSubMenu::CQMenuSubMenu (char *cmdtext, CQMenu *submenu, bool narrow)
 {
 	this->AllocCommandText (cmdtext);
 	this->SubMenu = submenu;
 	this->AcceptsInput = true;
+	this->Narrow = narrow;
 }
 
 
@@ -869,6 +872,14 @@ void CQMenuSubMenu::Draw (int y)
 void CQMenuSubMenu::Key (int k)
 {
 	if (k == K_ENTER) Menu_StackPush (this->SubMenu);
+}
+
+
+void CQMenuSubMenu::DrawCurrentOptionHighlight (int y)
+{
+	if (this->Narrow)
+		Menu_HighlightBar (-100, y, 200, 12);
+	else Menu_HighlightBar (y);
 }
 
 
@@ -960,7 +971,7 @@ void CQMenuCommand::Key (int k)
 	if (k == K_ENTER)
 	{
 		menu_soundlevel = m_sound_option;
-		this->Command ();
+		if (this->Command) this->Command ();
 	}
 }
 
@@ -1213,6 +1224,10 @@ void CQMenuChunkyPic::Draw (int y)
 
 	// we can't load this on init as the filesystem may not be up yet
 	qpic_t *pic = Draw_CachePic (this->Pic);
+
+	// hack the pic for nehahra
+	if (nehahra && !stricmp (this->Pic, "gfx/mainmenu.lmp"))
+		pic = Draw_CachePic ("gfx/gamemenu.lmp");
 
 	// quake plaque
 	qpic_t *pla = Draw_CachePic ("gfx/qplaque.lmp");
@@ -1627,13 +1642,13 @@ void CQMenuOption::SetParentMenu (CQMenu *parent) {this->Parent = parent;}
 void CQMenuOption::DrawCurrentOptionHighlight (int y) {Menu_HighlightBar (y);}
 
 // sets a tag number on the option
-void CQMenuOption::SetTag (int Tag) {this->OptionTag = Tag;}
+void CQMenuOption::SetTag (unsigned int Tag) {this->OptionTag = Tag;}
 
 // enable/disable on a tag match
-void CQMenuOption::CheckEnable (int Tag, bool enable) {if (this->OptionTag == Tag) this->Enabled = enable;}
+void CQMenuOption::CheckEnable (unsigned int Tag, bool enable) {if (this->OptionTag == Tag) this->Enabled = enable;}
 
 // show/hide on a tag match
-void CQMenuOption::CheckVisible (int Tag, bool shown) {if (this->OptionTag == Tag) this->Visible = shown;}
+void CQMenuOption::CheckVisible (unsigned int Tag, bool shown) {if (this->OptionTag == Tag) this->Visible = shown;}
 
 /*
 =====================================================================================================================================
@@ -1654,7 +1669,7 @@ CQMenu::CQMenu (m_state_t menustate)
 }
 
 
-void CQMenu::EnableOptions (int Tag)
+void CQMenu::EnableMenuOptions (unsigned int Tag)
 {
 	for (CQMenuOption *opt = this->MenuOptions; opt; opt = opt->NextOption)
 	{
@@ -1663,7 +1678,7 @@ void CQMenu::EnableOptions (int Tag)
 }
 
 
-void CQMenu::DisableOptions (int Tag)
+void CQMenu::DisableMenuOptions (unsigned int Tag)
 {
 	for (CQMenuOption *opt = this->MenuOptions; opt; opt = opt->NextOption)
 	{
@@ -1672,7 +1687,7 @@ void CQMenu::DisableOptions (int Tag)
 }
 
 
-void CQMenu::ShowOptions (int Tag)
+void CQMenu::ShowMenuOptions (unsigned int Tag)
 {
 	for (CQMenuOption *opt = this->MenuOptions; opt; opt = opt->NextOption)
 	{
@@ -1681,7 +1696,7 @@ void CQMenu::ShowOptions (int Tag)
 }
 
 
-void CQMenu::HideOptions (int Tag)
+void CQMenu::HideMenuOptions (unsigned int Tag)
 {
 	for (CQMenuOption *opt = this->MenuOptions; opt; opt = opt->NextOption)
 	{
@@ -1692,11 +1707,12 @@ void CQMenu::HideOptions (int Tag)
 
 void CQMenu::AddOption (CQMenuOption *opt)
 {
+	opt->SetTag (0);
 	this->AddOption (0, opt);
 }
 
 
-void CQMenu::AddOption (int OptionTag, CQMenuOption *opt)
+void CQMenu::AddOption (unsigned int OptionTag, CQMenuOption *opt)
 {
 	// next points to NULL always so that we can identify the end of the list
 	opt->NextOption = NULL;

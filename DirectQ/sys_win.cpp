@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // sys_win.c -- Win32 system interface code
 
@@ -34,9 +36,7 @@ int Sys_LoadResourceData (int resourceid, void **resbuf)
 	HRSRC hResInfo = FindResource (NULL, MAKEINTRESOURCE (resourceid), RT_RCDATA);
 	HGLOBAL hResData = LoadResource (NULL, hResInfo);
 	resbuf[0] = (byte *) LockResource (hResData);
-	int len = SizeofResource (NULL, hResInfo);
-
-	return len;
+	return SizeofResource (NULL, hResInfo);
 }
 
 
@@ -70,20 +70,46 @@ int	Sys_FileExists (char *path)
 }
 
 
+/*
+==================
+Sys_mkdir
+
+A better Sys_mkdir.
+
+Uses the Windows API instead of direct.h for better compatibility.
+Doesn't need com_gamedir included in the path to make.
+Will make all elements of a deeply nested path.
+==================
+*/
 void Sys_mkdir (char *path)
 {
 	char fullpath[256];
 
-	// silly me - this doesn't need quotes around a directory name with spaces
-	_snprintf (fullpath, 256, "%s/%s", com_gamedir, path);
+	// if a full absolute path is given we just copy it out, otherwise we build from the gamedir
+	if (path[1] == ':')
+		Q_strncpy (fullpath, path, 255);
+	else _snprintf (fullpath, 255, "%s/%s", com_gamedir, path);
 
 	for (int i = 0; ; i++)
 	{
 		if (!fullpath[i]) break;
 
-		if (fullpath[i] == '/') fullpath[i] = '\\';
+		if (fullpath[i] == '/' || fullpath[i] == '\\')
+		{
+			// correct seperator
+			fullpath[i] = '\\';
+
+			if (i > 3)
+			{
+				// make all elements of the path
+				fullpath[i] = 0;
+				CreateDirectory (fullpath, NULL);
+				fullpath[i] = '\\';
+			}
+		}
 	}
 
+	// final path
 	CreateDirectory (fullpath, NULL);
 }
 
@@ -95,7 +121,6 @@ Sys_Init
 */
 void Sys_Init (void)
 {
-	OSVERSIONINFO vinfo;
 	TIMECAPS tc;
 
 	if (timeGetDevCaps (&tc, sizeof (TIMECAPS)) != TIMERR_NOERROR) 
@@ -136,15 +161,6 @@ void Sys_Init (void)
 			exit (666);
 		}
 	}
-
-	vinfo.dwOSVersionInfoSize = sizeof (vinfo);
-
-	if (!GetVersionEx (&vinfo)) Sys_Error ("Couldn't get OS info");
-	if (vinfo.dwMajorVersion < 5) Sys_Error ("DirectQ requires at least Windows 2000");
-
-	if (vinfo.dwPlatformId == VER_PLATFORM_WIN32_NT)
-		WinNT = true;
-	else WinNT = false;
 }
 
 
@@ -274,6 +290,8 @@ bool ValidateQuakeDirectory (char *quakedir)
 	if (CheckKnownContent (va ("%s/ID1/maps/*.bsp", quakedir))) return true;
 	if (CheckKnownContent (va ("%s/ID1/progs/*.mdl", quakedir))) return true;
 	if (CheckKnownContent (va ("%s/ID1/*.pak", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/*.pk3", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/*.zip", quakedir))) return true;
 
 	// some gamedirs are just used for keeping stuff separate
 	if (CheckKnownContent (va ("%s/ID1/*.sav", quakedir))) return true;
@@ -374,6 +392,9 @@ typedef struct drivespec_s
 	bool valid;
 } drivespec_t;
 
+void Splash_Init (void);
+void Splash_Destroy (void);
+
 void SetQuakeDirectory (void)
 {
 	char currdir[MAX_PATH];
@@ -427,51 +448,58 @@ void SetQuakeDirectory (void)
 		}
 	}
 
-	// code disabled as a full hd scan without the user's consent is not a nice thing to do
-#ifdef _DEBUG
-	// second pass does a full scan of each drive
-	for (int d = 0; d < 26; d++)
-	{
-		// not a validated drive
-		if (!drives[d].valid) continue;
+	// if we still haven't found it we need to do a full HD scan.
+	// be nice and ask the user...
+	int conf = MessageBox (NULL, "Quake not found.\nPerform full disk scan?", "Alert", MB_YESNO | MB_ICONWARNING);
 
-		// check everything
-		if (RecursiveCheckFolderForQuake (drives[d].letter)) return;
+	if (conf == IDYES)
+	{
+		// show the splash screen at this point in time so that the user knows something is happening
+		Splash_Init ();
+
+		// second pass does a full scan of each drive
+		for (int d = 0; d < 26; d++)
+		{
+			// not a validated drive
+			if (!drives[d].valid) continue;
+
+			// check everything
+			if (RecursiveCheckFolderForQuake (drives[d].letter)) return;
+		}
 	}
-#endif
 
 	// oh shit
+	Splash_Destroy ();
 	MessageBox (NULL, "Could not locate Quake on your PC.\n\nPerhaps you need to move DirectQ.exe into C:\\Quake?", "Error", MB_OK | MB_ICONERROR);
 	exit (666);
 }
 
 
-void Splash_Init (void);
 void IN_ActivateMouse (void);
 void IN_DeactivateMouse (void);
 int MapKey (int key);
 void ClearAllStates (void);
 LONG CDAudio_MessageHandler(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
+void VID_SetOSGamma (void);
+void VID_SetAppGamma (void);
+void CDAudio_Pause (void);
+void CDAudio_Resume (void);
+
 void AppActivate (BOOL fActive, BOOL minimize)
 {
-	static bool	sound_active = false;
 	static bool vid_wassuspended = false;
 	extern bool vid_canalttab;
 
 	ActiveApp = fActive;
 	Minimized = minimize;
 
-	// enable/disable sound on focus gain/loss
-	if (!ActiveApp && sound_active)
-		sound_active = false;
-	else if (ActiveApp && !sound_active)
-		sound_active = true;
-
 	if (fActive)
 	{
 		IN_ActivateMouse ();
 		IN_ShowMouse (FALSE);
+		VID_SetAppGamma ();
+		CDAudio_Resume ();
 
 		if (modestate == MS_FULLDIB)
 		{
@@ -492,6 +520,9 @@ void AppActivate (BOOL fActive, BOOL minimize)
 	{
 		IN_DeactivateMouse ();
 		IN_ShowMouse (TRUE);
+		VID_SetOSGamma ();
+		CDAudio_Pause ();
+		S_ClearBuffer ();
 
 		if (modestate == MS_FULLDIB)
 		{
@@ -566,17 +597,12 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	case WM_MOUSEMOVE:
 		temp = 0;
 
-		if (wParam & MK_LBUTTON)
-			temp |= 1;
-
-		if (wParam & MK_RBUTTON)
-			temp |= 2;
-
-		if (wParam & MK_MBUTTON)
-			temp |= 4;
+		if (wParam & MK_LBUTTON) temp |= 1;
+		if (wParam & MK_RBUTTON) temp |= 2;
+		if (wParam & MK_MBUTTON) temp |= 4;
 
 		// 3 buttons
-		IN_MouseEvent (temp, 3, false);
+		if (temp) IN_MouseEvent (temp, 3, false);
 		break;
 
 	// JACK: This is the mouse wheel with the Intellimouse
@@ -641,6 +667,35 @@ void D3D_CreateShadeDots (void);
 
 int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+	OSVERSIONINFO vinfo;
+
+	vinfo.dwOSVersionInfoSize = sizeof (vinfo);
+
+	if (!GetVersionEx (&vinfo))
+	{
+		// if we couldn't get it we pop the warning but still let it run
+		vinfo.dwMajorVersion = 0;
+		vinfo.dwPlatformId = 0;
+	}
+
+	// we officially support v5 and above of Windows
+	if (vinfo.dwMajorVersion < 5)
+	{
+		int mret = MessageBox
+		(
+			NULL,
+			"!!! UNSUPPORTED !!!\n\nThis software may run on your Operating System\nbut is NOT officially supported.\n\nCertain pre-requisites are needed.\nNow might be a good time to read the readme.\n\nClick OK if you are sure you want to continue...",
+			"Warning",
+			MB_OKCANCEL | MB_ICONWARNING
+		);
+
+		if (mret == IDCANCEL) return 666;
+	}
+
+	if (vinfo.dwPlatformId == VER_PLATFORM_WIN32_NT)
+		WinNT = true;
+	else WinNT = false;
+
 	quakeparms_t parms;
 	char cwd[MAX_PATH];
 
@@ -676,6 +731,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if (!GetCurrentDirectory (sizeof (cwd), cwd))
 		Sys_Error ("Couldn't determine current directory");
 
+	// remove any trailing slash
 	if (cwd[strlen (cwd) - 1] == '/' || cwd[strlen (cwd) - 1] == '\\')
 		cwd[strlen (cwd) - 1] = 0;
 
@@ -685,6 +741,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	parms.argc = 1;
 	argv[0] = empty_string;
 
+	// parse the command-line into args
 	while (*lpCmdLine && (parms.argc < MAX_NUM_ARGVS))
 	{
 		while (*lpCmdLine && ((*lpCmdLine <= 32) || (*lpCmdLine > 126)))

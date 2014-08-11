@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // models.c -- model loading and caching
 
@@ -279,7 +281,7 @@ model_t *Mod_FindName (char *name)
 		// this is also done for cached models as the mod_known array is managed separately
 		mod_known[i] = (model_t *) Pool_Map->Alloc (sizeof (model_t));
 
-		strncpy (mod_known[i]->name, name, 63);
+		Q_strncpy (mod_known[i]->name, name, 63);
 		mod_known[i]->needload = true;
 		mod_numknown++;
 	}
@@ -455,8 +457,8 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 
 				// allow keys with a leading _
 				if (com_token[0] == '_')
-					strncpy (key, &com_token[1], 39);
-				else strncpy (key, com_token, 39);
+					Q_strncpy (key, &com_token[1], 39);
+				else Q_strncpy (key, com_token, 39);
 
 				// remove trailing spaces
 				while (key[strlen (key) - 1] == ' ') key[strlen (key) - 1] = 0;
@@ -758,7 +760,7 @@ bool Mod_LoadLITFile (lump_t *l)
 	char litname[128];
 
 	// take a copy to work on
-	strncpy (litname, loadmodel->name, 127);
+	Q_strncpy (litname, loadmodel->name, 127);
 
 	// fixme - we use this in a number of places so we should refactor it out
 	for (int i = strlen (litname) - 1; i; i--)
@@ -1769,7 +1771,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 			memcpy (inlinemod->brushhdr, mod->brushhdr, sizeof (brushhdr_t));
 
 			// write in the name
-			strncpy (inlinemod->name, name, 63);
+			Q_strncpy (inlinemod->name, name, 63);
 
 			// point mod to the inline model we just got for filling in at the next iteration
 			mod = inlinemod;
@@ -1820,7 +1822,7 @@ void *Mod_LoadAliasFrame (aliashdr_t *pheader, void *pin, maliasframedesc_t *fra
 	
 	pdaliasframe = (daliasframe_t *) pin;
 
-	strncpy (frame->name, pdaliasframe->name, 16);
+	Q_strncpy (frame->name, pdaliasframe->name, 16);
 	frame->firstpose = pheader->nummeshframes;
 	frame->numposes = 1;
 
@@ -2060,7 +2062,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 					loadmodel->flags |= EF_PLAYER;
 				}
 
-				_snprintf (name, 32, "%s_%i_%i", loadmodel->name, i,j);
+				_snprintf (name, 32, "%s_%i_%i", loadmodel->name, i, j);
 
 				// this tries to catch models with > 4 group skins
 				pheader->skins[i].texture[j & 3] = D3D_LoadTexture 

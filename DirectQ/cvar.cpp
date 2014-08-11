@@ -16,12 +16,16 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // cvar.c -- dynamic variable tracking
 
 #include "quakedef.h"
 
 cvar_t	*cvar_vars = NULL;
+cvar_alias_t *cvar_alias_vars = NULL;
+
 char *cvar_null_string = "";
 
 cvar_t *Cmd_FindCvar (char *name);
@@ -48,9 +52,8 @@ used only for cases where the full completion list can't be relied on to be up y
 */
 cvar_t *Cvar_FindVar (char *var_name)
 {
-	cvar_t	*var;
-
-	for (var = cvar_vars; var; var = var->next)
+	// regular cvars
+	for (cvar_t *var = cvar_vars; var; var = var->next)
 	{
 		// skip nehahra cvars
 		if (!nehahra && (var->usage & CVAR_NEHAHRA)) continue;
@@ -58,6 +61,18 @@ cvar_t *Cvar_FindVar (char *var_name)
 		if (!stricmp (var_name, var->name))
 		{
 			return var;
+		}
+	}
+
+	// alias cvars
+	for (cvar_alias_t *var = cvar_alias_vars; var; var = var->next)
+	{
+		// skip nehahra cvars
+		if (!nehahra && (var->var->usage & CVAR_NEHAHRA)) continue;
+
+		if (!stricmp (var_name, var->name))
+		{
+			return var->var;
 		}
 	}
 
@@ -307,3 +322,35 @@ cvar_t::~cvar_t (void)
 }
 
 
+cvar_alias_t::cvar_alias_t (char *cvarname, cvar_t *cvarvar)
+{
+	assert (cvarname);
+	assert (cvarvar);
+
+	// these should never go through here but let's just be certain
+	// (edit - actually it does - recursively - when setting up shadows; see below)
+	if (cvarvar->usage & CVAR_DUMMY) return;
+
+	// hack to prevent double-definition of nehahra cvars
+	bool oldneh = nehahra;
+	nehahra = true;
+
+	// first check to see if it has already been defined
+	if (Cvar_FindVar (cvarname)) return;
+
+	// unhack (note: this is not actually necessary as the game isn't up yet, but for the
+	// sake of correctness we do it anyway)
+	nehahra = oldneh;
+
+	// check for overlap with a command
+	if (Cmd_Exists (cvarname)) return;
+
+	// alloc space for name
+	this->name = (char *) Zone_Alloc (strlen (cvarname) + 1);
+	strcpy (this->name, cvarname);
+
+	this->var = cvarvar;
+
+	this->next = cvar_alias_vars;
+	cvar_alias_vars = this;
+}

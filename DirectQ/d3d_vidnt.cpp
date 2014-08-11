@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 
@@ -27,6 +29,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include <commctrl.h>
 
+#pragma comment (lib, "d3d9.lib")
+#pragma comment (lib, "d3dx9.lib")
 
 void D3D_SetDefaultStates (void);
 void D3D_SetAllStates (void);
@@ -34,6 +38,7 @@ void D3D_SetAllStates (void);
 D3DTEXTUREFILTERTYPE d3d_3DFilterMin = D3DTEXF_LINEAR;
 D3DTEXTUREFILTERTYPE d3d_3DFilterMag = D3DTEXF_LINEAR;
 D3DTEXTUREFILTERTYPE d3d_3DFilterMip = D3DTEXF_LINEAR;
+
 
 // declarations that don't really fit in anywhere else
 LPDIRECT3D9 d3d_Object = NULL;
@@ -111,6 +116,18 @@ typedef struct vid_gammaramp_s
 
 vid_gammaramp_t d3d_DefaultGamma;
 vid_gammaramp_t d3d_CurrentGamma;
+
+void VID_SetGammaGeneric (vid_gammaramp_t *gr)
+{
+	HDC hdc = GetDC (NULL);
+	SetDeviceGammaRamp (hdc, gr);
+	ReleaseDC (NULL, hdc);
+}
+
+
+void VID_SetOSGamma (void) {VID_SetGammaGeneric (&d3d_DefaultGamma);}
+void VID_SetAppGamma (void) {VID_SetGammaGeneric (&d3d_CurrentGamma);}
+
 
 // consistency with DP and FQ
 cvar_t r_anisotropicfilter ("gl_texture_anisotropy", "1", CVAR_ARCHIVE);
@@ -942,10 +959,10 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	// get the kind of capabilities we can expect from a HAL device ("hello Dave")
 	hr = d3d_Object->GetDeviceCaps (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3d_DeviceCaps);
 
-	if (FAILED (hr)) Sys_Error ("D3D_InitDirect3D: Failed to retrieve object caps");
+	if (FAILED (hr)) Sys_Error ("D3D_InitDirect3D: Failed to retrieve object caps\n(No HAL D3D Device Available)");
 
 	// check for basic required capabilities ("your name's not down, you're not coming in")
-	if (d3d_DeviceCaps.MaxStreams < 1) Sys_Error ("You must have a Direct3D 9 driver to run DirectQ");
+	// if (d3d_DeviceCaps.MaxStreams < 1) Sys_Error ("You must have a Direct3D 9 driver to run DirectQ");	// not a factor any more
 	if (!(d3d_DeviceCaps.DevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX)) Sys_Error ("You need at least a DirectX 7-compliant device to run DirectQ");
 	if (!(d3d_DeviceCaps.DevCaps & D3DDEVCAPS_HWRASTERIZATION)) Sys_Error ("You need a hardware-accelerated device to run DirectQ");
 	if (!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_MIPMAP)) Sys_Error ("You need a device that supports mipmapping to run DirectQ");
@@ -964,9 +981,9 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_CLAMP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_CLAMP to run DirectQ");
 	if (!(d3d_DeviceCaps.TextureAddressCaps & D3DPTADDRESSCAPS_WRAP)) Sys_Error ("You need a device that supports D3DPTADDRESSCAPS_WRAP to run DirectQ");
 
-	// check for TMU support
-	if (d3d_DeviceCaps.MaxTextureBlendStages < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
-	if (d3d_DeviceCaps.MaxSimultaneousTextures < 3) Sys_Error ("You need a device with at least 3 TMUs to run DirectQ");
+	// check for TMU support - Anything less than 2 TMUs is a 1st gen 3D card and doesn't stand a hope anyway...
+	if (d3d_DeviceCaps.MaxTextureBlendStages < 2) Sys_Error ("You need a device with at least 2 TMUs to run DirectQ");
+	if (d3d_DeviceCaps.MaxSimultaneousTextures < 2) Sys_Error ("You need a device with at least 2 TMUs to run DirectQ");
 
 	// check for z buffer support
 	if (!(d3d_DeviceCaps.ZCmpCaps & D3DPCMPCAPS_ALWAYS)) Sys_Error ("You need a device that supports a proper Z buffer to run DirectQ");
@@ -1049,6 +1066,12 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	Con_Printf ("Maximum Texture Size: %i x %i\n", d3d_DeviceCaps.MaxTextureWidth, d3d_DeviceCaps.MaxTextureHeight);
 	Con_Printf ("Maximum Anisotropic Filter: %i\n", d3d_DeviceCaps.MaxAnisotropy);
 	Con_Printf ("\n");
+
+	// tmus; take the lower of what's available as we need to work with them all
+	d3d_GlobalCaps.NumTMUs = 666;
+
+	if (d3d_DeviceCaps.MaxTextureBlendStages < d3d_GlobalCaps.NumTMUs) d3d_GlobalCaps.NumTMUs = d3d_DeviceCaps.MaxTextureBlendStages;
+	if (d3d_DeviceCaps.MaxSimultaneousTextures < d3d_GlobalCaps.NumTMUs) d3d_GlobalCaps.NumTMUs = d3d_DeviceCaps.MaxSimultaneousTextures;
 
 	// check for availability of rgb texture formats (ARGB is required by Quake)
 	d3d_GlobalCaps.supportARGB = D3D_CheckTextureFormat (D3DFMT_A8R8G8B8, TRUE);
@@ -1431,7 +1454,7 @@ void D3D_VidInit (byte *palette)
 
 	if (!(d3d_Object = Direct3DCreate9 (D3D_SDK_VERSION)))
 	{
-		Sys_Error ("D3D_InitDirect3D - failed to initialize Direct 3D!");
+		Sys_Error ("D3D_InitDirect3D - failed to initialize Direct3D!");
 		return;
 	}
 
@@ -1527,6 +1550,8 @@ void D3D_VidInit (byte *palette)
 }
 
 
+void Menu_PrintCenterWhite (int cy, char *str);
+
 void D3D_ShutdownDirect3D (void)
 {
 	// clear the screen to black so that shutdown doesn't leave artefacts from the last SCR_UpdateScreen
@@ -1534,6 +1559,51 @@ void D3D_ShutdownDirect3D (void)
 	{
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 		d3d_Device->Present (NULL, NULL, NULL, NULL);
+
+		extern int static_registered;
+		byte *endbin = (static_registered ? COM_LoadHunkFile ("end2.bin") : COM_LoadHunkFile ("end1.bin"));
+
+		// this is kinda crap... cute, but crap.
+		if (endbin && vid_initialized && 0)
+		{
+			d3d_Device->BeginScene ();
+
+			D3D_Set2D ();
+
+			int x = 0;
+			int y = 60;
+			bool firstline = true;
+
+			for (int i = 0; i < 80 * 25 * 2; i += 2)
+			{
+				if (endbin[i] < 127 && endbin[i] > 32)
+					Draw_Character (x, y, endbin[i] + (firstline ? 0 : 128));
+
+				x += 8;
+
+				if (x >= 640)
+				{
+					x = 0;
+					y += 12;
+					firstline = false;
+				}
+			}
+
+			Menu_PrintCenterWhite (y + 12, "Press 'Y' to Quit");
+
+			d3d_Device->EndScene ();
+			d3d_Device->Present (NULL, NULL, NULL, NULL);
+
+			do
+			{
+				key_count = -1;	// wait for a key down and up
+				Sys_SendKeyEvents ();
+
+				if (key_lastpress == 'y' || key_lastpress == 'Y') break;
+
+				Sleep (10);
+			} while (1);
+		}
 	}
 
 	// also need these... ;)
@@ -1559,9 +1629,7 @@ void VID_DefaultMonitorGamma_f (void)
 		d3d_DefaultGamma.b[i] = d3d_CurrentGamma.b[i] = i << 8;
 	}
 
-	HDC hdc = GetDC (NULL);
-	SetDeviceGammaRamp (hdc, &d3d_DefaultGamma);
-	ReleaseDC (NULL, hdc);
+	VID_SetOSGamma ();
 }
 
 cmd_t VID_DefaultMonitorGamma_Cmd ("vid_defaultmonitorgamma", VID_DefaultMonitorGamma_f);
@@ -1569,9 +1637,7 @@ cmd_t VID_DefaultMonitorGamma_Cmd ("vid_defaultmonitorgamma", VID_DefaultMonitor
 void VID_Shutdown (void)
 {
 	// always restore gamma correctly
-	HDC hdc = GetDC (NULL);
-	SetDeviceGammaRamp (hdc, &d3d_DefaultGamma);
-	ReleaseDC (NULL, hdc);
+	VID_SetOSGamma ();
 
 	if (vid_initialized)
 	{
@@ -1863,9 +1929,7 @@ void D3D_SetActiveGamma (void)
 		d3d_CurrentGamma.b[i] = D3D_AdjustGamma (b_gamma.value, d3d_CurrentGamma.b[i]);
 	}
 
-	HDC hdc = GetDC (d3d_Window);
-	SetDeviceGammaRamp (hdc, &d3d_CurrentGamma);
-	ReleaseDC (d3d_Window, hdc);
+	VID_SetAppGamma ();
 }
 
 
@@ -1985,8 +2049,10 @@ void D3D_EndRendering (void)
 	// not being used in fullscreen modes.
 	// the only difference for windowed modes is that the cursor is shown
 	extern bool mouseactive;
+	extern bool keybind_grab;
+	RECT cliprect;
 
-	if (key_dest == key_menu || key_dest == key_console || cls.state != ca_connected)
+	if ((key_dest == key_menu || key_dest == key_console || cls.state != ca_connected) && !keybind_grab)
 	{
 		if (mouseactive)
 		{
@@ -1994,18 +2060,22 @@ void D3D_EndRendering (void)
 			if (d3d_CurrentMode.RefreshRate == 0) IN_ShowMouse (TRUE);
 
 			// recenter the cursor here so that it will be visible if windowed
-			RECT cliprect;
-
 			GetWindowRect (d3d_Window, &cliprect);
 			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
+			mouseactive = false;
 		}
 	}
 	else
 	{
 		if (!mouseactive)
 		{
+			// recenter the cursor here so that the next press will be valid
+			GetWindowRect (d3d_Window, &cliprect);
+			SetCursorPos (cliprect.left + (cliprect.right - cliprect.left) / 2, cliprect.top + (cliprect.bottom - cliprect.top) / 2);
+
 			IN_ActivateMouse ();
 			IN_ShowMouse (FALSE);
+			mouseactive = true;
 		}
 	}
 }

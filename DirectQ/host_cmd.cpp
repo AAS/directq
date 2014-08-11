@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 
 #include "quakedef.h"
@@ -232,6 +234,7 @@ void Host_Ping_f (void)
 	}
 
 	SV_ClientPrintf ("Client ping times:\n");
+
 	for (i=0, client = svs.clients ; i<svs.maxclients ; i++, client++)
 	{
 		if (!client->active)
@@ -290,7 +293,7 @@ void Host_Map_f (void)
 	strcat (cls.mapstring, "\n");
 
 	svs.serverflags = 0;			// haven't completed an episode yet
-	strncpy (name, Cmd_Argv (1), 63);
+	Q_strncpy (name, Cmd_Argv (1), 63);
 
 	SV_SpawnServer (name);
 
@@ -332,7 +335,7 @@ void Host_Changelevel_f (void)
 	}
 
 	SV_SaveSpawnparms ();
-	strncpy (level, Cmd_Argv(1), 63);
+	Q_strncpy (level, Cmd_Argv(1), 63);
 	SV_SpawnServer (level);
 }
 
@@ -353,7 +356,7 @@ void Host_Restart_f (void)
 
 	if (cmd_source != src_command)
 		return;
-	strncpy (mapname, sv.name, 63);	// must copy out, because it gets cleared
+	Q_strncpy (mapname, sv.name, 63);	// must copy out, because it gets cleared
 								// in sv_spawnserver
 
 	SV_SpawnServer (mapname);
@@ -381,11 +384,12 @@ User command to connect to server
 =====================
 */
 void NET_SetPort (char *newport);
+char server_name[MAX_QPATH];
 
 void Host_Connect_f (void)
 {
 	char	name[MAX_QPATH];
-	
+
 	cls.demonum = -1;		// stop demo loop in case this fails
 
 	if (cls.demoplayback)
@@ -394,7 +398,7 @@ void Host_Connect_f (void)
 		CL_Disconnect ();
 	}
 
-	strncpy (name, Cmd_Argv(1), 63);
+	Q_strncpy (name, Cmd_Argv(1), 63);
 
 	// use for connect host:port format
 	char *portname = NULL;
@@ -414,6 +418,9 @@ void Host_Connect_f (void)
 
 	CL_EstablishConnection (name);
 	Host_Reconnect_f ();
+
+	// copy out for web download
+	Q_strncpy (server_name, name, 63);
 }
 
 
@@ -424,8 +431,6 @@ LOAD / SAVE GAME
 
 ===============================================================================
 */
-
-extern cvar_t host_savedir;
 
 /*
 ===============
@@ -444,7 +449,7 @@ void Host_SavegameComment (char *text)
 		text[i] = ' ';
 
 	// copy in level name - tough shit if it's > 21
-	strncpy (text, cl.levelname, 21);
+	Q_strncpy (text, cl.levelname, 21);
 
 	// create the kills text
 	_snprintf (kills, 20, "kills:%3i/%3i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
@@ -500,10 +505,7 @@ void Host_DoSavegame (char *savename)
 		}
 	}
 
-	// make the save directory
-	COM_CheckContentDirectory (&host_savedir, true);
-
-	_snprintf (name, 256, "%s/%s/%s", com_gamedir, host_savedir.string, savename);
+	_snprintf (name, 256, "%s/save/%s", com_gamedir, savename);
 	COM_DefaultExtension (name, ".sav");
 
 	f = fopen (name, "w");
@@ -655,10 +657,7 @@ void Host_Loadgame_f (void)
 
 	cls.demonum = -1;		// stop demo loop in case this fails
 
-	// make the save directory
-	COM_CheckContentDirectory (&host_savedir, true);
-
-	_snprintf (name, 128, "%s/%s/%s", com_gamedir, host_savedir.string, loadname);
+	_snprintf (name, 128, "%s/save/%s", com_gamedir, loadname);
 	COM_DefaultExtension (name, ".sav");
 
 // we can't call SCR_BeginLoadingPlaque, because too much stack space has
@@ -1676,6 +1675,18 @@ Host_Startdemos_f
 */
 void Host_Startdemos_f (void)
 {
+	// this is to protect from startdemos triggering again on a game change
+	static bool startdemos_firsttime = true;
+
+	if (!startdemos_firsttime)
+	{
+		// stop the demo loop
+		cls.demonum = -1;
+		return;
+	}
+
+	startdemos_firsttime = false;
+
 	int		i, c;
 
 	c = Cmd_Argc () - 1;
@@ -1689,7 +1700,7 @@ void Host_Startdemos_f (void)
 	Con_SafePrintf ("%i demo(s) in loop\n", c);
 
 	for (i = 1; i < c + 1; i++)
-		strncpy (cls.demos[i - 1], Cmd_Argv (i), sizeof (cls.demos[0]) - 1);
+		Q_strncpy (cls.demos[i - 1], Cmd_Argv (i), sizeof (cls.demos[0]) - 1);
 
 	if (!sv.active && cls.demonum != -1 && !cls.demoplayback)
 	{

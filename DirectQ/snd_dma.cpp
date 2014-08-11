@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+ 
+ 
 */
 // snd_dma.c -- main control for any streaming sound output device
 
@@ -64,7 +66,6 @@ int			soundtime;		// sample PAIRS
 int   		paintedtime; 	// sample PAIRS
 
 
-#define	MAX_SFX		512
 sfx_t		*known_sfx;		// hunk allocated [MAX_SFX]
 int			num_sfx;
 
@@ -138,7 +139,7 @@ void S_Startup (void)
 	if (!snd_initialized)
 		return;
 
-	rc = SNDDMA_Init();
+	rc = SNDDMA_Init ();
 
 	if (!rc)
 	{
@@ -201,7 +202,7 @@ void S_Shutdown(void)
 	shm = 0;
 	sound_started = 0;
 
-	SNDDMA_Shutdown();
+	SNDDMA_Shutdown ();
 }
 
 
@@ -251,6 +252,8 @@ sfx_t *S_FindName (char *name)
 void S_ClearSounds (void)
 {
 	// just clear the names of all known sfx so that they will be forced to load again
+	// this *doesn't* clear them from cache memory which needs to be cleared as a separate operation
+	// (because this is called on map load as well as on game change)
 	for (int i = 0; i < MAX_SFX; i++)
 	{
 		// clear the name and set the pointer to null
@@ -648,6 +651,17 @@ void S_UpdateAmbientSounds (void)
 }
 
 
+bool s_blocked = false;
+
+void S_BlockSound (bool block)
+{
+	// if we're blocking sound we must now clear anything left in the buffer
+	if (block) S_ClearBuffer ();
+
+	s_blocked = block;
+}
+
+
 /*
 ============
 S_Update
@@ -657,12 +671,13 @@ Called once each time through the main loop
 */
 void S_Update (vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 {
+	if (s_blocked) return;
+	if (!sound_started || (snd_blocked > 0)) return;
+
 	int			i, j;
 	int			total;
 	channel_t	*ch;
 	channel_t	*combine;
-
-	if (!sound_started || (snd_blocked > 0)) return;
 
 	VectorCopy (origin, listener_origin);
 	VectorCopy (forward, listener_forward);
