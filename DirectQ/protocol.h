@@ -19,26 +19,32 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // protocol.h -- communications protocols
 
-#define	PROTOCOL_VERSION	15
+#define	PROTOCOL_VERSION	15	// Standard Quake
+
+// BJP protocols - just ripped them from his engine!  let's see how far we get with them... :)
+#define	PROTOCOL_VERSION_BJP	10000	// Extended protocol (models > 256 etc), hopefully no conflict
+#define	PROTOCOL_VERSION_BJP2	10001	// Extended protocol (sounds > 256), problems with Marcher
+#define	PROTOCOL_VERSION_BJP3	10002	// Extended protocol (sounds > 256), more compatible, but less functional
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:
-#define	U_MOREBITS	(1<<0)
-#define	U_ORIGIN1	(1<<1)
-#define	U_ORIGIN2	(1<<2)
-#define	U_ORIGIN3	(1<<3)
-#define	U_ANGLE2	(1<<4)
-#define	U_NOLERP	(1<<5)		// don't interpolate movement
-#define	U_FRAME		(1<<6)
-#define U_SIGNAL	(1<<7)		// just differentiates from other updates
+#define	U_MOREBITS		(1<<0)
+#define	U_ORIGIN1		(1<<1)
+#define	U_ORIGIN2		(1<<2)
+#define	U_ORIGIN3		(1<<3)
+#define	U_ANGLE2		(1<<4)
+#define	U_NOLERP		(1<<5)		// don't interpolate movement
+#define	U_FRAME			(1<<6)
+#define U_SIGNAL		(1<<7)		// just differentiates from other updates
 
 // svc_update can pass all of the fast update bits, plus more
-#define	U_ANGLE1	(1<<8)
-#define	U_ANGLE3	(1<<9)
-#define	U_MODEL		(1<<10)
-#define	U_COLORMAP	(1<<11)
-#define	U_SKIN		(1<<12)
-#define	U_EFFECTS	(1<<13)
+#define	U_ANGLE1		(1<<8)
+#define	U_ANGLE3		(1<<9)
+#define	U_MODEL			(1<<10)
+#define	U_COLORMAP		(1<<11)
+#define	U_SKIN			(1<<12)
+#define	U_EFFECTS		(1<<13)
 #define	U_LONGENTITY	(1<<14)
+#define U_TRANS			(1<<15)		// Nehahra
 
 
 #define	SU_VIEWHEIGHT	(1<<0)
@@ -130,6 +136,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define svc_cutscene		34
 
+// Nehahra
+#define	svc_showlmp		35	// [string] slotname [string] lmpfilename [coord] x [coord] y
+#define	svc_hidelmp		36	// [string] slotname
+#define	svc_skybox		37	// [string] skyname
+
+//#define svc_skyboxsize          50      // [coord] size (default is 4096)
+#define svc_fog			51	// [byte] enable <optional past this point, only included if enable is true> [float] density [byte] red [byte] green [byte] blue
+
 //
 // client to server
 //
@@ -165,3 +179,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define TE_IMPLOSION		14
 #define TE_RAILTRAIL		15
 #endif
+
+// Nehahra
+#define TE_EXPLOSION3           16
+#define TE_LIGHTNING4           17
+

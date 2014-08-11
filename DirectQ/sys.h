@@ -35,6 +35,7 @@ int Sys_FileRead (int handle, void *dest, int count);
 int Sys_FileWrite (int handle, void *data, int count);
 int	Sys_FileTime (char *path);
 void Sys_mkdir (char *path);
+void Sys_ThreadCatchup (void);
 
 //
 // memory protection
@@ -48,9 +49,6 @@ void Sys_DebugLog(char *file, char *fmt, ...);
 
 void Sys_Error (char *error, ...);
 // an error will cause the entire program to exit
-
-void Sys_Printf (char *fmt, ...);
-// send text to the console
 
 void Sys_Quit (void);
 

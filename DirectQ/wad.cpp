@@ -71,10 +71,10 @@ void W_LoadWadFile (char *filename)
 	wadinfo_t		*header;
 	unsigned		i;
 	int				infotableofs;
-	
+
 	wad_base = COM_LoadHunkFile (filename);
-	if (!wad_base)
-		Sys_Error ("W_LoadWadFile: couldn't load %s", filename);
+
+	if (!wad_base) Sys_Error ("W_LoadWadFile: couldn't load %s", filename);
 
 	header = (wadinfo_t *)wad_base;
 	
@@ -117,29 +117,31 @@ lumpinfo_t	*W_GetLumpinfo (char *name)
 		if (!strcmp(clean, lump_p->name))
 			return lump_p;
 	}
-	
-	Sys_Error ("W_GetLumpinfo: %s not found", name);
+
 	return NULL;
 }
 
 void *W_GetLumpName (char *name)
 {
 	lumpinfo_t	*lump;
-	
+
 	lump = W_GetLumpinfo (name);
-	
+
+	// didn't find it
+	if (!lump) return NULL;
+
 	return (void *)(wad_base + lump->filepos);
 }
 
 void *W_GetLumpNum (int num)
 {
 	lumpinfo_t	*lump;
-	
+
 	if (num < 0 || num > wad_numlumps)
-		Sys_Error ("W_GetLumpNum: bad number: %i", num);
-		
+		return NULL;
+
 	lump = wad_lumps + num;
-	
+
 	return (void *)(wad_base + lump->filepos);
 }
 

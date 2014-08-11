@@ -19,6 +19,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // quakedef.h -- primary header for client
 
+// be a little kinder to the CRT in Quake by telling it to act like it's single-threaded
+#define _CRT_DISABLE_PERFCRIT_LOCKS
+
 //#define	GLTEST			// experimental stuff
 
 // disable unwanted warnings
@@ -29,7 +32,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma warning (disable: 4800)
 #pragma warning (disable: 4267)
 #pragma warning (disable: 4996)
+#pragma warning (disable: 4995)
 #pragma warning (disable: 4312)
+
+// savegame version for all savegames
+#define	SAVEGAME_VERSION	5
 
 #define	QUAKE_GAME			// as opposed to utilities
 
@@ -43,14 +50,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // 1/32 epsilon to keep floating point happy
 #define	DIST_EPSILON	(0.03125)
 
+// used in various places
+#define DIVIDER_LINE		"\35\36\36\36\36\36\36\36\36\36\36\36\36\37"
 
-//define	PARANOID			// speed sapping error checking
 
-#ifdef QUAKE2
-#define	GAMENAME	"id1"		// directory to look in by default
-#else
 #define	GAMENAME	"id1"
-#endif
+
+// used on both client and server
+#define	MAX_ENT_LEAFS	16
 
 #include <math.h>
 #include <string.h>
@@ -86,9 +93,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define UNUSED(x)	(x = x)	// for pesky compiler / lint warnings
 
-#define	MINIMUM_MEMORY			0x550000
-#define	MINIMUM_MEMORY_LEVELPAK	(MINIMUM_MEMORY + 0x100000)
-
 #define MAX_NUM_ARGVS	50
 
 // up / down
@@ -106,16 +110,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define	ON_EPSILON		0.1			// point on plane side epsilon
 
-#define	MAX_MSGLEN		8000		// max length of a reliable message
-#define	MAX_DATAGRAM	1024		// max length of unreliable message
+#define	MAX_MSGLEN	MAX_DATAGRAM //8000	// max length of a reliable message
+#define	MAX_DATAGRAM	(NETFLAG_DATA - 1 - NET_HEADERSIZE) //1024	// max length of unreliable message
+#define	MAX_DATAGRAM2	sv_max_datagram
+extern int		sv_max_datagram;	// is default MAX_DATAGRAM
 
 //
 // per-level limits
 //
-#define	MAX_EDICTS		600			// FIXME: ouch! ouch! ouch!
+#define	MAX_EDICTS		8192		// protocol limit
 #define	MAX_LIGHTSTYLES	64
-#define	MAX_MODELS		256			// these are sent over the net as bytes
-#define	MAX_SOUNDS		256			// so they cannot be blindly increased
+
+// protocol limit values - bumped from bjp
+#define	MAX_MODELS		4096		// these are sent over the net as bytes
+#define	MAX_SOUNDS		4096		// so they cannot be blindly increased
 
 #define	SAVEGAME_COMMENT_LENGTH	39
 
@@ -221,7 +229,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bspfile.h"
 #include "vid.h"
 #include "sys.h"
-#include "zone.h"
+#include "heap.h"
 #include "mathlib.h"
 
 typedef struct
@@ -243,7 +251,7 @@ typedef struct
 #include "net.h"
 #include "protocol.h"
 #include "cmd.h"
-#include "sbar.h"
+#include "hud.h"
 #include "sound.h"
 #include "render.h"
 #include "client.h"
@@ -262,13 +270,11 @@ typedef struct
 #include "keys.h"
 #include "console.h"
 #include "view.h"
-#include "menu.h"
 #include "crc.h"
 #include "cdaudio.h"
-
-#ifdef GLQUAKE
+#include "dshow_mp3.h"
 #include "glquake.h"
-#endif
+
 
 //=============================================================================
 
@@ -282,8 +288,6 @@ typedef struct
 	char	*cachedir;		// for development over ISDN lines
 	int		argc;
 	char	**argv;
-	void	*membase;
-	int		memsize;
 } quakeparms_t;
 
 
@@ -329,15 +333,42 @@ extern int			current_skill;		// skill level for currently loaded level (in case
 										//  the user changes the cvar while the level is
 										//  running, this reflects the level actually in use)
 
-extern bool		isDedicated;
+// make these accessible throught the engine
+extern cvar_t temp1;
+extern cvar_t temp2;
+extern cvar_t temp3;
+extern cvar_t temp4;
 
-extern int			minimum_memory;
+extern cvar_t scratch1;
+extern cvar_t scratch2;
+extern cvar_t scratch3;
+extern cvar_t scratch4;
 
-//
+extern cvar_t saved1;
+extern cvar_t saved2;
+extern cvar_t saved3;
+extern cvar_t saved4;
+
+
 // chase
-//
 extern	cvar_t	chase_active;
 
 void Chase_Init (void);
 void Chase_Reset (void);
 void Chase_Update (void);
+
+// object release for all COM objects and interfaces
+#define SAFE_RELEASE(COM_Generic) {if ((COM_Generic)) {(COM_Generic)->Release (); (COM_Generic) = NULL;}}
+
+// can't put this in common.h as it doens't know what a cvar_t is
+// optionally creates the directory if it doesn't exist
+void COM_CheckContentDirectory (cvar_t *contdir, bool createifneeded);
+
+// likewise since i moved it to a class
+extern cvar_t registered;
+
+// this can't be externed in heap.h as it doesn't know what a HANDLE is
+extern HANDLE QGlobalHeap;
+
+// line testing
+float CastRay (float *p1, float *p2);

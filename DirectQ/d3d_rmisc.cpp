@@ -21,13 +21,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
+#include "resource.h"
 
 void R_InitParticles (void);
 void R_ClearParticles (void);
 void GL_BuildLightmaps (void);
+void R_LoadSkyBox (char *basename, bool feedback);
 
+LPDIRECT3DTEXTURE9 r_notexture = NULL;
+extern LPDIRECT3DTEXTURE9 crosshairtexture;
 extern LPDIRECT3DTEXTURE9 playertextures[];
-
 
 /*
 ====================
@@ -54,14 +57,14 @@ void D3D_SetFVFStateManaged (DWORD NewFVF)
 R_InitTextures
 ==================
 */
-void	R_InitTextures (void)
+void R_InitTextures (void)
 {
 	int		x,y, m;
 	byte	*dest;
 
-// create a simple checkerboard texture for the default
-	r_notexture_mip = (texture_t *) Hunk_AllocName (sizeof(texture_t) + 16*16+8*8+4*4+2*2, "notexture");
-	
+	// create a simple checkerboard texture for the default
+	r_notexture_mip = (texture_t *) Heap_TagAlloc (TAG_STARTUP, sizeof (texture_t) + 16*16+8*8+4*4+2*2);
+
 	r_notexture_mip->width = r_notexture_mip->height = 16;
 	r_notexture_mip->offsets[0] = sizeof(texture_t);
 	r_notexture_mip->offsets[1] = r_notexture_mip->offsets[0] + 16*16;
@@ -82,103 +85,116 @@ void	R_InitTextures (void)
 	}	
 }
 
-byte	dottexture[8][8] =
+
+// textures to load from resources
+extern LPDIRECT3DTEXTURE9 particledottexture;
+extern LPDIRECT3DTEXTURE9 particlesmoketexture;
+extern LPDIRECT3DTEXTURE9 particletracertexture;
+extern LPDIRECT3DTEXTURE9 R_PaletteTexture;
+extern LPDIRECT3DTEXTURE9 particleblood[];
+LPDIRECT3DTEXTURE9 r_blacktexture = NULL;
+LPDIRECT3DTEXTURE9 r_greytexture = NULL;
+
+void R_ReleaseResourceTextures (void)
 {
-	{0,0,0,0,0,0,0,0},
-	{0,0,0,0,0,0,0,0},
-	{0,0,0,1,1,0,0,0},
-	{0,0,1,1,1,1,0,0},
-	{0,0,1,1,1,1,0,0},
-	{0,0,0,1,1,0,0,0},
-	{0,0,0,0,0,0,0,0},
-	{0,0,0,0,0,0,0,0},
-};
+	for (int i = 0; i < 8; i++)
+		SAFE_RELEASE (particleblood[i]);
 
-extern LPDIRECT3DTEXTURE9 particletexture;
+	SAFE_RELEASE (particledottexture);
+	SAFE_RELEASE (particlesmoketexture);
+	SAFE_RELEASE (crosshairtexture);
+	SAFE_RELEASE (particletracertexture);
+	SAFE_RELEASE (r_blacktexture);
+	SAFE_RELEASE (r_greytexture);
+}
 
-void R_InitParticleTexture (void)
+
+void R_InitResourceTextures (void)
 {
-	int x, y, z;
-	unsigned int data[64];
+	// load any textures contained in exe resources
+	D3D_LoadResourceTexture (&particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particlesmoketexture, IDR_PARTICLESMOKE, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particletracertexture, IDR_PARTICLETRACER, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[0], IDR_PARTICLEBLOOD1, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[1], IDR_PARTICLEBLOOD2, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[2], IDR_PARTICLEBLOOD3, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[3], IDR_PARTICLEBLOOD4, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[4], IDR_PARTICLEBLOOD5, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[5], IDR_PARTICLEBLOOD6, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[6], IDR_PARTICLEBLOOD7, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&particleblood[7], IDR_PARTICLEBLOOD8, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture (&crosshairtexture, IDR_CROSSHAIR, 0);
 
-	for (x = 0, z = 0; x < 8; x++)
+	// create a texture for the palette
+	// this is to save on state changes when a flat colour is needed; rather than
+	// switching off texturing and other messing, we just draw this one.
+	byte *paldata = (byte *) Heap_QMalloc (128 * 128);
+
+	for (int i = 0; i < 256; i++)
 	{
-		for (y = 0; y < 8; y++, z++)
-		{
-			byte *rgba = (byte *) &data[z];
+		int row = (i >> 4) * 8;
+		int col = (i & 15) * 8;
 
-			rgba[0] = 255;
-			rgba[1] = 255;
-			rgba[2] = 255;
-			rgba[3] = dottexture[x][y]*255;
+		for (int x = col; x < col + 8; x++)
+		{
+			for (int y = row; y < row + 8; y++)
+			{
+				int p = y * 128 + x;
+
+				paldata[p] = i;
+			}
 		}
 	}
 
-	particletexture = D3D_LoadTexture (8, 8, (byte *) data, IMAGE_32BIT | IMAGE_ALPHA | IMAGE_PRESERVE);
+	D3D_LoadTexture (&R_PaletteTexture, 128, 128, paldata, d_8to24table, false, false);
+
+	// clear to black
+	memset (paldata, 0, 128 * 128);
+
+	// load the black texture - we must mipmap this and also load it as 32 bit
+	// (in case palette index 0 isn't black).  also load it really really small...
+	D3D_LoadTexture (&r_blacktexture, 4, 4, paldata, NULL, true, false);
+
+	// clear to grey
+	memset (paldata, 128, 128 * 128);
+
+	// load the black texture - we must mipmap this and also load it as 32 bit
+	// (in case palette index 0 isn't black).  also load it really really small...
+	D3D_LoadTexture (&r_greytexture, 4, 4, paldata, NULL, true, false);
+
+	Heap_QFreeFull (paldata);
+
+	// load the notexture properly
+	D3D_LoadTexture (&r_notexture, r_notexture_mip->width, r_notexture_mip->height, (byte *) (r_notexture_mip + 1), d_8to24table, true, false);
 }
 
-/*
-===============
-R_Envmap_f
-
-Grab six views for environment mapping tests
-===============
-*/
-void R_Envmap_f (void)
-{
-}
 
 /*
 ===============
 R_Init
 ===============
 */
-cvar_t r_oldsky = {"r_oldsky", "1", true};
+cvar_t r_lerporient ("r_lerporient", "1", CVAR_ARCHIVE);
+cvar_t r_lerpframe ("r_lerpframe", "1", CVAR_ARCHIVE);
+
+extern cvar_t r_lerplightstyle;
+extern cvar_t r_lightupdatefrequency;
+void D3D_InitTextures (void);
+
+cmd_t R_TimeRefresh_f_Cmd ("timerefresh", R_TimeRefresh_f);
+cmd_t R_ReadPointFile_f_Cmd ("pointfile", R_ReadPointFile_f);
 
 void R_Init (void)
 {	
-	extern byte *hunk_base;
 	extern cvar_t gl_finish;
 
-	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);	
-	Cmd_AddCommand ("envmap", R_Envmap_f);	
-	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);	
-
-	Cvar_RegisterVariable (&r_oldsky);
-	Cvar_RegisterVariable (&r_norefresh);
-	Cvar_RegisterVariable (&r_lightmap);
-	Cvar_RegisterVariable (&r_fullbright);
-	Cvar_RegisterVariable (&r_drawentities);
-	Cvar_RegisterVariable (&r_drawviewmodel);
-	Cvar_RegisterVariable (&r_shadows);
-	Cvar_RegisterVariable (&r_mirroralpha);
-	Cvar_RegisterVariable (&r_wateralpha);
-	Cvar_RegisterVariable (&r_dynamic);
-	Cvar_RegisterVariable (&r_novis);
-	Cvar_RegisterVariable (&r_speeds);
-
-	Cvar_RegisterVariable (&gl_finish);
-	Cvar_RegisterVariable (&gl_clear);
-	Cvar_RegisterVariable (&gl_texsort);
-
-	Cvar_RegisterVariable (&gl_cull);
-	Cvar_RegisterVariable (&gl_smoothmodels);
-	Cvar_RegisterVariable (&gl_affinemodels);
-	Cvar_RegisterVariable (&gl_polyblend);
-	Cvar_RegisterVariable (&gl_flashblend);
-	Cvar_RegisterVariable (&gl_playermip);
-	Cvar_RegisterVariable (&gl_nocolors);
-
-	Cvar_RegisterVariable (&gl_keeptjunctions);
-	Cvar_RegisterVariable (&gl_reporttjunctions);
-
-	Cvar_RegisterVariable (&gl_doubleeyes);
+	D3D_InitTextures ();
 
 	R_InitParticles ();
-	R_InitParticleTexture ();
+	R_InitResourceTextures ();
 
 	for (int i = 0; i < 16; i++)
-		playertextures[i] = NULL;
+		SAFE_RELEASE (playertextures[i]);
 }
 
 
@@ -226,22 +242,25 @@ void R_TranslatePlayerSkin (int playernum)
 	//
 	// locate the original skin pixels
 	//
-	currententity = &cl_entities[1+playernum];
+	currententity = cl_entities[1 + playernum];
 	model = currententity->model;
 	if (!model)
 		return;		// player doesn't have a model yet
 	if (model->type != mod_alias)
 		return; // only translate skins on alias models
 
-	paliashdr = (aliashdr_t *)Mod_Extradata (model);
+	paliashdr = model->ah;
+
 	s = paliashdr->skinwidth * paliashdr->skinheight;
-	if (currententity->skinnum < 0 || currententity->skinnum >= paliashdr->numskins) {
+
+	if (currententity->skinnum < 0 || currententity->skinnum >= paliashdr->numskins)
+	{
 		Con_Printf("(%d): Invalid player skin #%d\n", playernum, currententity->skinnum);
 		original = (byte *)paliashdr + paliashdr->texels[0];
-	} else
-		original = (byte *)paliashdr + paliashdr->texels[currententity->skinnum];
-	if (s & 3)
-		Sys_Error ("R_TranslateSkin: s&3");
+	}
+	else original = (byte *)paliashdr + paliashdr->texels[currententity->skinnum];
+
+	if (s & 3) Sys_Error ("R_TranslateSkin: s&3");
 
 	inwidth = paliashdr->skinwidth;
 	inheight = paliashdr->skinheight;
@@ -249,7 +268,7 @@ void R_TranslatePlayerSkin (int playernum)
 	// recreate the texture
 	SAFE_RELEASE (playertextures[playernum]);
 
-	byte translated[320*200];
+	byte *translated = (byte *) Heap_QMalloc (paliashdr->skinwidth * paliashdr->skinheight);
 
 	for (i=0 ; i<s ; i+=4)
 	{
@@ -261,6 +280,8 @@ void R_TranslatePlayerSkin (int playernum)
 
 	// do mipmap these because it only happens when colour changes
 	D3D_LoadTexture (&playertextures[playernum], paliashdr->skinwidth, paliashdr->skinheight, translated, (unsigned int *) d_8to24table, true, false);
+
+	Heap_QFreeFull (translated);
 }
 
 
@@ -269,42 +290,91 @@ void R_TranslatePlayerSkin (int playernum)
 R_NewMap
 ===============
 */
+void S_InitAmbients (void);
+
+void R_ParseWorldSpawn (void)
+{
+	// get a pointer to the entities lump
+	char *data = cl.worldbrush->entities;
+	char key[40];
+
+	// can never happen, otherwise we wouldn't have gotten this far
+	if (!data) return;
+
+	// parse the opening brace
+	data = COM_Parse (data);
+
+	// likewise can never happen
+	if (!data) return;
+	if (com_token[0] != '{') return;
+
+	while (1)
+	{
+		// parse the key
+		data = COM_Parse (data);
+
+		// there is no key (end of worldspawn)
+		if (!data) break;
+		if (com_token[0] == '}') break;
+
+		// allow keys with a leading _
+		if (com_token[0] == '_')
+			strncpy (key, &com_token[1], 39);
+		else strncpy (key, com_token, 39);
+
+		// remove trailing spaces
+		while (key[strlen (key) - 1] == ' ') key[strlen (key) - 1] = 0;
+
+		// parse the value
+		data = COM_Parse (data);
+
+		// likewise should never happen (has already been successfully parsed server-side and any errors that
+		// were going to happen would have happened then; we only check to guard against pointer badness)
+		if (!data) return;
+
+		// check the key for a sky - notice the lack of standardisation in full swing again here!
+		if (!stricmp (key, "sky") || !stricmp (key, "skyname") || !stricmp (key, "q1sky") || !stricmp (key, "skybox"))
+		{
+			// attempt to load it (silently fail)
+			// direct from com_token - is this safe?  should be...
+			R_LoadSkyBox (com_token, false);
+		}
+
+		// can add anything else we want to parse out of the worldspawn here too...
+	}
+}
+
+
+void R_CheckTransWater (void);
+
 void R_NewMap (void)
 {
 	int		i;
-	
-	for (i=0 ; i<256 ; i++)
-		d_lightstylevalue[i] = 264;		// normal light value
 
-	memset (&r_worldentity, 0, sizeof(r_worldentity));
+	// normal light value (consistency with 'm' * 22)
+	for (i = 0; i < 256; i++) d_lightstylevalue[i] = 264;
+
+	memset (&r_worldentity, 0, sizeof (r_worldentity));
 	r_worldentity.model = cl.worldmodel;
 
-// clear out efrags in case the level hasn't been reloaded
-// FIXME: is this one short?
-	for (i=0 ; i<cl.worldmodel->numleafs ; i++)
-		cl.worldmodel->leafs[i].efrags = NULL;
-		 	
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 
 	GL_BuildLightmaps ();
 
-	// identify sky texture
-	skytexturenum = -1;
-	mirrortexturenum = -1;
-	for (i=0 ; i<cl.worldmodel->numtextures ; i++)
-	{
-		if (!cl.worldmodel->textures[i])
-			continue;
-		if (!Q_strncmp(cl.worldmodel->textures[i]->name,"sky",3) )
-			skytexturenum = i;
-		if (!Q_strncmp(cl.worldmodel->textures[i]->name,"window02_1",10) )
-			mirrortexturenum = i;
- 		cl.worldmodel->textures[i]->texturechain = NULL;
-	}
-#ifdef QUAKE2
-	R_LoadSkys ();
-#endif
+	// flush unused textures from the cache
+	D3D_FlushTextures ();
+
+	// parse worldspawn from the entities lump to determine any map-specific fields in there
+	R_ParseWorldSpawn ();
+
+	// check for translucent water in the map
+	R_CheckTransWater ();
+
+	// as sounds are now cleared between maps these sounds also need to be
+	// reloaded otherwise the known_sfx will go out of sequence for them
+	CL_InitTEnts ();
+	S_InitAmbients ();
 }
 
 
@@ -317,27 +387,36 @@ For program optimization
 */
 void R_TimeRefresh_f (void)
 {
-	/*
 	int			i;
 	float		start, stop, time;
 
-	glDrawBuffer  (GL_FRONT);
-	glFinish ();
-
-	start = Sys_FloatTime ();
-	for (i=0 ; i<128 ; i++)
+	if (cls.state != ca_connected)
 	{
-		r_refdef.viewangles[1] = i/128.0*360.0;
-		R_RenderView ();
+		Con_Printf ("You cannot timerefresh when not connected.\n");
+		return;
 	}
 
-	glFinish ();
-	stop = Sys_FloatTime ();
-	time = stop-start;
-	Con_Printf ("%f seconds (%f fps)\n", time, 128/time);
+	start = Sys_FloatTime ();
+	float oldvang = r_refdef.viewangles[1];
 
-	glDrawBuffer  (GL_BACK);
-	*/
+	d3d_Device->EndScene ();
+	d3d_Device->Present (NULL, NULL, NULL, NULL);
+
+	for (i = 0; i < 128; i++)
+	{
+		r_refdef.viewangles[1] = i / 128.0 * 360.0;
+
+		d3d_Device->BeginScene ();
+		R_RenderView ();
+		d3d_Device->EndScene ();
+		d3d_Device->Present (NULL, NULL, NULL, NULL);
+	}
+
+	r_refdef.viewangles[1] = oldvang;
+	stop = Sys_FloatTime ();
+	time = stop - start;
+
+	Con_Printf ("%f seconds (%f fps)\n", time, 128 / time);
 }
 
 void D_FlushCaches (void)

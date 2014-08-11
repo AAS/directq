@@ -23,20 +23,35 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
+#include "d3d_hlsl.h"
+#include <vector>
+#include <algorithm>
 
 #define	D3DQUAKE_VERSION		0.01
 
-cvar_t		gl_nobind = {"gl_nobind", "0"};
-cvar_t		gl_max_size = {"gl_max_size", "1024"};
-cvar_t		gl_picmip = {"gl_picmip", "0"};
-cvar_t		gl_conscale = {"gl_conscale", "0", true};
+cvar_t		gl_nobind ("gl_nobind", "0");
+cvar_t		gl_conscale ("gl_conscale", "0", CVAR_ARCHIVE);
 
 byte		*draw_chars;				// 8*8 graphic characters
 qpic_t		*draw_disc;
 qpic_t		*draw_backtile;
 
 int			translate_texture;
-LPDIRECT3DTEXTURE9 char_texture;
+
+LPDIRECT3DTEXTURE9 char_texture = NULL;
+LPDIRECT3DTEXTURE9 R_PaletteTexture = NULL;
+LPDIRECT3DTEXTURE9 crosshairtexture = NULL;
+
+// faster lookup for char and palette coords
+typedef struct quadcood_s
+{
+	float s;
+	float t;
+	float smax;
+	float tmax;
+} quadcoord_t;
+
+quadcoord_t quadcoords[256];
 
 typedef struct
 {
@@ -50,24 +65,11 @@ qpic_t *conback;
 int		texels;
 
 
-typedef struct vert_2dtextured_s
+typedef struct vert_2d_s
 {
 	float xyz[3];
 	float st[2];
-} vert_2dtextured_t;
-
-typedef struct vert_2dtexturedcoloured_s
-{
-	float xyz[3];
-	DWORD color;
-	float st[2];
-} vert_2dtexturedcoloured_t;
-
-typedef struct vert_2dcoloured_s
-{
-	float xyz[3];
-	DWORD color;
-} vert_2dcoloured_t;
+} vert_2d_t;
 
 
 //=============================================================================
@@ -80,14 +82,20 @@ typedef struct cachepic_s
 	byte		padding[32];	// for appended glpic
 } cachepic_t;
 
-#define	MAX_CACHED_PICS		128
-cachepic_t	menu_cachepics[MAX_CACHED_PICS];
-int			menu_numcachepics;
+#define	MAX_CACHED_PICS		256
+
+std::vector<cachepic_t *> menu_cachepics;
 
 byte		menuplyr_pixels[4096];
 
 int		pic_texels;
 int		pic_count;
+
+// failsafe pic for when a load from the wad fails
+// (prevent crashes here during mod dev cycles)
+byte *failsafedata = NULL;
+qpic_t *draw_failsafe = NULL;
+
 
 qpic_t *Draw_PicFromWad (char *name)
 {
@@ -95,7 +103,23 @@ qpic_t *Draw_PicFromWad (char *name)
 	glpic_t	*gl;
 
 	p = (qpic_t *) W_GetLumpName (name);
-	gl = (glpic_t *)p->data;
+
+	if (!p) p = draw_failsafe;
+
+	if (p->width < 1 || p->height < 1)
+	{
+		// this occasionally gets hosed, dunno why yet...
+		// seems preferable to crashing
+		Con_Printf ("Draw_PicFromWad: p->width < 1 || p->height < 1 for %s\n(I fucked up - sorry)\n", name);
+		p = draw_failsafe;
+
+#ifdef _DEBUG
+		// prevent an exception in release builds
+		DebugBreak ();
+#endif
+	}
+
+	gl = (glpic_t *) p->data;
 
 	gl->tex = D3D_LoadTexture (name, p->width, p->height, p->data, false, true);
 	gl->sl = 0;
@@ -112,40 +136,62 @@ qpic_t *Draw_PicFromWad (char *name)
 Draw_CachePic
 ================
 */
-qpic_t	*Draw_CachePic (char *path)
+qpic_t *Draw_CachePic (char *path)
 {
 	cachepic_t	*pic;
 	int			i;
 	qpic_t		*dat;
 	glpic_t		*gl;
 
-	for (pic=menu_cachepics, i=0 ; i<menu_numcachepics ; pic++, i++)
-		if (!strcmp (path, pic->name))
-			return &pic->pic;
+	int menu_numcachepics = menu_cachepics.size ();
 
-	if (menu_numcachepics == MAX_CACHED_PICS)
-		Sys_Error ("menu_numcachepics == MAX_CACHED_PICS");
-	menu_numcachepics++;
+	for (i = 0; i < menu_numcachepics; i++)
+		if (!strcmp (path, menu_cachepics[i]->name))
+			return &menu_cachepics[i]->pic;
+
+	// add a new pic
+	pic = (cachepic_t *) malloc (sizeof (cachepic_t));
+	menu_cachepics.push_back (pic);
+
 	strcpy (pic->name, path);
 
-//
-// load the pic from disk
-//
-	dat = (qpic_t *)COM_LoadTempFile (path);	
+	// load the pic from disk
+	dat = (qpic_t *) COM_LoadTempFile (path);
+
 	if (!dat)
-		Sys_Error ("Draw_CachePic: failed to load %s", path);
-	SwapPic (dat);
+	{
+		Con_Printf ("Draw_CachePic: failed to load %s", path);
+		dat = draw_failsafe;
+	}
+	else
+	{
+		// don't swap draw_failsafe!!!
+		SwapPic (dat);
+	}
+
+	if (dat->width < 1 || dat->height < 1)
+	{
+		// this occasionally gets hosed, dunno why yet...
+		// seems preferable to crashing
+		Con_Printf ("Draw_CachePic: dat->width < 1 || dat->height < 1 for %s\n(I fucked up - sorry)\n", path);
+		dat = draw_failsafe;
+
+#ifdef _DEBUG
+		// prevent an exception in release builds
+		DebugBreak ();
+#endif
+	}
 
 	// HACK HACK HACK --- we need to keep the bytes for
 	// the translatable player picture just for the menu
 	// configuration dialog
 	if (!strcmp (path, "gfx/menuplyr.lmp"))
-		memcpy (menuplyr_pixels, dat->data, dat->width*dat->height);
+		memcpy (menuplyr_pixels, dat->data, dat->width * dat->height);
 
 	pic->pic.width = dat->width;
 	pic->pic.height = dat->height;
 
-	gl = (glpic_t *)pic->pic.data;
+	gl = (glpic_t *) pic->pic.data;
 
 	gl->tex = D3D_LoadTexture (path, dat->width, dat->height, dat->data, false, true);
 	gl->sl = 0;
@@ -164,7 +210,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	int i, j, c;
 
 	// allocate memory for a new charset
-	newchars = (byte *) malloc (w * h * 4);
+	newchars = (byte *) Heap_QMalloc (w * h * 4);
 
 	// clear to all alpha
 	memset (newchars, 0, w * h * 4);
@@ -246,8 +292,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	char_texture = D3D_LoadTexture ("charset", 256, 256, newchars, false, true);
 
 	// free the working memory we used
-//	free (buf);
-	free (newchars);
+	Heap_QFreeFull (newchars);
 }
 
 
@@ -256,6 +301,9 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 Draw_Init
 ===============
 */
+extern cvar_t gl_texturedir;
+int D3D_PowerOf2Size (int size);
+
 void Draw_Init (void)
 {
 	qpic_t	*cb;
@@ -266,16 +314,64 @@ void Draw_Init (void)
 	int		start;
 	byte	*ncdata;
 
-	Cvar_RegisterVariable (&gl_nobind);
-	Cvar_RegisterVariable (&gl_max_size);
-	Cvar_RegisterVariable (&gl_picmip);
-	Cvar_RegisterVariable (&gl_conscale);
+	// free cache pics
+	int menu_numcachepics = menu_cachepics.size ();
 
-	// load the console background and the charset
-	// by hand, because we need to write the version
-	// string into the background before turning
-	// it into a texture
+	if (menu_numcachepics)
+	{
+		for (int i = 0; i < menu_numcachepics; i++)
+			free (menu_cachepics[i]);
+
+		menu_cachepics.clear ();
+	}
+
+	// setup failsafe pic
+	// free previous allocation (on game change)
+	if (failsafedata) Heap_QFreeFast (failsafedata);
+
+	// this is a qpic_t that's used in the event of any qpic_t failing to load!!!
+	// we alloc enough memory for the glpic_t that draw_failsafe->data is casted to.
+	// this crazy-assed shit prevents an "ambiguous call to overloaded function" error.
+	// add 1 cos of integer round down.  do it this way in case we ever change the glpic_t struct
+	int failsafedatasize = D3D_PowerOf2Size ((int) sqrt ((float) (sizeof (glpic_t))) + 1);
+
+	// persist in memory
+	failsafedata = (byte *) Heap_QMalloc (sizeof (int) * 2 + (failsafedatasize * failsafedatasize));
+	draw_failsafe = (qpic_t *) failsafedata;
+	draw_failsafe->height = failsafedatasize;
+	draw_failsafe->width = failsafedatasize;
+
+	// lookup table for charset and palette texcoords
+	for (int i = 0; i < 256; i++)
+	{
+		int row, col;
+		float frow, fcol, size;
+
+		// get position in the grid
+		row = i >> 4;
+		col = i & 15;
+
+		// base texcoords relative to grid
+		frow = row * 0.0625;
+		fcol = col * 0.0625;
+
+		// half size because we space out the chars to prevent bilerp overlap
+		size = 0.03125;
+
+		quadcoords[i].s = fcol;
+		quadcoords[i].t = frow;
+		quadcoords[i].smax = fcol + size;
+		quadcoords[i].tmax = frow + size;
+	}
+
 	draw_chars = (byte *) W_GetLumpName ("conchars");
+
+	if (!draw_chars)
+	{
+		Sys_Error ("Draw_Init: failed to load draw_chars");
+		return;
+	}
+
 	Draw_SpaceOutCharSet (draw_chars, 128, 128);
 
 	// load the console background
@@ -303,39 +399,137 @@ smoothly scrolled off.
 */
 void Draw_Character (int x, int y, int num)
 {
-	int				row, col;
-	float			frow, fcol, size;
-
 	num &= 255;
-	
-	if (num == 32)
-		return;		// space
 
-	if (y <= -8)
-		return;			// totally off screen
+	// don't draw spaces
+	if (num == 32) return;
 
-	row = num>>4;
-	col = num&15;
+	// check for offscreen
+	if (y <= -8) return;
+	if (y >= vid.height) return;
+	if (x <= -8) return;
+	if (x >= vid.width) return;
 
-	// base texcoords relative to grid
-	frow = row * 0.0625;
-	fcol = col * 0.0625;
+	d3d_Flat2DFX.SetTexture (char_texture);
 
-	// half size because we space out the chars to prevent bilerp overlap
-	size = 0.03125;
-
-	D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_TEX1);
-	D3D_BindTexture (char_texture);
-
-	vert_2dtextured_t verts[] =
+	vert_2d_t verts[] =
 	{
-		{x, y, 0, fcol, frow},
-		{x + 8, y, 0, fcol + size, frow},
-		{x + 8, y + 8, 0, fcol + size, frow + size},
-		{x, y + 8, 0, fcol, frow + size}
+		{x, y, 0, quadcoords[num].s, quadcoords[num].t},
+		{x + 8, y, 0, quadcoords[num].smax, quadcoords[num].t},
+		{x + 8, y + 8, 0, quadcoords[num].smax, quadcoords[num].tmax},
+		{x, y + 8, 0, quadcoords[num].s, quadcoords[num].tmax}
 	};
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2dtextured_t));
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_InvertCharacter (int x, int y, int num)
+{
+	num &= 255;
+
+	// don't draw spaces
+	if (num == 32) return;
+
+	// check for offscreen
+	if (y <= -8) return;
+	if (y >= vid.height) return;
+	if (x <= -8) return;
+	if (x >= vid.width) return;
+
+	d3d_Flat2DFX.SetTexture (char_texture);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, quadcoords[num].s, quadcoords[num].tmax},
+		{x + 8, y, 0, quadcoords[num].smax, quadcoords[num].tmax},
+		{x + 8, y + 8, 0, quadcoords[num].smax, quadcoords[num].t},
+		{x, y + 8, 0, quadcoords[num].s, quadcoords[num].t}
+	};
+
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_BackwardsCharacter (int x, int y, int num)
+{
+	num &= 255;
+
+	// don't draw spaces
+	if (num == 32) return;
+
+	// check for offscreen
+	if (y <= -8) return;
+	if (y >= vid.height) return;
+	if (x <= -8) return;
+	if (x >= vid.width) return;
+
+	d3d_Flat2DFX.SetTexture (char_texture);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, quadcoords[num].smax, quadcoords[num].t},
+		{x + 8, y, 0, quadcoords[num].s, quadcoords[num].t},
+		{x + 8, y + 8, 0, quadcoords[num].s, quadcoords[num].tmax},
+		{x, y + 8, 0, quadcoords[num].smax, quadcoords[num].tmax}
+	};
+
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_RotateCharacter (int x, int y, int num)
+{
+	num &= 255;
+
+	// don't draw spaces
+	if (num == 32) return;
+
+	// check for offscreen
+	if (y <= -8) return;
+	if (y >= vid.height) return;
+	if (x <= -8) return;
+	if (x >= vid.width) return;
+
+	d3d_Flat2DFX.SetTexture (char_texture);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, quadcoords[num].s, quadcoords[num].tmax},
+		{x + 8, y, 0, quadcoords[num].s, quadcoords[num].t},
+		{x + 8, y + 8, 0, quadcoords[num].smax, quadcoords[num].t},
+		{x, y + 8, 0, quadcoords[num].smax, quadcoords[num].tmax}
+	};
+
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_VScrollBar (int x, int y, int height, int pos, int scale)
+{
+	int i;
+	float f;
+
+	// take to next lowest multiple of 8
+	int h = height & 0xfff8;
+
+	// body
+	for (i = y; i < (y + h); i += 8)
+		Draw_RotateCharacter (x, i, 129);
+
+	// fill in the last if necessary
+	if (h < height) Draw_RotateCharacter (x, y + height - 8, 129);
+
+	// nothing in the list
+	if (scale < 2) return;
+
+	// get the position
+	f = (height - 8) * pos;
+	f /= (float) (scale - 1);
+	f += (y);
+
+	// position indicator
+	Draw_RotateCharacter (x, f, 131);
 }
 
 
@@ -376,28 +570,23 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	d3d_DisableAlphaTest->Apply ();
-	d3d_EnableAlphaBlend->Apply ();
+	float AlphaColour[] = {1, 1, 1, alpha};
 
-	alpha *= 255;
+	d3d_Flat2DFX.SwitchToPass (2);
+	d3d_Flat2DFX.SetColor4f (AlphaColour);
 
-	DWORD AlphaColour = D3DCOLOR_ARGB (alpha > 255 ? 255 : (int) alpha, 255, 255, 255);
+	d3d_Flat2DFX.SetTexture (gl->tex);
 
-	D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
-	D3D_BindTexture (gl->tex);
-
-	vert_2dtexturedcoloured_t verts[] =
+	vert_2d_t verts[] =
 	{
-		{x, y, 0, AlphaColour, gl->sl, gl->tl},
-		{x + pic->width, y, 0, AlphaColour, gl->sh, gl->tl},
-		{x + pic->width, y + pic->height, 0, AlphaColour, gl->sh, gl->th},
-		{x, y + pic->height, 0, AlphaColour, gl->sl, gl->th}
+		{x, y, 0, gl->sl, gl->tl},
+		{x + pic->width, y, 0, gl->sh, gl->tl},
+		{x + pic->width, y + pic->height, 0, gl->sh, gl->th},
+		{x, y + pic->height, 0, gl->sl, gl->th}
 	};
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2dtexturedcoloured_t));
-
-	d3d_DisableAlphaBlend->Apply ();
-	d3d_EnableAlphaTest->Apply ();
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	d3d_Flat2DFX.SwitchToPass (0);
 }
 
 
@@ -410,10 +599,9 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_TEX1);
-	D3D_BindTexture (gl->tex);
+	d3d_Flat2DFX.SetTexture (gl->tex);
 
-	vert_2dtextured_t verts[] =
+	vert_2d_t verts[] =
 	{
 		{x, y, 0, gl->sl, gl->tl},
 		{x + pic->width, y, 0, gl->sh, gl->tl},
@@ -421,7 +609,231 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 		{x, y + pic->height, 0, gl->sl, gl->th}
 	};
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2dtextured_t));
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void D3D_TranslateAlphaTexture (int r, int g, int b, LPDIRECT3DTEXTURE9 tex);
+
+void Draw_Crosshair (int x, int y, int size)
+{
+	// we don't know about these cvars
+	extern cvar_t crosshair;
+	extern cvar_t scr_crosshaircolor;
+
+	// no custom crosshair
+	if (crosshair.integer < 3) return;
+
+	static int savedcolor = 666;
+
+	if (scr_crosshaircolor.integer != savedcolor)
+	{
+		// bound colour
+		if (scr_crosshaircolor.integer < 0) scr_crosshaircolor.integer = 0;
+		if (scr_crosshaircolor.integer > 13) scr_crosshaircolor.integer = 13;
+
+		// set back
+		Cvar_Set (&scr_crosshaircolor, scr_crosshaircolor.integer);
+
+		// because we don't have a vertex type for texture * color in the 2D render, and we don't wanna
+		// complicate things by creating one (more declarations, shaders, switching passes, etc) we just
+		// translate the texture by the chosen colour if changes.  first we need to find what the correct
+		// rgb components are... take full range (and handle backwards ranges)
+		int cindex = scr_crosshaircolor.integer * 16 + (scr_crosshaircolor.integer < 8 ? 15 : 0);
+
+		// bound
+		if (cindex < 0) cindex = 0;
+		if (cindex > 255) cindex = 255;
+
+		// translate
+		Con_DPrintf ("Translating crosshair to %i [%i] [%i] [%i]\n", cindex, ((byte *) &d_8to24table[cindex])[2], ((byte *) &d_8to24table[cindex])[1], ((byte *) &d_8to24table[cindex])[0]);
+		D3D_TranslateAlphaTexture (((byte *) &d_8to24table[cindex])[2], ((byte *) &d_8to24table[cindex])[1], ((byte *) &d_8to24table[cindex])[0], crosshairtexture);
+
+		// store back
+		savedcolor = scr_crosshaircolor.integer;
+	}
+
+	// 1 and 2 are the regular '+' symbols
+	int xhairimage = crosshair.integer - 3;
+
+	// 0 to 15 scale
+	while (xhairimage > 15) xhairimage -= 16;
+
+	// full texcoords for each value
+	float xhairs[] = {0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75, 0, 0.25, 0.5, 0.75};
+	float xhairt[] = {0, 0, 0, 0, 0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0.5, 0.5, 0.75, 0.75, 0.75, 0.75};
+
+	// actual coords we'll use
+	float s = xhairimage[xhairs];
+	float t = xhairimage[xhairt];
+
+	// bind it
+	d3d_Flat2DFX.SetTexture (crosshairtexture);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, s, t},
+		{x + size, y, 0, s + 0.25, t},
+		{x + size, y + size, 0, s + 0.25, t + 0.25},
+		{x, y + size, 0, s, t + 0.25}
+	};
+
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_HalfPic (int x, int y, qpic_t *pic)
+{
+	glpic_t *gl = (glpic_t *) pic->data;
+
+	d3d_Flat2DFX.SetTexture (gl->tex);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, gl->sl, gl->tl},
+		{x + pic->width / 2, y, 0, gl->sh, gl->tl},
+		{x + pic->width / 2, y + pic->height / 2, 0, gl->sh, gl->th},
+		{x, y + pic->height / 2, 0, gl->sl, gl->th}
+	};
+
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_TextBox (int x, int y, int width, int height)
+{
+	// cache the frequently used qpic_t's for faster access
+	qpic_t *box_ml = Draw_CachePic ("gfx/box_ml.lmp");
+	qpic_t *box_mr = Draw_CachePic ("gfx/box_mr.lmp");
+	qpic_t *box_tm = Draw_CachePic ("gfx/box_tm.lmp");
+	qpic_t *box_bm = Draw_CachePic ("gfx/box_bm.lmp");
+	qpic_t *box_mm2 = Draw_CachePic ("gfx/box_mm2.lmp");
+
+	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+	// corners
+	Draw_Pic (x, y, Draw_CachePic ("gfx/box_tl.lmp"));
+	Draw_Pic (x + width + 8, y, Draw_CachePic ("gfx/box_tr.lmp"));
+	Draw_Pic (x, y + height + 8, Draw_CachePic ("gfx/box_bl.lmp"));
+	Draw_Pic (x + width + 8, y + height + 8, Draw_CachePic ("gfx/box_br.lmp"));
+
+	// left and right sides
+	for (int i = 8; i < height; i += 8)
+	{
+		Draw_Pic (x, y + i, box_ml);
+		Draw_Pic (x + width + 8, y + i, box_mr);
+	}
+
+	// top and bottom sides
+	for (int i = 16; i < width; i += 8)
+	{
+		Draw_Pic (x + i - 8, y, box_tm);
+		Draw_Pic (x + i - 8, y + height + 8, box_bm);
+	}
+
+	// finish off
+	Draw_Pic (x + width - 8, y, box_tm);
+	Draw_Pic (x + width - 8, y + height + 8, box_bm);
+	Draw_Pic (x, y + height, box_ml);
+	Draw_Pic (x + width + 8, y + height, box_mr);
+
+	// fill (ugly as a box of frogs...)
+	for (int i = 16; i < width; i += 8)
+	{
+		for (int j = 8; j < height; j += 8)
+		{
+			if (i == 16)
+				Draw_Pic (x + width - 8, y + j, box_mm2);
+
+			Draw_Pic (x + i - 8, y + j, box_mm2);
+		}
+
+		Draw_Pic (x + i - 8, y + height, box_mm2);
+	}
+
+	Draw_Pic (x + width - 8, y + height, box_mm2);
+
+	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
+	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
+}
+
+
+char cached_name[256] = {0};
+LPDIRECT3DTEXTURE9 d3d_MapshotTexture = NULL;
+
+void Draw_InvalidateMapshot (void)
+{
+	// just invalidate the cached name to force a reload in case the shot changes
+	cached_name[0] = 0;
+}
+
+
+void Draw_MapshotTexture (LPDIRECT3DTEXTURE9 mstex, int x, int y)
+{
+	Draw_TextBox (x - 8, y - 8, 128, 128);
+
+	d3d_Flat2DFX.SetTexture (mstex);
+
+	vert_2d_t verts[] =
+	{
+		{x, y, 0, 0, 0},
+		{x + 128, y, 0, 1, 0},
+		{x + 128, y + 128, 0, 1, 1},
+		{x, y + 128, 0, 0, 1}
+	};
+
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_Mapshot (char *name, int x, int y)
+{
+	if (!name)
+	{
+		// no name supplied so display the console image instead
+		glpic_t *gl = (glpic_t *) conback->data;
+
+		// note - sl/tl/sh/th for the conback are correct 0 and 1 values
+		Draw_MapshotTexture (gl->tex, x, y);
+		return;
+	}
+
+	if (stricmp (name, cached_name))
+	{
+		// save to cached name
+		strncpy (cached_name, name, 255);
+
+		// texture has changed, release the existing one
+		SAFE_RELEASE (d3d_MapshotTexture);
+
+		// attempt to load a new one
+		// note - D3DX won't allow us to save TGAs (BASTARDS!), but we'll still attempt to load them
+		if (!D3D_LoadExternalTexture (&d3d_MapshotTexture, cached_name, 0))
+		{
+			// ensure release
+			SAFE_RELEASE (d3d_MapshotTexture);
+
+			// if we didn't load it, call recursively to display the console
+			Draw_Mapshot (NULL, x, y);
+
+			// done
+			return;
+		}
+	}
+
+	// ensure valid
+	if (!d3d_MapshotTexture)
+	{
+		// if we didn't load it, call recursively to display the console
+		Draw_Mapshot (NULL, x, y);
+
+		// return
+		return;
+	}
+
+	// draw it
+	Draw_MapshotTexture (d3d_MapshotTexture, x, y);
 }
 
 
@@ -485,10 +897,9 @@ void Draw_ConsoleBackground (int lines)
 	conback->width = vid.width;
 	conback->height = vid.height;
 
-	if (lines > y)
-		Draw_Pic (0, lines - vid.height, conback);
-	else
-		Draw_AlphaPic (0, lines - vid.height, conback, (float)(1.2 * lines)/y);
+	if (lines <= y)
+		Draw_AlphaPic (0, lines - vid.height, conback, (float) (1.2 * lines) / y);
+	else Draw_Pic (0, lines - vid.height, conback);
 }
 
 
@@ -504,10 +915,9 @@ void Draw_TileClear (int x, int y, int w, int h)
 {
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
 
-	D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_TEX1);
-	D3D_BindTexture (gl->tex);
+	d3d_Flat2DFX.SetTexture (gl->tex);
 
-	vert_2dtextured_t verts[] =
+	vert_2d_t verts[] =
 	{
 		{x, y, 0, x / 64.0, y / 64.0},
 		{x + w, y, 0, (x + w) / 64.0, y / 64.0},
@@ -515,7 +925,7 @@ void Draw_TileClear (int x, int y, int w, int h)
 		{x, y + h, 0, x / 64.0, (y + h) / 64.0},
 	};
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2dtextured_t));
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 }
 
 
@@ -526,30 +936,27 @@ Draw_Fill
 Fills a box of pixels with a single color
 =============
 */
-void Draw_Fill (int x, int y, int w, int h, int c)
+void Draw_Fill (int x, int y, int w, int h, int c, int alpha)
 {
-	// disable texturing
-	d3d_Device->SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_DISABLE);
-
-	D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_DIFFUSE);
-
 	byte *bgra = (byte *) &d_8to24table[c];
 
-	DWORD FillColour = D3DCOLOR_XRGB (bgra[2], bgra[1], bgra[0]);
+	float FillColour[4] = {bgra[2] / 255.0f, bgra[1] / 255.0f, bgra[0] / 255.0f, alpha / 255.0f};
 
-	vert_2dcoloured_t verts[] =
+	d3d_Flat2DFX.SwitchToPass (1);
+	d3d_Flat2DFX.SetColor4f (FillColour);
+
+	vert_2d_t verts[] =
 	{
-		{x, y, 0, FillColour},
-		{x + w, y, 0, FillColour},
-		{x + w, y + h, 0, FillColour},
-		{x, y + h, 0, FillColour}
+		{x, y, 0},
+		{x + w, y, 0},
+		{x + w, y + h, 0},
+		{x, y + h, 0}
 	};
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2dcoloured_t));
-
-	// revert state
-	d3d_Device->SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	d3d_Flat2DFX.SwitchToPass (0);
 }
+
 
 //=============================================================================
 
@@ -561,35 +968,25 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (void)
 {
-	// disable texturing
-	d3d_Device->SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+	float FadeColour[4] = {0, 0, 0, 0.8};
 
-	d3d_DisableAlphaTest->Apply ();
-	d3d_EnableAlphaBlend->Apply ();
+	d3d_Flat2DFX.SwitchToPass (1);
+	d3d_Flat2DFX.SetColor4f (FadeColour);
 
-	D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_DIFFUSE);
-	DWORD FadeColour = D3DCOLOR_ARGB (204, 0, 0, 0);
-
-	vert_2dcoloured_t verts[] =
+	vert_2d_t verts[] =
 	{
-		{0, 0, 0, FadeColour},
-		{vid.width, 0, 0, FadeColour},
-		{vid.width, vid.height, 0, FadeColour},
-		{0, vid.height, 0, FadeColour}
+		{0, 0, 0},
+		{vid.width, 0, 0},
+		{vid.width, vid.height, 0},
+		{0, vid.height, 0}
 	};
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2dcoloured_t));
-
-	// revert state
-	d3d_Device->SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-	d3d_DisableAlphaBlend->Apply ();
-	d3d_EnableAlphaTest->Apply ();
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	d3d_Flat2DFX.SwitchToPass (0);
 }
 
 
 //=============================================================================
-
-bool DrawLoadDisc = false;
 
 /*
 ================
@@ -599,11 +996,28 @@ Draws the little blue disc in the corner of the screen.
 Call before beginning any disc IO.
 ================
 */
+cvar_t r_showdisc ("r_showdisc", 0.0f);
+
 void Draw_BeginDisc (void)
 {
-	if (!draw_disc) return;
+	// Spirit's right - this can limit your loading speed to 60 files per second, and you do not want that
+	if (!r_showdisc.integer) return;
 
-	DrawLoadDisc = true;
+	extern bool scr_initialized;
+
+	// these prevent it from crashing if the disc is called at certain times during the game
+	if (!d3d_Device) return;
+	if (!draw_disc) return;
+	if (!scr_initialized) return;
+	if (!((glpic_t *) draw_disc->data)->tex) return;
+
+	// direct3d doesn't let us directly access the front buffer so instead
+	// we draw it in the current render and then finish that up to get it onscreen
+//	Draw_Pic (vid.width - 24, 0, draw_disc);
+//	d3d_Flat2DFX->EndPass ();
+//	d3d_Flat2DFX->End ();
+//	d3d_Device->EndScene ();
+//	d3d_Device->Present (NULL, NULL, NULL, NULL);
 }
 
 
@@ -617,7 +1031,6 @@ Call after completing any disc IO
 */
 void Draw_EndDisc (void)
 {
-	DrawLoadDisc = false;
 }
 
 
@@ -631,60 +1044,97 @@ void Draw_PolyBlend (void)
 	if (!gl_polyblend.value) return;
 	if (!v_blend[3]) return;
 
-	// disable texturing
-	d3d_Device->SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+	float BlendColor[4] = {v_blend[0] / 255.0f, v_blend[1] / 255.0f, v_blend[2] / 255.0f, v_blend[3] / 255.0f};
 
-	d3d_DisableAlphaTest->Apply ();
-	d3d_EnableAlphaBlend->Apply ();
+	d3d_Flat2DFX.SwitchToPass (1);
+	d3d_Flat2DFX.SetColor4f (BlendColor);
 
-	D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_DIFFUSE);
-	DWORD BlendColour = D3DCOLOR_ARGB (v_blend[3], v_blend[0], v_blend[1], v_blend[2]);
-
-	vert_2dcoloured_t verts[] =
+	vert_2d_t verts[] =
 	{
-		{0, 0, 0, BlendColour},
-		{vid.width, 0, 0, BlendColour},
-		{vid.width, vid.height, 0, BlendColour},
-		{0, vid.height, 0, BlendColour}
+		{0, 0, 0},
+		{vid.width, 0, 0},
+		{vid.width, vid.height, 0},
+		{0, vid.height, 0}
 	};
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2dcoloured_t));
-
-	// revert state
-	d3d_Device->SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-	d3d_DisableAlphaBlend->Apply ();
-	d3d_EnableAlphaTest->Apply ();
+	d3d_Flat2DFX.Draw (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+	d3d_Flat2DFX.SwitchToPass (0);
 }
 
 
+void D3D_Set2DShade (float shadecolor)
+{
+	if (shadecolor >= 0.99f)
+	{
+		// revert to pass 0
+		d3d_Flat2DFX.SwitchToPass (0);
+	}
+	else
+	{
+		// don't go below 0
+		if (shadecolor <= 0.0f) shadecolor = 0.0f;
+
+		// set color
+		float ShadeColor[4] = {shadecolor, shadecolor, shadecolor, shadecolor};
+
+		// switch to pass 2
+		d3d_Flat2DFX.SwitchToPass (2);
+		d3d_Flat2DFX.SetColor4f (ShadeColor);
+	}
+}
+
+
+// we'll store this out too in case we ever want to do anything with it
+D3DVIEWPORT9 d3d_2DViewport;
+void D3D_DrawUnderwaterWarp (void);
+
 void D3D_Set2D (void)
 {
-	// switch to the fullscreen viewport for 2D drawing
-	d3d_2DViewport->Apply ();
+	// switch to a fullscreen viewport for 2D drawing
+	d3d_2DViewport.X = 0;
+	d3d_2DViewport.Y = 0;
+	d3d_2DViewport.Width = d3d_CurrentMode.Width;
+	d3d_2DViewport.Height = d3d_CurrentMode.Height;
+	d3d_2DViewport.MinZ = 0.0f;
+	d3d_2DViewport.MaxZ = 1.0f;
+
+	// because the underwater warp needs it's own beginscene/endscene pair, we need a beginscene here too...
+	d3d_Device->BeginScene ();
+	d3d_Device->SetViewport (&d3d_2DViewport);
 
 	// world matrix
 	d3d_WorldMatrixStack->LoadIdentity ();
 	d3d_Device->SetTransform (D3DTS_WORLD, d3d_WorldMatrixStack->GetTop ());
-
-	// projection matrix
-	D3DXMatrixIdentity (&d3d_ProjectionMatrix);
-	D3DXMatrixOrthoOffCenterRH (&d3d_ProjectionMatrix, 0, vid.width, vid.height, 0, -100, 100);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjectionMatrix);
 
 	// disable depth testing and writing
 	d3d_Device->SetRenderState (D3DRS_ZENABLE, D3DZB_FALSE);
 	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
 	// no backface culling
-	d3d_Device->SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
+	D3D_BackfaceCull (D3DCULL_NONE);
+
+	// common for all 2D drawing, including the underwater warp
+	d3d_Device->SetVertexDeclaration (d3d_V3ST2Declaration);
+
+	// draw the underwater warp here - all the above state is common but it uses a different orthographic matrix
+	D3D_DrawUnderwaterWarp ();
+
+	// projection matrix
+	D3DXMatrixIdentity (&d3d_OrthoMatrix);
+	D3DXMatrixOrthoOffCenterRH (&d3d_OrthoMatrix, 0, vid.width, vid.height, 0, 0, 1);
+	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_OrthoMatrix);
+
+	// enable alpha blending
+	d3d_EnableAlphaBlend->Apply ();
+
+	// note - texture clamping is done per element rather than globally as the Draw_TileClear requires wrapping
+	// set up our shader
+	d3d_Flat2DFX.BeginRender ();
+	d3d_Flat2DFX.SetWPMatrix (&((*d3d_WorldMatrixStack->GetTop ()) * d3d_OrthoMatrix));
 
 	// do the polyblend here for simplicity
 	Draw_PolyBlend ();
 
-	// enable alpha testing
-	d3d_EnableAlphaTest->Apply ();
-
-	// default texturing
-	d3d_Device->SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+	d3d_Flat2DFX.SwitchToPass (0);
 }
 

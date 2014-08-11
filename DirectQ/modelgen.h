@@ -92,7 +92,8 @@ typedef struct dtriangle_s {
 // This mirrors trivert_t in trilib.h, is present so Quake knows how to
 // load this data
 
-typedef struct {
+typedef struct
+{
 	byte	v[3];
 	byte	lightnormalindex;
 } trivertx_t;
@@ -100,17 +101,20 @@ typedef struct {
 // pre-expanded
 typedef struct
 {
-	float	v[3];
+	byte	v[3];
 	byte	lightnormalindex;
+	bool	lerpvert;
 } drawvertx_t;
 
-typedef struct {
+typedef struct 
+{
 	trivertx_t	bboxmin;	// lightnormal isn't used
 	trivertx_t	bboxmax;	// lightnormal isn't used
 	char		name[16];	// frame name from grabbing
 } daliasframe_t;
 
-typedef struct {
+typedef struct
+{
 	int			numframes;
 	trivertx_t	bboxmin;	// lightnormal isn't used
 	trivertx_t	bboxmax;	// lightnormal isn't used

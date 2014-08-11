@@ -18,6 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+
 #ifndef __MODEL__
 #define __MODEL__
 
@@ -79,8 +80,10 @@ typedef struct texture_s
 	unsigned	width, height;
 
 	void		*d3d_Texture;
+	void		*d3d_Fullbright;
+	int			visframe;
 
-	struct msurface_s	*texturechain;	// for gl_texsort drawing
+	struct msurface_s	*texturechain;
 
 	int			anim_total;				// total tenths in sequence ( 0 = no)
 	int			anim_min, anim_max;		// time for this frame min <=time< max
@@ -113,18 +116,6 @@ typedef struct
 	int			flags;
 } mtexinfo_t;
 
-// add 3 extra verts (at end) for transformed bmodel surfs
-#define	VERTEXSIZE	10
-
-typedef struct glpoly_s
-{
-	struct	glpoly_s	*next;
-	struct	glpoly_s	*chain;
-	int		numverts;
-	int		vboffset;
-	int		flags;			// for SURF_UNDERWATER
-	float	verts[4][VERTEXSIZE];	// variable sized (xyz s1t1 s2t2)
-} glpoly_t;
 
 typedef struct msurface_s
 {
@@ -135,20 +126,26 @@ typedef struct msurface_s
 
 	int			firstedge;	// look up in model->surfedges[], negative numbers
 	int			numedges;	// are backwards edges
-	
+
 	short		texturemins[2];
 	short		extents[2];
 
-	int			light_s, light_t;	// gl lightmap coordinates
+	// changed to bytes as they go 0 to 128
+	// (pegair03 bugs still happen with ints...)
+	byte		light_l, light_t;	// lightmap coordinates (relative to LIGHTMAP_SIZE, not 0 to 1)
+	byte		smax, tmax;			// lightmap extents (width and height) (relative to LIGHTMAP_SIZE, not 0 to 1)
+	byte		light_r, light_b;	// lightmap rect right and bottom (light_s + smax, light_t + tmax)
 
-	glpoly_t	*polys;				// multiple if warped
+	// this will be NULL for solid surfaces, must be casted to the correct poly type for water and sky
+	void	*polys;
+
 	struct	msurface_s	*texturechain;
 
 	mtexinfo_t	*texinfo;
-	
-// lighting info
+
+	// lighting info
 	int			dlightframe;
-	int			dlightbits;
+	int			dlightbits[4];
 
 	// direct3d stuff
 	void		*d3d_Lightmap;
@@ -156,23 +153,31 @@ typedef struct msurface_s
 	// offset to first vert in the vertex buffer
 	int			vboffset;
 
+	// the model to which this surf belongs
+	struct model_s *model;
+
+	// extents of the surf in world space
+	float		mins[3];
+	float		maxs[3];
+
 	byte		styles[MAXLIGHTMAPS];
 	int			cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
-	bool	cached_dlight;				// true if dynamic light in cache
+	bool		cached_dlight;				// true if dynamic light in cache
 	byte		*samples;		// [numstyles*surfsize]
 } msurface_t;
 
 typedef struct mnode_s
 {
-// common with leaf
+	// common with leaf
 	int			contents;		// 0, to differentiate from leafs
 	int			visframe;		// node needs to be traversed if current
+	bool		previousvisframe;
 	
 	float		minmaxs[6];		// for bounding box culling
 
 	struct mnode_s	*parent;
 
-// node specific
+	// node specific
 	mplane_t	*plane;
 	struct mnode_s	*children[2];	
 
@@ -184,20 +189,24 @@ typedef struct mnode_s
 
 typedef struct mleaf_s
 {
-// common with node
+	// common with node
 	int			contents;		// wil be a negative contents number
 	int			visframe;		// node needs to be traversed if current
+	bool		previousvisframe;
 
 	float		minmaxs[6];		// for bounding box culling
 
 	struct mnode_s	*parent;
 
-// leaf specific
+	// leaf specific
 	byte		*compressed_vis;
-	efrag_t		*efrags;
 
 	msurface_t	**firstmarksurface;
 	int			nummarksurfaces;
+
+	// static entities contained in this leaf
+	struct staticent_s *statics;
+
 	int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
 } mleaf_t;
@@ -291,7 +300,8 @@ typedef struct
 } maliasgroup_t;
 
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
-typedef struct mtriangle_s {
+typedef struct mtriangle_s
+{
 	int					facesfront;
 	int					vertindex[3];
 } mtriangle_t;
@@ -317,22 +327,22 @@ typedef struct aliashdr_s
 	int			flags;
 	float		size;
 
+	bool		mfdelerp;
+	bool		nolerp;
+
 	int					numposes;
 	int					poseverts;
-	int					posedata;	// numposes*poseverts trivert_t
-	int					commands;	// gl command list with embedded s/t
+	void *posedata;	// numposes*poseverts trivert_t
+	int	 *commands;	// gl command list with embedded s/t
 	void				*texture[MAX_SKINS][4];
+	void				*fullbright[MAX_SKINS][4];
 	int					texels[MAX_SKINS];	// only for player skins
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
 
-#define	MAXALIASVERTS	1024
-#define	MAXALIASFRAMES	256
-#define	MAXALIASTRIS	2048
 
-extern	stvert_t	stverts[MAXALIASVERTS];
-extern	mtriangle_t	triangles[MAXALIASTRIS];
-extern	trivertx_t	*poseverts[MAXALIASFRAMES];
+extern	stvert_t	*stverts;
+extern	mtriangle_t	*triangles;
 
 //===================================================================
 
@@ -351,32 +361,9 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 #define	EF_TRACER2	64			// orange split trail + rotate
 #define	EF_TRACER3	128			// purple trail
 
-typedef struct model_s
+
+typedef struct brushheader_s
 {
-	char		name[MAX_QPATH];
-	bool	needload;		// bmodels and sprites don't cache normally
-
-	modtype_t	type;
-	int			numframes;
-	synctype_t	synctype;
-	
-	int			flags;
-
-//
-// volume occupied by the model graphics
-//		
-	vec3_t		mins, maxs;
-	float		radius;
-
-//
-// solid volume for clipping 
-//
-	bool	clipbox;
-	vec3_t		clipmins, clipmaxs;
-
-//
-// brush model
-//
 	int			firstmodelsurface, nummodelsurfaces;
 
 	int			numsubmodels;
@@ -421,11 +408,42 @@ typedef struct model_s
 	byte		*lightdata;
 	char		*entities;
 
-//
-// additional model data
-//
-	cache_user_t	cache;		// only access through Mod_Extradata
+	bool		transwater;
+} brushhdr_t;
 
+
+typedef struct model_s
+{
+	char	name[MAX_QPATH];
+	bool	needload;
+
+	modtype_t	type;
+	int			numframes;
+	synctype_t	synctype;
+	
+	int			flags;
+
+	// volume occupied by the model graphics
+	// alias models normally check this per frame rather than for the entire model;
+	// this is retained for compatibility with anything server-side that sill uses it
+	vec3_t		mins, maxs;
+	float		radius;
+
+	// solid volume for clipping 
+	bool	clipbox;
+	vec3_t	clipmins, clipmaxs;
+
+	// brush/alias/sprite headers
+	// this gets a LOT of polluting data OUT of the model_t struct
+	// could turn these into a union... bit it makes accessing them a bit more awkward...
+	// besides, it's only an extra 8 bytes per model... chickenfeed, really...
+	// it also allows us to be more robust by setting the others to NULL in the loader
+	brushhdr_t	*bh;
+	aliashdr_t	*ah;
+	msprite_t	*sh;
+
+	// the matrix used for transforming this model
+	void		*matrix;
 } model_t;
 
 //============================================================================
@@ -433,7 +451,6 @@ typedef struct model_s
 void	Mod_Init (void);
 void	Mod_ClearAll (void);
 model_t *Mod_ForName (char *name, bool crash);
-void	*Mod_Extradata (model_t *mod);	// handles caching
 void	Mod_TouchModel (char *name);
 
 mleaf_t *Mod_PointInLeaf (float *p, model_t *model);

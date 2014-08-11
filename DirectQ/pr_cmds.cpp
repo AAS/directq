@@ -22,6 +22,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define	RETURN_EDICT(e) (((int *)pr_globals)[OFS_RETURN] = EDICT_TO_PROG(e))
 
+cvar_t qc_snoop ("qc_snoop", "0");
+cvar_t pr_checkextension ("pr_checkextension", "1", CVAR_READONLY);
+
+char *pr_extensions = NULL;
+
+char pr_string_temp[128];
+
+
 /*
 ===============================================================================
 
@@ -33,19 +41,19 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 char *PF_VarString (int	first)
 {
 	int		i;
-	static char out[256];
+	static char out[4096];
 
 	out[0] = 0;
 	int len = 0;
 
 	for (i=first ; i<pr_argc ; i++)
 	{
-		char *append = G_STRING((OFS_PARM0+i*3));
+		char *append = G_STRING ((OFS_PARM0 + i * 3));
 
 		// prevent buffer overflow in this function
 		len += strlen (append);
 
-		if (len > 250) break;
+		if (len > 4090) break;
 
 		strcat (out, append);
 	}
@@ -72,8 +80,7 @@ void PF_error (void)
 	edict_t	*ed;
 	
 	s = PF_VarString(0);
-	Con_Printf ("======SERVER ERROR in %s:\n%s\n"
-	,pr_strings + pr_xfunction->s_name,s);
+	Con_Printf ("======SERVER ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name,s);
 	ed = PROG_TO_EDICT(pr_global_struct->self);
 	ED_Print (ed);
 
@@ -96,8 +103,7 @@ void PF_objerror (void)
 	edict_t	*ed;
 	
 	s = PF_VarString(0);
-	Con_Printf ("======OBJECT ERROR in %s:\n%s\n"
-	,pr_strings + pr_xfunction->s_name,s);
+	Con_Printf ("======OBJECT ERROR in %s:\n%s\n", pr_strings + pr_xfunction->s_name,s);
 	ed = PROG_TO_EDICT(pr_global_struct->self);
 	ED_Print (ed);
 	ED_Free (ed);
@@ -246,31 +252,28 @@ setmodel(entity, model)
 void PF_setmodel (void)
 {
 	edict_t	*e;
-	char	*m, **check;
+	char	*m;
 	model_t	*mod;
 	int		i;
 
-	e = G_EDICT(OFS_PARM0);
-	m = G_STRING(OFS_PARM1);
+	e = G_EDICT (OFS_PARM0);
+	m = G_STRING (OFS_PARM1);
 
-// check to see if model was properly precached
-	for (i=0, check = sv.model_precache ; *check ; i++, check++)
-		if (!strcmp(*check, m))
-			break;
-			
-	if (!*check)
-		PR_RunError ("no precache: %s\n", m);
-		
+	// rewrote to use array indexing instead of a pointer
+	for (i = 0; sv.model_precache[i]; i++)
+	{
+		if (!sv.model_precache[i]) PR_RunError ("no precache: %s\n", m);
+		if (!strcmp (sv.model_precache[i], m)) break;
+	}
 
 	e->v.model = m - pr_strings;
-	e->v.modelindex = i; //SV_ModelIndex (m);
+	e->v.modelindex = i;
 
-	mod = sv.models[ (int)e->v.modelindex];  // Mod_ForName (m, true);
-	
+	mod = sv.models[(int)e->v.modelindex];
+
 	if (mod)
 		SetMinMaxSize (e, mod->mins, mod->maxs, true);
-	else
-		SetMinMaxSize (e, vec3_origin, vec3_origin, true);
+	else SetMinMaxSize (e, vec3_origin, vec3_origin, true);
 }
 
 /*
@@ -545,7 +548,7 @@ void PF_ambientsound (void)
 	for (i=0 ; i<3 ; i++)
 		MSG_WriteCoord(&sv.signon, pos[i]);
 
-	MSG_WriteByte (&sv.signon, soundnum);
+	SV_WriteByteShort2 (&sv.signon, soundnum, true);
 
 	MSG_WriteByte (&sv.signon, vol*255);
 	MSG_WriteByte (&sv.signon, attenuation*64);
@@ -574,7 +577,7 @@ void PF_sound (void)
 	edict_t		*entity;
 	int 		volume;
 	float attenuation;
-		
+
 	entity = G_EDICT(OFS_PARM0);
 	channel = G_FLOAT(OFS_PARM1);
 	sample = G_STRING(OFS_PARM2);
@@ -647,7 +650,6 @@ void PF_traceline (void)
 }
 
 
-#ifdef QUAKE2
 extern trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore);
 
 void PF_TraceToss (void)
@@ -674,7 +676,6 @@ void PF_TraceToss (void)
 	else
 		pr_global_struct->trace_ent = EDICT_TO_PROG(sv.edicts);
 }
-#endif
 
 
 /*
@@ -693,7 +694,7 @@ void PF_checkpos (void)
 
 //============================================================================
 
-byte	checkpvs[MAX_MAP_LEAFS/8];
+byte	checkpvs[(MAX_MAP_LEAFS + 7) / 8];
 
 int PF_newcheckclient (int check)
 {
@@ -740,7 +741,7 @@ int PF_newcheckclient (int check)
 	VectorAdd (ent->v.origin, ent->v.view_ofs, org);
 	leaf = Mod_PointInLeaf (org, sv.worldmodel);
 	pvs = Mod_LeafPVS (leaf, sv.worldmodel);
-	memcpy (checkpvs, pvs, (sv.worldmodel->numleafs+7)>>3 );
+	memcpy (checkpvs, pvs, (sv.worldmodel->bh->numleafs+7)>>3 );
 
 	return i;
 }
@@ -788,7 +789,7 @@ void PF_checkclient (void)
 	self = PROG_TO_EDICT(pr_global_struct->self);
 	VectorAdd (self->v.origin, self->v.view_ofs, view);
 	leaf = Mod_PointInLeaf (view, sv.worldmodel);
-	l = (leaf - sv.worldmodel->leafs) - 1;
+	l = (leaf - sv.worldmodel->bh->leafs) - 1;
 	if ( (l<0) || !(checkpvs[l>>3] & (1<<(l&7)) ) )
 	{
 c_notvis++;
@@ -818,12 +819,14 @@ void PF_stuffcmd (void)
 	int		entnum;
 	char	*str;
 	client_t	*old;
-	
-	entnum = G_EDICTNUM(OFS_PARM0);
+
+	entnum = G_EDICTNUM (OFS_PARM0);
+
 	if (entnum < 1 || entnum > svs.maxclients)
 		PR_RunError ("Parm 0 not a client");
-	str = G_STRING(OFS_PARM1);	
-	
+
+	str = G_STRING (OFS_PARM1);	
+
 	old = host_client;
 	host_client = &svs.clients[entnum-1];
 	Host_ClientCommands ("%s", str);
@@ -842,8 +845,11 @@ localcmd (string)
 void PF_localcmd (void)
 {
 	char	*str;
-	
-	str = G_STRING(OFS_PARM0);	
+
+	str = G_STRING(OFS_PARM0);
+
+	if (qc_snoop.value) Con_Printf ("QC Snoop: Execing cmd \"%s\"\n", str);
+
 	Cbuf_AddText (str);
 }
 
@@ -863,6 +869,7 @@ void PF_cvar (void)
 	G_FLOAT(OFS_RETURN) = Cvar_VariableValue (str);
 }
 
+
 /*
 =================
 PF_cvar_set
@@ -873,10 +880,12 @@ float cvar (string)
 void PF_cvar_set (void)
 {
 	char	*var, *val;
-	
+
 	var = G_STRING(OFS_PARM0);
 	val = G_STRING(OFS_PARM1);
-	
+
+	if (qc_snoop.value) Con_Printf ("QC Snoop: Setting cvar \"%s\" to \"%s\"\n", var, val);
+
 	Cvar_Set (var, val);
 }
 
@@ -929,21 +938,21 @@ PF_dprint
 */
 void PF_dprint (void)
 {
-	Con_DPrintf ("%s",PF_VarString(0));
+	Con_DPrintf ("%s", PF_VarString (0));
 }
 
-char	pr_string_temp[128];
 
 void PF_ftos (void)
 {
 	float	v;
-	v = G_FLOAT(OFS_PARM0);
-	
-	if (v == (int)v)
-		sprintf (pr_string_temp, "%d",(int)v);
+	v = G_FLOAT (OFS_PARM0);
+
+	if (v == (int) v)
+		sprintf (pr_string_temp, "%d", (int) v);
 	else
-		sprintf (pr_string_temp, "%5.1f",v);
-	G_INT(OFS_RETURN) = pr_string_temp - pr_strings;
+		sprintf (pr_string_temp, "%f", v);
+
+	G_INT (OFS_RETURN) = pr_string_temp - pr_strings;
 }
 
 void PF_fabs (void)
@@ -959,13 +968,11 @@ void PF_vtos (void)
 	G_INT(OFS_RETURN) = pr_string_temp - pr_strings;
 }
 
-#ifdef QUAKE2
 void PF_etos (void)
 {
 	sprintf (pr_string_temp, "entity %i", G_EDICTNUM(OFS_PARM0));
 	G_INT(OFS_RETURN) = pr_string_temp - pr_strings;
 }
-#endif
 
 void PF_Spawn (void)
 {
@@ -985,55 +992,6 @@ void PF_Remove (void)
 
 // entity (entity start, .string field, string match) find = #5;
 void PF_Find (void)
-#ifdef QUAKE2
-{
-	int		e;	
-	int		f;
-	char	*s, *t;
-	edict_t	*ed;
-	edict_t	*first;
-	edict_t	*second;
-	edict_t	*last;
-
-	first = second = last = (edict_t *)sv.edicts;
-	e = G_EDICTNUM(OFS_PARM0);
-	f = G_INT(OFS_PARM1);
-	s = G_STRING(OFS_PARM2);
-	if (!s)
-		PR_RunError ("PF_Find: bad search string");
-		
-	for (e++ ; e < sv.num_edicts ; e++)
-	{
-		ed = EDICT_NUM(e);
-		if (ed->free)
-			continue;
-		t = E_STRING(ed,f);
-		if (!t)
-			continue;
-		if (!strcmp(t,s))
-		{
-			if (first == (edict_t *)sv.edicts)
-				first = ed;
-			else if (second == (edict_t *)sv.edicts)
-				second = ed;
-			ed->v.chain = EDICT_TO_PROG(last);
-			last = ed;
-		}
-	}
-
-	if (first != last)
-	{
-		if (last != second)
-			first->v.chain = last->v.chain;
-		else
-			first->v.chain = EDICT_TO_PROG(last);
-		last->v.chain = EDICT_TO_PROG((edict_t *)sv.edicts);
-		if (second && second != last)
-			second->v.chain = EDICT_TO_PROG(last);
-	}
-	RETURN_EDICT(first);
-}
-#else
 {
 	int		e;	
 	int		f;
@@ -1043,9 +1001,10 @@ void PF_Find (void)
 	e = G_EDICTNUM(OFS_PARM0);
 	f = G_INT(OFS_PARM1);
 	s = G_STRING(OFS_PARM2);
+
 	if (!s)
 		PR_RunError ("PF_Find: bad search string");
-		
+
 	for (e++ ; e < sv.num_edicts ; e++)
 	{
 		ed = EDICT_NUM(e);
@@ -1063,7 +1022,7 @@ void PF_Find (void)
 
 	RETURN_EDICT(sv.edicts);
 }
-#endif
+
 
 void PR_CheckEmptyString (char *s)
 {
@@ -1113,7 +1072,7 @@ void PF_precache_model (void)
 	G_INT(OFS_RETURN) = G_INT(OFS_PARM0);
 	PR_CheckEmptyString (s);
 
-	for (i=0 ; i<MAX_MODELS ; i++)
+	for (i = 0; i < MAX_MODELS; i++)
 	{
 		if (!sv.model_precache[i])
 		{
@@ -1124,6 +1083,7 @@ void PF_precache_model (void)
 		if (!strcmp(sv.model_precache[i], s))
 			return;
 	}
+
 	PR_RunError ("PF_precache_model: overflow");
 }
 
@@ -1341,7 +1301,8 @@ Pick a vector for the player to shoot along
 vector aim(entity, missilespeed)
 =============
 */
-cvar_t	sv_aim = {"sv_aim", "0.93"};
+cvar_t	sv_aim ("sv_aim", "0.93");
+
 void PF_aim (void)
 {
 	edict_t	*ent, *check, *bestent;
@@ -1458,7 +1419,6 @@ void PF_changeyaw (void)
 	ent->v.angles[1] = anglemod (current + move);
 }
 
-#ifdef QUAKE2
 /*
 ==============
 PF_changepitch
@@ -1466,6 +1426,7 @@ PF_changepitch
 */
 void PF_changepitch (void)
 {
+#if 0
 	edict_t		*ent;
 	float		ideal, current, move, speed;
 	
@@ -1499,8 +1460,9 @@ void PF_changepitch (void)
 	}
 	
 	ent->v.angles[0] = anglemod (current + move);
-}
 #endif
+}
+
 
 /*
 ===============================================================================
@@ -1597,12 +1559,12 @@ void PF_makestatic (void)
 {
 	edict_t	*ent;
 	int		i;
-	
+
 	ent = G_EDICT(OFS_PARM0);
 
 	MSG_WriteByte (&sv.signon,svc_spawnstatic);
 
-	MSG_WriteByte (&sv.signon, SV_ModelIndex(pr_strings + ent->v.model));
+	SV_WriteByteShort (&sv.signon, SV_ModelIndex(pr_strings + ent->v.model));
 
 	MSG_WriteByte (&sv.signon, ent->v.frame);
 	MSG_WriteByte (&sv.signon, ent->v.colormap);
@@ -1649,36 +1611,19 @@ PF_changelevel
 */
 void PF_changelevel (void)
 {
-#ifdef QUAKE2
-	char	*s1, *s2;
-
-	if (svs.changelevel_issued)
-		return;
-	svs.changelevel_issued = true;
-
-	s1 = G_STRING(OFS_PARM0);
-	s2 = G_STRING(OFS_PARM1);
-
-	if ((int)pr_global_struct->serverflags & (SFL_NEW_UNIT | SFL_NEW_EPISODE))
-		Cbuf_AddText (va("changelevel %s %s\n",s1, s2));
-	else
-		Cbuf_AddText (va("changelevel2 %s %s\n",s1, s2));
-#else
 	char	*s;
 
-// make sure we don't issue two changelevels
-	if (svs.changelevel_issued)
-		return;
+	// make sure we don't issue two changelevels
+	if (svs.changelevel_issued) return;
 	svs.changelevel_issued = true;
-	
+
 	s = G_STRING(OFS_PARM0);
-	Cbuf_AddText (va("changelevel %s\n",s));
-#endif
+
+	Cbuf_AddText (va ("changelevel %s\n",s));
 }
 
 
 #ifdef QUAKE2
-
 #define	CONTENT_WATER	-3
 #define CONTENT_SLIME	-4
 #define CONTENT_LAVA	-5
@@ -1815,6 +1760,7 @@ void PF_WaterMove (void)
 
 	G_FLOAT(OFS_RETURN) = damage;
 }
+#endif
 
 
 void PF_sin (void)
@@ -1829,9 +1775,9 @@ void PF_cos (void)
 
 void PF_sqrt (void)
 {
-	G_FLOAT(OFS_RETURN) = sqrt(G_FLOAT(OFS_PARM0));
+	G_FLOAT (OFS_RETURN) = sqrt (G_FLOAT(OFS_PARM0));
 }
-#endif
+
 
 void PF_Fixme (void)
 {
@@ -1839,108 +1785,118 @@ void PF_Fixme (void)
 }
 
 
-
-builtin_t pr_builtin[] =
+void PF_CheckExtension (void)
 {
-PF_Fixme,
-PF_makevectors,	// void(entity e)	makevectors 		= #1;
-PF_setorigin,	// void(entity e, vector o) setorigin	= #2;
-PF_setmodel,	// void(entity e, string m) setmodel	= #3;
-PF_setsize,	// void(entity e, vector min, vector max) setsize = #4;
-PF_Fixme,	// void(entity e, vector min, vector max) setabssize = #5;
-PF_break,	// void() break						= #6;
-PF_random,	// float() random						= #7;
-PF_sound,	// void(entity e, float chan, string samp) sound = #8;
-PF_normalize,	// vector(vector v) normalize			= #9;
-PF_error,	// void(string e) error				= #10;
-PF_objerror,	// void(string e) objerror				= #11;
-PF_vlen,	// float(vector v) vlen				= #12;
-PF_vectoyaw,	// float(vector v) vectoyaw		= #13;
-PF_Spawn,	// entity() spawn						= #14;
-PF_Remove,	// void(entity e) remove				= #15;
-PF_traceline,	// float(vector v1, vector v2, float tryents) traceline = #16;
-PF_checkclient,	// entity() clientlist					= #17;
-PF_Find,	// entity(entity start, .string fld, string match) find = #18;
-PF_precache_sound,	// void(string s) precache_sound		= #19;
-PF_precache_model,	// void(string s) precache_model		= #20;
-PF_stuffcmd,	// void(entity client, string s)stuffcmd = #21;
-PF_findradius,	// entity(vector org, float rad) findradius = #22;
-PF_bprint,	// void(string s) bprint				= #23;
-PF_sprint,	// void(entity client, string s) sprint = #24;
-PF_dprint,	// void(string s) dprint				= #25;
-PF_ftos,	// void(string s) ftos				= #26;
-PF_vtos,	// void(string s) vtos				= #27;
-PF_coredump,
-PF_traceon,
-PF_traceoff,
-PF_eprint,	// void(entity e) debug print an entire entity
-PF_walkmove, // float(float yaw, float dist) walkmove
-PF_Fixme, // float(float yaw, float dist) walkmove
-PF_droptofloor,
-PF_lightstyle,
-PF_rint,
-PF_floor,
-PF_ceil,
-PF_Fixme,
-PF_checkbottom,
-PF_pointcontents,
-PF_Fixme,
-PF_fabs,
-PF_aim,
-PF_cvar,
-PF_localcmd,
-PF_nextent,
-PF_particle,
-PF_changeyaw,
-PF_Fixme,
-PF_vectoangles,
+	// darkplaces extension check
+	if (pr_checkextension.value)
+	{
+		// check in pr_extensions
+		char *ext = PF_VarString (0);
+	}
 
-PF_WriteByte,
-PF_WriteChar,
-PF_WriteShort,
-PF_WriteLong,
-PF_WriteCoord,
-PF_WriteAngle,
-PF_WriteString,
-PF_WriteEntity,
+	// unimplemented extension
+	G_FLOAT (OFS_RETURN) = 0;
+}
 
-#ifdef QUAKE2
-PF_sin,
-PF_cos,
-PF_sqrt,
-PF_changepitch,
-PF_TraceToss,
-PF_etos,
-PF_WaterMove,
-#else
-PF_Fixme,
-PF_Fixme,
-PF_Fixme,
-PF_Fixme,
-PF_Fixme,
-PF_Fixme,
-PF_Fixme,
-#endif
 
-SV_MoveToGoal,
-PF_precache_file,
-PF_makestatic,
+builtin_t *pr_builtins;
+int pr_numbuiltins;
 
-PF_changelevel,
-PF_Fixme,
+#define PR_MAX_BUILTINS  1000
 
-PF_cvar_set,
-PF_centerprint,
+void PR_InitBuiltIns (void)
+{
+	pr_builtins = (builtin_t *) Heap_QMalloc (sizeof (builtin_t) * PR_MAX_BUILTINS);
 
-PF_ambientsound,
+	// set all builtins to unimplemented
+	for (int i = 0; i < PR_MAX_BUILTINS; i++)
+		pr_builtins[i] = PF_Fixme;
 
-PF_precache_model,
-PF_precache_sound,		// precache_sound2 is different only for qcc
-PF_precache_file,
+	// setup used builtins
+	pr_builtins[1] = PF_makevectors;
+	pr_builtins[2] = PF_setorigin;
+	pr_builtins[3] = PF_setmodel;
+	pr_builtins[4] = PF_setsize;
+	pr_builtins[6] = PF_break;
+	pr_builtins[7] = PF_random;
+	pr_builtins[8] = PF_sound;
+	pr_builtins[9] = PF_normalize;
+	pr_builtins[10] = PF_error;
+	pr_builtins[11] = PF_objerror;
+	pr_builtins[12] = PF_vlen;
+	pr_builtins[13] = PF_vectoyaw;
+	pr_builtins[14] = PF_Spawn;
+	pr_builtins[15] = PF_Remove;
+	pr_builtins[16] = PF_traceline;
+	pr_builtins[17] = PF_checkclient;
+	pr_builtins[18] = PF_Find;
+	pr_builtins[19] = PF_precache_sound;
+	pr_builtins[20] = PF_precache_model;
+	pr_builtins[21] = PF_stuffcmd;
+	pr_builtins[22] = PF_findradius;
+	pr_builtins[23] = PF_bprint;
+	pr_builtins[24] = PF_sprint;
+	pr_builtins[25] = PF_dprint;
+	pr_builtins[26] = PF_ftos;
+	pr_builtins[27] = PF_vtos;
+	pr_builtins[28] = PF_coredump;
+	pr_builtins[29] = PF_traceon;
+	pr_builtins[30] = PF_traceoff;
+	pr_builtins[31] = PF_eprint;
+	pr_builtins[32] = PF_walkmove;
+	pr_builtins[34] = PF_droptofloor;
+	pr_builtins[35] = PF_lightstyle;
+	pr_builtins[36] = PF_rint;
+	pr_builtins[37] = PF_floor;
+	pr_builtins[38] = PF_ceil;
+	pr_builtins[40] = PF_checkbottom;
+	pr_builtins[41] = PF_pointcontents;
+	pr_builtins[43] = PF_fabs;
+	pr_builtins[44] = PF_aim;
+	pr_builtins[45] = PF_cvar;
+	pr_builtins[46] = PF_localcmd;
+	pr_builtins[47] = PF_nextent;
+	pr_builtins[48] = PF_particle;
+	pr_builtins[49] = PF_changeyaw;
+	pr_builtins[51] = PF_vectoangles;
+	pr_builtins[52] = PF_WriteByte;
+	pr_builtins[53] = PF_WriteChar;
+	pr_builtins[54] = PF_WriteShort;
+	pr_builtins[55] = PF_WriteLong;
+	pr_builtins[56] = PF_WriteCoord;
+	pr_builtins[57] = PF_WriteAngle;
+	pr_builtins[58] = PF_WriteString;
+	pr_builtins[59] = PF_WriteEntity;
+	pr_builtins[60] = PF_sin;
+	pr_builtins[61] = PF_cos;
+	pr_builtins[62] = PF_sqrt;
+	pr_builtins[63] = PF_changepitch;
+	pr_builtins[64] = PF_TraceToss;
+	pr_builtins[65] = PF_etos;
+	pr_builtins[67] = SV_MoveToGoal;
+	pr_builtins[68] = PF_precache_file;
+	pr_builtins[69] = PF_makestatic;
+	pr_builtins[70] = PF_changelevel;
+	pr_builtins[72] = PF_cvar_set;
+	pr_builtins[73] = PF_centerprint;
+	pr_builtins[74] = PF_ambientsound;
+	pr_builtins[75] = PF_precache_model;
+	pr_builtins[76] = PF_precache_sound;
+	pr_builtins[77] = PF_precache_file;
+	pr_builtins[78] = PF_setspawnparms;
+	pr_builtins[99] = PF_CheckExtension;
 
-PF_setspawnparms
-};
+	// count number of implemented builtins
+	for (int i = 0; i < PR_MAX_BUILTINS; i++)
+	{
+		if (pr_builtins[i] == PF_Fixme) continue;
 
-builtin_t *pr_builtins = pr_builtin;
-int pr_numbuiltins = sizeof(pr_builtin)/sizeof(pr_builtin[0]);
+		// last builtin that's not a fixme
+		pr_numbuiltins = i;
+	}
+
+	// add 1 cos it's 0-based
+	pr_numbuiltins++;
+}
+
 

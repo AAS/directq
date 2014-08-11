@@ -1,110 +1,186 @@
 <?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.10"
+	Version="9.00"
 	Name="DirectQ"
 	ProjectGUID="{AE4C00CC-F232-4917-89D7-5D78E6DF6AEB}"
-	Keyword="Win32Proj">
+	Keyword="Win32Proj"
+	TargetFrameworkVersion="131072"
+	>
 	<Platforms>
 		<Platform
-			Name="Win32"/>
+			Name="Win32"
+		/>
 	</Platforms>
+	<ToolFiles>
+	</ToolFiles>
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
 			OutputDirectory="Debug"
 			IntermediateDirectory="Debug"
 			ConfigurationType="1"
-			CharacterSet="2">
+			CharacterSet="2"
+			EnableManagedIncrementalBuild="0"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				UseUnicodeResponseFiles="false"
 				Optimization="0"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;GLQUAKE"
-				MinimalRebuild="TRUE"
 				BasicRuntimeChecks="3"
-				RuntimeLibrary="5"
+				RuntimeLibrary="1"
+				BufferSecurityCheck="false"
+				TreatWChar_tAsBuiltInType="false"
+				RuntimeTypeInfo="false"
 				UsePrecompiledHeader="0"
 				WarningLevel="1"
-				Detect64BitPortabilityProblems="TRUE"
-				DebugInformationFormat="4"/>
+				DebugInformationFormat="3"
+			/>
 			<Tool
-				Name="VCCustomBuildTool"/>
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib d3d9.lib d3dx9.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
-				LinkIncremental="2"
-				GenerateDebugInformation="TRUE"
+				LinkIncremental="1"
+				EnableUAC="false"
+				UACExecutionLevel="2"
+				IgnoreDefaultLibraryNames=""
+				GenerateDebugInformation="true"
 				ProgramDatabaseFile="$(OutDir)/DirectQ.pdb"
 				SubSystem="2"
-				TargetMachine="1"/>
+				LargeAddressAware="1"
+				TerminalServerAware="1"
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="1"
+				TargetMachine="1"
+			/>
 			<Tool
-				Name="VCMIDLTool"/>
+				Name="VCALinkTool"
+			/>
 			<Tool
-				Name="VCPostBuildEventTool"/>
+				Name="VCManifestTool"
+			/>
 			<Tool
-				Name="VCPreBuildEventTool"/>
+				Name="VCXDCMakeTool"
+			/>
 			<Tool
-				Name="VCPreLinkEventTool"/>
+				Name="VCBscMakeTool"
+			/>
 			<Tool
-				Name="VCResourceCompilerTool"/>
+				Name="VCFxCopTool"
+			/>
 			<Tool
-				Name="VCWebServiceProxyGeneratorTool"/>
+				Name="VCAppVerifierTool"
+			/>
 			<Tool
-				Name="VCXMLDataGeneratorTool"/>
-			<Tool
-				Name="VCWebDeploymentTool"/>
-			<Tool
-				Name="VCManagedWrapperGeneratorTool"/>
-			<Tool
-				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
+				Name="VCPostBuildEventTool"
+			/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
 			OutputDirectory="Release"
 			IntermediateDirectory="Release"
 			ConfigurationType="1"
-			CharacterSet="2">
+			CharacterSet="2"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				UseUnicodeResponseFiles="false"
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;GLQUAKE"
-				RuntimeLibrary="4"
+				RuntimeLibrary="0"
+				BufferSecurityCheck="false"
+				TreatWChar_tAsBuiltInType="false"
+				RuntimeTypeInfo="false"
 				UsePrecompiledHeader="0"
 				WarningLevel="1"
-				Detect64BitPortabilityProblems="TRUE"
-				DebugInformationFormat="3"/>
+				Detect64BitPortabilityProblems="true"
+				DebugInformationFormat="3"
+			/>
 			<Tool
-				Name="VCCustomBuildTool"/>
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib d3d9.lib d3dx9.lib odbc32.lib odbccp32.lib"
-				OutputFile="C:\Quake\DirectQ.exe"
+				OutputFile="c:\quake\directq.exe"
 				LinkIncremental="1"
-				GenerateDebugInformation="TRUE"
+				EnableUAC="false"
+				UACExecutionLevel="2"
 				SubSystem="2"
+				LargeAddressAware="1"
+				TerminalServerAware="1"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
-				TargetMachine="1"/>
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="1"
+				TargetMachine="1"
+			/>
 			<Tool
-				Name="VCMIDLTool"/>
+				Name="VCALinkTool"
+			/>
 			<Tool
-				Name="VCPostBuildEventTool"/>
+				Name="VCManifestTool"
+			/>
 			<Tool
-				Name="VCPreBuildEventTool"/>
+				Name="VCXDCMakeTool"
+			/>
 			<Tool
-				Name="VCPreLinkEventTool"/>
+				Name="VCBscMakeTool"
+			/>
 			<Tool
-				Name="VCResourceCompilerTool"/>
+				Name="VCFxCopTool"
+			/>
 			<Tool
-				Name="VCWebServiceProxyGeneratorTool"/>
+				Name="VCAppVerifierTool"
+			/>
 			<Tool
-				Name="VCXMLDataGeneratorTool"/>
-			<Tool
-				Name="VCWebDeploymentTool"/>
-			<Tool
-				Name="VCManagedWrapperGeneratorTool"/>
-			<Tool
-				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
+				Name="VCPostBuildEventTool"
+			/>
 		</Configuration>
 	</Configurations>
 	<References>
@@ -113,343 +189,463 @@
 		<Filter
 			Name="Source Files"
 			Filter="cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx"
-			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}">
+			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
+			>
 			<File
-				RelativePath=".\cd_win.cpp">
+				RelativePath=".\cd_win.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\chase.cpp">
+				RelativePath=".\chase.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\cl_demo.cpp">
+				RelativePath=".\cl_demo.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\cl_input.cpp">
+				RelativePath=".\cl_input.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\cl_main.cpp">
+				RelativePath=".\cl_main.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\cl_parse.cpp">
+				RelativePath=".\cl_parse.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\cl_tent.cpp">
+				RelativePath=".\cl_tent.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\cmd.cpp">
+				RelativePath=".\cmd.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\common.cpp">
+				RelativePath=".\common.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\conproc.cpp">
+				RelativePath=".\console.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\console.cpp">
+				RelativePath=".\crc.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\crc.cpp">
+				RelativePath=".\cvar.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\cvar.cpp">
+				RelativePath=".\d3d_alias.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_draw.cpp">
+				RelativePath=".\d3d_brush.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_mesh.cpp">
+				RelativePath=".\d3d_draw.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_model.cpp">
+				RelativePath=".\d3d_hlsl.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_refrag.cpp">
+				RelativePath=".\d3d_model.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_rlight.cpp">
+				RelativePath=".\d3d_rlight.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_rmain.cpp">
+				RelativePath=".\d3d_rmain.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_rmisc.cpp">
+				RelativePath=".\d3d_rmisc.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_rpart.cpp">
+				RelativePath=".\d3d_rpart.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_rsurf.cpp">
+				RelativePath=".\d3d_rsurf.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_screen.cpp">
+				RelativePath=".\d3d_screen.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_sprite.cpp">
+				RelativePath=".\d3d_sprite.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_state.cpp">
+				RelativePath=".\d3d_state.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_texture.cpp">
+				RelativePath=".\d3d_texture.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_vidnt.cpp">
+				RelativePath=".\d3d_vidnt.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_warp.cpp">
+				RelativePath=".\d3d_warp.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\host.cpp">
+				RelativePath=".\dshow_mp3.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\host_cmd.cpp">
+				RelativePath=".\heap.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\in_win.cpp">
+				RelativePath=".\host.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\keys.cpp">
+				RelativePath=".\host_cmd.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\mathlib.cpp">
+				RelativePath=".\hud.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\menu.cpp">
+				RelativePath=".\in_win.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\net_dgrm.cpp">
+				RelativePath=".\keys.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\net_loop.cpp">
+				RelativePath=".\mathlib.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\net_main.cpp">
+				RelativePath=".\menu_common.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\net_vcr.cpp">
+				RelativePath=".\menu_multiplayer.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\net_win.cpp">
+				RelativePath=".\menu_other.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\net_wins.cpp">
+				RelativePath=".\menu_singleplayer.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\net_wipx.cpp">
+				RelativePath=".\net_dgrm.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\pr_cmds.cpp">
+				RelativePath=".\net_loop.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\pr_edict.cpp">
+				RelativePath=".\net_main.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\pr_exec.cpp">
+				RelativePath=".\net_vcr.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\sbar.cpp">
+				RelativePath=".\net_win.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\snd_dma.cpp">
+				RelativePath=".\net_wins.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\snd_mem.cpp">
+				RelativePath=".\pr_cmds.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\snd_mix.cpp">
+				RelativePath=".\pr_edict.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\snd_win.cpp">
+				RelativePath=".\pr_exec.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\splash.cpp">
+				RelativePath=".\snd_dma.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\sv_main.cpp">
+				RelativePath=".\snd_mem.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\sv_move.cpp">
+				RelativePath=".\snd_mix.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\sv_phys.cpp">
+				RelativePath=".\snd_win.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\sv_user.cpp">
+				RelativePath=".\splash.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\sys_win.cpp">
+				RelativePath=".\sv_main.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\view.cpp">
+				RelativePath=".\sv_move.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\wad.cpp">
+				RelativePath=".\sv_phys.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\world.cpp">
+				RelativePath=".\sv_user.cpp"
+				>
 			</File>
 			<File
-				RelativePath=".\zone.cpp">
+				RelativePath=".\sys_win.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\trace.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\view.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\wad.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\world.cpp"
+				>
 			</File>
 		</Filter>
 		<Filter
 			Name="Header Files"
 			Filter="h;hpp;hxx;hm;inl;inc;xsd"
-			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}">
+			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
+			>
 			<File
-				RelativePath=".\anorm_dots.h">
+				RelativePath=".\anorm_dots.h"
+				>
 			</File>
 			<File
-				RelativePath=".\anorms.h">
+				RelativePath=".\anorms.h"
+				>
 			</File>
 			<File
-				RelativePath=".\bspfile.h">
+				RelativePath=".\bspfile.h"
+				>
 			</File>
 			<File
-				RelativePath=".\cdaudio.h">
+				RelativePath=".\cdaudio.h"
+				>
 			</File>
 			<File
-				RelativePath=".\client.h">
+				RelativePath=".\client.h"
+				>
 			</File>
 			<File
-				RelativePath=".\cmd.h">
+				RelativePath=".\cmd.h"
+				>
 			</File>
 			<File
-				RelativePath=".\common.h">
+				RelativePath=".\common.h"
+				>
 			</File>
 			<File
-				RelativePath=".\conproc.h">
+				RelativePath=".\console.h"
+				>
 			</File>
 			<File
-				RelativePath=".\console.h">
+				RelativePath=".\crc.h"
+				>
 			</File>
 			<File
-				RelativePath=".\crc.h">
+				RelativePath=".\cvar.h"
+				>
 			</File>
 			<File
-				RelativePath=".\cvar.h">
+				RelativePath=".\d3d_hlsl.h"
+				>
 			</File>
 			<File
-				RelativePath=".\d3d_quake.h">
+				RelativePath=".\d3d_quake.h"
+				>
 			</File>
 			<File
-				RelativePath=".\dosisms.h">
+				RelativePath=".\dosisms.h"
+				>
 			</File>
 			<File
-				RelativePath=".\draw.h">
+				RelativePath=".\draw.h"
+				>
 			</File>
 			<File
-				RelativePath=".\gl_model.h">
+				RelativePath=".\dshow_mp3.h"
+				>
 			</File>
 			<File
-				RelativePath=".\gl_warp_sin.h">
+				RelativePath=".\gl_model.h"
+				>
 			</File>
 			<File
-				RelativePath=".\glquake.h">
+				RelativePath=".\glquake.h"
+				>
 			</File>
 			<File
-				RelativePath=".\input.h">
+				RelativePath=".\heap.h"
+				>
 			</File>
 			<File
-				RelativePath=".\keys.h">
+				RelativePath=".\hud.h"
+				>
 			</File>
 			<File
-				RelativePath=".\mathlib.h">
+				RelativePath=".\input.h"
+				>
 			</File>
 			<File
-				RelativePath=".\menu.h">
+				RelativePath=".\keys.h"
+				>
 			</File>
 			<File
-				RelativePath=".\modelgen.h">
+				RelativePath=".\mathlib.h"
+				>
 			</File>
 			<File
-				RelativePath=".\net.h">
+				RelativePath=".\menu_common.h"
+				>
 			</File>
 			<File
-				RelativePath=".\net_dgrm.h">
+				RelativePath=".\modelgen.h"
+				>
 			</File>
 			<File
-				RelativePath=".\net_loop.h">
+				RelativePath=".\net.h"
+				>
 			</File>
 			<File
-				RelativePath=".\net_ser.h">
+				RelativePath=".\net_dgrm.h"
+				>
 			</File>
 			<File
-				RelativePath=".\net_vcr.h">
+				RelativePath=".\net_loop.h"
+				>
 			</File>
 			<File
-				RelativePath=".\net_wins.h">
+				RelativePath=".\net_ser.h"
+				>
 			</File>
 			<File
-				RelativePath=".\net_wipx.h">
+				RelativePath=".\net_vcr.h"
+				>
 			</File>
 			<File
-				RelativePath=".\pr_comp.h">
+				RelativePath=".\net_wins.h"
+				>
 			</File>
 			<File
-				RelativePath=".\progdefs.h">
+				RelativePath=".\pr_comp.h"
+				>
 			</File>
 			<File
-				RelativePath=".\progs.h">
+				RelativePath=".\progdefs.h"
+				>
 			</File>
 			<File
-				RelativePath=".\protocol.h">
+				RelativePath=".\progs.h"
+				>
 			</File>
 			<File
-				RelativePath=".\quakedef.h">
+				RelativePath=".\protocol.h"
+				>
 			</File>
 			<File
-				RelativePath=".\render.h">
+				RelativePath=".\quakedef.h"
+				>
 			</File>
 			<File
-				RelativePath=".\resource.h">
+				RelativePath=".\render.h"
+				>
 			</File>
 			<File
-				RelativePath=".\sbar.h">
+				RelativePath=".\resource.h"
+				>
 			</File>
 			<File
-				RelativePath=".\screen.h">
+				RelativePath=".\screen.h"
+				>
 			</File>
 			<File
-				RelativePath=".\server.h">
+				RelativePath=".\server.h"
+				>
 			</File>
 			<File
-				RelativePath=".\sound.h">
+				RelativePath=".\sound.h"
+				>
 			</File>
 			<File
-				RelativePath=".\spritegn.h">
+				RelativePath=".\spritegn.h"
+				>
 			</File>
 			<File
-				RelativePath=".\sys.h">
+				RelativePath=".\sys.h"
+				>
 			</File>
 			<File
-				RelativePath=".\vid.h">
+				RelativePath=".\vid.h"
+				>
 			</File>
 			<File
-				RelativePath=".\view.h">
+				RelativePath=".\view.h"
+				>
 			</File>
 			<File
-				RelativePath=".\wad.h">
+				RelativePath=".\wad.h"
+				>
 			</File>
 			<File
-				RelativePath=".\winquake.h">
+				RelativePath=".\winquake.h"
+				>
 			</File>
 			<File
-				RelativePath=".\world.h">
-			</File>
-			<File
-				RelativePath=".\zone.h">
+				RelativePath=".\world.h"
+				>
 			</File>
 		</Filter>
 		<Filter
 			Name="Resource Files"
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx"
-			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}">
+			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
+			>
 			<File
-				RelativePath=".\D3DQuake.ICO">
-			</File>
-			<File
-				RelativePath=".\D3DQuake.rc">
+				RelativePath=".\DirectQ.rc"
+				>
 			</File>
 		</Filter>
 	</Files>

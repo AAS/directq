@@ -57,7 +57,7 @@ unsigned long inet_addr(const char *cp);
 
 // these two macros are to make the code more readable
 #define sfunc	net_landrivers[sock->landriver]
-#define dfunc	net_landrivers[net_landriverlevel]
+#define net_DriverFunc	net_landrivers[net_landriverlevel]
 
 static int net_landriverlevel;
 
@@ -78,10 +78,8 @@ struct
 	byte			data[MAX_DATAGRAM];
 } packetBuffer;
 
-
 void NET_MenuReturn (void);
 
-extern bool m_return_onerror;
 extern char m_return_reason[32];
 
 
@@ -179,14 +177,14 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	Q_memcpy(sock->sendMessage, data->data, data->cursize);
 	sock->sendMessageLength = data->cursize;
 
-	if (data->cursize <= MAX_DATAGRAM)
+	if (data->cursize <= MAX_DATAGRAM2)
 	{
 		dataLen = data->cursize;
 		eom = NETFLAG_EOM;
 	}
 	else
 	{
-		dataLen = MAX_DATAGRAM;
+		dataLen = MAX_DATAGRAM2;
 		eom = 0;
 	}
 	packetLen = NET_HEADERSIZE + dataLen;
@@ -212,14 +210,14 @@ int SendMessageNext (qsocket_t *sock)
 	unsigned int	dataLen;
 	unsigned int	eom;
 
-	if (sock->sendMessageLength <= MAX_DATAGRAM)
+	if (sock->sendMessageLength <= MAX_DATAGRAM2)
 	{
 		dataLen = sock->sendMessageLength;
 		eom = NETFLAG_EOM;
 	}
 	else
 	{
-		dataLen = MAX_DATAGRAM;
+		dataLen = MAX_DATAGRAM2;
 		eom = 0;
 	}
 	packetLen = NET_HEADERSIZE + dataLen;
@@ -245,14 +243,14 @@ int ReSendMessage (qsocket_t *sock)
 	unsigned int	dataLen;
 	unsigned int	eom;
 
-	if (sock->sendMessageLength <= MAX_DATAGRAM)
+	if (sock->sendMessageLength <= MAX_DATAGRAM2)
 	{
 		dataLen = sock->sendMessageLength;
 		eom = NETFLAG_EOM;
 	}
 	else
 	{
-		dataLen = MAX_DATAGRAM;
+		dataLen = MAX_DATAGRAM2;
 		eom = 0;
 	}
 	packetLen = NET_HEADERSIZE + dataLen;
@@ -295,7 +293,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	if (data->cursize == 0)
 		Sys_Error("Datagram_SendUnreliableMessage: zero length message\n");
 
-	if (data->cursize > MAX_DATAGRAM)
+	if (data->cursize > MAX_DATAGRAM2)
 		Sys_Error("Datagram_SendUnreliableMessage: message too big %u\n", data->cursize);
 #endif
 
@@ -362,6 +360,14 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		flags = length & (~NETFLAG_LENGTH_MASK);
 		length &= NETFLAG_LENGTH_MASK;
 
+		// ProQuake extra protection
+		if (length > NET_DATAGRAMSIZE)
+		{
+			Con_Printf ("\002Datagram_GetMessage: ");
+			Con_Printf ("excessive datagram length (%d, max = %d)\n", length, NET_DATAGRAMSIZE);
+			return -1;
+		}
+
 		if (flags & NETFLAG_CTL)
 			continue;
 
@@ -411,10 +417,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				Con_DPrintf("Duplicate ACK received\n");
 				continue;
 			}
-			sock->sendMessageLength -= MAX_DATAGRAM;
+			sock->sendMessageLength -= MAX_DATAGRAM2;
 			if (sock->sendMessageLength > 0)
 			{
-				Q_memcpy(sock->sendMessage, sock->sendMessage+MAX_DATAGRAM, sock->sendMessageLength);
+				Q_memcpy(sock->sendMessage, sock->sendMessage+MAX_DATAGRAM2, sock->sendMessageLength);
 				sock->sendNext = true;
 			}
 			else
@@ -517,11 +523,10 @@ static int		testPollCount;
 static int		testDriver;
 static int		testSocket;
 
-static void Test_Poll (void *soak);
+static void Test_Poll(void *);
 PollProcedure	testPollProcedure = {NULL, 0.0, Test_Poll};
 
-// needs a dummy void* to conform to PollProcedure def
-static void Test_Poll (void *soak)
+static void Test_Poll(void *junk)
 {
 	struct qsockaddr clientaddr;
 	int		control;
@@ -537,7 +542,7 @@ static void Test_Poll (void *soak)
 
 	while (1)
 	{
-		len = dfunc.Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
+		len = net_DriverFunc.Read (testSocket, net_message.data, net_message.maxsize, &clientaddr);
 		if (len < sizeof(int))
 			break;
 
@@ -573,7 +578,7 @@ static void Test_Poll (void *soak)
 	}
 	else
 	{
-		dfunc.CloseSocket(testSocket);
+		net_DriverFunc.CloseSocket(testSocket);
 		testInProgress = false;
 	}
 }
@@ -612,14 +617,14 @@ static void Test_f (void)
 			continue;
 
 		// see if we can resolve the host name
-		if (dfunc.GetAddrFromName(host, &sendaddr) != -1)
+		if (net_DriverFunc.GetAddrFromName(host, &sendaddr) != -1)
 			break;
 	}
 	if (net_landriverlevel == net_numlandrivers)
 		return;
 
 JustDoIt:
-	testSocket = dfunc.OpenSocket(0);
+	testSocket = net_DriverFunc.OpenSocket(0);
 	if (testSocket == -1)
 		return;
 
@@ -635,7 +640,7 @@ JustDoIt:
 		MSG_WriteByte(&net_message, CCREQ_PLAYER_INFO);
 		MSG_WriteByte(&net_message, n);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | 	(net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
+		net_DriverFunc.Write (testSocket, net_message.data, net_message.cursize, &sendaddr);
 	}
 	SZ_Clear(&net_message);
 	SchedulePollProcedure(&testPollProcedure, 0.1);
@@ -646,10 +651,10 @@ static bool test2InProgress = false;
 static int		test2Driver;
 static int		test2Socket;
 
-static void Test2_Poll (void *soak);
+static void Test2_Poll(void *);
 PollProcedure	test2PollProcedure = {NULL, 0.0, Test2_Poll};
 
-static void Test2_Poll (void *soak)
+static void Test2_Poll(void *junk)
 {
 	struct qsockaddr clientaddr;
 	int		control;
@@ -660,7 +665,7 @@ static void Test2_Poll (void *soak)
 	net_landriverlevel = test2Driver;
 	name[0] = 0;
 
-	len = dfunc.Read (test2Socket, net_message.data, net_message.maxsize, &clientaddr);
+	len = net_DriverFunc.Read (test2Socket, net_message.data, net_message.maxsize, &clientaddr);
 	if (len < sizeof(int))
 		goto Reschedule;
 
@@ -692,7 +697,7 @@ static void Test2_Poll (void *soak)
 	MSG_WriteByte(&net_message, CCREQ_RULE_INFO);
 	MSG_WriteString(&net_message, name);
 	*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (test2Socket, net_message.data, net_message.cursize, &clientaddr);
+	net_DriverFunc.Write (test2Socket, net_message.data, net_message.cursize, &clientaddr);
 	SZ_Clear(&net_message);
 
 Reschedule:
@@ -702,7 +707,7 @@ Reschedule:
 Error:
 	Con_Printf("Unexpected repsonse to Rule Info request\n");
 Done:
-	dfunc.CloseSocket(test2Socket);
+	net_DriverFunc.CloseSocket(test2Socket);
 	test2InProgress = false;
 	return;
 }
@@ -739,14 +744,14 @@ static void Test2_f (void)
 			continue;
 
 		// see if we can resolve the host name
-		if (dfunc.GetAddrFromName(host, &sendaddr) != -1)
+		if (net_DriverFunc.GetAddrFromName(host, &sendaddr) != -1)
 			break;
 	}
 	if (net_landriverlevel == net_numlandrivers)
 		return;
 
 JustDoIt:
-	test2Socket = dfunc.OpenSocket(0);
+	test2Socket = net_DriverFunc.OpenSocket(0);
 	if (test2Socket == -1)
 		return;
 
@@ -759,11 +764,18 @@ JustDoIt:
 	MSG_WriteByte(&net_message, CCREQ_RULE_INFO);
 	MSG_WriteString(&net_message, "");
 	*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (test2Socket, net_message.data, net_message.cursize, &sendaddr);
+	net_DriverFunc.Write (test2Socket, net_message.data, net_message.cursize, &sendaddr);
 	SZ_Clear(&net_message);
 	SchedulePollProcedure(&test2PollProcedure, 0.05);
 }
 
+
+cmd_t NET_Stats_Cmd ("net_stats", NET_Stats_f);
+#ifdef BAN_TEST
+cmd_t NET_Ban_Cmd ("ban", NET_Ban_f);
+#endif
+cmd_t Test_Cmd ("test", Test_f);
+cmd_t Test2_Cmd ("test2", Test2_f);
 
 int Datagram_Init (void)
 {
@@ -771,25 +783,18 @@ int Datagram_Init (void)
 	int csock;
 
 	myDriverLevel = net_driverlevel;
-	Cmd_AddCommand ("net_stats", NET_Stats_f);
 
 	if (COM_CheckParm("-nolan"))
 		return -1;
 
 	for (i = 0; i < net_numlandrivers; i++)
-		{
+	{
 		csock = net_landrivers[i].Init ();
 		if (csock == -1)
 			continue;
 		net_landrivers[i].initialized = true;
 		net_landrivers[i].controlSock = csock;
-		}
-
-#ifdef BAN_TEST
-	Cmd_AddCommand ("ban", NET_Ban_f);
-#endif
-	Cmd_AddCommand ("test", Test_f);
-	Cmd_AddCommand ("test2", Test2_f);
+	}
 
 	return 0;
 }
@@ -828,6 +833,19 @@ void Datagram_Listen (bool state)
 			net_landrivers[i].Listen (state);
 }
 
+// ProQuake: this code appears multiple times, so factor it out
+static qsocket_t *Datagram_Reject (char *message, int acceptsock, struct qsockaddr *addr)
+{
+	SZ_Clear (&net_message);
+	// save space for the header, filled in later
+	MSG_WriteLong (&net_message, 0);
+	MSG_WriteByte (&net_message, CCREP_REJECT);
+	MSG_WriteString (&net_message, message);
+	*((int *)net_message.data) = BigLong (NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
+	net_DriverFunc.Write (acceptsock, net_message.data, net_message.cursize, addr);
+	SZ_Clear (&net_message);
+	return NULL;
+}
 
 static qsocket_t *_Datagram_CheckNewConnections (void)
 {
@@ -842,13 +860,13 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	int			control;
 	int			ret;
 
-	acceptsock = dfunc.CheckNewConnections();
+	acceptsock = net_DriverFunc.CheckNewConnections();
 	if (acceptsock == -1)
 		return NULL;
 
 	SZ_Clear(&net_message);
 
-	len = dfunc.Read (acceptsock, net_message.data, net_message.maxsize, &clientaddr);
+	len = net_DriverFunc.Read (acceptsock, net_message.data, net_message.maxsize, &clientaddr);
 	if (len < sizeof(int))
 		return NULL;
 	net_message.cursize = len;
@@ -873,15 +891,15 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		// save space for the header, filled in later
 		MSG_WriteLong(&net_message, 0);
 		MSG_WriteByte(&net_message, CCREP_SERVER_INFO);
-		dfunc.GetSocketAddr(acceptsock, &newaddr);
-		MSG_WriteString(&net_message, dfunc.AddrToString(&newaddr));
+		net_DriverFunc.GetSocketAddr(acceptsock, &newaddr);
+		MSG_WriteString(&net_message, net_DriverFunc.AddrToString(&newaddr));
 		MSG_WriteString(&net_message, hostname.string);
 		MSG_WriteString(&net_message, sv.name);
 		MSG_WriteByte(&net_message, net_activeconnections);
 		MSG_WriteByte(&net_message, svs.maxclients);
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		net_DriverFunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 		SZ_Clear(&net_message);
 		return NULL;
 	}
@@ -918,7 +936,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteLong(&net_message, (int)(net_time - client->netconnection->connecttime));
 		MSG_WriteString(&net_message, client->netconnection->address);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		net_DriverFunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 		SZ_Clear(&net_message);
 
 		return NULL;
@@ -944,7 +962,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		// search for the next server cvar
 		while (var)
 		{
-			if (var->server)
+			if (var->usage & CVAR_SERVER)
 				break;
 			var = var->next;
 		}
@@ -961,7 +979,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 			MSG_WriteString(&net_message, var->string);
 		}
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		net_DriverFunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 		SZ_Clear(&net_message);
 
 		return NULL;
@@ -974,17 +992,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		return NULL;
 
 	if (MSG_ReadByte() != NET_PROTOCOL_VERSION)
-	{
-		SZ_Clear(&net_message);
-		// save space for the header, filled in later
-		MSG_WriteLong(&net_message, 0);
-		MSG_WriteByte(&net_message, CCREP_REJECT);
-		MSG_WriteString(&net_message, "Incompatible version.\n");
-		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		SZ_Clear(&net_message);
-		return NULL;
-	}
+		return Datagram_Reject ("Incompatible version.\n", acceptsock, &clientaddr);
 
 #ifdef BAN_TEST
 	// check for a ban
@@ -993,17 +1001,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		unsigned long testAddr;
 		testAddr = ((struct sockaddr_in *)&clientaddr)->sin_addr.s_addr;
 		if ((testAddr & banMask) == banAddr)
-		{
-			SZ_Clear(&net_message);
-			// save space for the header, filled in later
-			MSG_WriteLong(&net_message, 0);
-			MSG_WriteByte(&net_message, CCREP_REJECT);
-			MSG_WriteString(&net_message, "You have been banned.\n");
-			*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-			dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-			SZ_Clear(&net_message);
-			return NULL;
-		}
+			return Datagram_Reject ("You have been banned.\n", acceptsock, &clientaddr);
 	}
 #endif
 
@@ -1012,7 +1010,7 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	{
 		if (s->driver != net_driverlevel)
 			continue;
-		ret = dfunc.AddrCompare(&clientaddr, &s->addr);
+		ret = net_DriverFunc.AddrCompare(&clientaddr, &s->addr);
 		if (ret >= 0)
 		{
 			// is this a duplicate connection reqeust?
@@ -1023,38 +1021,29 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 				// save space for the header, filled in later
 				MSG_WriteLong(&net_message, 0);
 				MSG_WriteByte(&net_message, CCREP_ACCEPT);
-				dfunc.GetSocketAddr(s->socket, &newaddr);
-				MSG_WriteLong(&net_message, dfunc.GetSocketPort(&newaddr));
+				net_DriverFunc.GetSocketAddr(s->socket, &newaddr);
+				MSG_WriteLong(&net_message, net_DriverFunc.GetSocketPort(&newaddr));
 				*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-				dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+				net_DriverFunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 				SZ_Clear(&net_message);
 				return NULL;
 			}
 			// it's somebody coming back in from a crash/disconnect
 			// so close the old qsocket and let their retry get them back in
-			NET_Close(s);
-			return NULL;
+			
+			// ProQuake fix
+//			NET_Close(s);
+//			return NULL;
 		}
 	}
 
 	// allocate a QSocket
 	sock = NET_NewQSocket ();
-	if (sock == NULL)
-	{
-		// no room; try to let him know
-		SZ_Clear(&net_message);
-		// save space for the header, filled in later
-		MSG_WriteLong(&net_message, 0);
-		MSG_WriteByte(&net_message, CCREP_REJECT);
-		MSG_WriteString(&net_message, "Server is full.\n");
-		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		SZ_Clear(&net_message);
-		return NULL;
-	}
+	if (sock == NULL) // no room; try to let him know
+		return Datagram_Reject ("Server is full.\n", acceptsock, &clientaddr);
 
 	// allocate a network socket
-	newsock = dfunc.OpenSocket(0);
+	newsock = net_DriverFunc.OpenSocket(0);
 	if (newsock == -1)
 	{
 		NET_FreeQSocket(sock);
@@ -1062,9 +1051,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	}
 
 	// connect to the client
-	if (dfunc.Connect (newsock, &clientaddr) == -1)
+	if (net_DriverFunc.Connect (newsock, &clientaddr) == -1)
 	{
-		dfunc.CloseSocket(newsock);
+		net_DriverFunc.CloseSocket(newsock);
 		NET_FreeQSocket(sock);
 		return NULL;
 	}
@@ -1073,18 +1062,18 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	sock->socket = newsock;
 	sock->landriver = net_landriverlevel;
 	sock->addr = clientaddr;
-	Q_strcpy(sock->address, dfunc.AddrToString(&clientaddr));
+	Q_strcpy(sock->address, net_DriverFunc.AddrToString(&clientaddr));
 
 	// send him back the info about the server connection he has been allocated
 	SZ_Clear(&net_message);
 	// save space for the header, filled in later
 	MSG_WriteLong(&net_message, 0);
 	MSG_WriteByte(&net_message, CCREP_ACCEPT);
-	dfunc.GetSocketAddr(newsock, &newaddr);
-	MSG_WriteLong(&net_message, dfunc.GetSocketPort(&newaddr));
-//	MSG_WriteString(&net_message, dfunc.AddrToString(&newaddr));
+	net_DriverFunc.GetSocketAddr(newsock, &newaddr);
+	MSG_WriteLong(&net_message, net_DriverFunc.GetSocketPort(&newaddr));
+//	MSG_WriteString(&net_message, net_DriverFunc.AddrToString(&newaddr));
 	*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-	dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+	net_DriverFunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 	SZ_Clear(&net_message);
 
 	return sock;
@@ -1111,7 +1100,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 	struct qsockaddr myaddr;
 	int		control;
 
-	dfunc.GetSocketAddr (dfunc.controlSock, &myaddr);
+	net_DriverFunc.GetSocketAddr (net_DriverFunc.controlSock, &myaddr);
 	if (xmit)
 	{
 		SZ_Clear(&net_message);
@@ -1121,18 +1110,18 @@ static void _Datagram_SearchForHosts (bool xmit)
 		MSG_WriteString(&net_message, "QUAKE");
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Broadcast(dfunc.controlSock, net_message.data, net_message.cursize);
+		net_DriverFunc.Broadcast(net_DriverFunc.controlSock, net_message.data, net_message.cursize);
 		SZ_Clear(&net_message);
 	}
 
-	while ((ret = dfunc.Read (dfunc.controlSock, net_message.data, net_message.maxsize, &readaddr)) > 0)
+	while ((ret = net_DriverFunc.Read (net_DriverFunc.controlSock, net_message.data, net_message.maxsize, &readaddr)) > 0)
 	{
 		if (ret < sizeof(int))
 			continue;
 		net_message.cursize = ret;
 
 		// don't answer our own query
-		if (dfunc.AddrCompare(&readaddr, &myaddr) >= 0)
+		if (net_DriverFunc.AddrCompare(&readaddr, &myaddr) >= 0)
 			continue;
 
 		// is the cache full?
@@ -1152,10 +1141,10 @@ static void _Datagram_SearchForHosts (bool xmit)
 		if (MSG_ReadByte() != CCREP_SERVER_INFO)
 			continue;
 
-		dfunc.GetAddrFromName(MSG_ReadString(), &readaddr);
+		net_DriverFunc.GetAddrFromName(MSG_ReadString(), &readaddr);
 		// search the cache for this server
 		for (n = 0; n < hostCacheCount; n++)
-			if (dfunc.AddrCompare(&readaddr, &hostcache[n].addr) == 0)
+			if (net_DriverFunc.AddrCompare(&readaddr, &hostcache[n].addr) == 0)
 				break;
 
 		// is it already there?
@@ -1178,7 +1167,7 @@ static void _Datagram_SearchForHosts (bool xmit)
 		Q_memcpy(&hostcache[n].addr, &readaddr, sizeof(struct qsockaddr));
 		hostcache[n].driver = net_driverlevel;
 		hostcache[n].ldriver = net_landriverlevel;
-		Q_strcpy(hostcache[n].cname, dfunc.AddrToString(&readaddr));
+		Q_strcpy(hostcache[n].cname, net_DriverFunc.AddrToString(&readaddr));
 
 		// check for a name conflict
 		for (i = 0; i < hostCacheCount; i++)
@@ -1226,10 +1215,10 @@ static qsocket_t *_Datagram_Connect (char *host)
 	char		*reason;
 
 	// see if we can resolve the host name
-	if (dfunc.GetAddrFromName(host, &sendaddr) == -1)
+	if (net_DriverFunc.GetAddrFromName(host, &sendaddr) == -1)
 		return NULL;
 
-	newsock = dfunc.OpenSocket (0);
+	newsock = net_DriverFunc.OpenSocket (0);
 	if (newsock == -1)
 		return NULL;
 
@@ -1240,7 +1229,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	sock->landriver = net_landriverlevel;
 
 	// connect to the host
-	if (dfunc.Connect (newsock, &sendaddr) == -1)
+	if (net_DriverFunc.Connect (newsock, &sendaddr) == -1)
 		goto ErrorReturn;
 
 	// send the connection request
@@ -1256,11 +1245,11 @@ static qsocket_t *_Datagram_Connect (char *host)
 		MSG_WriteString(&net_message, "QUAKE");
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
-		dfunc.Write (newsock, net_message.data, net_message.cursize, &sendaddr);
+		net_DriverFunc.Write (newsock, net_message.data, net_message.cursize, &sendaddr);
 		SZ_Clear(&net_message);
 		do
 		{
-			ret = dfunc.Read (newsock, net_message.data, net_message.maxsize, &readaddr);
+			ret = net_DriverFunc.Read (newsock, net_message.data, net_message.maxsize, &readaddr);
 			// if we got something, validate it
 			if (ret > 0)
 			{
@@ -1340,7 +1329,7 @@ static qsocket_t *_Datagram_Connect (char *host)
 	if (ret == CCREP_ACCEPT)
 	{
 		Q_memcpy(&sock->addr, &sendaddr, sizeof(struct qsockaddr));
-		dfunc.SetSocketPort (&sock->addr, MSG_ReadLong());
+		net_DriverFunc.SetSocketPort (&sock->addr, MSG_ReadLong());
 	}
 	else
 	{
@@ -1350,13 +1339,13 @@ static qsocket_t *_Datagram_Connect (char *host)
 		goto ErrorReturn;
 	}
 
-	dfunc.GetNameFromAddr (&sendaddr, sock->address);
+	net_DriverFunc.GetNameFromAddr (&sendaddr, sock->address);
 
 	Con_Printf ("Connection accepted\n");
 	sock->lastMessageTime = SetNetTime();
 
 	// switch the connection to the specified address
-	if (dfunc.Connect (newsock, &sock->addr) == -1)
+	if (net_DriverFunc.Connect (newsock, &sock->addr) == -1)
 	{
 		reason = "Connect to Game failed";
 		Con_Printf("%s\n", reason);
@@ -1364,19 +1353,13 @@ static qsocket_t *_Datagram_Connect (char *host)
 		goto ErrorReturn;
 	}
 
-	m_return_onerror = false;
 	return sock;
 
 ErrorReturn:
 	NET_FreeQSocket(sock);
 ErrorReturn2:
-	dfunc.CloseSocket(newsock);
-	if (m_return_onerror)
-	{
-		key_dest = key_menu;
-		NET_MenuReturn ();
-		m_return_onerror = false;
-	}
+	net_DriverFunc.CloseSocket(newsock);
+	NET_MenuReturn ();
 	return NULL;
 }
 

@@ -68,21 +68,28 @@ not apropriate.
 
 typedef void (*xcommand_t) (void);
 
+class cmd_t
+{
+public:
+	cmd_t (char *cmdname, xcommand_t cmdcmd);
+
+	char			name[128];
+	xcommand_t		function;
+	cmd_t *next;
+};
+
+
 typedef enum
 {
 	src_client,		// came in over a net connection as a clc_stringcmd
 					// host_client will be valid during this state.
-	src_command		// from the command buffer
+	src_command,		// from the command buffer
+	src_allowindirect	// for setting of CVAR_INDIRECT variables
 } cmd_source_t;
 
 extern	cmd_source_t	cmd_source;
 
 void	Cmd_Init (void);
-
-void	Cmd_AddCommand (char *cmd_name, xcommand_t function);
-// called by the init functions of other parts of the program to
-// register commands and functions to call for them.
-// The cmd_name is referenced later, so it should not be in temp memory
 
 bool Cmd_Exists (char *cmd_name);
 // used by the cvar code to check for cvar / command name overlap

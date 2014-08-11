@@ -19,14 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // view.h
 
-extern	cvar_t		v_gamma;
-
-extern	byte		gammatable[256];	// palette is sent through this
-extern	byte		ramps[3][256];
 extern int v_blend[4];
-
-extern cvar_t lcd_x;
-
 
 void V_Init (void);
 void V_RenderView (void);

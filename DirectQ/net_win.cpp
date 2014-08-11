@@ -64,57 +64,32 @@ int net_numdrivers = 2;
 
 
 #include "net_wins.h"
-#include "net_wipx.h"
 
 net_landriver_t	net_landrivers[MAX_NET_DRIVERS] =
 {
 	{
-	"Winsock TCPIP",
-	false,
-	0,
-	WINS_Init,
-	WINS_Shutdown,
-	WINS_Listen,
-	WINS_OpenSocket,
-	WINS_CloseSocket,
-	WINS_Connect,
-	WINS_CheckNewConnections,
-	WINS_Read,
-	WINS_Write,
-	WINS_Broadcast,
-	WINS_AddrToString,
-	WINS_StringToAddr,
-	WINS_GetSocketAddr,
-	WINS_GetNameFromAddr,
-	WINS_GetAddrFromName,
-	WINS_AddrCompare,
-	WINS_GetSocketPort,
-	WINS_SetSocketPort
-	},
-	{
-	"Winsock IPX",
-	false,
-	0,
-	WIPX_Init,
-	WIPX_Shutdown,
-	WIPX_Listen,
-	WIPX_OpenSocket,
-	WIPX_CloseSocket,
-	WIPX_Connect,
-	WIPX_CheckNewConnections,
-	WIPX_Read,
-	WIPX_Write,
-	WIPX_Broadcast,
-	WIPX_AddrToString,
-	WIPX_StringToAddr,
-	WIPX_GetSocketAddr,
-	WIPX_GetNameFromAddr,
-	WIPX_GetAddrFromName,
-	WIPX_AddrCompare,
-	WIPX_GetSocketPort,
-	WIPX_SetSocketPort
+		"Winsock TCPIP",
+		false,
+		0,
+		WINS_Init,
+		WINS_Shutdown,
+		WINS_Listen,
+		WINS_OpenSocket,
+		WINS_CloseSocket,
+		WINS_Connect,
+		WINS_CheckNewConnections,
+		WINS_Read,
+		WINS_Write,
+		WINS_Broadcast,
+		WINS_AddrToString,
+		WINS_StringToAddr,
+		WINS_GetSocketAddr,
+		WINS_GetNameFromAddr,
+		WINS_GetAddrFromName,
+		WINS_AddrCompare,
+		WINS_GetSocketPort,
+		WINS_SetSocketPort
 	}
-
 };
 
-int net_numlandrivers = 2;
+int net_numlandrivers = 1;

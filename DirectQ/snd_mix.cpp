@@ -27,13 +27,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DWORD	unsigned long
 #endif
 
+extern LPDIRECTSOUNDBUFFER8 ds_SecondaryBuffer8;
+
+extern DWORD ds_SoundBufferSize;
+
+
 #define	PAINTBUFFER_SIZE	512
 portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
 int		snd_scaletable[32][256];
 int 	*snd_p, snd_linear_count, snd_vol;
 short	*snd_out;
-
-void Snd_WriteLinearBlastStereo16 (void);
 
 void Snd_WriteLinearBlastStereo16 (void)
 {
@@ -63,55 +66,48 @@ void Snd_WriteLinearBlastStereo16 (void)
 
 void S_TransferStereo16 (int endtime)
 {
+	if (!ds_SecondaryBuffer8) return;
+
 	int		lpos;
 	int		lpaintedtime;
 	DWORD	*pbuf;
-#ifdef _WIN32
+
 	int		reps;
 	DWORD	dwSize,dwSize2;
 	DWORD	*pbuf2;
 	HRESULT	hresult;
-#endif
 	
 	snd_vol = volume.value*256;
 
 	snd_p = (int *) paintbuffer;
 	lpaintedtime = paintedtime;
 
-#ifdef _WIN32
-	if (pDSBuf)
-	{
-		reps = 0;
+	reps = 0;
 
-		while ((hresult = pDSBuf->Lock(0, gSndBufSize, (LPVOID *) &pbuf, &dwSize, 
-									   (LPVOID *) &pbuf2, &dwSize2, 0)) != DS_OK)
+	// if plan A fails try plan A
+	while ((hresult = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, 
+									(LPVOID *) &pbuf2, &dwSize2, 0)) != DS_OK)
+	{
+		if (hresult != DSERR_BUFFERLOST)
 		{
-			if (hresult != DSERR_BUFFERLOST)
-			{
-				Con_Printf ("S_TransferStereo16: DS::Lock Sound Buffer Failed\n");
-				S_Shutdown ();
-				S_Startup ();
-				return;
-			}
-
-			if (++reps > 10000)
-			{
-				Con_Printf ("S_TransferStereo16: DS: couldn't restore buffer\n");
-				S_Shutdown ();
-				S_Startup ();
-				return;
-			}
+			Con_Printf ("S_TransferStereo16: DS::Lock Sound Buffer Failed\n");
+			S_Shutdown ();
+			S_Startup ();
+			return;
 		}
-	}
-	else
-#endif
-	{
-		pbuf = (DWORD *)shm->buffer;
+
+		if (++reps > 10000)
+		{
+			Con_Printf ("S_TransferStereo16: DS: couldn't restore buffer\n");
+			S_Shutdown ();
+			S_Startup ();
+			return;
+		}
 	}
 
 	while (lpaintedtime < endtime)
 	{
-	// handle recirculating buffer issues
+		// handle recirculating buffer issues
 		lpos = lpaintedtime & ((shm->samples>>1)-1);
 
 		snd_out = (short *) pbuf + (lpos<<1);
@@ -122,18 +118,16 @@ void S_TransferStereo16 (int endtime)
 
 		snd_linear_count <<= 1;
 
-	// write a linear blast of samples
+		// write a linear blast of samples
 		Snd_WriteLinearBlastStereo16 ();
 
 		snd_p += snd_linear_count;
 		lpaintedtime += (snd_linear_count>>1);
 	}
 
-#ifdef _WIN32
-	if (pDSBuf)
-		pDSBuf->Unlock(pbuf, dwSize, NULL, 0);
-#endif
+	ds_SecondaryBuffer8->Unlock(pbuf, dwSize, NULL, 0);
 }
+
 
 void S_TransferPaintBuffer(int endtime)
 {
@@ -145,12 +139,11 @@ void S_TransferPaintBuffer(int endtime)
 	int		val;
 	int		snd_vol;
 	DWORD	*pbuf;
-#ifdef _WIN32
+
 	int		reps;
 	DWORD	dwSize,dwSize2;
 	DWORD	*pbuf2;
 	HRESULT	hresult;
-#endif
 
 	if (shm->samplebits == 16 && shm->channels == 2)
 	{
@@ -165,35 +158,26 @@ void S_TransferPaintBuffer(int endtime)
 	step = 3 - shm->channels;
 	snd_vol = volume.value*256;
 
-#ifdef _WIN32
-	if (pDSBuf)
-	{
-		reps = 0;
+	reps = 0;
 
-		while ((hresult = pDSBuf->Lock(0, gSndBufSize, (LPVOID *) &pbuf, &dwSize, 
-									   (LPVOID *) &pbuf2,&dwSize2, 0)) != DS_OK)
+	while ((hresult = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, 
+									(LPVOID *) &pbuf2,&dwSize2, 0)) != DS_OK)
+	{
+		if (hresult != DSERR_BUFFERLOST)
 		{
-			if (hresult != DSERR_BUFFERLOST)
-			{
-				Con_Printf ("S_TransferPaintBuffer: DS::Lock Sound Buffer Failed\n");
-				S_Shutdown ();
-				S_Startup ();
-				return;
-			}
-
-			if (++reps > 10000)
-			{
-				Con_Printf ("S_TransferPaintBuffer: DS: couldn't restore buffer\n");
-				S_Shutdown ();
-				S_Startup ();
-				return;
-			}
+			Con_Printf ("S_TransferPaintBuffer: DS::Lock Sound Buffer Failed\n");
+			S_Shutdown ();
+			S_Startup ();
+			return;
 		}
-	}
-	else
-#endif
-	{
-		pbuf = (DWORD *)shm->buffer;
+
+		if (++reps > 10000)
+		{
+			Con_Printf ("S_TransferPaintBuffer: DS: couldn't restore buffer\n");
+			S_Shutdown ();
+			S_Startup ();
+			return;
+		}
 	}
 
 	if (shm->samplebits == 16)
@@ -227,22 +211,14 @@ void S_TransferPaintBuffer(int endtime)
 		}
 	}
 
-#ifdef _WIN32
-	if (pDSBuf) {
-		DWORD dwNewpos, dwWrite;
-		int il = paintedtime;
-		int ir = endtime - paintedtime;
-		
-		ir += il;
+	DWORD dwNewpos, dwWrite;
+	int il = paintedtime;
+	int ir = endtime - paintedtime;
+	
+	ir += il;
 
-		pDSBuf->Unlock(pbuf, dwSize, NULL, 0);
-
-		pDSBuf->GetCurrentPosition(&dwNewpos, &dwWrite);
-
-//		if ((dwNewpos >= il) && (dwNewpos <= ir))
-//			Con_Printf("%d-%d p %d c\n", il, ir, dwNewpos);
-	}
-#endif
+	ds_SecondaryBuffer8->Unlock(pbuf, dwSize, NULL, 0);
+	ds_SecondaryBuffer8->GetCurrentPosition(&dwNewpos, &dwWrite);
 }
 
 

@@ -1,0 +1,78 @@
+Release 1.3 updates.
+====================
+
+* Various changes to the cvar system for better reliability; protection from QC abuse for certain cvars (disabled by default).
+* Changed number of console notify lines to 5.
+* Protected several cvars from QC abuse.
+* Cvar-ized sound_nominal_clip_dist (default 1500).
+* Added sound options menu.
+* Moved "Customize Controls" to Input menu.
+* Fixed mapshots (broke during viewport cleanup).
+* Added "mapshot" command for user to take a mapshot wherever they wish.
+* Added "r_automapshot" cvar (default 0) to take a mapshot automatically on entering a new level (in maps directory).
+* Added mapshot drawing to serverlist menu.
+* Moved sound to DirectSound 8.
+* Removed parts of old "crappy Windows multimedia base".
+* Modified somewhat weird sound startup to be more standardised.
+* Removed sounds from cache memory system.
+* Got rid of COM_LoadCacheFile (never used).
+* Removed entire Cache system.
+* Fixed "items/damage2.wav is not precached" bug on maps where you do impulse 255 with no quad in the map as standard.
+* Removed Zone and Hunk memory systems; replaced with simplified Heap system.
+* Fixed bug where larger player skins would crash R_TranslatePlayerTexture.
+* Implemented texture flushing; those unused after 4 maps get flushed.
+* Added LIT file support.
+* Added -quoth support.
+* Removed hard limit on number of warp update textures.
+* Adjusted r_wateralpha so it's only effective if scene has translucent water or if r_novis is 1; made it an archive cvar.
+* Bumped MAX_DLIGHTS to 128.
+* Added r_monolight cvar to set coloured light off (default 1), requires map reload for static light.
+* Changed rendering order for entities under translucent water.
+* Added extra dynamic lights on many ents and tents, controlled by r_extradlight cvar (default 0).
+* Fixed bug where lightning bolts weren't visible.
+* Fixed model allocation memory leak (unlikely to be hit, but dangerous all the same!)
+* Moved client-side entity lists to dynamic allocation (still fixed size with hard limits though...)
+* Tightened up client side entity allocation memory overhead, 512 initial allocation, over 512 (up to 8192) allocated on-demand.
+* Fixed bug where beams could persist after a changelevel has issued.
+* Added cmd_allowqc cvar (default 1) to protect clients from unwanted command execution by rogue QC.
+* Begun fully customizable alternate new HUD layout.
+* More work on HUD layout; replicating classic HUD in new scriptable system.
+* Added console autocompletion.
+* Changed default r_wateralpha to 0.5 (new behaviour makes the safe).
+* Changed lightmaps back to lock/unlock per frame (suspicion of the other method).
+* Added console enhancements: left arrow, right arrow, insert, delete, copy and paste support.
+* Removed limit on number of efrags.
+* Various usability and performance improvements in the save/load menu.
+* Several memory usage improvements.
+* Modified warp update to allow user-settable detail (r_warptess, default 32) and better code efficiency.
+* Fixed menu toggle options.
+* Added anisotropic filtering (r_anisotropicfilter).
+* Removed render to texture water warp update.
+* Moved alias model interpolation to a vertex shader.
+* Moved water warp update to a pixel shader.
+* Rewrote instanced BSP model render (still messy and ugly).
+* Added skybox loading (via "loadsky" and "sky" key in worldspawn).
+* Changed sv.entities to dynamic.
+* Replaced Hunk_ system.
+* Fixed interpolation bug on entity model change.
+* Changed mouse movement so it doesn't update if in the menu or console.
+* Added mouse acceleration to both software and DirectInput.
+* Added toggling between software and DirectInput mouse.
+* Made a lot of entity loading console spam developer 1 only and printed simplified warning for developer 0.
+* Completed move to fully dynamic memory allocation - no more -heapsize.
+* Protocol optimization - comparison of origin and angles is based on what will actually be transmitted rather than what is stored (non-breaking).
+* Definitively fixed CL_UpdateTEnts bug (thanks metlslime!)
+* Added BJP protocols.  We can load Warpspasm maps now. :D
+* Moved model loading to dynamic and bumped MAX_MOD_KNOWN to 8192.
+* Fixed bug where not enough PVS bytes were allocated, only apparent where loadmodel->leafs == MAX_MAP_LEAFS, but would cause overflow/data stomping.  Bumped MAX_MAP_LEAFS to 32767.
+* Added fullbrights to world surfs, moved them to shaders, removed old code.
+* Enabled liquid textures on instanced brush models.
+* Completed fullbright texture support on all world and alias surfaces/models.
+* Moved more rendering to HLSL.
+* Defaulted gl_clear to 1 as it seems faster on some hardware (i.e. mine!)
+* Added server-side anti wallhack.  Don't know why you'd use this engine as a server, but it's there anyway...
+* Fixed bug where an entity initially spawned on a frame other than 0 might have an invalid frame if it changes model (happens in some mods, not in ID1).
+* Fixed infinite loop on server takedown in Warpspasm (still there on demo switching).
+
+
+

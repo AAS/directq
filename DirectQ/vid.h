@@ -41,7 +41,6 @@ typedef struct
 	unsigned		width;		
 	unsigned		height;
 	float			aspect;		// width / height -- < 0 is taller than wide
-	int				numpages;
 	int				recalc_refdef;	// if true, recalc vid-based stuff
 	pixel_t			*conbuffer;
 	int				conrowbytes;
@@ -53,8 +52,6 @@ typedef struct
 
 extern	viddef_t	vid;				// global video state
 extern	unsigned	d_8to24table[256];
-extern void (*vid_menudrawfn)(void);
-extern void (*vid_menukeyfn)(int key);
 
 void	VID_SetPalette (unsigned char *palette);
 // called at startup and after any gamma correction

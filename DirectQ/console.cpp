@@ -42,10 +42,13 @@ int			con_current;		// where next message will be printed
 int			con_x;				// offset in current line for next print
 char		*con_text=0;
 
-cvar_t		con_notifytime = {"con_notifytime","3"};		//seconds
+cvar_t		con_notifytime ("con_notifytime", "3");		//seconds
+cvar_t		con_lineheight ("con_lineheight", "8", CVAR_ARCHIVE);
 
-#define	NUM_CON_TIMES 4
-float		con_times[NUM_CON_TIMES];	// realtime time the line was generated
+// this define was a bit misnamed
+#define	CON_NOTIFYLINES 5
+
+float		con_times[CON_NOTIFYLINES];	// realtime time the line was generated
 								// for transparent notify lines
 
 int			con_vislines;
@@ -56,7 +59,7 @@ bool	con_debuglog;
 extern	char	key_lines[32][MAXCMDLINE];
 extern	int		edit_line;
 extern	int		key_linepos;
-		
+extern int	key_insert; // insert key toggle
 
 bool	con_initialized;
 
@@ -112,7 +115,7 @@ void Con_ClearNotify (void)
 {
 	int		i;
 	
-	for (i=0 ; i<NUM_CON_TIMES ; i++)
+	for (i=0 ; i<CON_NOTIFYLINES ; i++)
 		con_times[i] = 0;
 }
 
@@ -209,6 +212,12 @@ void Con_CheckResize (void)
 Con_Init
 ================
 */
+cmd_t Con_ToggleConsole_f_Cmd ("toggleconsole", Con_ToggleConsole_f);
+cmd_t Con_MessageMode_f_Cmd ("messagemode", Con_MessageMode_f);
+cmd_t Con_MessageMode2_f_Cmd ("messagemode2", Con_MessageMode2_f);
+cmd_t Con_Clear_f_Cmd ("clear", Con_Clear_f);
+cvar_t condebug ("condebug", 0.0f);
+
 void Con_Init (void)
 {
 #define MAXGAMEDIRLEN	1000
@@ -226,22 +235,13 @@ void Con_Init (void)
 		}
 	}
 
-	con_text = (char *) Hunk_AllocName (CON_TEXTSIZE, "context");
+	con_text = (char *) Heap_TagAlloc (TAG_CONSOLE, CON_TEXTSIZE);
 	Q_memset (con_text, ' ', CON_TEXTSIZE);
 	con_linewidth = -1;
 	Con_CheckResize ();
 	
 	Con_Printf ("Console initialized.\n");
 
-//
-// register our commands
-//
-	Cvar_RegisterVariable (&con_notifytime);
-
-	Cmd_AddCommand ("toggleconsole", Con_ToggleConsole_f);
-	Cmd_AddCommand ("messagemode", Con_MessageMode_f);
-	Cmd_AddCommand ("messagemode2", Con_MessageMode2_f);
-	Cmd_AddCommand ("clear", Con_Clear_f);
 	con_initialized = true;
 }
 
@@ -268,7 +268,7 @@ All console printing must go through this in order to be logged to disk
 If no console is visible, the notify window will pop up.
 ================
 */
-void Con_Print (char *txt)
+static void Con_Print (char *txt, bool silent)
 {
 	int		y;
 	int		c, l;
@@ -281,7 +281,7 @@ void Con_Print (char *txt)
 	{
 		mask = 128;		// go to colored text
 		S_LocalSound ("misc/talk.wav");
-	// play talk wav
+		// play talk wav
 		txt++;
 	}
 	else if (txt[0] == 2)
@@ -292,15 +292,14 @@ void Con_Print (char *txt)
 	else
 		mask = 0;
 
-
 	while ( (c = *txt) )
 	{
-	// count word length
+		// count word length
 		for (l=0 ; l< con_linewidth ; l++)
 			if ( txt[l] <= ' ')
 				break;
 
-	// word wrap
+		// word wrap
 		if (l != con_linewidth && (con_x + l > con_linewidth) )
 			con_x = 0;
 
@@ -316,9 +315,10 @@ void Con_Print (char *txt)
 		if (!con_x)
 		{
 			Con_Linefeed ();
-		// mark time for transparent overlay
-			if (con_current >= 0)
-				con_times[con_current % NUM_CON_TIMES] = realtime;
+
+			// mark time for transparent overlay
+			if (con_current >= 0 && !silent)
+				con_times[con_current % CON_NOTIFYLINES] = realtime;
 		}
 
 		switch (c)
@@ -336,8 +336,10 @@ void Con_Print (char *txt)
 			y = con_current % con_totallines;
 			con_text[y*con_linewidth+con_x] = c | mask;
 			con_x++;
+
 			if (con_x >= con_linewidth)
 				con_x = 0;
+
 			break;
 		}
 		
@@ -350,20 +352,14 @@ void Con_Print (char *txt)
 Con_DebugLog
 ================
 */
-void Con_DebugLog(char *file, char *fmt, ...)
+void Con_DebugLog (char *file, char *fmt)
 {
-	/*
-    va_list argptr; 
-    static char data[1024];
-    int fd;
-    
-    va_start(argptr, fmt);
-    vsprintf(data, fmt, argptr);
-    va_end(argptr);
-    fd = open(file, O_WRONLY | O_CREAT | O_APPEND, 0666);
-    write(fd, data, strlen(data));
-    close(fd);
-	*/
+	FILE *f = fopen (file, "a");
+
+	if (!f) return;
+
+	fprintf (f, "%s", fmt);
+	fclose (f);
 }
 
 
@@ -374,39 +370,56 @@ Con_Printf
 Handles cursor positioning, line wrapping, etc
 ================
 */
+void Menu_PutConsolePrintInbuffer (char *text);
+
 #define	MAXPRINTMSG	4096
+
+
+static void Con_PrintfCommon (char *msg, bool silent)
+{
+	// log all messages to file
+	if (con_debuglog || condebug.integer) Con_DebugLog (va ("%s/qconsole.log", com_gamedir), msg);
+
+	if (!con_initialized) return;
+
+	// write it to the scrollable buffer
+	Con_Print (msg, silent);
+}
+
+
+void Con_SilentPrintf (char *fmt, ...)
+{
+	va_list		argptr;
+	char		msg[MAXPRINTMSG];
+
+	va_start (argptr,fmt);
+	vsprintf (msg,fmt,argptr);
+	va_end (argptr);
+
+	Con_PrintfCommon (msg, true);
+}
+
+
 // FIXME: make a buffer size safe vsprintf?
 void Con_Printf (char *fmt, ...)
 {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 	static bool	inupdate = false;
-	
+
 	va_start (argptr,fmt);
 	vsprintf (msg,fmt,argptr);
 	va_end (argptr);
-	
-// also echo to debugging console
-	Sys_Printf ("%s", msg);	// also echo to debugging console
 
-// log all messages to file
-	if (con_debuglog)
-		Con_DebugLog(va("%s/qconsole.log",com_gamedir), "%s", msg);
+	Con_PrintfCommon (msg, false);
 
-	if (!con_initialized)
-		return;
-		
-	if (cls.state == ca_dedicated)
-		return;		// no graphics mode
+	// take a copy for the menus
+	if (key_dest == key_menu) Menu_PutConsolePrintInbuffer (msg);
 
-// write it to the scrollable buffer
-	Con_Print (msg);
-	
-// update the screen if the console is displayed
+	// update the screen if the console is displayed
 	if (cls.signon != SIGNONS && !scr_disabled_for_loading )
 	{
-	// protect against infinite loop if something in SCR_UpdateScreen calls
-	// Con_Printd
+		// protect against infinite loop if something in SCR_UpdateScreen calls Con_Printf
 		if (!inupdate)
 		{
 			inupdate = true;
@@ -415,6 +428,7 @@ void Con_Printf (char *fmt, ...)
 		}
 	}
 }
+
 
 /*
 ================
@@ -481,34 +495,29 @@ The input line scrolls horizontally if typing goes beyond the right edge
 */
 void Con_DrawInput (void)
 {
-	int		y;
-	int		i;
-	char	*text;
+	int y;
+	int i;
+	char editlinecopy[256];
+	char *text;
 
-	if (key_dest != key_console && !con_forcedup)
-		return;		// don't draw anything
+	// don't draw anything
+	if (key_dest != key_console && !con_forcedup) return;
 
-	text = key_lines[edit_line];
-	
-// add the cursor frame
-	text[key_linepos] = 10+((int)(realtime*con_cursorspeed)&1);
-	
-// fill out remainder with spaces
-	for (i=key_linepos+1 ; i< con_linewidth ; i++)
-		text[i] = ' ';
-		
-//	prestep if horizontally scrolling
-	if (key_linepos >= con_linewidth)
-		text += 1 + key_linepos - con_linewidth;
-		
-// draw it
-	y = con_vislines-16;
+	// fill out remainder with spaces (those of a nervous disposition should look away now)
+	for (i = strlen ((text = strncpy (editlinecopy, key_lines[edit_line], 255))); i < 256; text[i++] = ' ');
 
-	for (i=0 ; i<con_linewidth ; i++)
-		Draw_Character ( (i+1)<<3, con_vislines - 16, text[i]);
+	// add the cursor frame
+	if ((int) (realtime * con_cursorspeed) & 1) text[key_linepos] = 11 + 130 * key_insert;
 
-// remove cursor
-	key_lines[edit_line][key_linepos] = 0;
+	//	prestep if horizontally scrolling
+	if (key_linepos >= con_linewidth) text += 1 + key_linepos - con_linewidth;
+
+	for
+	(
+		i = 0, y = con_vislines - (con_lineheight.value * 2);
+		i < con_linewidth;
+		Draw_Character ((i + 1) << 3, con_vislines - (con_lineheight.value * 2), text[i]), i++
+	);
 }
 
 
@@ -528,47 +537,52 @@ void Con_DrawNotify (void)
 	extern char chat_buffer[];
 
 	v = 0;
-	for (i= con_current-NUM_CON_TIMES+1 ; i<=con_current ; i++)
+
+	if (con_lineheight.value < 1) con_lineheight.value = 1;
+
+	for (i = con_current - CON_NOTIFYLINES + 1; i <= con_current; i++)
 	{
-		if (i < 0)
-			continue;
-		time = con_times[i % NUM_CON_TIMES];
-		if (time == 0)
-			continue;
+		if (i < 0) continue;
+
+		time = con_times[i % CON_NOTIFYLINES];
+
+		if (time < 0.001f) continue;
+
 		time = realtime - time;
-		if (time > con_notifytime.value)
-			continue;
-		text = con_text + (i % con_totallines)*con_linewidth;
-		
+
+		if (time > con_notifytime.value) continue;
+
+		if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (con_notifytime.value - time);
+
+		text = con_text + (i % con_totallines) * con_linewidth;
+
 		clearnotify = 0;
-		scr_copytop = 1;
 
 		for (x = 0 ; x < con_linewidth ; x++)
-			Draw_Character ( (x+1)<<3, v, text[x]);
+			Draw_Character ((x + 1) << 3, v, text[x]);
 
-		v += 8;
+		if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (1.0f);
+		v += con_lineheight.value;
 	}
 
 
 	if (key_dest == key_message)
 	{
 		clearnotify = 0;
-		scr_copytop = 1;
-	
 		x = 0;
-		
 		Draw_String (8, v, "say:");
-		while(chat_buffer[x])
+
+		while (chat_buffer[x])
 		{
-			Draw_Character ( (x+5)<<3, v, chat_buffer[x]);
+			Draw_Character ((x + 5) << 3, v, chat_buffer[x]);
 			x++;
 		}
-		Draw_Character ( (x+5)<<3, v, 10+((int)(realtime*con_cursorspeed)&1));
-		v += 8;
+
+		Draw_Character ((x + 5) << 3, v, 10 + ((int) (realtime * con_cursorspeed) & 1));
+		v += con_lineheight.value;
 	}
-	
-	if (v > con_notifylines)
-		con_notifylines = v;
+
+	if (v > con_notifylines) con_notifylines = v;
 }
 
 /*
@@ -585,33 +599,31 @@ void Con_DrawConsole (int lines, bool drawinput)
 	int				rows;
 	char			*text;
 	int				j;
-	
+
 	if (lines <= 0)
 		return;
 
-// draw the background
+	// draw the background
 	Draw_ConsoleBackground (lines);
 
-// draw the text
+	// draw the text
 	con_vislines = lines;
 
-	rows = (lines-16)>>3;		// rows of text to draw
-	y = lines - 16 - (rows<<3);	// may start slightly negative
+	rows = (lines - (con_lineheight.value * 2)) / con_lineheight.value;		// rows of text to draw
+	y = lines - (con_lineheight.value * 2) - (rows * con_lineheight.value);	// may start slightly negative
 
-	for (i= con_current - rows + 1 ; i<=con_current ; i++, y+=8 )
+	for (i = con_current - rows + 1; i <= con_current; i++, y += con_lineheight.value)
 	{
-		j = i - con_backscroll;
-		if (j<0)
-			j = 0;
-		text = con_text + (j % con_totallines)*con_linewidth;
+		if ((j = i - con_backscroll) < 0) j = 0;
 
-		for (x=0 ; x<con_linewidth ; x++)
-			Draw_Character ( (x+1)<<3, y, text[x]);
+		text = con_text + (j % con_totallines) * con_linewidth;
+
+		for (x = 0; x < con_linewidth; x++)
+			Draw_Character ((x + 1) << 3, y, text[x]);
 	}
 
-// draw the input prompt, user text, and cursor if desired
-	if (drawinput)
-		Con_DrawInput ();
+	// draw the input prompt, user text, and cursor if desired
+	if (drawinput) Con_DrawInput ();
 }
 
 

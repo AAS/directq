@@ -24,7 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 edict_t	*sv_player;
 
 extern	cvar_t	sv_friction;
-cvar_t	sv_edgefriction = {"edgefriction", "2"};
+cvar_t	sv_edgefriction ("edgefriction", "2");
 extern	cvar_t	sv_stopspeed;
 
 static	vec3_t		forward, right, up;
@@ -41,7 +41,7 @@ bool	onground;
 
 usercmd_t	cmd;
 
-cvar_t	sv_idealpitchscale = {"sv_idealpitchscale","0.8"};
+cvar_t	sv_idealpitchscale ("sv_idealpitchscale","0.8");
 
 
 /*
@@ -159,13 +159,16 @@ void SV_UserFriction (void)
 	vel[2] = vel[2] * newspeed;
 }
 
+
 /*
 ==============
 SV_Accelerate
 ==============
 */
-cvar_t	sv_maxspeed = {"sv_maxspeed", "320", false, true};
-cvar_t	sv_accelerate = {"sv_accelerate", "10"};
+cvar_t	sv_maxspeed ("sv_maxspeed", "320", CVAR_SERVER);
+cvar_t	sv_accelerate ("sv_accelerate", "10");
+
+
 #if 0
 void SV_Accelerate (vec3_t wishvel)
 {
@@ -512,14 +515,10 @@ bool SV_ReadClientMessage (void)
 	{
 nextmsg:
 		ret = NET_GetMessage (host_client->netconnection);
-		if (ret == -1)
-		{
-			Sys_Printf ("SV_ReadClientMessage: NET_GetMessage failed\n");
-			return false;
-		}
-		if (!ret)
-			return true;
-					
+
+		if (ret == -1) return false;
+		if (!ret) return true;
+
 		MSG_BeginReading ();
 		
 		while (1)
@@ -527,11 +526,7 @@ nextmsg:
 			if (!host_client->active)
 				return false;	// a command caused an error
 
-			if (msg_badread)
-			{
-				Sys_Printf ("SV_ReadClientMessage: badread\n");
-				return false;
-			}	
+			if (msg_badread) return false;
 	
 			cmd = MSG_ReadChar ();
 			
@@ -541,11 +536,9 @@ nextmsg:
 				goto nextmsg;		// end of message
 				
 			default:
-				Sys_Printf ("SV_ReadClientMessage: unknown command char\n");
 				return false;
 							
 			case clc_nop:
-//				Sys_Printf ("clc_nop\n");
 				break;
 				
 			case clc_stringcmd:	
@@ -599,11 +592,10 @@ nextmsg:
 				else
 					Con_DPrintf("%s tried to %s\n", host_client->name, s);
 				break;
-				
+
 			case clc_disconnect:
-//				Sys_Printf ("SV_ReadClientMessage: client disconnected\n");
 				return false;
-			
+
 			case clc_move:
 				SV_ReadClientMove (&host_client->cmd);
 				break;

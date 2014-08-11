@@ -209,17 +209,16 @@ float CL_KeyState (kbutton_t *key)
 
 //==========================================================================
 
-cvar_t	cl_upspeed = {"cl_upspeed","200"};
-cvar_t	cl_forwardspeed = {"cl_forwardspeed","200", true};
-cvar_t	cl_backspeed = {"cl_backspeed","200", true};
-cvar_t	cl_sidespeed = {"cl_sidespeed","350"};
+cvar_t	cl_upspeed ("cl_upspeed","200");
+cvar_t	cl_forwardspeed ("cl_forwardspeed","200", CVAR_ARCHIVE);
+cvar_t	cl_backspeed ("cl_backspeed","200", CVAR_ARCHIVE);
+cvar_t	cl_sidespeed ("cl_sidespeed","350");
+cvar_t	cl_movespeedkey ("cl_movespeedkey","2.0");
 
-cvar_t	cl_movespeedkey = {"cl_movespeedkey","2.0"};
+cvar_t	cl_yawspeed ("cl_yawspeed","140");
+cvar_t	cl_pitchspeed ("cl_pitchspeed","150");
 
-cvar_t	cl_yawspeed = {"cl_yawspeed","140"};
-cvar_t	cl_pitchspeed = {"cl_pitchspeed","150"};
-
-cvar_t	cl_anglespeedkey = {"cl_anglespeedkey","1.5"};
+cvar_t	cl_anglespeedkey ("cl_anglespeedkey","1.5");
 
 
 /*
@@ -406,43 +405,44 @@ void CL_SendMove (usercmd_t *cmd)
 CL_InitInput
 ============
 */
+cmd_t IN_UpDown_Cmd ("+moveup", IN_UpDown);
+cmd_t IN_UpUp_Cmd ("-moveup", IN_UpUp);
+cmd_t IN_DownDown_Cmd ("+movedown", IN_DownDown);
+cmd_t IN_DownUp_Cmd ("-movedown", IN_DownUp);
+cmd_t IN_LeftDown_Cmd ("+left", IN_LeftDown);
+cmd_t IN_LeftUp_Cmd ("-left", IN_LeftUp);
+cmd_t IN_RightDown_Cmd ("+right", IN_RightDown);
+cmd_t IN_RightUp_Cmd ("-right", IN_RightUp);
+cmd_t IN_ForwardDown_Cmd ("+forward", IN_ForwardDown);
+cmd_t IN_ForwardUp_Cmd ("-forward", IN_ForwardUp);
+cmd_t IN_BackDown_Cmd ("+back", IN_BackDown);
+cmd_t IN_BackUp_Cmd ("-back", IN_BackUp);
+cmd_t IN_LookupDown_Cmd ("+lookup", IN_LookupDown);
+cmd_t IN_LookupUp_Cmd ("-lookup", IN_LookupUp);
+cmd_t IN_LookdownDown_Cmd ("+lookdown", IN_LookdownDown);
+cmd_t IN_LookdownUp_Cmd ("-lookdown", IN_LookdownUp);
+cmd_t IN_StrafeDown_Cmd ("+strafe", IN_StrafeDown);
+cmd_t IN_StrafeUp_Cmd ("-strafe", IN_StrafeUp);
+cmd_t IN_MoveleftDown_Cmd ("+moveleft", IN_MoveleftDown);
+cmd_t IN_MoveleftUp_Cmd ("-moveleft", IN_MoveleftUp);
+cmd_t IN_MoverightDown_Cmd ("+moveright", IN_MoverightDown);
+cmd_t IN_MoverightUp_Cmd ("-moveright", IN_MoverightUp);
+cmd_t IN_SpeedDown_Cmd ("+speed", IN_SpeedDown);
+cmd_t IN_SpeedUp_Cmd ("-speed", IN_SpeedUp);
+cmd_t IN_AttackDown_Cmd ("+attack", IN_AttackDown);
+cmd_t IN_AttackUp_Cmd ("-attack", IN_AttackUp);
+cmd_t IN_UseDown_Cmd ("+use", IN_UseDown);
+cmd_t IN_UseUp_Cmd ("-use", IN_UseUp);
+cmd_t IN_JumpDown_Cmd ("+jump", IN_JumpDown);
+cmd_t IN_JumpUp_Cmd ("-jump", IN_JumpUp);
+cmd_t IN_Impulse_Cmd ("impulse", IN_Impulse);
+cmd_t IN_KLookDown_Cmd ("+klook", IN_KLookDown);
+cmd_t IN_KLookUp_Cmd ("-klook", IN_KLookUp);
+cmd_t IN_MLookDown_Cmd ("+mlook", IN_MLookDown);
+cmd_t IN_MLookUp_Cmd ("-mlook", IN_MLookUp);
+
+
 void CL_InitInput (void)
 {
-	Cmd_AddCommand ("+moveup",IN_UpDown);
-	Cmd_AddCommand ("-moveup",IN_UpUp);
-	Cmd_AddCommand ("+movedown",IN_DownDown);
-	Cmd_AddCommand ("-movedown",IN_DownUp);
-	Cmd_AddCommand ("+left",IN_LeftDown);
-	Cmd_AddCommand ("-left",IN_LeftUp);
-	Cmd_AddCommand ("+right",IN_RightDown);
-	Cmd_AddCommand ("-right",IN_RightUp);
-	Cmd_AddCommand ("+forward",IN_ForwardDown);
-	Cmd_AddCommand ("-forward",IN_ForwardUp);
-	Cmd_AddCommand ("+back",IN_BackDown);
-	Cmd_AddCommand ("-back",IN_BackUp);
-	Cmd_AddCommand ("+lookup", IN_LookupDown);
-	Cmd_AddCommand ("-lookup", IN_LookupUp);
-	Cmd_AddCommand ("+lookdown", IN_LookdownDown);
-	Cmd_AddCommand ("-lookdown", IN_LookdownUp);
-	Cmd_AddCommand ("+strafe", IN_StrafeDown);
-	Cmd_AddCommand ("-strafe", IN_StrafeUp);
-	Cmd_AddCommand ("+moveleft", IN_MoveleftDown);
-	Cmd_AddCommand ("-moveleft", IN_MoveleftUp);
-	Cmd_AddCommand ("+moveright", IN_MoverightDown);
-	Cmd_AddCommand ("-moveright", IN_MoverightUp);
-	Cmd_AddCommand ("+speed", IN_SpeedDown);
-	Cmd_AddCommand ("-speed", IN_SpeedUp);
-	Cmd_AddCommand ("+attack", IN_AttackDown);
-	Cmd_AddCommand ("-attack", IN_AttackUp);
-	Cmd_AddCommand ("+use", IN_UseDown);
-	Cmd_AddCommand ("-use", IN_UseUp);
-	Cmd_AddCommand ("+jump", IN_JumpDown);
-	Cmd_AddCommand ("-jump", IN_JumpUp);
-	Cmd_AddCommand ("impulse", IN_Impulse);
-	Cmd_AddCommand ("+klook", IN_KLookDown);
-	Cmd_AddCommand ("-klook", IN_KLookUp);
-	Cmd_AddCommand ("+mlook", IN_MLookDown);
-	Cmd_AddCommand ("-mlook", IN_MLookUp);
-
 }
 

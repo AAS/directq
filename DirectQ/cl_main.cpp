@@ -25,33 +25,39 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // references them even when on a unix system.
 
 // these two are not intended to be set directly
-cvar_t	cl_name = {"_cl_name", "player", true};
-cvar_t	cl_color = {"_cl_color", "0", true};
+cvar_t	cl_name ("_cl_name", "player", CVAR_ARCHIVE);
+cvar_t	cl_color ("_cl_color", "0", CVAR_ARCHIVE);
 
-cvar_t	cl_shownet = {"cl_shownet","0"};	// can be 0, 1, or 2
-cvar_t	cl_nolerp = {"cl_nolerp","0"};
+cvar_t	cl_shownet ("cl_shownet","0");	// can be 0, 1, or 2
+cvar_t	cl_nolerp ("cl_nolerp","0");
 
-cvar_t	lookspring = {"lookspring","0", true};
-cvar_t	lookstrafe = {"lookstrafe","0", true};
-cvar_t	sensitivity = {"sensitivity","3", true};
+cvar_t	lookspring ("lookspring","0", CVAR_ARCHIVE);
+cvar_t	lookstrafe ("lookstrafe","0", CVAR_ARCHIVE);
+cvar_t	sensitivity ("sensitivity","3", CVAR_ARCHIVE);
 
-cvar_t	m_pitch = {"m_pitch","0.022", true};
-cvar_t	m_yaw = {"m_yaw","0.022", true};
-cvar_t	m_forward = {"m_forward","0", true};
-cvar_t	m_side = {"m_side","0.8", true};
+cvar_t	m_pitch ("m_pitch","0.022", CVAR_ARCHIVE);
+cvar_t	m_yaw ("m_yaw","0.022", CVAR_ARCHIVE);
+cvar_t	m_forward ("m_forward","0", CVAR_ARCHIVE);
+cvar_t	m_side ("m_side","0.8", CVAR_ARCHIVE);
 
+cvar_t	r_rapidfire ("r_rapidfire", "0", CVAR_ARCHIVE);
+
+extern cvar_t r_extradlight;
 
 client_static_t	cls;
 client_state_t	cl;
+
 // FIXME: put these on hunk?
-efrag_t			cl_efrags[MAX_EFRAGS];
-entity_t		cl_entities[MAX_EDICTS];
-entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
+// consider it done ;)
+#define BASE_ENTITIES	512
+
+entity_t		**cl_entities = NULL;
 lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
-dlight_t		cl_dlights[MAX_DLIGHTS];
+dlight_t		*cl_dlights = NULL;
 
 int				cl_numvisedicts;
-entity_t		*cl_visedicts[MAX_VISEDICTS];
+entity_t		**cl_visedicts = NULL;
+
 
 /*
 =====================
@@ -61,32 +67,39 @@ CL_ClearState
 */
 void CL_ClearState (void)
 {
-	int			i;
+	int i;
 
-	if (!sv.active)
-		Host_ClearMemory ();
+	// this really only happens with demos
+	if (!sv.active) Host_ClearMemory ();
 
-// wipe the entire cl structure
+	// wipe the entire cl structure
 	memset (&cl, 0, sizeof(cl));
 
 	SZ_Clear (&cls.message);
 
-// clear other arrays	
-	memset (cl_efrags, 0, sizeof(cl_efrags));
-	memset (cl_entities, 0, sizeof(cl_entities));
-	memset (cl_dlights, 0, sizeof(cl_dlights));
-	memset (cl_lightstyle, 0, sizeof(cl_lightstyle));
-	memset (cl_temp_entities, 0, sizeof(cl_temp_entities));
-	memset (cl_beams, 0, sizeof(cl_beams));
+	// set up arrays on the heap (note - this will automatically clear them for us too)
+	cl_dlights = (dlight_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, MAX_DLIGHTS * sizeof (dlight_t));
+	cl_visedicts = (entity_t **) Heap_TagAlloc (TAG_CLIENTSTRUCT, MAX_VISEDICTS * sizeof (entity_t *));
 
-//
-// allocate the efrags and chain together into a free list
-//
-	cl.free_efrags = cl_efrags;
-	for (i=0 ; i<MAX_EFRAGS-1 ; i++)
-		cl.free_efrags[i].entnext = &cl.free_efrags[i+1];
-	cl.free_efrags[i].entnext = NULL;
+	// clear down anything that stayed as static
+	memset (cl_temp_entities, 0, MAX_TEMP_ENTITIES * sizeof (entity_t));
+	memset (cl_beams, 0, MAX_BEAMS * sizeof (beam_t));
+	memset (cl_lightstyle, 0, MAX_LIGHTSTYLES * sizeof (lightstyle_t));
+
+	// allocate space for the first 512 entities - also clears the array
+	// the remainder are left at NULL and allocated on-demand if they are ever needed
+	// this array was allocated in CL_Init as it's a one-time-only need.
+	for (i = 0; i < MAX_EDICTS; i++)
+	{
+		if (i < BASE_ENTITIES)
+		{
+			cl_entities[i] = (entity_t *) Heap_TagAlloc (TAG_CLIENTSTRUCT, sizeof (entity_t));
+			cl_entities[i]->entnum = i;
+		}
+		else cl_entities[i] = NULL;
+	}
 }
+
 
 /*
 =====================
@@ -98,13 +111,16 @@ This is also called on Host_Error, so it shouldn't cause any errors
 */
 void CL_Disconnect (void)
 {
-// stop sounds (especially looping!)
+	// stop sounds (especially looping!)
 	S_StopAllSounds (true);
-	
-// bring the console down and fade the colors back to normal
-//	SCR_BringDownConsole ();
 
-// if running a local server, shut it down
+	// bring the console down and fade the colors back to normal
+	//	SCR_BringDownConsole ();
+
+	cl.worldbrush = NULL;
+	cl.worldmodel = NULL;
+
+	// if running a local server, shut it down
 	if (cls.demoplayback)
 		CL_StopPlayback ();
 	else if (cls.state == ca_connected)
@@ -147,11 +163,7 @@ Host should be either "local" or a net address to be passed on
 */
 void CL_EstablishConnection (char *host)
 {
-	if (cls.state == ca_dedicated)
-		return;
-
-	if (cls.demoplayback)
-		return;
+	if (cls.demoplayback) return;
 
 	CL_Disconnect ();
 
@@ -176,7 +188,7 @@ void CL_SignonReply (void)
 {
 	char 	str[8192];
 
-Con_DPrintf ("CL_SignonReply: %i\n", cls.signon);
+	Con_DPrintf ("CL_SignonReply: %i\n", cls.signon);
 
 	switch (cls.signon)
 	{
@@ -200,7 +212,6 @@ Con_DPrintf ("CL_SignonReply: %i\n", cls.signon);
 	case 3:	
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "begin");
-		Cache_Report ();		// print remaining memory
 		break;
 		
 	case 4:
@@ -223,6 +234,8 @@ void CL_NextDemo (void)
 	if (cls.demonum == -1)
 		return;		// don't play demos
 
+	// this causes lockups when switching between demos in warpspasm.
+	// let's just not do it. ;)
 	SCR_BeginLoadingPlaque ();
 
 	if (!cls.demos[cls.demonum][0] || cls.demonum == MAX_DEMOS)
@@ -248,19 +261,32 @@ CL_PrintEntities_f
 */
 void CL_PrintEntities_f (void)
 {
-	entity_t	*ent;
-	int			i;
-	
-	for (i=0,ent=cl_entities ; i<cl.num_entities ; i++,ent++)
+	int i;
+
+	for (i = 0; i < cl.num_entities; i++)
 	{
-		Con_Printf ("%3i:",i);
+		entity_t *ent = cl_entities[i];
+
+		Con_Printf ("%3i:", i);
+
 		if (!ent->model)
 		{
 			Con_Printf ("EMPTY\n");
 			continue;
 		}
-		Con_Printf ("%s:%2i  (%5.1f,%5.1f,%5.1f) [%5.1f %5.1f %5.1f]\n"
-		,ent->model->name,ent->frame, ent->origin[0], ent->origin[1], ent->origin[2], ent->angles[0], ent->angles[1], ent->angles[2]);
+
+		Con_Printf
+		(
+			"%s:%3i  (%5.1f,%5.1f,%5.1f) [%5.1f %5.1f %5.1f]\n",
+			ent->model->name,
+			ent->frame,
+			ent->origin[0],
+			ent->origin[1],
+			ent->origin[2],
+			ent->angles[0],
+			ent->angles[1],
+			ent->angles[2]
+		);
 	}
 }
 
@@ -308,18 +334,19 @@ void SetPal (int i)
 #endif
 }
 
+
 /*
 ===============
 CL_AllocDlight
 
 ===============
 */
-dlight_t *CL_AllocDlight (int key)
+dlight_t *CL_FindDlight (int key)
 {
 	int		i;
 	dlight_t	*dl;
 
-// first look for an exact key match
+	// first look for an exact key match
 	if (key)
 	{
 		dl = cl_dlights;
@@ -334,7 +361,7 @@ dlight_t *CL_AllocDlight (int key)
 		}
 	}
 
-// then look for anything else
+	// then look for anything else
 	dl = cl_dlights;
 	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
 	{
@@ -349,6 +376,21 @@ dlight_t *CL_AllocDlight (int key)
 	dl = &cl_dlights[0];
 	memset (dl, 0, sizeof(*dl));
 	dl->key = key;
+	return dl;
+}
+
+
+dlight_t *CL_AllocDlight (int key)
+{
+	// find a dlight to use
+	dlight_t *dl = CL_FindDlight (key);
+
+	// set default colour for any we don't colour ourselves
+	// NOTE - all dlight colour ops should go through R_ColourDLight (in d3d_rlight.cpp) rather than
+	// accessing the fields directly, so that those who don't want coloured light can switch it off.
+	dl->rgb[0] = dl->rgb[1] = dl->rgb[2] = 255;
+
+	// done
 	return dl;
 }
 
@@ -439,6 +481,8 @@ SetPal(2);
 CL_RelinkEntities
 ===============
 */
+extern cvar_t r_lerporient;
+
 void CL_RelinkEntities (void)
 {
 	entity_t	*ent;
@@ -448,111 +492,263 @@ void CL_RelinkEntities (void)
 	float		bobjrotate;
 	vec3_t		oldorg;
 	dlight_t	*dl;
+	float timepassed;
+	float blend;
 
-// determine partial update time	
+	// determine partial update time	
 	frac = CL_LerpPoint ();
 
 	cl_numvisedicts = 0;
 
-//
-// interpolate player info
-//
-	for (i=0 ; i<3 ; i++)
-		cl.velocity[i] = cl.mvelocity[1][i] + 
-			frac * (cl.mvelocity[0][i] - cl.mvelocity[1][i]);
+	// interpolate player info
+	for (i = 0; i < 3; i++)
+		cl.velocity[i] = cl.mvelocity[1][i] + frac * (cl.mvelocity[0][i] - cl.mvelocity[1][i]);
 
 	if (cls.demoplayback)
 	{
-	// interpolate the angles	
-		for (j=0 ; j<3 ; j++)
+		// interpolate the angles	
+		for (j = 0; j < 3; j++)
 		{
 			d = cl.mviewangles[0][j] - cl.mviewangles[1][j];
-			if (d > 180)
+
+			if (d > 180) 
 				d -= 360;
 			else if (d < -180)
 				d += 360;
-			cl.viewangles[j] = cl.mviewangles[1][j] + frac*d;
+
+			cl.viewangles[j] = cl.mviewangles[1][j] + frac * d;
 		}
 	}
 	
-	bobjrotate = anglemod(100*cl.time);
-	
-// start on the entity after the world
-	for (i=1,ent=cl_entities+1 ; i<cl.num_entities ; i++,ent++)
-	{
-		if (!ent->model)
-		{	// empty slot
-			if (ent->forcelink)
-				R_RemoveEfrags (ent);	// just became empty
-			continue;
-		}
+	bobjrotate = anglemod (100 * cl.time);
 
-// if the object wasn't included in the last packet, remove it
+	// start on the entity after the world
+	for (i = 1; i < cl.num_entities; i++)
+	{
+		ent = cl_entities[i];
+
+		// doesn't have a model
+		if (!ent->model) continue;
+
+		// if the object wasn't included in the last packet, remove it
 		if (ent->msgtime != cl.mtime[0])
 		{
 			ent->model = NULL;
+
+			// clear it's interpolation data
+			ent->frame_start_time     = 0;
+			ent->translate_start_time = 0;
+			ent->rotate_start_time    = 0;
+
+			// and the poses
+			ent->pose1 = ent->pose2 = 0;
+
 			continue;
 		}
 
 		VectorCopy (ent->origin, oldorg);
 
 		if (ent->forcelink)
-		{	// the entity was not updated in the last message
+		{
+			// the entity was not updated in the last message
 			// so move to the final spot
 			VectorCopy (ent->msg_origins[0], ent->origin);
 			VectorCopy (ent->msg_angles[0], ent->angles);
 		}
 		else
-		{	// if the delta is large, assume a teleport and don't lerp
+		{
+			// if the delta is large, assume a teleport and don't lerp
 			f = frac;
-			for (j=0 ; j<3 ; j++)
+
+			for (j = 0; j < 3; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
+
 				if (delta[j] > 100 || delta[j] < -100)
-					f = 1;		// assume a teleportation, not a motion
+				{
+					// assume a teleportation, not a motion
+					f = 1;
+				}
+
+				if (f >= 1)
+				{
+					// clear interpolation data
+					ent->translate_start_time = 0;
+					ent->rotate_start_time    = 0;
+				}
 			}
 
-		// interpolate the origin and angles
-			for (j=0 ; j<3 ; j++)
+			// interpolate the origin and angles
+			for (j = 0; j < 3; j++)
 			{
-				ent->origin[j] = ent->msg_origins[1][j] + f*delta[j];
+				ent->origin[j] = ent->msg_origins[1][j] + f * delta[j];
 
 				d = ent->msg_angles[0][j] - ent->msg_angles[1][j];
+
 				if (d > 180)
 					d -= 360;
 				else if (d < -180)
 					d += 360;
-				ent->angles[j] = ent->msg_angles[1][j] + f*d;
+
+				ent->angles[j] = ent->msg_angles[1][j] + f * d;
 			}
-			
 		}
 
-// rotate binary objects locally
+		// blend the positions
+		// (moved from R_RotateForEntity to here so that the blended position is available everywhere on the client)
+		// (fixes a lot of interpolation related bugs and makes other hacky workarounds unnecessary :))
+		// positional interpolation
+		timepassed = cl.time - ent->translate_start_time;
+
+		if (ent->translate_start_time == 0 || timepassed > 1)
+		{
+			ent->translate_start_time = cl.time;
+
+			VectorCopy (ent->origin, ent->origin1);
+			VectorCopy (ent->origin, ent->origin2);
+		}
+
+		if (!VectorCompare (ent->origin, ent->origin2))
+		{
+			ent->translate_start_time = cl.time;
+
+			VectorCopy (ent->origin2, ent->origin1);
+			VectorCopy (ent->origin,  ent->origin2);
+
+			blend = 0;
+		}
+		else
+		{
+			blend = timepassed / 0.1;
+
+			if (cl.paused || blend > 1) blend = 1;
+		}
+
+		VectorSubtract (ent->origin2, ent->origin1, delta);
+
+		if (r_lerporient.value)
+		{
+			// set interpolated origin
+			ent->origin[0] = ent->origin1[0] + (blend * delta[0]);
+			ent->origin[1] = ent->origin1[1] + (blend * delta[1]);
+			ent->origin[2] = ent->origin1[2] + (blend * delta[2]);
+
+			// orientation interpolation (Euler angles, yuck!)
+			timepassed = cl.time - ent->rotate_start_time; 
+
+			if (ent->rotate_start_time == 0 || timepassed > 1)
+			{
+				ent->rotate_start_time = cl.time;
+
+				VectorCopy (ent->angles, ent->angles1);
+				VectorCopy (ent->angles, ent->angles2);
+			}
+
+			if (!VectorCompare (ent->angles, ent->angles2))
+			{
+				ent->rotate_start_time = cl.time;
+
+				VectorCopy (ent->angles2, ent->angles1);
+				VectorCopy (ent->angles,  ent->angles2);
+
+				blend = 0;
+			}
+			else
+			{
+				blend = timepassed / 0.1;
+
+				if (cl.paused || blend > 1) blend = 1;
+			}
+
+			VectorSubtract (ent->angles2, ent->angles1, delta);
+
+			// always interpolate along the shortest path
+			if (delta[0] > 180) delta[0] -= 360; else if (delta[0] < -180) delta[0] += 360;
+			if (delta[1] > 180) delta[1] -= 360; else if (delta[1] < -180) delta[1] += 360;
+			if (delta[2] > 180) delta[2] -= 360; else if (delta[2] < -180) delta[2] += 360;
+
+			// set interpolated angles
+			ent->angles[0] = ent->angles1[0] + (blend * delta[0]);
+			ent->angles[1] = ent->angles1[1] + (blend * delta[1]);
+			ent->angles[2] = ent->angles1[2] + (blend * delta[2]);
+		}
+
+		// no alpha
+		ent->alphaval = 255;
+
+		// rotate binary objects locally
 		if (ent->model->flags & EF_ROTATE)
+		{
+			// bugfix - a rotating backpack spawned from a dead player gets the same angles as the player
+			// if it was spawned when the player is not upright (e.g. killed by a rocket or similar)
+			ent->angles[0] = 0;
 			ent->angles[1] = bobjrotate;
+			ent->angles[2] = 0;
+		}
 
 		if (ent->effects & EF_BRIGHTFIELD)
 			R_EntityParticles (ent);
-#ifdef QUAKE2
-		if (ent->effects & EF_DARKFIELD)
-			R_DarkFieldParticles (ent);
-#endif
+
 		if (ent->effects & EF_MUZZLEFLASH)
 		{
 			vec3_t		fv, rv, uv;
 
 			dl = CL_AllocDlight (i);
+			dl->die = cl.time + 0.1;
+
+			// some entities have different attacks resulting in a different flash colour
+			if (!strncmp (&ent->model->name[6], "wizard", 6))
+				R_ColourDLight (dl, 125, 492, 146);
+			else if (!strncmp (&ent->model->name[6], "shalrath", 8))
+				R_ColourDLight (dl, 399, 141, 228);
+			else if (!strncmp (&ent->model->name[6], "shambler", 8))
+				R_ColourDLight (dl, 2, 225, 541);
+			else R_ColourDLight (dl, 408, 242, 117);
+
+			if (i == cl.viewentity)
+			{
+				if (cl.stats[STAT_ACTIVEWEAPON] == IT_NAILGUN)
+				{
+					// rapid fire
+					dl->die = cl.time + 0.001;
+				}
+				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_LIGHTNING)
+				{
+					// rapid fire
+					dl->die = cl.time + 0.001;
+
+					// switch the dlight colour
+					R_ColourDLight (dl, 2, 225, 541);
+				}
+				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_LIGHTNING)
+				{
+					// rapid fire
+					dl->die = cl.time + 0.001;
+
+					// switch the dlight colour
+					R_ColourDLight (dl, 2, 225, 541);
+				}
+				else if (cl.stats[STAT_ACTIVEWEAPON] == IT_SUPER_NAILGUN)
+				{
+					// rapid fire
+					dl->die = cl.time + 0.001;
+				}
+
+				// switch off rapid fire
+				if (!r_rapidfire.value) dl->die = cl.time + 0.1;
+			}
+
 			VectorCopy (ent->origin,  dl->origin);
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
-			 
+
 			VectorMA (dl->origin, 18, fv, dl->origin);
 			dl->radius = 200 + (rand()&31);
 			dl->minlight = 32;
-			dl->die = cl.time + 0.1;
 		}
 		if (ent->effects & EF_BRIGHTLIGHT)
-		{			
+		{
+			// uncoloured
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
 			dl->origin[2] += 16;
@@ -565,33 +761,65 @@ void CL_RelinkEntities (void)
 			VectorCopy (ent->origin,  dl->origin);
 			dl->radius = 200 + (rand()&31);
 			dl->die = cl.time + 0.001;
+
+			// powerup dynamic lights
+			if (i == cl.viewentity)
+			{
+				int AverageColour;
+				int rgb[3];
+
+				rgb[0] = 64;
+				rgb[1] = 64;
+				rgb[2] = 64;
+
+				if (cl.items & IT_QUAD) rgb[2] = 255;
+				if (cl.items & IT_INVULNERABILITY) rgb[0] = 255;
+
+				// re-balance the colours
+				AverageColour = (rgb[0] + rgb[1] + rgb[2]) / 3;
+
+				rgb[0] = rgb[0] * 255 / AverageColour;
+				rgb[1] = rgb[1] * 255 / AverageColour;
+				rgb[2] = rgb[2] * 255 / AverageColour;
+
+				R_ColourDLight (dl, rgb[0], rgb[1], rgb[2]);
+			}
 		}
-#ifdef QUAKE2
-		if (ent->effects & EF_DARKLIGHT)
-		{			
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200.0 + (rand()&31);
-			dl->die = cl.time + 0.001;
-			dl->dark = true;
-		}
-		if (ent->effects & EF_LIGHT)
-		{			
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200;
-			dl->die = cl.time + 0.001;
-		}
-#endif
 
 		if (ent->model->flags & EF_GIB)
 			R_RocketTrail (oldorg, ent->origin, 2);
 		else if (ent->model->flags & EF_ZOMGIB)
 			R_RocketTrail (oldorg, ent->origin, 4);
 		else if (ent->model->flags & EF_TRACER)
+		{
+			// wizard trail
 			R_RocketTrail (oldorg, ent->origin, 3);
+
+			if (r_extradlight.value)
+			{
+				dl = CL_AllocDlight (i);
+				VectorCopy (ent->origin, dl->origin);
+				dl->radius = 200;
+				dl->die = cl.time + 0.01;
+
+				R_ColourDLight (dl, 125, 492, 146);
+			}
+		}
 		else if (ent->model->flags & EF_TRACER2)
+		{
+			// knight trail
 			R_RocketTrail (oldorg, ent->origin, 5);
+
+			if (r_extradlight.value)
+			{
+				dl = CL_AllocDlight (i);
+				VectorCopy (ent->origin, dl->origin);
+				dl->radius = 200;
+				dl->die = cl.time + 0.01;
+
+				R_ColourDLight (dl, 408, 242, 117);
+			}
+		}
 		else if (ent->model->flags & EF_ROCKET)
 		{
 			R_RocketTrail (oldorg, ent->origin, 0);
@@ -599,23 +827,35 @@ void CL_RelinkEntities (void)
 			VectorCopy (ent->origin, dl->origin);
 			dl->radius = 200;
 			dl->die = cl.time + 0.01;
+
+			R_ColourDLight (dl, 408, 242, 117);
 		}
 		else if (ent->model->flags & EF_GRENADE)
 			R_RocketTrail (oldorg, ent->origin, 1);
 		else if (ent->model->flags & EF_TRACER3)
+		{
+			// vore trail
 			R_RocketTrail (oldorg, ent->origin, 6);
+
+			if (r_extradlight.value)
+			{
+				dl = CL_AllocDlight (i);
+				VectorCopy (ent->origin, dl->origin);
+				dl->radius = 200;
+				dl->die = cl.time + 0.01;
+
+				R_ColourDLight (dl, 399, 141, 228);
+			}
+		}
 
 		ent->forcelink = false;
 
-		if (i == cl.viewentity && !chase_active.value)
-			continue;
+		// chasecam test
+		if (i == cl.viewentity && !chase_active.value) continue;
 
-#ifdef QUAKE2
-		if ( ent->effects & EF_NODRAW )
-			continue;
-#endif
 		if (cl_numvisedicts < MAX_VISEDICTS)
 		{
+			ent->nocullbox = false;
 			cl_visedicts[cl_numvisedicts] = ent;
 			cl_numvisedicts++;
 		}
@@ -637,7 +877,7 @@ int CL_ReadFromServer (void)
 
 	cl.oldtime = cl.time;
 	cl.time += host_frametime;
-	
+
 	do
 	{
 		ret = CL_GetMessage ();
@@ -649,16 +889,15 @@ int CL_ReadFromServer (void)
 		cl.last_received_message = realtime;
 		CL_ParseServerMessage ();
 	} while (ret && cls.state == ca_connected);
-	
+
 	if (cl_shownet.value)
 		Con_Printf ("\n");
 
 	CL_RelinkEntities ();
+
 	CL_UpdateTEnts ();
 
-//
-// bring the links up to date
-//
+	// bring the links up to date
 	return 0;
 }
 
@@ -714,42 +953,25 @@ void CL_SendCmd (void)
 CL_Init
 =================
 */
+cmd_t CL_PrintEntities_f_Cmd ("entities", CL_PrintEntities_f);
+cmd_t CL_Disconnect_f_Cmd ("disconnect", CL_Disconnect_f);
+cmd_t CL_Record_f_Cmd ("record", CL_Record_f);
+cmd_t CL_Stop_f_Cmd ("stop", CL_Stop_f);
+cmd_t CL_PlayDemo_f_Cmd ("playdemo", CL_PlayDemo_f);
+cmd_t CL_TimeDemo_f_Cmd ("timedemo", CL_TimeDemo_f);
+
+
 void CL_Init (void)
 {	
 	SZ_Alloc (&cls.message, 1024);
 
+	// allocated here because (1) it's just a poxy array of pointers, so no big deal, and (2) it's
+	// referenced during a changelevel (?only when there's no intermission?) so it needs to be in
+	// the persistent heap, and (3) the full thing is allocated each map anyway, so why not shift
+	// the overhead (small as it is) to one time only.
+	cl_entities = (entity_t **) Heap_TagAlloc (TAG_CLIENTSTARTUP, MAX_EDICTS * sizeof (entity_t *));
+
 	CL_InitInput ();
-	CL_InitTEnts ();
-	
-//
-// register our commands
-//
-	Cvar_RegisterVariable (&cl_name);
-	Cvar_RegisterVariable (&cl_color);
-	Cvar_RegisterVariable (&cl_upspeed);
-	Cvar_RegisterVariable (&cl_forwardspeed);
-	Cvar_RegisterVariable (&cl_backspeed);
-	Cvar_RegisterVariable (&cl_sidespeed);
-	Cvar_RegisterVariable (&cl_movespeedkey);
-	Cvar_RegisterVariable (&cl_yawspeed);
-	Cvar_RegisterVariable (&cl_pitchspeed);
-	Cvar_RegisterVariable (&cl_anglespeedkey);
-	Cvar_RegisterVariable (&cl_shownet);
-	Cvar_RegisterVariable (&cl_nolerp);
-	Cvar_RegisterVariable (&lookspring);
-	Cvar_RegisterVariable (&lookstrafe);
-	Cvar_RegisterVariable (&sensitivity);
-
-	Cvar_RegisterVariable (&m_pitch);
-	Cvar_RegisterVariable (&m_yaw);
-	Cvar_RegisterVariable (&m_forward);
-	Cvar_RegisterVariable (&m_side);
-
-	Cmd_AddCommand ("entities", CL_PrintEntities_f);
-	Cmd_AddCommand ("disconnect", CL_Disconnect_f);
-	Cmd_AddCommand ("record", CL_Record_f);
-	Cmd_AddCommand ("stop", CL_Stop_f);
-	Cmd_AddCommand ("playdemo", CL_PlayDemo_f);
-	Cmd_AddCommand ("timedemo", CL_TimeDemo_f);
 }
+
 

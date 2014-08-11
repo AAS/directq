@@ -21,19 +21,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 /*
 
-cvar_t variables are used to hold scalar or string variables that can be changed or displayed at the console or prog code as well as accessed directly
-in C code.
+cvar_t variables are used to hold scalar or string variables that can be changed or displayed at the console or 
+prog code as well as accessed directly in C code.
 
 it is sufficient to initialize a cvar_t with just the first two fields, or
-you can add a ,true flag for variables that you want saved to the configuration
+you can add a CVAR_ARCHIVE flag for variables that you want saved to the configuration
 file when the game is quit:
 
-cvar_t	r_draworder = {"r_draworder","1"};
-cvar_t	scr_screensize = {"screensize","1",true};
+cvar_t	r_draworder ("r_draworder","1");
+cvar_t	scr_screensize ("screensize","1",CVAR_ARCHIVE);
 
-Cvars must be registered before use, or they will have a 0 value instead of the float interpretation of the string.  Generally, all cvar_t declarations should be registered in the apropriate init function before any console commands are executed:
-Cvar_RegisterVariable (&host_framerate);
-
+Cvars will register themselves on creation, so there is no need to call Cvar_Register on them.
 
 C code usually just references a cvar in place:
 if ( r_draworder.value )
@@ -53,25 +51,65 @@ Cvars are restricted from having the same names as commands to keep this
 interface from being ambiguous.
 */
 
-typedef struct cvar_s
+// changes are broadcast to all clients
+#define CVAR_SERVER			1
+
+// written to config.cfg
+#define CVAR_ARCHIVE		2
+
+// explicit value type cvar
+#define CVAR_VALUE			4
+
+// dummy cvar, only used for temp storage for menu controls that expect a cvar
+// but where we don't want to give them a real one!
+#define CVAR_DUMMY			8
+
+// this cvar is written to a hud script
+#define CVAR_HUD			16
+
+// cvar will reject any attempt to set (thru cvar_set; members can be accessed directly)
+// at least until we split up public/private properly...
+#define CVAR_READONLY		32
+
+class cvar_t
 {
-	char	*name;
-	char	*string;
-	bool archive;		// set to true to cause it to be saved to vars.rc
-	bool server;		// notifies players when changed
+public:
+	// this one is for use when we just want a dummy cvar (e.g. to take a copy of an existing one for the menus)
+	// these types are not registered and do not show up in completion lists
+	cvar_t (void);
+
+	// this one allows specifying of cvars directly by usage flags
+	// this is the preferred way and ultimately all cvars will be changed over to this
+	cvar_t (char *cvarname, char *initialval, int useflags = 0);
+
+	// same as above but it allows for an explicit value cvar
+	cvar_t (char *cvarname, float initialval, int useflags = 0);
+
+	// let's not mess with char * pointers here
+	char	name[128];
+
+	// do i need this so long?
+	char	string[1024];
+
+	// value for numeric cvars (this needs to be changed to a less primitive method)
 	float	value;
-	struct cvar_s *next;
-} cvar_t;
 
-void 	Cvar_RegisterVariable (cvar_t *variable);
-// registers a cvar that allready has the name, string, and optionally the
-// archive elements set.
+	// integer representation of value
+	int		integer;
 
-void 	Cvar_Set (char *var_name, char *value);
-// equivelant to "<name> <variable>" typed at the console
+	// usage flags
+	int usage;
 
-void	Cvar_SetValue (char *var_name, float value);
-// expands value to a string and calls Cvar_Set
+	// next in the chain
+	cvar_t *next;
+};
+
+
+// overloads - set by name or variable and take float or string
+void Cvar_Set (char *var_name, char *value);
+void Cvar_Set (char *var_name, float value);
+void Cvar_Set (cvar_t *var, float value);
+void Cvar_Set (cvar_t *var, char *value);
 
 float	Cvar_VariableValue (char *var_name);
 // returns 0 if not defined or non numeric

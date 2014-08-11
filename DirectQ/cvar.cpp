@@ -32,7 +32,7 @@ Cvar_FindVar
 cvar_t *Cvar_FindVar (char *var_name)
 {
 	cvar_t	*var;
-	
+
 	for (var=cvar_vars ; var ; var=var->next)
 		if (!Q_strcmp (var_name, var->name))
 			return var;
@@ -45,13 +45,14 @@ cvar_t *Cvar_FindVar (char *var_name)
 Cvar_VariableValue
 ============
 */
-float	Cvar_VariableValue (char *var_name)
+float Cvar_VariableValue (char *var_name)
 {
 	cvar_t	*var;
 	
 	var = Cvar_FindVar (var_name);
-	if (!var)
-		return 0;
+
+	if (!var) return 0;
+
 	return Q_atof (var->string);
 }
 
@@ -101,81 +102,85 @@ char *Cvar_CompleteVariable (char *partial)
 Cvar_Set
 ============
 */
-void Cvar_Set (char *var_name, char *value)
+void Cvar_Set (cvar_t *var, char *value)
 {
-	cvar_t	*var;
 	bool changed;
-	
-	var = Cvar_FindVar (var_name);
+
 	if (!var)
-	{	// there is an error in C code if this happens
-		Con_Printf ("Cvar_Set: variable %s not found\n", var_name);
+	{
+		// there is an error in C code if this happens
+		Con_Printf ("Cvar_Set: variable %s not found\n", var->name);
 		return;
 	}
 
-	changed = Q_strcmp(var->string, value);
-	
-	Z_Free (var->string);	// free the old value string
-	
-	var->string = (char *) Z_Malloc (Q_strlen(value)+1);
+	// reject set attempt
+	if (var->usage & CVAR_READONLY)
+	{
+		Con_Printf ("Cvar_Set: var->usage & CVAR_READONLY\n");
+		return;
+	}
+
+	changed = Q_strcmp (var->string, value);
+
+	// store back to the cvar
 	Q_strcpy (var->string, value);
 	var->value = Q_atof (var->string);
-	if (var->server && changed)
+	var->integer = (int) var->value;
+
+	if ((var->usage & CVAR_SERVER) && changed)
 	{
 		if (sv.active)
 			SV_BroadcastPrintf ("\"%s\" changed to \"%s\"\n", var->name, var->string);
 	}
 }
 
-/*
-============
-Cvar_SetValue
-============
-*/
-void Cvar_SetValue (char *var_name, float value)
+
+void Cvar_Set (cvar_t *var, float value)
 {
-	char	val[32];
-	
-	sprintf (val, "%f",value);
-	Cvar_Set (var_name, val);
+	Cvar_Set (var, va ("%g", value));
+}
+
+
+void Cvar_Set (char *var_name, float value)
+{
+	Cvar_Set (Cvar_FindVar (var_name), va ("%g", value));
+}
+
+
+void Cvar_Set (char *var_name, char *value)
+{
+	Cvar_Set (Cvar_FindVar (var_name), value);
 }
 
 
 /*
 ============
-Cvar_RegisterVariable
+Cvar_Register
 
 Adds a freestanding variable to the variable list.
 ============
 */
-void Cvar_RegisterVariable (cvar_t *variable)
+static void Cvar_Register (cvar_t *variable)
 {
-	char	*oldstr;
-	
-// first check to see if it has allready been defined
-	if (Cvar_FindVar (variable->name))
-	{
-		Con_Printf ("Can't register variable %s, allready defined\n", variable->name);
-		return;
-	}
-	
-// check for overlap with a command
-	if (Cmd_Exists (variable->name))
-	{
-		Con_Printf ("Cvar_RegisterVariable: %s is a command\n", variable->name);
-		return;
-	}
-		
-// copy the value off, because future sets will Z_Free it
-	oldstr = variable->string;
-	variable->string = (char *) Z_Malloc (Q_strlen(variable->string)+1);	
-	Q_strcpy (variable->string, oldstr);
+	// these should never go through here but let's just be certain
+	// (edit - actually it does - recursively - when setting up shadows; see below)
+	if (variable->usage & CVAR_DUMMY) return;
+
+	// first check to see if it has already been defined
+	if (Cvar_FindVar (variable->name)) return;
+
+	// check for overlap with a command
+	if (Cmd_Exists (variable->name)) return;
+
+	// store the value off
 	variable->value = Q_atof (variable->string);
-	
-// link the variable in
+	variable->integer = (int) variable->value;
+
+	// link the variable in
 	variable->next = cvar_vars;
 	cvar_vars = variable;
 }
+
 
 /*
 ============
@@ -184,16 +189,14 @@ Cvar_Command
 Handles variable inspection and changing from the console
 ============
 */
-bool	Cvar_Command (void)
+bool Cvar_Command (void)
 {
-	cvar_t			*v;
+	cvar_t *v;
 
-// check variables
-	v = Cvar_FindVar (Cmd_Argv(0));
-	if (!v)
-		return false;
-		
-// perform a variable print or set
+	// check variables
+	if (!(v = Cvar_FindVar (Cmd_Argv(0)))) return false;
+
+	// perform a variable print or set
 	if (Cmd_Argc() == 1)
 	{
 		Con_Printf ("\"%s\" is \"%s\"\n", v->name, v->string);
@@ -216,9 +219,44 @@ with the archive flag set to true.
 void Cvar_WriteVariables (FILE *f)
 {
 	cvar_t	*var;
-	
+
 	for (var = cvar_vars ; var ; var = var->next)
-		if (var->archive)
+		if (var->usage & CVAR_ARCHIVE)
 			fprintf (f, "%s \"%s\"\n", var->name, var->string);
+}
+
+
+cvar_t::cvar_t (char *cvarname, char *initialval, int useflags)
+{
+	// copy in the data
+	strcpy (this->name, cvarname);
+	strcpy (this->string, initialval);
+	this->usage = useflags;
+
+	// self-register the cvar at construction time
+	Cvar_Register (this);
+}
+
+
+cvar_t::cvar_t (char *cvarname, float initialval, int useflags)
+{
+	// copy in the data
+	strcpy (this->name, cvarname);
+	sprintf (this->string, "%g", initialval);
+	this->usage = useflags;
+
+	// self-register the cvar at construction time
+	Cvar_Register (this);
+}
+
+
+cvar_t::cvar_t (void)
+{
+	this->name[0] = 0;
+	this->string[0] = 0;
+	this->value = 0;
+	this->usage = CVAR_DUMMY;
+	this->integer = 0;
+	this->next = NULL;
 }
 

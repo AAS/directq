@@ -1,0 +1,65 @@
+Release 1.6 updates.
+====================
+
+* Added XInput code for XBox 360 Controller.
+* Added FX loading from file (in gamedir/shaders, built-in shaders are available in source code folder).
+* Removed messy "Apply" stuff from menu code.
+* Added ability to show/hide/enable/disable menu options.
+* Changed video mode selection from instant to requiring an "Apply".
+* Added loaders for several "enhanced" particle types ("enhanced" system not implemented yet).
+* Further updates of particle system, replaced types with individual particle parameters.
+* Made new Multiplayer game config menu more tolerant of run-time game changes.
+* Removed dependency on ID1 naming convention from viewmodel muzzleflash frame interpolation hack.
+* Removed frame interpolation from bolt models.
+* Fixed crash on changelevel where you give yourself the lightning gun before changing level.
+* Fixed r_lightmap cvar.
+* Removed efrags system (replaced with similar - but more efficient - system).
+* Ported trace system from light.exe source code.
+* Fixed rotating va buffers disappeared somewhere around 1.2
+* Added proper bilinear resampling for texture upsizing.
+* Made Heap_TempAlloc more robust against recursive calls.
+* Worked around occasional weird crash in Draw_CachePic.
+* Removed dedicated server functionality.
+* Fixed memory leak in S_LocalSound.
+* Fixed shader loading from resources (badly broken).
+* Moved project to Visual C++ 2008 Express.
+* Added centerprint logging (scr_centerlog - need to change this to a standard cvar name - default on).
+* Cleared out gl_triplebuffer and vid.numpages.
+* Adding fading to centerprints and console notifications.
+* Fixed bug where brush and sprite static ents were not rendered unless a regular brush or sprite ent was also rendered.
+* Tightened up on textbox input for content names and locations menu.
+* Added customisation of base save and screenshot names.
+* Exposed screenshot format cvar via content menu (TGA/BMP/PNG/DDS/JPG support).
+* Moved alias model interpolation back to CPU (lighter vertex submission).
+* Fixed "dying throes" interpolation bug.
+* Added Maps menu.
+* Restored offset centerprinting from "lost version" somewhere around 1.2 or 1.3 (...long story...)
+* Removed limit on number of menu cachepics.
+* Removed limit on number of alias verts (fixed vert loader so it only allocs the number of verts needed too).
+* Fixed crash bug with game changing followed by map load; made progs loader significantly more robust in the process.
+* Added optional (on by default) "classic" sky warp (ripped from darkplaces) - use r_skywarp 0 to revert to sky sphere warp.
+* Added r_skybackscroll and r_skyfrontscroll cvars to control sky scroll speed.
+* Split out warp surfaces to a new options submenu and added sky warp control options.
+* Moved skies from fixed functionality to HLSL (there is no fixed functionality left in the engine now).
+* Added 8 new custom crosshairs (some good, some rubbish).
+* Added skybox loading to menu.
+* Fixed multiplayer map selection so that it works off the same map list as the maps menu.
+* Added TAB autocompletion to "map" command.
+* Added TAB autocompletion to "loadsky" command.
+* Added TAB autocompletion to "playdemo" and "timedemo" commands.
+* Added demos menu allowing playdemo, timedemo or record commands.
+* Fixed Timerefresh command.
+* Added more configurability to underwater warp.
+* Cleaned up water "lock alpha sliders" option a little.
+* Made SCR_ModalMessage look less "1996".
+* Removed all remaining hard limits from alias model mesh system.
+* Fixed shader floating point precision made water look ugly on NVIDIA cards.
+* Added ability to switch between full and partial precision when loading shaders.
+* Added r_64bitlightmaps cvar for switching 64 bit lightmaps off (on platforms that support it).
+* Removed automap code.
+* Restored menu highlight colour selection option from "lost" version.
+* Fixed long-standing "Center Align X" appearing where it should be "Y" typo in HUD menu.
+* Added custom name generator.
+* Moved more state info to HLSL backend and implemented state manager.
+
+

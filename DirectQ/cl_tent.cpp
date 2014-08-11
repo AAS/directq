@@ -32,18 +32,39 @@ sfx_t			*cl_sfx_ric1;
 sfx_t			*cl_sfx_ric2;
 sfx_t			*cl_sfx_ric3;
 sfx_t			*cl_sfx_r_exp3;
-#ifdef QUAKE2
-sfx_t			*cl_sfx_imp;
-sfx_t			*cl_sfx_rail;
-#endif
+
+// don't protect this one as a mod may wish to use it
+cvar_t r_extradlight ("r_extradlight", "0", CVAR_ARCHIVE);
 
 /*
 =================
 CL_ParseTEnt
 =================
 */
+model_t	*cl_bolt1_mod = NULL;
+model_t	*cl_bolt2_mod = NULL;
+model_t	*cl_bolt3_mod = NULL;
+model_t *cl_beam_mod = NULL;
+
 void CL_InitTEnts (void)
 {
+	beam_t	*b;
+	int		i;
+
+	// we need to load these too as models are being cleared between maps
+	cl_bolt1_mod = Mod_ForName ("progs/bolt.mdl", true);
+	cl_bolt2_mod = Mod_ForName ("progs/bolt2.mdl", true);
+	cl_bolt3_mod = Mod_ForName ("progs/bolt3.mdl", true);
+
+	// don't crash as this isn't in ID1
+	cl_beam_mod = Mod_ForName ("progs/beam.mdl", false);
+
+	// don't frame interpolate the bolts
+	cl_bolt1_mod->ah->nolerp = true;
+	cl_bolt2_mod->ah->nolerp = true;
+	cl_bolt3_mod->ah->nolerp = true;
+
+	// sounds
 	cl_sfx_wizhit = S_PrecacheSound ("wizard/hit.wav");
 	cl_sfx_knighthit = S_PrecacheSound ("hknight/hit.wav");
 	cl_sfx_tink1 = S_PrecacheSound ("weapons/tink1.wav");
@@ -51,10 +72,6 @@ void CL_InitTEnts (void)
 	cl_sfx_ric2 = S_PrecacheSound ("weapons/ric2.wav");
 	cl_sfx_ric3 = S_PrecacheSound ("weapons/ric3.wav");
 	cl_sfx_r_exp3 = S_PrecacheSound ("weapons/r_exp3.wav");
-#ifdef QUAKE2
-	cl_sfx_imp = S_PrecacheSound ("shambler/sattck1.wav");
-	cl_sfx_rail = S_PrecacheSound ("weapons/lstart.wav");
-#endif
 }
 
 /*
@@ -62,25 +79,17 @@ void CL_InitTEnts (void)
 CL_ParseBeam
 =================
 */
-void CL_ParseBeam (model_t *m)
+void CL_ParseBeam (model_t *m, int ent, vec3_t start, vec3_t end)
 {
-	int		ent;
-	vec3_t	start, end;
+	// if the model didn't load just ignore it
+	if (!m) return;
+
 	beam_t	*b;
 	int		i;
-	
-	ent = MSG_ReadShort ();
-	
-	start[0] = MSG_ReadCoord ();
-	start[1] = MSG_ReadCoord ();
-	start[2] = MSG_ReadCoord ();
-	
-	end[0] = MSG_ReadCoord ();
-	end[1] = MSG_ReadCoord ();
-	end[2] = MSG_ReadCoord ();
 
-// override any beam with the same entity
-	for (i=0, b=cl_beams ; i< MAX_BEAMS ; i++, b++)
+	// override any beam with the same entity
+	for (i = 0, b = cl_beams; i < MAX_BEAMS; i++, b++)
+	{
 		if (b->entity == ent)
 		{
 			b->entity = ent;
@@ -90,9 +99,10 @@ void CL_ParseBeam (model_t *m)
 			VectorCopy (end, b->end);
 			return;
 		}
+	}
 
-// find a free beam
-	for (i=0, b=cl_beams ; i< MAX_BEAMS ; i++, b++)
+	// find a free beam
+	for (i = 0, b = cl_beams; i < MAX_BEAMS; i++, b++)
 	{
 		if (!b->model || b->endtime < cl.time)
 		{
@@ -104,33 +114,52 @@ void CL_ParseBeam (model_t *m)
 			return;
 		}
 	}
+
 	Con_Printf ("beam list overflow!\n");	
 }
+
 
 /*
 =================
 CL_ParseTEnt
 =================
 */
+void R_WallHitParticles (vec3_t org, vec3_t dir, int color, int count);
+
 void CL_ParseTEnt (void)
 {
 	int		type;
 	vec3_t	pos;
-#ifdef QUAKE2
-	vec3_t	endpos;
-#endif
+
 	dlight_t	*dl;
 	int		rnd;
 	int		colorStart, colorLength;
 
+	// lightning needs this
+	int ent;
+	vec3_t	start, end;
+
 	type = MSG_ReadByte ();
+
 	switch (type)
 	{
 	case TE_WIZSPIKE:			// spike hitting wall
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
-		R_RunParticleEffect (pos, vec3_origin, 20, 30);
+
+		if (r_extradlight.value)
+		{
+			dl = CL_AllocDlight (0);
+			VectorCopy (pos, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.5;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 125, 492, 146);
+		}
+
+		R_WallHitParticles (pos, vec3_origin, 20, 30);
 		S_StartSound (-1, 0, cl_sfx_wizhit, pos, 1, 1);
 		break;
 		
@@ -138,7 +167,19 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
-		R_RunParticleEffect (pos, vec3_origin, 226, 20);
+
+		if (r_extradlight.value)
+		{
+			dl = CL_AllocDlight (0);
+			VectorCopy (pos, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.5;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 408, 242, 117);
+		}
+
+		R_WallHitParticles (pos, vec3_origin, 226, 20);
 		S_StartSound (-1, 0, cl_sfx_knighthit, pos, 1, 1);
 		break;
 		
@@ -146,11 +187,9 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
-#ifdef GLTEST
-		Test_Spawn (pos);
-#else
-		R_RunParticleEffect (pos, vec3_origin, 0, 10);
-#endif
+
+		R_WallHitParticles (pos, vec3_origin, 0, 10);
+
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
@@ -164,11 +203,12 @@ void CL_ParseTEnt (void)
 				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
 		break;
+
 	case TE_SUPERSPIKE:			// super spike hitting wall
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
-		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		R_WallHitParticles (pos, vec3_origin, 0, 20);
 
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -188,7 +228,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord ();
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
-		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		R_WallHitParticles (pos, vec3_origin, 0, 20);
 		break;
 		
 	case TE_EXPLOSION:			// rocket explosion
@@ -196,11 +236,15 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord ();
 		pos[2] = MSG_ReadCoord ();
 		R_ParticleExplosion (pos);
+
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
+
+		R_ColourDLight (dl, 408, 242, 117);
+
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 		
@@ -210,24 +254,132 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord ();
 		R_BlobExplosion (pos);
 
+		if (r_extradlight.value)
+		{
+			dl = CL_AllocDlight (0);
+			VectorCopy (pos, dl->origin);
+			dl->radius = 350;
+			dl->die = cl.time + 0.5;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 399, 141, 228);
+		}
+
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
 	case TE_LIGHTNING1:				// lightning bolts
-		CL_ParseBeam (Mod_ForName("progs/bolt.mdl", true));
+		ent = MSG_ReadShort ();
+		
+		start[0] = MSG_ReadCoord ();
+		start[1] = MSG_ReadCoord ();
+		start[2] = MSG_ReadCoord ();
+		
+		end[0] = MSG_ReadCoord ();
+		end[1] = MSG_ReadCoord ();
+		end[2] = MSG_ReadCoord ();
+
+		if (r_extradlight.value)
+		{
+			dl = CL_AllocDlight (0);
+			VectorCopy (start, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.001;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 2, 225, 541);
+
+			dl = CL_AllocDlight (0);
+			VectorCopy (end, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.001;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 2, 225, 541);
+		}
+
+		CL_ParseBeam (cl_bolt1_mod, ent, start, end);
 		break;
-	
+
 	case TE_LIGHTNING2:				// lightning bolts
-		CL_ParseBeam (Mod_ForName("progs/bolt2.mdl", true));
+		ent = MSG_ReadShort ();
+		
+		start[0] = MSG_ReadCoord ();
+		start[1] = MSG_ReadCoord ();
+		start[2] = MSG_ReadCoord ();
+		
+		end[0] = MSG_ReadCoord ();
+		end[1] = MSG_ReadCoord ();
+		end[2] = MSG_ReadCoord ();
+
+		if (r_extradlight.value)
+		{
+			dl = CL_AllocDlight (0);
+			VectorCopy (start, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.001;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 2, 225, 541);
+
+			dl = CL_AllocDlight (0);
+			VectorCopy (end, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.001;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 2, 225, 541);
+		}
+
+		CL_ParseBeam (cl_bolt2_mod, ent, start, end);
 		break;
-	
+
 	case TE_LIGHTNING3:				// lightning bolts
-		CL_ParseBeam (Mod_ForName("progs/bolt3.mdl", true));
+		ent = MSG_ReadShort ();
+		
+		start[0] = MSG_ReadCoord ();
+		start[1] = MSG_ReadCoord ();
+		start[2] = MSG_ReadCoord ();
+		
+		end[0] = MSG_ReadCoord ();
+		end[1] = MSG_ReadCoord ();
+		end[2] = MSG_ReadCoord ();
+
+		if (r_extradlight.value)
+		{
+			dl = CL_AllocDlight (0);
+			VectorCopy (start, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.001;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 2, 225, 541);
+
+			dl = CL_AllocDlight (0);
+			VectorCopy (end, dl->origin);
+			dl->radius = 250;
+			dl->die = cl.time + 0.001;
+			dl->decay = 300;
+
+			R_ColourDLight (dl, 2, 225, 541);
+		}
+
+		CL_ParseBeam (cl_bolt3_mod, ent, start, end);
 		break;
-	
+
 // PGM 01/21/97 
 	case TE_BEAM:				// grappling hook beam
-		CL_ParseBeam (Mod_ForName("progs/beam.mdl", true));
+		ent = MSG_ReadShort ();
+		
+		start[0] = MSG_ReadCoord ();
+		start[1] = MSG_ReadCoord ();
+		start[2] = MSG_ReadCoord ();
+		
+		end[0] = MSG_ReadCoord ();
+		end[1] = MSG_ReadCoord ();
+		end[2] = MSG_ReadCoord ();
+
+		CL_ParseBeam (cl_beam_mod, ent, start, end);
 		break;
 // PGM 01/21/97
 
@@ -259,36 +411,11 @@ void CL_ParseTEnt (void)
 		dl->decay = 300;
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
-		
-#ifdef QUAKE2
-	case TE_IMPLOSION:
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
-		S_StartSound (-1, 0, cl_sfx_imp, pos, 1, 1);
-		break;
-
-	case TE_RAILTRAIL:
-		pos[0] = MSG_ReadCoord ();
-		pos[1] = MSG_ReadCoord ();
-		pos[2] = MSG_ReadCoord ();
-		endpos[0] = MSG_ReadCoord ();
-		endpos[1] = MSG_ReadCoord ();
-		endpos[2] = MSG_ReadCoord ();
-		S_StartSound (-1, 0, cl_sfx_rail, pos, 1, 1);
-		S_StartSound (-1, 1, cl_sfx_r_exp3, endpos, 1, 1);
-		R_RocketTrail (pos, endpos, 0+128);
-		R_ParticleExplosion (endpos);
-		dl = CL_AllocDlight (-1);
-		VectorCopy (endpos, dl->origin);
-		dl->radius = 350;
-		dl->die = cl.time + 0.5;
-		dl->decay = 300;
-		break;
-#endif
 
 	default:
-		Sys_Error ("CL_ParseTEnt: bad type");
+		// no need to crash the engine but we will crash the map, as it means we have
+		// a malformed packet
+		Host_Error ("CL_ParseTEnt: bad type");
 	}
 }
 
@@ -302,13 +429,14 @@ entity_t *CL_NewTempEntity (void)
 {
 	entity_t	*ent;
 
-	if (cl_numvisedicts == MAX_VISEDICTS)
-		return NULL;
-	if (num_temp_entities == MAX_TEMP_ENTITIES)
-		return NULL;
+	if (cl_numvisedicts == MAX_VISEDICTS) return NULL;
+	if (num_temp_entities == MAX_TEMP_ENTITIES) return NULL;
+
 	ent = &cl_temp_entities[num_temp_entities];
 	memset (ent, 0, sizeof(*ent));
+
 	num_temp_entities++;
+	ent->nocullbox = false;
 	cl_visedicts[cl_numvisedicts] = ent;
 	cl_numvisedicts++;
 
@@ -332,21 +460,24 @@ void CL_UpdateTEnts (void)
 	float		yaw, pitch;
 	float		forward;
 
+	// hack - cl.time goes to 0 before some maps are fully flushed which can cause invalid
+	// beam entities to be added to the list, so need to test for that (this can cause
+	// crashes on maps where you give yourself the lightning gun and then issue a changelevel)
+	if (cl.time < 0.1) return;
+
 	num_temp_entities = 0;
 
-// update lightning
-	for (i=0, b=cl_beams ; i< MAX_BEAMS ; i++, b++)
+	// update lightning
+	for (i = 0, b = cl_beams; i < MAX_BEAMS; i++, b++)
 	{
 		if (!b->model || b->endtime < cl.time)
 			continue;
 
-	// if coming from the player, update the start position
+		// if coming from the player, update the start position
 		if (b->entity == cl.viewentity)
-		{
-			VectorCopy (cl_entities[cl.viewentity].origin, b->start);
-		}
+			VectorCopy (cl_entities[cl.viewentity]->origin, b->start);
 
-	// calculate pitch and yaw
+		// calculate pitch and yaw
 		VectorSubtract (b->end, b->start, dist);
 
 		if (dist[1] == 0 && dist[0] == 0)
@@ -369,26 +500,33 @@ void CL_UpdateTEnts (void)
 				pitch += 360;
 		}
 
-	// add new entities for the lightning
+		// add new entities for the lightning
 		VectorCopy (b->start, org);
-		d = VectorNormalize(dist);
+		d = VectorNormalize (dist);
+
 		while (d > 0)
 		{
-			ent = CL_NewTempEntity ();
-			if (!ent)
+			if (!(ent = CL_NewTempEntity ()))
 				return;
+
 			VectorCopy (org, ent->origin);
 			ent->model = b->model;
+			ent->alphaval = 255;
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
-			ent->angles[2] = rand()%360;
+			ent->angles[2] = rand () % 360;
+			ent->model->ah->nolerp = true;
 
-			for (i=0 ; i<3 ; i++)
-				org[i] += dist[i]*30;
+			// spotted by metlslime - inner loop used i as well!
+			for (int j = 0; j < 3; j++)
+			{
+				org[j] += dist[j] * 30;
+				ent->origin[j] = org[j];
+			}
+
 			d -= 30;
 		}
 	}
-	
 }
 
 

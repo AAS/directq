@@ -20,13 +20,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "winquake.h"
 
 /*
 
 A server can allways be started, even if the system started out as a client
 to a remote system.
-
-A client can NOT be started if the system started as a dedicated server.
 
 Memory is cleared / released when a server or client begins, not when they end.
 
@@ -42,10 +41,6 @@ double		realtime;				// without any filtering or bounding
 double		oldrealtime;			// last frame run
 int			host_framecount;
 
-int			host_hunklevel;
-
-int			minimum_memory;
-
 client_t	*host_client;			// current client
 
 jmp_buf 	host_abortserver;
@@ -53,32 +48,33 @@ jmp_buf 	host_abortserver;
 byte		*host_basepal;
 byte		*host_colormap;
 
-cvar_t	host_framerate = {"host_framerate","0"};	// set for slow motion
-cvar_t	host_speeds = {"host_speeds","0"};			// set for running times
+cvar_t	host_savedir ("host_savedir", "save", CVAR_ARCHIVE);
 
-cvar_t	sys_ticrate = {"sys_ticrate","0.05"};
-cvar_t	serverprofile = {"serverprofile","0"};
+cvar_t	host_framerate ("host_framerate","0");	// set for slow motion
+cvar_t	host_speeds ("host_speeds","0");			// set for running times
 
-cvar_t	fraglimit = {"fraglimit","0",false,true};
-cvar_t	timelimit = {"timelimit","0",false,true};
-cvar_t	teamplay = {"teamplay","0",false,true};
+cvar_t	sys_ticrate ("sys_ticrate","0.05");
+cvar_t	serverprofile ("serverprofile","0");
 
-cvar_t	samelevel = {"samelevel","0"};
-cvar_t	noexit = {"noexit","0",false,true};
+cvar_t	fraglimit ("fraglimit","0",CVAR_SERVER);
+cvar_t	timelimit ("timelimit","0",CVAR_SERVER);
+cvar_t	teamplay ("teamplay","0",CVAR_SERVER);
 
-#ifdef QUAKE2
-cvar_t	developer = {"developer","1"};	// should be 0 for release!
-#else
-cvar_t	developer = {"developer","0"};
-#endif
+cvar_t	samelevel ("samelevel","0");
+cvar_t	noexit ("noexit","0",CVAR_SERVER);
 
-cvar_t	skill = {"skill","1"};						// 0 - 3
-cvar_t	deathmatch = {"deathmatch","0"};			// 0, 1, or 2
-cvar_t	coop = {"coop","0"};			// 0 or 1
+cvar_t	developer ("developer","0");
 
-cvar_t	pausable = {"pausable","1"};
+cvar_t	skill ("skill","1");						// 0 - 3
+cvar_t	deathmatch ("deathmatch","0");			// 0, 1, or 2
+cvar_t	coop ("coop","0");			// 0 or 1
 
-cvar_t	temp1 = {"temp1","0"};
+cvar_t	pausable ("pausable","1");
+
+cvar_t	temp1 ("temp1", "0");
+cvar_t	temp2 ("temp2", "0");
+cvar_t	temp3 ("temp3", "0");
+cvar_t	temp4 ("temp4", "0");
 
 
 /*
@@ -99,9 +95,6 @@ void Host_EndGame (char *message, ...)
 	if (sv.active)
 		Host_ShutdownServer (false);
 
-	if (cls.state == ca_dedicated)
-		Sys_Error ("Host_EndGame: %s\n",string);	// dedicated servers exit
-	
 	if (cls.demonum != -1)
 		CL_NextDemo ();
 	else
@@ -137,9 +130,6 @@ void Host_Error (char *error, ...)
 	if (sv.active)
 		Host_ShutdownServer (false);
 
-	if (cls.state == ca_dedicated)
-		Sys_Error ("Host_Error: %s\n",string);	// dedicated servers exit
-
 	CL_Disconnect ();
 	cls.demonum = -1;
 
@@ -153,50 +143,43 @@ void Host_Error (char *error, ...)
 Host_FindMaxClients
 ================
 */
-void	Host_FindMaxClients (void)
+void Host_FindMaxClients (void)
 {
 	int		i;
 
 	svs.maxclients = 1;
-		
-	i = COM_CheckParm ("-dedicated");
-	if (i)
-	{
-		cls.state = ca_dedicated;
-		if (i != (com_argc - 1))
-		{
-			svs.maxclients = Q_atoi (com_argv[i+1]);
-		}
-		else
-			svs.maxclients = 8;
-	}
-	else
-		cls.state = ca_disconnected;
+
+	// initially disconnected
+	cls.state = ca_disconnected;
 
 	i = COM_CheckParm ("-listen");
+
+	// check for a listen server
 	if (i)
 	{
-		if (cls.state == ca_dedicated)
-			Sys_Error ("Only one of -dedicated or -listen can be specified");
 		if (i != (com_argc - 1))
-			svs.maxclients = Q_atoi (com_argv[i+1]);
-		else
-			svs.maxclients = 8;
+			svs.maxclients = Q_atoi (com_argv[i + 1]);
+		else svs.maxclients = 8;
 	}
+
+	// don't let silly values go in
 	if (svs.maxclients < 1)
 		svs.maxclients = 8;
 	else if (svs.maxclients > MAX_SCOREBOARD)
 		svs.maxclients = MAX_SCOREBOARD;
 
 	svs.maxclientslimit = svs.maxclients;
+
 	if (svs.maxclientslimit < 4)
 		svs.maxclientslimit = 4;
-	svs.clients = (client_s *) Hunk_AllocName (svs.maxclientslimit*sizeof(client_t), "clients");
 
+	// allocate space for the max clients
+	svs.clients = (client_s *) Heap_TagAlloc (TAG_STARTUP, svs.maxclientslimit * sizeof (client_t));
+
+	// if we request more than 1 client we set the appropriate game mode
 	if (svs.maxclients > 1)
-		Cvar_SetValue ("deathmatch", 1.0);
-	else
-		Cvar_SetValue ("deathmatch", 0.0);
+		Cvar_Set ("deathmatch", 1.0);
+	else Cvar_Set ("deathmatch", 0.0);
 }
 
 
@@ -208,26 +191,6 @@ Host_InitLocal
 void Host_InitLocal (void)
 {
 	Host_InitCommands ();
-	
-	Cvar_RegisterVariable (&host_framerate);
-	Cvar_RegisterVariable (&host_speeds);
-
-	Cvar_RegisterVariable (&sys_ticrate);
-	Cvar_RegisterVariable (&serverprofile);
-
-	Cvar_RegisterVariable (&fraglimit);
-	Cvar_RegisterVariable (&timelimit);
-	Cvar_RegisterVariable (&teamplay);
-	Cvar_RegisterVariable (&samelevel);
-	Cvar_RegisterVariable (&noexit);
-	Cvar_RegisterVariable (&skill);
-	Cvar_RegisterVariable (&developer);
-	Cvar_RegisterVariable (&deathmatch);
-	Cvar_RegisterVariable (&coop);
-
-	Cvar_RegisterVariable (&pausable);
-
-	Cvar_RegisterVariable (&temp1);
 
 	Host_FindMaxClients ();
 	
@@ -242,25 +205,46 @@ Host_WriteConfiguration
 Writes key bindings and archived cvars to config.cfg
 ===============
 */
+extern cvar_t hud_defaulthud;
+extern cvar_t hud_autosave;
+
 void Host_WriteConfiguration (void)
 {
 	FILE	*f;
 
-// dedicated servers initialize the host but don't parse and set the
-// config.cfg cvars
-	if (host_initialized & !isDedicated)
+	if (host_initialized)
 	{
-		f = fopen (va("%s/config.cfg",com_gamedir), "w");
-		if (!f)
+		// force all open buffers to commit and close
+		while (_fcloseall ());
+
+		if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
 		{
-			Con_Printf ("Couldn't write config.cfg.\n");
-			return;
+			// if we failed to open it, we sleep for a bit, then attempt it again.  windows or something seems to
+			// lock on to a file handle for a while even after it's been closed, so this might help giving it a
+			// hint that it needs to unlock
+			Sleep (1000);
+
+			if (!(f = fopen (va ("%s/config.cfg", com_gamedir), "w")))
+			{
+				// if after this amount of time it's still locked open, something has gone askew
+				Con_Printf ("Couldn't write config.cfg.\n");
+				return;
+			}
 		}
-		
+
 		Key_WriteBindings (f);
 		Cvar_WriteVariables (f);
 
 		fclose (f);
+
+		Con_Printf ("Wrote config.cfg\n");
+	}
+
+	if (hud_autosave.value)
+	{
+		// save out the user's HUD cfg as well
+		Cbuf_InsertText (va ("savehud %s\n", hud_defaulthud.string));
+		Cbuf_Execute ();
 	}
 }
 
@@ -322,11 +306,11 @@ void Host_ClientCommands (char *fmt, ...)
 {
 	va_list		argptr;
 	char		string[1024];
-	
+
 	va_start (argptr,fmt);
 	vsprintf (string, fmt,argptr);
 	va_end (argptr);
-	
+
 	MSG_WriteByte (&host_client->message, svc_stufftext);
 	MSG_WriteString (&host_client->message, string);
 }
@@ -356,28 +340,26 @@ void SV_DropClient (bool crash)
 	
 		if (host_client->edict && host_client->spawned)
 		{
-		// call the prog function for removing a client
-		// this will set the body to a dead frame, among other things
+			// call the prog function for removing a client
+			// this will set the body to a dead frame, among other things
 			saveSelf = pr_global_struct->self;
 			pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
 			PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
 			pr_global_struct->self = saveSelf;
 		}
-
-		Sys_Printf ("Client %s removed\n",host_client->name);
 	}
 
-// break the net connection
+	// break the net connection
 	NET_Close (host_client->netconnection);
 	host_client->netconnection = NULL;
 
-// free the client (the body stays around)
+	// free the client (the body stays around)
 	host_client->active = false;
 	host_client->name[0] = 0;
 	host_client->old_frags = -999999;
 	net_activeconnections--;
 
-// send notification to all clients
+	// send notification to all clients
 	for (i=0, client = svs.clients ; i<svs.maxclients ; i++, client++)
 	{
 		if (!client->active)
@@ -457,11 +439,10 @@ void Host_ShutdownServer(bool crash)
 		if (host_client->active)
 			SV_DropClient(crash);
 
-//
-// clear structures
-//
+	// clear structures
 	memset (&sv, 0, sizeof(sv));
 	memset (svs.clients, 0, svs.maxclientslimit*sizeof(client_t));
+	PR_ClearProgs ();
 }
 
 
@@ -475,15 +456,21 @@ not reinitialize anything.
 */
 void Host_ClearMemory (void)
 {
-	Con_DPrintf ("Clearing memory\n");
+	// clear anything that needs to be cleared specifically
+	S_StopAllSounds (true);
 	D_FlushCaches ();
 	Mod_ClearAll ();
-	if (host_hunklevel)
-		Hunk_FreeToLowMark (host_hunklevel);
+	S_ClearSounds ();
+
+	// free everything with a tag allocation of 101 or above
+	Heap_Free101Plus ();
 
 	cls.signon = 0;
-	memset (&sv, 0, sizeof(sv));
-	memset (&cl, 0, sizeof(cl));
+
+	// wipe the client and server structs
+	memset (&sv, 0, sizeof (sv));
+	memset (&cl, 0, sizeof (cl));
+	PR_ClearProgs ();
 }
 
 
@@ -547,78 +534,27 @@ Host_ServerFrame
 
 ==================
 */
-#ifdef FPS_20
-
-void _Host_ServerFrame (void)
-{
-// run the world state	
-	pr_global_struct->frametime = host_frametime;
-
-// read client messages
-	SV_RunClients ();
-	
-// move things around and think
-// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
-		SV_Physics ();
-}
-
 void Host_ServerFrame (void)
 {
-	float	save_host_frametime;
-	float	temp_host_frametime;
-
-// run the world state	
+	// run the world state	
 	pr_global_struct->frametime = host_frametime;
 
-// set the time and clear the general datagram
+	// set the time and clear the general datagram
 	SV_ClearDatagram ();
-	
-// check for new clients
+
+	// check for new clients
 	SV_CheckForNewClients ();
 
-	temp_host_frametime = save_host_frametime = host_frametime;
-	while(temp_host_frametime > (1.0/72.0))
-	{
-		if (temp_host_frametime > 0.05)
-			host_frametime = 0.05;
-		else
-			host_frametime = temp_host_frametime;
-		temp_host_frametime -= host_frametime;
-		_Host_ServerFrame ();
-	}
-	host_frametime = save_host_frametime;
-
-// send all messages to the clients
-	SV_SendClientMessages ();
-}
-
-#else
-
-void Host_ServerFrame (void)
-{
-// run the world state	
-	pr_global_struct->frametime = host_frametime;
-
-// set the time and clear the general datagram
-	SV_ClearDatagram ();
-	
-// check for new clients
-	SV_CheckForNewClients ();
-
-// read client messages
+	// read client messages
 	SV_RunClients ();
-	
-// move things around and think
-// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
-		SV_Physics ();
 
-// send all messages to the clients
+	// move things around and think
+	// always pause in single player if in console or menus
+	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game)) SV_Physics ();
+
+	// send all messages to the clients
 	SV_SendClientMessages ();
 }
-
-#endif
 
 
 /*
@@ -635,16 +571,16 @@ void _Host_Frame (float time)
 	static double		time3 = 0;
 	int			pass1, pass2, pass3;
 
-	if (setjmp (host_abortserver) )
+	if (setjmp (host_abortserver))
 		return;			// something bad happened, or the server disconnected
 
 // keep the random time dependent
 	rand ();
-	
+
 // decide the simulation time
 	if (!Host_FilterTime (time))
 		return;			// don't run too fast, or packets will flood out
-		
+
 // get new key events
 	Sys_SendKeyEvents ();
 
@@ -659,7 +595,7 @@ void _Host_Frame (float time)
 // if running the server locally, make intentions now
 	if (sv.active)
 		CL_SendCmd ();
-	
+
 //-------------------
 //
 // server operations
@@ -687,23 +623,22 @@ void _Host_Frame (float time)
 
 // fetch results from server
 	if (cls.state == ca_connected)
-	{
 		CL_ReadFromServer ();
-	}
 
 // update video
 	if (host_speeds.value)
 		time1 = Sys_FloatTime ();
-		
+
 	SCR_UpdateScreen ();
 
 	if (host_speeds.value)
 		time2 = Sys_FloatTime ();
-		
+
 // update audio
 	if (cls.signon == SIGNONS)
 	{
 		S_Update (r_origin, vpn, vright, vup);
+
 		CL_DecayLights ();
 	}
 	else
@@ -786,12 +721,12 @@ void Host_InitVCR (quakeparms_t *parms)
 			Sys_Error("Invalid signature in vcr file\n");
 
 		Sys_FileRead (vcrFile, &com_argc, sizeof(int));
-		com_argv = (char **) malloc(com_argc * sizeof(char *));
+		com_argv = (char **) Heap_QMalloc (com_argc * sizeof(char *));
 		com_argv[0] = parms->argv[0];
 		for (i = 0; i < com_argc; i++)
 		{
 			Sys_FileRead (vcrFile, &len, sizeof(int));
-			p = (char *) malloc(len);
+			p = (char *) Heap_QMalloc (len);
 			Sys_FileRead (vcrFile, p, len);
 			com_argv[i+1] = p;
 		}
@@ -831,78 +766,83 @@ Host_Init
 ====================
 */
 void D3D_VidInit (byte *palette);
+bool full_initialized = false;
+extern cvar_t hud_defaulthud;
+void Menu_CommonInit (void);
+void PR_InitBuiltIns (void);
+void Menu_MapsPopulate (void);
+void Menu_DemoPopulate (void);
+void Menu_LoadAvailableSkyboxes (void);
 
 void Host_Init (quakeparms_t *parms)
 {
-
-	if (standard_quake)
-		minimum_memory = MINIMUM_MEMORY;
-	else
-		minimum_memory = MINIMUM_MEMORY_LEVELPAK;
-
-	if (COM_CheckParm ("-minmemory"))
-		parms->memsize = minimum_memory;
+	// hold back some things until we're fully up
+	full_initialized = false;
 
 	host_parms = *parms;
-
-	if (parms->memsize < minimum_memory)
-		Sys_Error ("Only %4.1f megs of memory available, can't execute game", parms->memsize / (float)0x100000);
 
 	com_argc = parms->argc;
 	com_argv = parms->argv;
 
-	Memory_Init (parms->membase, parms->memsize);
+	PR_InitBuiltIns ();
 	Cbuf_Init ();
 	Cmd_Init ();	
 	V_Init ();
 	Chase_Init ();
 	Host_InitVCR (parms);
 	COM_Init (parms->basedir);
+
+	// as soon as the filesystem comes up we want to load the configs so that cvars will have correct
+	// values before we proceed with anything else.  this is possible to do as we've made our cvars
+	// self-registering, so we don't need to worry about subsequent registrations or cvars that don't exist.
+	Cbuf_InsertText ("exec quake.rc\n");
+
+	// execute immediately rather than deferring
+	Cbuf_Execute ();
+
 	Host_InitLocal ();
 	W_LoadWadFile ("gfx.wad");
 	Key_Init ();
-	Con_Init ();	
-	M_Init ();	
+	Con_Init ();
+	Menu_CommonInit ();
+	Menu_MapsPopulate ();
+	Menu_DemoPopulate ();
+	Menu_LoadAvailableSkyboxes ();
 	PR_Init ();
 	Mod_Init ();
 	NET_Init ();
 	SV_Init ();
 
 	Con_Printf ("Exe: "__TIME__" "__DATE__"\n");
-	Con_Printf ("%4.1f megabyte heap\n",parms->memsize/ (1024*1024.0));
-	
-	R_InitTextures ();		// needed even for dedicated servers
+
+	R_InitTextures ();
  
-	if (cls.state != ca_dedicated)
-	{
-		host_basepal = (byte *)COM_LoadHunkFile ("gfx/palette.lmp");
-		if (!host_basepal)
-			Sys_Error ("Couldn't load gfx/palette.lmp");
-		host_colormap = (byte *)COM_LoadHunkFile ("gfx/colormap.lmp");
-		if (!host_colormap)
-			Sys_Error ("Couldn't load gfx/colormap.lmp");
+	host_basepal = (byte *) COM_LoadHunkFile ("gfx/palette.lmp");
+	if (!host_basepal) Sys_Error ("Couldn't load gfx/palette.lmp");
+	host_colormap = (byte *) COM_LoadHunkFile ("gfx/colormap.lmp");
+	if (!host_colormap) Sys_Error ("Couldn't load gfx/colormap.lmp");
 
-		D3D_VidInit (host_basepal);
+	D3D_VidInit (host_basepal);
 
-		Draw_Init ();
-		SCR_Init ();
-		R_Init ();
+	Draw_Init ();
+	SCR_Init ();
+	R_Init ();
 	// FIXME: doesn't use the new one-window approach yet
-		S_Init ();
-		CDAudio_Init ();
-		Sbar_Init ();
-		CL_Init ();
-		IN_Init ();
-	}
+	S_Init ();
+	DS_Init ();
+	CDAudio_Init ();
+	HUD_Init ();
+	CL_Init ();
+	IN_Init ();
 
+	// everythings up now
+	full_initialized = true;
+
+	// load the configs fully
 	Cbuf_InsertText ("exec quake.rc\n");
 
-	Hunk_AllocName (0, "-HOST_HUNKLEVEL-");
-	host_hunklevel = Hunk_LowMark ();
-
+	// anything allocated after this point will be cleared between maps
 	host_initialized = true;
-	
-	Sys_Printf ("========Quake Initialized=========\n");	
 }
 
 
@@ -914,30 +854,30 @@ FIXME: this is a callback from Sys_Quit and Sys_Error.  It would be better
 to run quit through here before the final handoff to the sys code.
 ===============
 */
-void Host_Shutdown(void)
+void Host_ShutdownGame (void)
 {
-	static bool isdown = false;
-	
-	if (isdown)
-	{
-		printf ("recursive shutdown\n");
-		return;
-	}
-	isdown = true;
-
-// keep Con_Printf from trying to update the screen
+	// keep Con_Printf from trying to update the screen
 	scr_disabled_for_loading = true;
 
-	Host_WriteConfiguration (); 
+	Host_WriteConfiguration ();
 
 	CDAudio_Shutdown ();
+	DS_Shutdown ();
 	NET_Shutdown ();
 	S_Shutdown();
 	IN_Shutdown ();
+	VID_Shutdown();
+}
 
-	if (cls.state != ca_dedicated)
-	{
-		VID_Shutdown();
-	}
+
+void Host_Shutdown (void)
+{
+	static bool isdown = false;
+
+	if (isdown) return;
+
+	isdown = true;
+
+	Host_ShutdownGame ();
 }
 

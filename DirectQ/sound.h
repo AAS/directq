@@ -35,12 +35,6 @@ typedef struct
 	int right;
 } portable_samplepair_t;
 
-typedef struct sfx_s
-{
-	char 	name[MAX_QPATH];
-	cache_user_t	cache;
-} sfx_t;
-
 // !!! if this is changed, it much be changed in asm_i386.h too !!!
 typedef struct
 {
@@ -51,6 +45,15 @@ typedef struct
 	int 	stereo;
 	byte	data[1];		// variable sized
 } sfxcache_t;
+
+typedef struct sfx_s
+{
+	char 	name[MAX_QPATH];
+
+	// soundcache - no longer put in the cache, it's everything on the hunk now
+	sfxcache_t *sndcache;
+} sfx_t;
+
 
 typedef struct
 {
@@ -130,8 +133,8 @@ void SNDDMA_Shutdown(void);
 // User-setable variables
 // ====================================================================
 
-#define	MAX_CHANNELS			128
-#define	MAX_DYNAMIC_CHANNELS	8
+#define	MAX_CHANNELS			512
+#define	MAX_DYNAMIC_CHANNELS	128
 
 
 extern	channel_t   channels[MAX_CHANNELS];
@@ -141,14 +144,6 @@ extern	channel_t   channels[MAX_CHANNELS];
 
 extern	int			total_channels;
 
-//
-// Fake dma is a synchronous faking of the DMA progress used for
-// isolating performance in the renderer.  The fakedma_updates is
-// number of times S_Update() is called per second.
-//
-
-extern bool 		fakedma;
-extern int 			fakedma_updates;
 extern int		paintedtime;
 extern vec3_t listener_origin;
 extern vec3_t listener_forward;
@@ -156,7 +151,6 @@ extern vec3_t listener_right;
 extern vec3_t listener_up;
 extern volatile dma_t *shm;
 extern volatile dma_t sn;
-extern vec_t sound_nominal_clip_dist;
 
 extern	cvar_t loadas8bit;
 extern	cvar_t bgmvolume;
@@ -172,7 +166,6 @@ sfxcache_t *S_LoadSound (sfx_t *s);
 wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength);
 
 void SND_InitScaletable (void);
-void SNDDMA_Submit(void);
 
 void S_AmbientOff (void);
 void S_AmbientOn (void);

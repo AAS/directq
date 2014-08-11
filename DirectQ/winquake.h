@@ -41,23 +41,18 @@ extern	int			global_nCmdShow;
 
 extern LPDIRECTDRAW		lpDD;
 extern bool			DDActive;
-extern LPDIRECTDRAWSURFACE	lpPrimary;
-extern LPDIRECTDRAWSURFACE	lpFrontBuffer;
-extern LPDIRECTDRAWSURFACE	lpBackBuffer;
-extern LPDIRECTDRAWPALETTE	lpDDPal;
-extern LPDIRECTSOUND pDS;
-extern LPDIRECTSOUNDBUFFER pDSBuf;
 
-extern DWORD gSndBufSize;
 //#define SNDBUFSIZE 65536
 
 #endif
+
+void S_ClearSounds (void);
 
 typedef enum {MS_WINDOWED, MS_FULLSCREEN, MS_FULLDIB, MS_UNINIT} modestate_t;
 
 extern modestate_t	modestate;
 
-extern HWND			mainwindow;
+extern HWND			d3d_Window;
 extern bool		ActiveApp, Minimized;
 
 extern bool	WinNT;
@@ -80,9 +75,6 @@ extern bool	mouseinitialized;
 extern HANDLE	hinput, houtput;
 
 void IN_UpdateClipCursor (void);
-
-void S_BlockSound (void);
-void S_UnblockSound (void);
 
 void VID_SetDefaultMode (void);
 

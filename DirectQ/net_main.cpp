@@ -63,21 +63,21 @@ int messagesReceived = 0;
 int unreliableMessagesSent = 0;
 int unreliableMessagesReceived = 0;
 
-cvar_t	net_messagetimeout = {"net_messagetimeout","300"};
-cvar_t	hostname = {"hostname", "UNNAMED"};
+cvar_t	net_messagetimeout ("net_messagetimeout","300");
+cvar_t	hostname ("hostname", "UNNAMED");
 
 bool	configRestored = false;
-cvar_t	config_com_port = {"_config_com_port", "0x3f8", true};
-cvar_t	config_com_irq = {"_config_com_irq", "4", true};
-cvar_t	config_com_baud = {"_config_com_baud", "57600", true};
-cvar_t	config_com_modem = {"_config_com_modem", "1", true};
-cvar_t	config_modem_dialtype = {"_config_modem_dialtype", "T", true};
-cvar_t	config_modem_clear = {"_config_modem_clear", "ATZ", true};
-cvar_t	config_modem_init = {"_config_modem_init", "", true};
-cvar_t	config_modem_hangup = {"_config_modem_hangup", "AT H", true};
+cvar_t	config_com_port ("_config_com_port", "0x3f8", CVAR_ARCHIVE);
+cvar_t	config_com_irq ("_config_com_irq", "4", CVAR_ARCHIVE);
+cvar_t	config_com_baud ("_config_com_baud", "57600", CVAR_ARCHIVE);
+cvar_t	config_com_modem ("_config_com_modem", "1", CVAR_ARCHIVE);
+cvar_t	config_modem_dialtype ("_config_modem_dialtype", "T", CVAR_ARCHIVE);
+cvar_t	config_modem_clear ("_config_modem_clear", "ATZ", CVAR_ARCHIVE);
+cvar_t	config_modem_init ("_config_modem_init", "", CVAR_ARCHIVE);
+cvar_t	config_modem_hangup ("_config_modem_hangup", "AT H", CVAR_ARCHIVE);
 
 #ifdef IDGODS
-cvar_t	idgods = {"idgods", "0"};
+cvar_t	idgods ("idgods", "0");
 #endif
 
 int	vcrFile = -1;
@@ -85,7 +85,7 @@ bool recording = false;
 
 // these two macros are to make the code more readable
 #define sfunc	net_drivers[sock->driver]
-#define dfunc	net_drivers[net_driverlevel]
+#define net_DriverFunc	net_drivers[net_driverlevel]
 
 int	net_driverlevel;
 
@@ -186,7 +186,7 @@ static void NET_Listen_f (void)
 	{
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
-		dfunc.Listen (listening);
+		net_DriverFunc.Listen (listening);
 	}
 }
 
@@ -320,7 +320,7 @@ static void Slist_Send (void *soak)
 			continue;
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
-		dfunc.SearchForHosts (true);
+		net_DriverFunc.SearchForHosts (true);
 	}
 
 	if ((Sys_FloatTime() - slistStartTime) < 0.5)
@@ -336,7 +336,7 @@ static void Slist_Poll (void *soak)
 			continue;
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
-		dfunc.SearchForHosts (false);
+		net_DriverFunc.SearchForHosts (false);
 	}
 
 	if (! slistSilent)
@@ -424,7 +424,7 @@ JustDoIt:
 	{
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
-		ret = dfunc.Connect (host);
+		ret = net_DriverFunc.Connect (host);
 		if (ret)
 			return ret;
 	}
@@ -466,7 +466,7 @@ qsocket_t *NET_CheckNewConnections (void)
 			continue;
 		if (net_driverlevel && listening == false)
 			continue;
-		ret = dfunc.CheckNewConnections ();
+		ret = net_DriverFunc.CheckNewConnections ();
 		if (ret)
 		{
 			if (recording)
@@ -800,6 +800,10 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 NET_Init
 ====================
 */
+cmd_t NET_Slist_f_Cmd ("slist", NET_Slist_f);
+cmd_t NET_Listen_f_Cmd ("listen", NET_Listen_f);
+cmd_t MaxPlayers_f_Cmd ("maxplayers", MaxPlayers_f);
+cmd_t NET_Port_f_Cmd ("port", NET_Port_f);
 
 void NET_Init (void)
 {
@@ -829,19 +833,20 @@ void NET_Init (void)
 		else
 			Sys_Error ("NET_Init: you must specify a number after -port");
 	}
+
 	net_hostport = DEFAULTnet_hostport;
 
-	if (COM_CheckParm("-listen") || cls.state == ca_dedicated)
+	if (COM_CheckParm("-listen"))
 		listening = true;
-	net_numsockets = svs.maxclientslimit;
-	if (cls.state != ca_dedicated)
-		net_numsockets++;
+
+	// add an extra socket for the server itself
+	net_numsockets = (svs.maxclientslimit + 1);
 
 	SetNetTime();
 
 	for (i = 0; i < net_numsockets; i++)
 	{
-		s = (qsocket_t *)Hunk_AllocName(sizeof(qsocket_t), "qsocket");
+		s = (qsocket_t *) Heap_TagAlloc (TAG_NETWORK, sizeof (qsocket_t));
 		s->next = net_freeSockets;
 		net_freeSockets = s;
 		s->disconnected = true;
@@ -849,25 +854,6 @@ void NET_Init (void)
 
 	// allocate space for network message buffer
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
-
-	Cvar_RegisterVariable (&net_messagetimeout);
-	Cvar_RegisterVariable (&hostname);
-	Cvar_RegisterVariable (&config_com_port);
-	Cvar_RegisterVariable (&config_com_irq);
-	Cvar_RegisterVariable (&config_com_baud);
-	Cvar_RegisterVariable (&config_com_modem);
-	Cvar_RegisterVariable (&config_modem_dialtype);
-	Cvar_RegisterVariable (&config_modem_clear);
-	Cvar_RegisterVariable (&config_modem_init);
-	Cvar_RegisterVariable (&config_modem_hangup);
-#ifdef IDGODS
-	Cvar_RegisterVariable (&idgods);
-#endif
-
-	Cmd_AddCommand ("slist", NET_Slist_f);
-	Cmd_AddCommand ("listen", NET_Listen_f);
-	Cmd_AddCommand ("maxplayers", MaxPlayers_f);
-	Cmd_AddCommand ("port", NET_Port_f);
 
 	// initialize all the drivers
 	for (net_driverlevel=0 ; net_driverlevel<net_numdrivers ; net_driverlevel++)

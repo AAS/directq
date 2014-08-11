@@ -21,9 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-int			cache_full_cycle;
-
-byte *S_Alloc (int size);
 
 /*
 ================
@@ -38,10 +35,15 @@ void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 	int		i;
 	int		sample, samplefrac, fracstep;
 	sfxcache_t	*sc;
-	
-	sc = (sfxcache_t *) Cache_Check (&sfx->cache);
+
+	sc = sfx->sndcache;
+
+	// not in memory
 	if (!sc)
+	{
+		// Con_Printf ("Sound %s not in memory\n", sfx->name);
 		return;
+	}
 
 	stepscale = (float)inrate / shm->speed;	// this is usually 0.5, 1, or 2
 
@@ -102,32 +104,34 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	int		len;
 	float	stepscale;
 	sfxcache_t	*sc;
-	byte	stackbuf[1*1024];		// avoid dirtying the cache heap
 
-// see if still in memory
-	sc = (sfxcache_t *) Cache_Check (&s->cache);
-	if (sc)
-		return sc;
+	if (s->sndcache)
+	{
+		// Con_Printf ("Sound %s already loaded\n", s->name);
+		return s->sndcache;
+	}
 
-//Con_Printf ("S_LoadSound: %x\n", (int)stackbuf);
-// load it in
-    Q_strcpy(namebuffer, "sound/");
-    Q_strcat(namebuffer, s->name);
+	// Con_Printf ("Loading %s\n", s->name);
 
-//	Con_Printf ("loading %s\n",namebuffer);
+	// load it in
+    Q_strcpy (namebuffer, "sound/");
+    Q_strcat (namebuffer, s->name);
 
-	data = COM_LoadStackFile(namebuffer, stackbuf, sizeof(stackbuf));
+	// don't load as a stack file!!!  no way!!!  never!!!
+	data = COM_LoadTempFile (namebuffer);
 
 	if (!data)
 	{
-		Con_Printf ("Couldn't load %s\n", namebuffer);
+		Con_DPrintf ("Couldn't load %s\n", namebuffer);
 		return NULL;
 	}
 
 	info = GetWavinfo (s->name, data, com_filesize);
+
 	if (info.channels != 1)
 	{
-		Con_Printf ("%s is a stereo sample\n",s->name);
+		// we'll fix this later by converting it to mono
+		Con_DPrintf ("%s is a stereo sample\n",s->name);
 		return NULL;
 	}
 
@@ -136,10 +140,11 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 	len = len * info.width * info.channels;
 
-	sc = (sfxcache_t *) Cache_Alloc ( &s->cache, len + sizeof(sfxcache_t), s->name);
-	if (!sc)
-		return NULL;
-	
+	sc = (sfxcache_t *) Heap_TagAlloc (TAG_SOUND, len + sizeof (sfxcache_t));
+	s->sndcache = sc;
+
+	if (!sc) return NULL;
+
 	sc->length = info.samples;
 	sc->loopstart = info.loopstart;
 	sc->speed = info.rate;
@@ -264,7 +269,7 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 	FindChunk("RIFF");
 	if (!(data_p && !Q_strncmp((char *) data_p+8, "WAVE", 4)))
 	{
-		Con_Printf("Missing RIFF/WAVE chunks\n");
+		Con_DPrintf ("Missing RIFF/WAVE chunks\n");
 		return info;
 	}
 
@@ -275,14 +280,14 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 	FindChunk("fmt ");
 	if (!data_p)
 	{
-		Con_Printf("Missing fmt chunk\n");
+		Con_DPrintf ("Missing fmt chunk\n");
 		return info;
 	}
 	data_p += 8;
 	format = GetLittleShort();
 	if (format != 1)
 	{
-		Con_Printf("Microsoft PCM format only\n");
+		Con_DPrintf ("Microsoft PCM format only\n");
 		return info;
 	}
 
@@ -297,7 +302,7 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 	{
 		data_p += 32;
 		info.loopstart = GetLittleLong();
-//		Con_Printf("loopstart=%d\n", sfx->loopstart);
+//		Con_DPrintf ("loopstart=%d\n", sfx->loopstart);
 
 	// if the next chunk is a LIST chunk, look for a cue length marker
 		FindNextChunk ("LIST");
@@ -308,7 +313,7 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 				data_p += 24;
 				i = GetLittleLong ();	// samples in loop
 				info.samples = info.loopstart + i;
-//				Con_Printf("looped length: %i\n", i);
+//				Con_DPrintf ("looped length: %i\n", i);
 			}
 		}
 	}
@@ -319,7 +324,7 @@ wavinfo_t GetWavinfo (char *name, byte *wav, int wavlength)
 	FindChunk("data");
 	if (!data_p)
 	{
-		Con_Printf("Missing data chunk\n");
+		Con_DPrintf ("Missing data chunk\n");
 		return info;
 	}
 

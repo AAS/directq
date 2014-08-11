@@ -27,15 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 //=============================================================================
 
-typedef struct efrag_s
-{
-	struct mleaf_s		*leaf;
-	struct efrag_s		*leafnext;
-	struct entity_s		*entity;
-	struct efrag_s		*entnext;
-} efrag_t;
-
-
 typedef struct entity_s
 {
 	bool				forcelink;		// model changed
@@ -50,7 +41,6 @@ typedef struct entity_s
 	vec3_t					msg_angles[2];	// last two updates (0 is newest)
 	vec3_t					angles;	
 	struct model_s			*model;			// NULL = no model
-	struct efrag_s			*efrag;			// linked list of efrags
 	int						frame;
 	float					syncbase;		// for client-side animations
 	byte					*colormap;
@@ -58,11 +48,37 @@ typedef struct entity_s
 	int						skinnum;		// for Alias models
 	int						visframe;		// last frame this entity was
 											//  found in an active leaf
-											
+
+	// allocated at runtime client and server side
+	int						entnum;
+
+	/*
+	unused
 	int						dlightframe;	// dynamic lighting
 	int						dlightbits;
-	
-// FIXME: could turn these into a union
+	*/
+
+	// interpolation
+	float		frame_start_time;
+	float		frame_interval;
+	int			pose1, pose2;
+
+	float		translate_start_time;
+	vec3_t		origin1, origin2;
+
+	float		rotate_start_time;
+	vec3_t		angles1, angles2;
+
+	// allows an alpha value to be assigned to any entity
+	int			alphaval;
+
+	// light averaging
+	float		last_shadelight[3];
+
+	// false if the entity is to be subjected to bbox culling
+	bool		nocullbox;
+
+	// FIXME: could turn these into a union
 	int						trivial_accept;
 	struct mnode_s			*topnode;		// for bmodels, first world node
 											//  that splits bmodel, or NULL if
@@ -115,16 +131,11 @@ extern	struct texture_s	*r_notexture_mip;
 
 void R_Init (void);
 void R_InitTextures (void);
-void R_InitEfrags (void);
 void R_RenderView (void);		// must set r_refdef first
 void R_ViewChanged (vrect_t *pvrect, int lineadj, float aspect);
 								// called whenever r_refdef or vid change
 
-void R_AddEfrags (entity_t *ent);
-void R_RemoveEfrags (entity_t *ent);
-
 void R_NewMap (void);
-
 
 void R_ParseParticleEffect (void);
 void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count);

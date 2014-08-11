@@ -28,7 +28,7 @@ struct qsockaddr
 
 #define	NET_NAMELEN			64
 
-#define NET_MAXMESSAGE		8192
+#define NET_MAXMESSAGE		65536 //8192
 #define NET_HEADERSIZE		(2 * sizeof(unsigned int))
 #define NET_DATAGRAMSIZE	(MAX_DATAGRAM + NET_HEADERSIZE)
 
@@ -220,8 +220,8 @@ qsocket_t *NET_NewQSocket (void);
 void NET_FreeQSocket(qsocket_t *);
 double SetNetTime(void);
 
-
-#define HOSTCACHESIZE	8
+// allow discovery of up to 64 servers
+#define HOSTCACHESIZE	64
 
 typedef struct
 {
@@ -294,7 +294,8 @@ int			NET_SendUnreliableMessage (struct qsocket_s *sock, sizebuf_t *data);
 // returns 1 if the message was sent properly
 // returns -1 if the connection died
 
-int			NET_SendToAll(sizebuf_t *data, int blocktime);
+int			NET_SendToAll (sizebuf_t *data, int blocktime);
+int			NET_SendToAll2 (sizebuf_t *data, int blocktime, bool nolocals);
 // This is a reliable *blocking* send to all attached clients.
 
 

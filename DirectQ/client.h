@@ -68,7 +68,8 @@ typedef struct
 
 #define	SIGNONS		4			// signon messages to receive before connected
 
-#define	MAX_DLIGHTS		32
+#define	MAX_DLIGHTS		128
+
 typedef struct
 {
 	vec3_t	origin;
@@ -77,13 +78,17 @@ typedef struct
 	float	decay;				// drop this each second
 	float	minlight;			// don't add when contributing less
 	int		key;
-#ifdef QUAKE2
-	bool	dark;			// subtracts light instead of adding
-#endif
+
+	// coloured light
+	unsigned short rgb[3];
 } dlight_t;
 
 
-#define	MAX_BEAMS	24
+void R_ColourDLight (dlight_t *dl, unsigned short r, unsigned short g, unsigned short b);
+
+
+#define	MAX_BEAMS	64
+
 typedef struct
 {
 	int		entity;
@@ -92,17 +97,17 @@ typedef struct
 	vec3_t	start, end;
 } beam_t;
 
-#define	MAX_EFRAGS		640
 
 #define	MAX_MAPSTRING	2048
 #define	MAX_DEMOS		8
 #define	MAX_DEMONAME	16
 
-typedef enum {
-ca_dedicated, 		// a dedicated server with no ability to start a client
-ca_disconnected, 	// full screen console with no connection
-ca_connected		// valid netcon, talking to a server
+typedef enum
+{
+	ca_disconnected, 	// full screen console with no connection
+	ca_connected		// valid netcon, talking to a server
 } cactive_t;
+
 
 //
 // the client_static_t structure is persistant through an arbitrary number
@@ -203,9 +208,7 @@ typedef struct
 
 	float		last_received_message;	// (realtime) for net trouble icon
 
-//
-// information that is static for the entire time connected to a server
-//
+	// information that is static for the entire time connected to a server
 	struct model_s		*model_precache[MAX_MODELS];
 	struct sfx_s		*sound_precache[MAX_SOUNDS];
 
@@ -214,24 +217,20 @@ typedef struct
 	int			maxclients;
 	int			gametype;
 
-// refresh related state
+	int			Protocol;
+
+	// refresh related state
 	struct model_s	*worldmodel;	// cl_entitites[0].model
-	struct efrag_s	*free_efrags;
+	struct brushheader_s *worldbrush;
+
 	int			num_entities;	// held in cl_entities array
-	int			num_statics;	// held in cl_staticentities array
+
 	entity_t	viewent;			// the gun model
 
 	int			cdtrack, looptrack;	// cd audio
 
-// frag scoreboard
+	// frag scoreboard
 	scoreboard_t	*scores;		// [cl.maxclients]
-
-#ifdef QUAKE2
-// light level at player's position including dlights
-// this is sent back to the server each frame
-// architectually ugly but it works
-	int			light_level;
-#endif
 } client_state_t;
 
 
@@ -269,17 +268,24 @@ extern	cvar_t	m_forward;
 extern	cvar_t	m_side;
 
 
-#define	MAX_TEMP_ENTITIES	64			// lightning bolts, etc
-#define	MAX_STATIC_ENTITIES	128			// torches, etc
+#define	MAX_TEMP_ENTITIES	128			// lightning bolts, etc
+
+typedef struct staticent_s
+{
+	// the entity itself
+	entity_t *ent;
+
+	// linking
+	struct staticent_s *next;
+} staticent_t;
+
 
 extern	client_state_t	cl;
 
 // FIXME, allocate dynamically
-extern	efrag_t			cl_efrags[MAX_EFRAGS];
-extern	entity_t		cl_entities[MAX_EDICTS];
-extern	entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
+extern	entity_t		**cl_entities;
 extern	lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
-extern	dlight_t		cl_dlights[MAX_DLIGHTS];
+extern	dlight_t		*cl_dlights;
 extern	entity_t		cl_temp_entities[MAX_TEMP_ENTITIES];
 extern	beam_t			cl_beams[MAX_BEAMS];
 
@@ -303,9 +309,11 @@ void CL_Disconnect (void);
 void CL_Disconnect_f (void);
 void CL_NextDemo (void);
 
-#define			MAX_VISEDICTS	256
+// bumped to 16384 as static entities can also add on
+#define			MAX_VISEDICTS	16384
+
 extern	int				cl_numvisedicts;
-extern	entity_t		*cl_visedicts[MAX_VISEDICTS];
+extern	entity_t		**cl_visedicts;
 
 //
 // cl_input

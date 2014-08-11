@@ -20,6 +20,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+static long demofile_len, demofile_start;
+
 void CL_FinishTimeDemo (void);
 
 /*
@@ -36,6 +38,22 @@ read from the demo file.
 */
 
 /*
+====================
+CL_CloseDemoFile
+====================
+*/
+void CL_CloseDemoFile (void)
+{
+	if (!cls.demofile)
+		return;
+
+	fclose (cls.demofile);
+	cls.demofile = NULL;
+}
+
+void SCR_SetTimeout (float timeout);
+
+/*
 ==============
 CL_StopPlayback
 
@@ -47,13 +65,14 @@ void CL_StopPlayback (void)
 	if (!cls.demoplayback)
 		return;
 
-	fclose (cls.demofile);
 	cls.demoplayback = false;
-	cls.demofile = NULL;
+	CL_CloseDemoFile ();
 	cls.state = ca_disconnected;
 
-	if (cls.timedemo)
-		CL_FinishTimeDemo ();
+	// Make sure screen is updated shortly after this
+	SCR_SetTimeout (0);
+
+	if (cls.timedemo) CL_FinishTimeDemo ();
 }
 
 /*
@@ -63,21 +82,33 @@ CL_WriteDemoMessage
 Dumps the current net message, prefixed by the length and view angles
 ====================
 */
-void CL_WriteDemoMessage (void)
+bool CL_WriteDemoMessage (void)
 {
-	int		len;
-	int		i;
-	float	f;
+	int	    len;
+	int	    i;
+	float	    f;
+	bool    Success;
 
 	len = LittleLong (net_message.cursize);
-	fwrite (&len, 4, 1, cls.demofile);
-	for (i=0 ; i<3 ; i++)
+	Success = fwrite (&len, 4, 1, cls.demofile) == 1;
+	for (i=0 ; i<3 && Success ; i++)
 	{
 		f = LittleFloat (cl.viewangles[i]);
-		fwrite (&f, 4, 1, cls.demofile);
+		Success = fwrite (&f, 4, 1, cls.demofile) == 1;
 	}
-	fwrite (net_message.data, net_message.cursize, 1, cls.demofile);
-	fflush (cls.demofile);
+	
+	if (Success)
+		Success = fwrite (net_message.data, net_message.cursize, 1, cls.demofile) == 1;
+
+	if (Success)
+		fflush (cls.demofile);
+	else
+	{
+		CL_CloseDemoFile ();
+		Con_Printf ("Error writing demofile\n");
+	}
+
+	return Success;
 }
 
 /*
@@ -89,8 +120,9 @@ Handles recording and playback of demos, on top of NET_ code
 */
 int CL_GetMessage (void)
 {
-	int		r, i;
-	float	f;
+	int	    r, i;
+	float	    f;
+	bool    Success;
 	
 	if	(cls.demoplayback)
 	{
@@ -113,22 +145,32 @@ int CL_GetMessage (void)
 			}
 		}
 		
+		// Detect EOF, especially for demos in pak files
+		if (ftell(cls.demofile) - demofile_start >= demofile_len)
+			Host_EndGame ("Missing disconnect in demofile\n");
+	
 	// get the next message
-		fread (&net_message.cursize, 4, 1, cls.demofile);
+		Success = fread (&net_message.cursize, 4, 1, cls.demofile) == 1;
+
 		VectorCopy (cl.mviewangles[0], cl.mviewangles[1]);
-		for (i=0 ; i<3 ; i++)
+		for (i=0 ; i<3 && Success ; i++)
 		{
-			r = fread (&f, 4, 1, cls.demofile);
+			Success = fread (&f, 4, 1, cls.demofile) == 1;
 			cl.mviewangles[0][i] = LittleFloat (f);
 		}
 		
-		net_message.cursize = LittleLong (net_message.cursize);
-		if (net_message.cursize > MAX_MSGLEN)
-			Sys_Error ("Demo message > MAX_MSGLEN");
-		r = fread (net_message.data, net_message.cursize, 1, cls.demofile);
-		if (r != 1)
+		if (Success)
 		{
-			CL_StopPlayback ();
+			net_message.cursize = LittleLong (net_message.cursize);
+			if (net_message.cursize > MAX_MSGLEN)
+				Host_Error ("Demo message %d > MAX_MSGLEN (%d)", net_message.cursize, MAX_MSGLEN);
+			Success = fread (net_message.data, net_message.cursize, 1, cls.demofile) == 1;
+		}
+
+		if (!Success)
+		{
+			Con_Printf ("Error reading demofile\n");
+			CL_Disconnect ();
 			return 0;
 		}
 	
@@ -150,11 +192,13 @@ int CL_GetMessage (void)
 	}
 
 	if (cls.demorecording)
-		CL_WriteDemoMessage ();
+	{
+		if (!CL_WriteDemoMessage ())
+			return -1; // File write failure
+	}
 	
 	return r;
 }
-
 
 /*
 ====================
@@ -174,17 +218,23 @@ void CL_Stop_f (void)
 		return;
 	}
 
-// write a disconnect message to the demo file
-	SZ_Clear (&net_message);
-	MSG_WriteByte (&net_message, svc_disconnect);
-	CL_WriteDemoMessage ();
+	if (cls.demofile)
+	{
+		// write a disconnect message to the demo file
+		SZ_Clear (&net_message);
+		MSG_WriteByte (&net_message, svc_disconnect);
+		CL_WriteDemoMessage ();
 
-// finish up
-	fclose (cls.demofile);
-	cls.demofile = NULL;
+		// finish up
+		CL_CloseDemoFile ();
+	}
+
 	cls.demorecording = false;
 	Con_Printf ("Completed demo\n");
 }
+
+
+void Menu_DemoPopulate (void);
 
 /*
 ====================
@@ -225,10 +275,11 @@ void CL_Record_f (void)
 	if (c == 4)
 	{
 		track = atoi(Cmd_Argv(3));
-		Con_Printf ("Forcing CD track to %i\n", cls.forcetrack);
+
+		// bug - this was cls.forcetrack
+		Con_Printf ("Forcing CD track to %i\n", track);
 	}
-	else
-		track = -1;	
+	else track = -1;
 
 	sprintf (name, "%s/%s", com_gamedir, Cmd_Argv(1));
 	
@@ -255,6 +306,60 @@ void CL_Record_f (void)
 	fprintf (cls.demofile, "%i\n", cls.forcetrack);
 	
 	cls.demorecording = true;
+
+	// force a refersh of the demo list
+	Menu_DemoPopulate ();
+}
+
+
+bool CL_DoPlayDemo (void)
+{
+	char name[MAX_OSPATH];
+	int	 c;
+	bool neg = false;
+
+	if (cmd_source != src_command) return false;
+
+	if (Cmd_Argc() != 2)
+	{
+		Con_Printf ("playdemo <demoname> : plays a demo\n");
+		return false;
+	}
+
+	// disconnect from server
+	CL_Disconnect ();
+
+	// open the demo file
+	strcpy (name, Cmd_Argv(1));
+	COM_DefaultExtension (name, ".dem");
+
+	Con_Printf ("Playing demo from %s.\n", name);
+        demofile_len = COM_FOpenFile (name, &cls.demofile);
+	
+	if (!cls.demofile)
+	{
+		Con_Printf ("ERROR: couldn't open %s\n", name);
+		cls.demonum = -1;		// stop demo loop
+		return false;
+	}
+
+    demofile_start = ftell (cls.demofile);
+
+	cls.demoplayback = true;
+	cls.state = ca_connected;
+	cls.forcetrack = 0;
+
+	while ((c = getc(cls.demofile)) != '\n')
+	{
+		if (c == '-')
+			neg = true;
+		else cls.forcetrack = cls.forcetrack * 10 + (c - '0');
+	}
+
+	if (neg) cls.forcetrack = -cls.forcetrack;
+
+	// success
+	return true;
 }
 
 
@@ -262,58 +367,12 @@ void CL_Record_f (void)
 ====================
 CL_PlayDemo_f
 
-play [demoname]
+playdemo [demoname]
 ====================
 */
 void CL_PlayDemo_f (void)
 {
-	char	name[256];
-	int c;
-	bool neg = false;
-
-	if (cmd_source != src_command)
-		return;
-
-	if (Cmd_Argc() != 2)
-	{
-		Con_Printf ("play <demoname> : plays a demo\n");
-		return;
-	}
-
-//
-// disconnect from server
-//
-	CL_Disconnect ();
-	
-//
-// open the demo file
-//
-	strcpy (name, Cmd_Argv(1));
-	COM_DefaultExtension (name, ".dem");
-
-	Con_Printf ("Playing demo from %s.\n", name);
-	COM_FOpenFile (name, &cls.demofile);
-	if (!cls.demofile)
-	{
-		Con_Printf ("ERROR: couldn't open.\n");
-		cls.demonum = -1;		// stop demo loop
-		return;
-	}
-
-	cls.demoplayback = true;
-	cls.state = ca_connected;
-	cls.forcetrack = 0;
-
-	while ((c = getc(cls.demofile)) != '\n')
-		if (c == '-')
-			neg = true;
-		else
-			cls.forcetrack = cls.forcetrack * 10 + (c - '0');
-
-	if (neg)
-		cls.forcetrack = -cls.forcetrack;
-// ZOID, fscanf is evil
-//	fscanf (cls.demofile, "%i\n", &cls.forcetrack);
+	CL_DoPlayDemo ();
 }
 
 /*
@@ -355,13 +414,14 @@ void CL_TimeDemo_f (void)
 		return;
 	}
 
-	CL_PlayDemo_f ();
-	
-// cls.td_starttime will be grabbed at the second frame of the demo, so
-// all the loading time doesn't get counted
-	
+	// dn't switch into timedemo mode if we fail to load the demo!
+	if (!CL_DoPlayDemo ()) return;
+
+	// cls.td_starttime will be grabbed at the second frame of the demo, so
+	// all the loading time doesn't get counted
 	cls.timedemo = true;
 	cls.td_startframe = host_framecount;
 	cls.td_lastframe = -1;		// get a new message this frame
 }
+
 

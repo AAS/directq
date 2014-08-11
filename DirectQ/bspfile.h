@@ -21,6 +21,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // upper design bounds
 
+// with the exception of leafs and hulls, none of these limits have effect in the engine.
+// adding more hulls requires a BSP format change; leafs can only be statically bumped as
+// the arrays cannot even be dynamically added to at load time!!!
 #define	MAX_MAP_HULLS		4
 
 #define	MAX_MAP_MODELS		256
@@ -28,10 +31,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	MAX_MAP_ENTITIES	1024
 #define	MAX_MAP_ENTSTRING	65536
 
+// these use shorts for indexing so a limit increase would require a BSP format change
 #define	MAX_MAP_PLANES		32767
 #define	MAX_MAP_NODES		32767		// because negative shorts are contents
 #define	MAX_MAP_CLIPNODES	32767		//
-#define	MAX_MAP_LEAFS		8192
+#define	MAX_MAP_LEAFS		32767		// consistency with nodes - every node can have 2 children, one of which might be a leaf
 #define	MAX_MAP_VERTS		65535
 #define	MAX_MAP_FACES		65535
 #define	MAX_MAP_MARKSURFACES 65535
@@ -226,4 +230,11 @@ typedef struct
 
 
 //============================================================================
+
+
+// bspfile structs
+extern dnode_t *dnodes;
+extern dleaf_t *dleafs;
+extern dplane_t *dplanes;
+
 

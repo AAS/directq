@@ -23,14 +23,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "winquake.h"
 #include "errno.h"
 #include "resource.h"
-#include "conproc.h"
-#include <direct.h>
+
 
 #define MINIMUM_WIN_MEMORY		0x1000000
 #define MAXIMUM_WIN_MEMORY		0x4000000
 
-#define CONSOLE_ERROR_TIMEOUT	60.0	// # of seconds to wait on Sys_Error running
-										//  dedicated before exiting
 #define PAUSE_SLEEP		50				// sleep time on pause or minimization
 #define NOT_FOCUS_SLEEP	20				// sleep time when not focus
 
@@ -42,7 +39,6 @@ static double		pfreq;
 static double		curtime = 0.0;
 static double		lastcurtime = 0.0;
 static int			lowshift;
-bool			isDedicated;
 static bool		sc_return_on_enter = false;
 HANDLE				hinput, houtput;
 
@@ -60,6 +56,7 @@ void Sys_PopFPCW (void);
 
 volatile int					sys_checksum;
 
+CRITICAL_SECTION TheCS;
 
 /*
 ================
@@ -95,19 +92,73 @@ FILE IO
 ===============================================================================
 */
 
-#define	MAX_HANDLES		10
-FILE	*sys_handles[MAX_HANDLES];
-
-int		findhandle (void)
+typedef struct sys_handle_s
 {
-	int		i;
-	
-	for (i=1 ; i<MAX_HANDLES ; i++)
-		if (!sys_handles[i])
-			return i;
-	Sys_Error ("out of handles");
-	return -1;
+	int num;
+	FILE *file;
+	struct sys_handle_s *next;
+} sys_handle_t;
+
+sys_handle_t *active_handles = NULL;
+int num_handles = 1;
+
+sys_handle_t *findhandle (int hnum)
+{
+	// search for a match
+	for (sys_handle_t *h = active_handles; h; h = h->next)
+	{
+		if (h->num == hnum)
+		{
+			// got it
+			return h;
+		}
+	}
+
+	// no match
+	Sys_Error ("findhandle: could not find handle for num %i\n", hnum);
+	return NULL;
 }
+
+
+sys_handle_t *findhandle (void)
+{
+	int i;
+	sys_handle_t *h;
+
+	// search for an unused one
+	for (h = active_handles; h; h = h->next)
+	{
+		if (!h->file)
+		{
+			// unused
+			Con_DPrintf ("Used handle %i\n", h->num);
+			return h;
+		}
+	}
+
+	// alloc a new handle
+	h = (sys_handle_t *) Heap_QMalloc (sizeof (sys_handle_t));
+
+	if (!h)
+	{
+		Sys_Error ("findhandle: failed to alloc a file handle");
+		return NULL;
+	}
+
+	// link it in
+	h->next = active_handles;
+	active_handles = h;
+
+	Con_DPrintf ("Allocated %i handles\n", num_handles);
+
+	// fill in props
+	h->file = NULL;
+	h->num = num_handles++;
+
+	// return the handle we got
+	return h;
+}
+
 
 /*
 ================
@@ -129,23 +180,22 @@ int filelength (FILE *f)
 
 int Sys_FileOpenRead (char *path, int *hndl)
 {
-	FILE	*f;
-	int		i, retval;
+	int		retval;
+	sys_handle_t *h;
 
-	i = findhandle ();
+	h = findhandle ();
 
-	f = fopen(path, "rb");
+	h->file = fopen (path, "rb");
 
-	if (!f)
+	if (!h->file)
 	{
 		*hndl = -1;
 		retval = -1;
 	}
 	else
 	{
-		sys_handles[i] = f;
-		*hndl = i;
-		retval = filelength(f);
+		*hndl = h->num;
+		retval = filelength (h->file);
 	}
 
 	return retval;
@@ -153,56 +203,85 @@ int Sys_FileOpenRead (char *path, int *hndl)
 
 int Sys_FileOpenWrite (char *path)
 {
-	FILE	*f;
-	int		i;
+	sys_handle_t *h;
 
-	i = findhandle ();
+	h = findhandle ();
 
-	f = fopen(path, "wb");
-	if (!f)
-		Sys_Error ("Error opening %s: %s", path,strerror(errno));
-	sys_handles[i] = f;
+	h->file = fopen (path, "wb");
 
-	return i;
+	if (!h->file)
+		Sys_Error ("Error opening %s: %s", path, strerror(errno));
+
+	return h->num;
 }
 
 void Sys_FileClose (int handle)
 {
-	fclose (sys_handles[handle]);
-	sys_handles[handle] = NULL;
+	sys_handle_t *h = findhandle (handle);
+
+	// prevent double-close
+	if (h->file)
+	{
+		// null it as well so that it becomes valid for a future findhandle ()
+		fclose (h->file);
+		h->file = NULL;
+	}
 }
 
 void Sys_FileSeek (int handle, int position)
 {
-	fseek (sys_handles[handle], position, SEEK_SET);
+	sys_handle_t *h = findhandle (handle);
+
+	if (!h->file)
+	{
+		Sys_Error ("Sys_FileSeek: file not open");
+		return;
+	}
+
+	fseek (h->file, position, SEEK_SET);
 }
 
 int Sys_FileRead (int handle, void *dest, int count)
 {
-	int		x;
+	int x;
+	sys_handle_t *h = findhandle (handle);
 
-	x = fread (dest, 1, count, sys_handles[handle]);
+	if (!h->file)
+	{
+		Sys_Error ("Sys_FileRead: file not open");
+		return -1;
+	}
+
+	x = fread (dest, 1, count, h->file);
 	return x;
 }
 
 int Sys_FileWrite (int handle, void *data, int count)
 {
-	int		x;
+	int x;
+	sys_handle_t *h = findhandle (handle);
 
-	x = fwrite (data, 1, count, sys_handles[handle]);
+	if (!h->file)
+	{
+		Sys_Error ("Sys_FileWrite: file not open");
+		return -1;
+	}
+
+	x = fwrite (data, 1, count, h->file);
 	return x;
 }
+
 
 int	Sys_FileTime (char *path)
 {
 	FILE	*f;
 	int		retval;
 
-	f = fopen(path, "rb");
+	f = fopen (path, "rb");
 
 	if (f)
 	{
-		fclose(f);
+		fclose (f);
 		retval = 1;
 	}
 	else
@@ -217,9 +296,17 @@ void Sys_mkdir (char *path)
 {
 	char fullpath[256];
 
+	// silly me - this doesn't need quotes around a directory name with spaces
 	sprintf (fullpath, "%s/%s", com_gamedir, path);
 
-	_mkdir (fullpath);
+	for (int i = 0; ; i++)
+	{
+		if (!fullpath[i]) break;
+
+		if (fullpath[i] == '/') fullpath[i] = '\\';
+	}
+
+	CreateDirectory (fullpath, NULL);
 }
 
 
@@ -338,44 +425,19 @@ void Sys_Error (char *error, ...)
 	vsprintf (text, error, argptr);
 	va_end (argptr);
 
-	if (isDedicated)
+	// switch to windowed so the message box is visible, unless we already
+	// tried that and failed
+	if (!in_sys_error0)
 	{
-		va_start (argptr, error);
-		vsprintf (text, error, argptr);
-		va_end (argptr);
-
-		sprintf (text2, "ERROR: %s\n", text);
-		WriteFile (houtput, text5, strlen (text5), &dummy, NULL);
-		WriteFile (houtput, text4, strlen (text4), &dummy, NULL);
-		WriteFile (houtput, text2, strlen (text2), &dummy, NULL);
-		WriteFile (houtput, text3, strlen (text3), &dummy, NULL);
-		WriteFile (houtput, text4, strlen (text4), &dummy, NULL);
-
-
-		starttime = Sys_FloatTime ();
-		sc_return_on_enter = true;	// so Enter will get us out of here
-
-		while (!Sys_ConsoleInput () &&
-				((Sys_FloatTime () - starttime) < CONSOLE_ERROR_TIMEOUT))
-		{
-		}
+		in_sys_error0 = 1;
+		IN_DeactivateMouse ();
+		MessageBox(NULL, text, "Quake Error",
+					MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
 	}
 	else
 	{
-	// switch to windowed so the message box is visible, unless we already
-	// tried that and failed
-		if (!in_sys_error0)
-		{
-			in_sys_error0 = 1;
-			IN_DeactivateMouse ();
-			MessageBox(NULL, text, "Quake Error",
-					   MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
-		}
-		else
-		{
-			MessageBox(NULL, text, "Double Quake Error",
-					   MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
-		}
+		MessageBox(NULL, text, "Double Quake Error",
+					MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
 	}
 
 	if (!in_sys_error1)
@@ -384,45 +446,21 @@ void Sys_Error (char *error, ...)
 		Host_Shutdown ();
 	}
 
-// shut down QHOST hooks if necessary
+	// shut down QHOST hooks if necessary
 	if (!in_sys_error2)
 	{
 		in_sys_error2 = 1;
-		DeinitConProc ();
 	}
 
 	exit (1);
 }
 
-void Sys_Printf (char *fmt, ...)
-{
-	va_list		argptr;
-	char		text[1024];
-	DWORD		dummy;
-	
-	if (isDedicated)
-	{
-		va_start (argptr,fmt);
-		vsprintf (text, fmt, argptr);
-		va_end (argptr);
-
-		WriteFile(houtput, text, strlen (text), &dummy, NULL);	
-	}
-}
 
 void Sys_Quit (void)
 {
+	Host_Shutdown ();
 
-	Host_Shutdown();
-
-	if (tevent)
-		CloseHandle (tevent);
-
-	if (isDedicated)
-		FreeConsole ();
-
-// shut down QHOST hooks if necessary
-	DeinitConProc ();
+	if (tevent) CloseHandle (tevent);
 
 	exit (0);
 }
@@ -523,80 +561,6 @@ void Sys_InitFloatTime (void)
 
 char *Sys_ConsoleInput (void)
 {
-	static char	text[256];
-	static int		len;
-	INPUT_RECORD	recs[1024];
-	int		dummy;
-	int		ch, numread, numevents;
-
-	if (!isDedicated)
-		return NULL;
-
-
-	for ( ;; )
-	{
-		if (!GetNumberOfConsoleInputEvents (hinput, (LPDWORD) &numevents))
-			Sys_Error ("Error getting # of console events");
-
-		if (numevents <= 0)
-			break;
-
-		if (!ReadConsoleInput(hinput, recs, 1, (LPDWORD) &numread))
-			Sys_Error ("Error reading console input");
-
-		if (numread != 1)
-			Sys_Error ("Couldn't read console input");
-
-		if (recs[0].EventType == KEY_EVENT)
-		{
-			if (!recs[0].Event.KeyEvent.bKeyDown)
-			{
-				ch = recs[0].Event.KeyEvent.uChar.AsciiChar;
-
-				switch (ch)
-				{
-					case '\r':
-						WriteFile(houtput, "\r\n", 2, (LPDWORD) &dummy, NULL);	
-
-						if (len)
-						{
-							text[len] = 0;
-							len = 0;
-							return text;
-						}
-						else if (sc_return_on_enter)
-						{
-						// special case to allow exiting from the error handler on Enter
-							text[0] = '\r';
-							len = 0;
-							return text;
-						}
-
-						break;
-
-					case '\b':
-						WriteFile(houtput, "\b \b", 3, (LPDWORD) &dummy, NULL);	
-						if (len)
-						{
-							len--;
-						}
-						break;
-
-					default:
-						if (ch >= ' ')
-						{
-							WriteFile(houtput, &ch, 1, (LPDWORD) &dummy, NULL);	
-							text[len] = ch;
-							len = (len + 1) & 0xff;
-						}
-
-						break;
-
-				}
-			}
-		}
-	}
-
 	return NULL;
 }
 
@@ -624,6 +588,24 @@ void Sys_SendKeyEvents (void)
 }
 
 
+void Sys_ThreadCatchup (void)
+{
+	// DON'T PANIC!!!
+	// per MSDN - "Specifies the time, in milliseconds, for which to suspend execution.
+	// A value of zero causes the thread to relinquish the remainder of its time slice
+	// to any other thread of equal priority that is ready to run. If there are no other
+	// threads of equal priority ready to run, the function returns immediately, and
+	// the thread continues execution."
+	// DON'T PANIC!!!
+	// DirectInput needs this, and anyway it makes the engine a more well-behaved citizen
+	// in a multi-threaded environment.  Got a few extra FPS from it too... (confirming my
+	// suspicion that something in Direct3D was running multi-threaded...
+	// DON'T PANIC!!!
+	Sleep (0);
+	// DON'T PANIC!!!
+}
+
+
 /*
 ==============================================================================
 
@@ -640,8 +622,7 @@ WinMain
 */
 void SleepUntilInput (int time)
 {
-
-	MsgWaitForMultipleObjects(1, &tevent, FALSE, time, QS_ALLINPUT);
+	MsgWaitForMultipleObjects (1, &tevent, FALSE, time, QS_ALLINPUT);
 }
 
 
@@ -661,21 +642,27 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 {
 	quakeparms_t	parms;
 	double			time, oldtime, newtime;
-	MEMORYSTATUS	lpBuffer;
 	static	char	cwd[1024];
 	int				t;
 
-    /* previous instances do not exist in Win32 */
-    if (hPrevInstance)
-        return 0;
+    // previous instances do not exist in Win32
+	// this is stupid as is can't be anothing but NULL...
+    if (hPrevInstance) return 0;
+
+	SetProcessAffinityMask (GetCurrentProcess (), 1);
+
+	// mark the entire program as a critical section so that the 
+	// multithreaded CRT and multithreading in DirectX don't trip us up.
+	InitializeCriticalSection (&TheCS);
+	EnterCriticalSection (&TheCS);
+
+	// init memory heap
+	Heap_Init ();
 
 	global_hInstance = hInstance;
 	global_nCmdShow = nCmdShow;
 
-	lpBuffer.dwLength = sizeof(MEMORYSTATUS);
-	GlobalMemoryStatus (&lpBuffer);
-
-	if (!GetCurrentDirectory (sizeof(cwd), cwd))
+	if (!GetCurrentDirectory (sizeof (cwd), cwd))
 		Sys_Error ("Couldn't determine current directory");
 
 	if (cwd[Q_strlen(cwd)-1] == '/')
@@ -716,83 +703,27 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	parms.argc = com_argc;
 	parms.argv = com_argv;
 
-	isDedicated = (COM_CheckParm ("-dedicated") != 0);
+	if (COM_CheckParm ("-dedicated") != 0)
+	{
+		// dedicated server is no longer supported
+		MessageBox
+		(
+			NULL,
+			"DirectQ can no longer run as a Dedicated Server.\nWhy would you want to anyway?\n\nUse another engine!",
+			"Error",
+			MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_SETFOREGROUND | MB_TOPMOST
+		);
+
+		return -1;
+	}
 
 	// initialize the splash screen
-	if (!isDedicated) Splash_Init (hInstance);
+	Splash_Init (hInstance);
 
-// take the greater of all the available memory or half the total memory,
-// but at least 8 Mb and no more than 16 Mb, unless they explicitly
-// request otherwise
-	parms.memsize = lpBuffer.dwAvailPhys;
-
-	if (parms.memsize < MINIMUM_WIN_MEMORY)
-		parms.memsize = MINIMUM_WIN_MEMORY;
-
-	if (parms.memsize < (lpBuffer.dwTotalPhys >> 1))
-		parms.memsize = lpBuffer.dwTotalPhys >> 1;
-
-	if (parms.memsize > MAXIMUM_WIN_MEMORY)
-		parms.memsize = MAXIMUM_WIN_MEMORY;
-
-	if (COM_CheckParm ("-heapsize"))
-	{
-		t = COM_CheckParm("-heapsize") + 1;
-
-		if (t < com_argc)
-			parms.memsize = Q_atoi (com_argv[t]) * 1024;
-	}
-
-	parms.membase = malloc (parms.memsize);
-
-	if (!parms.membase)
-		Sys_Error ("Not enough memory free; check disk space\n");
-
-	Sys_PageIn (parms.membase, parms.memsize);
-
-	tevent = CreateEvent(NULL, FALSE, FALSE, NULL);
-
-	if (!tevent)
-		Sys_Error ("Couldn't create event");
-
-	if (isDedicated)
-	{
-		if (!AllocConsole ())
-		{
-			Sys_Error ("Couldn't create dedicated server console");
-		}
-
-		hinput = GetStdHandle (STD_INPUT_HANDLE);
-		houtput = GetStdHandle (STD_OUTPUT_HANDLE);
-
-	// give QHOST a chance to hook into the console
-		if ((t = COM_CheckParm ("-HFILE")) > 0)
-		{
-			if (t < com_argc)
-				hFile = (HANDLE)Q_atoi (com_argv[t+1]);
-		}
-			
-		if ((t = COM_CheckParm ("-HPARENT")) > 0)
-		{
-			if (t < com_argc)
-				heventParent = (HANDLE)Q_atoi (com_argv[t+1]);
-		}
-			
-		if ((t = COM_CheckParm ("-HCHILD")) > 0)
-		{
-			if (t < com_argc)
-				heventChild = (HANDLE)Q_atoi (com_argv[t+1]);
-		}
-
-		InitConProc (hFile, heventParent, heventChild);
-	}
+	if (!(tevent = CreateEvent (NULL, FALSE, FALSE, NULL))) Sys_Error ("Couldn't create event");
 
 	Sys_Init ();
 
-// because sound is off until we become active
-	S_BlockSound ();
-
-	Sys_Printf ("Host_Init\n");
 	Host_Init (&parms);
 
 	oldtime = Sys_FloatTime ();
@@ -800,37 +731,26 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
     /* main window message loop */
 	while (1)
 	{
-		if (isDedicated)
-		{
-			newtime = Sys_FloatTime ();
-			time = newtime - oldtime;
-
-			while (time < sys_ticrate.value )
-			{
-				Sys_Sleep();
-				newtime = Sys_FloatTime ();
-				time = newtime - oldtime;
-			}
-		}
-		else
-		{
 		// yield the CPU for a little while when paused, minimized, or not the focus
-			if ((cl.paused && (!ActiveApp && !DDActive)) || Minimized || block_drawing)
-			{
-				SleepUntilInput (PAUSE_SLEEP);
-				scr_skipupdate = 1;		// no point in bothering to draw
-			}
-			else if (!ActiveApp && !DDActive)
-			{
-				SleepUntilInput (NOT_FOCUS_SLEEP);
-			}
-
-			newtime = Sys_FloatTime ();
-			time = newtime - oldtime;
+		if ((cl.paused && (!ActiveApp && !DDActive)) || Minimized || block_drawing)
+		{
+			SleepUntilInput (PAUSE_SLEEP);
+			scr_skipupdate = 1;		// no point in bothering to draw
 		}
+		else if (!ActiveApp && !DDActive)
+		{
+			SleepUntilInput (NOT_FOCUS_SLEEP);
+		}
+
+		newtime = Sys_FloatTime ();
+		time = newtime - oldtime;
 
 		Host_Frame (time);
 		oldtime = newtime;
+
+		// allow any other threads which may have been spawned by the application to grab a timeslice
+		// (DirectX seems to spawn a few undocumented threads here and there which cause problems if you don't do this)
+		Sys_ThreadCatchup ();
 	}
 
     /* return success of application */

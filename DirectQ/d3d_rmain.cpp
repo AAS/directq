@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 See the GNU General Public License for more details.
 
@@ -21,18 +21,24 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
+#include "d3d_hlsl.h"
 
 void RotatePointAroundVector (vec3_t dst, const vec3_t dir, const vec3_t point, float degrees);
 void R_AnimateLight (void);
 void V_CalcBlend (void);
 void R_DrawWorld (void);
-void R_RenderDlights (void);
 void R_DrawParticles (void);
 void R_DrawWaterSurfaces (void);
-void R_DrawAliasModel (entity_t *e);
 void R_DrawSpriteModel (entity_t *e);
+void D3D_DrawAliasModels (void);
+void D3D_DrawInstancedBrushModels (void);
+void D3D_DrawSpriteModels (void);
+
+void D3D_BeginUnderwaterWarp (void);
+void D3D_EndUnderwaterWarp (void);
 
 entity_t	r_worldentity;
+float r_frametime;
 
 bool	r_cache_thrash;		// compatability
 
@@ -40,21 +46,11 @@ vec3_t		modelorg, r_entorigin;
 entity_t	*currententity;
 
 int			r_visframecount;	// bumped when going to a new PVS
-int			r_framecount;		// used for dlight push checking
+int			r_framecount;		// used for dlight push checking (and surf visibility)
 
 mplane_t	frustum[4];
 
 int			c_brush_polys, c_alias_polys;
-
-bool	envmap;				// true during envmap command capture 
-
-int			currenttexture = -1;		// to avoid unnecessary texture sets
-
-int			cnttextures[2] = {-1, -1};     // cached
-
-int			mirrortexturenum;	// quake texturenum, not gltexturenum
-bool	mirror;
-mplane_t	*mirror_plane;
 
 //
 // view origin
@@ -63,9 +59,6 @@ vec3_t	vup;
 vec3_t	vpn;
 vec3_t	vright;
 vec3_t	r_origin;
-
-float	r_world_matrix[16];
-float	r_base_world_matrix[16];
 
 //
 // screen size info
@@ -81,33 +74,26 @@ int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
 void R_MarkLeaves (void);
 
-cvar_t	r_norefresh = {"r_norefresh","0"};
-cvar_t	r_drawentities = {"r_drawentities","1"};
-cvar_t	r_drawviewmodel = {"r_drawviewmodel","1"};
-cvar_t	r_speeds = {"r_speeds","0"};
-cvar_t	r_fullbright = {"r_fullbright","0"};
-cvar_t	r_lightmap = {"r_lightmap","0"};
-cvar_t	r_shadows = {"r_shadows","0"};
-cvar_t	r_mirroralpha = {"r_mirroralpha","1"};
-cvar_t	r_wateralpha = {"r_wateralpha","1"};
-cvar_t	r_dynamic = {"r_dynamic","1"};
-cvar_t	r_novis = {"r_novis","0"};
+cvar_t	r_norefresh ("r_norefresh","0");
+cvar_t	r_drawentities ("r_drawentities","1");
+cvar_t	r_drawviewmodel ("r_drawviewmodel","1");
+cvar_t	r_speeds ("r_speeds","0");
+cvar_t	r_fullbright ("r_fullbright","0");
+cvar_t	r_lightmap ("r_lightmap","0");
+cvar_t	r_shadows ("r_shadows","0");
+cvar_t	r_wateralpha ("r_wateralpha", 0.5, CVAR_ARCHIVE);
+cvar_t	r_dynamic ("r_dynamic","1");
+cvar_t	r_novis ("r_novis","0");
 
-cvar_t	gl_finish = {"gl_finish","0"};
-cvar_t	gl_clear = {"gl_clear","0", true};
-cvar_t	gl_cull = {"gl_cull","1"};
-cvar_t	gl_texsort = {"gl_texsort","1"};
-cvar_t	gl_smoothmodels = {"gl_smoothmodels","1"};
-cvar_t	gl_affinemodels = {"gl_affinemodels","0"};
-cvar_t	gl_polyblend = {"gl_polyblend","1"};
-cvar_t	gl_flashblend = {"gl_flashblend","0"};
-cvar_t	gl_playermip = {"gl_playermip","0"};
-cvar_t	gl_nocolors = {"gl_nocolors","0"};
-cvar_t	gl_keeptjunctions = {"gl_keeptjunctions","0"};
-cvar_t	gl_reporttjunctions = {"gl_reporttjunctions","0"};
-cvar_t	gl_doubleeyes = {"gl_doubleeys", "1"};
+cvar_t	gl_finish ("gl_finish","0");
+cvar_t	gl_clear ("gl_clear","1", CVAR_ARCHIVE);
+cvar_t	gl_cull ("gl_cull","1");
+cvar_t	gl_smoothmodels ("gl_smoothmodels","1");
+cvar_t	gl_affinemodels ("gl_affinemodels","0");
+cvar_t	gl_polyblend ("gl_polyblend","1");
+cvar_t	gl_nocolors ("gl_nocolors","0");
+cvar_t	gl_doubleeyes ("gl_doubleeys", "1");
 
-extern	cvar_t	gl_ztrick;
 
 /*
 =================
@@ -127,7 +113,7 @@ bool R_CullBox (vec3_t mins, vec3_t maxs)
 }
 
 
-void D3D_RotateForEntity (entity_t *e, bool shadow)
+void D3D_RotateForEntity (entity_t *e, bool shadow = false)
 {
 	// calculate transforms
 	d3d_WorldMatrixStack->TranslateLocal (e->origin[0], e->origin[1], e->origin[2]);
@@ -139,146 +125,10 @@ void D3D_RotateForEntity (entity_t *e, bool shadow)
 		d3d_WorldMatrixStack->RotateAxisLocal (&YVECTOR, D3DXToRadian (-e->angles[0]));
 		d3d_WorldMatrixStack->RotateAxisLocal (&XVECTOR, D3DXToRadian (e->angles[2]));
 	}
-
-	// set the transforms
-	d3d_Device->SetTransform (D3DTS_WORLD, d3d_WorldMatrixStack->GetTop ());
-}
-
-
-void D3D_RotateForEntity (entity_t *e)
-{
-	D3D_RotateForEntity (e, false);
 }
 
 
 //==================================================================================
-
-D3DMATERIAL9 d3d_Material;
-D3DLIGHT9 d3d_Light0;
-
-void D3D_SetAliasRenderState (bool enable)
-{
-	if (enable)
-	{
-		// set alias model state
-		if (gl_smoothmodels.value) d3d_Device->SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-
-		//	if (gl_affinemodels.value)
-		//		glHint (GL_PERSPECTIVE_CORRECTION_HINT, GL_FASTEST);
-
-		// set fvf to include normals as we're going to light these using d3d lighting
-		D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
-	}
-	else
-	{
-		//	if (gl_affinemodels.value)
-		//		glHint (GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
-
-		// flat shading
-		d3d_Device->SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
-
-		// go back to the world matrix
-		d3d_Device->SetTransform (D3DTS_WORLD, d3d_WorldMatrix);
-	}
-}
-
-
-/*
-=============
-R_DrawEntitiesOnList
-=============
-*/
-void R_DrawEntitiesOnList (void)
-{
-	int i;
-	int numalias = 0;
-	int numsprite = 0;
-
-	if (!r_drawentities.value) return;
-
-	// draw sprites seperately, because of alpha blending
-	for (i = 0; i < cl_numvisedicts; i++)
-	{
-		currententity = cl_visedicts[i];
-
-		switch (currententity->model->type)
-		{
-		case mod_alias:
-			if (!numalias) D3D_SetAliasRenderState (true);
-
-			R_DrawAliasModel (currententity);
-
-			numalias++;
-			break;
-
-		default:
-			break;
-		}
-	}
-
-	// revert state
-	if (numalias) D3D_SetAliasRenderState (false);
-
-	for (i = 0; i < cl_numvisedicts; i++)
-	{
-		currententity = cl_visedicts[i];
-
-		switch (currententity->model->type)
-		{
-		case mod_sprite:
-			if (!numsprite)
-			{
-				d3d_EnableAlphaTest->Apply ();
-				D3D_SetFVFStateManaged (D3DFVF_XYZ | D3DFVF_TEX1);
-			}
-
-			R_DrawSpriteModel (currententity);
-
-			numsprite++;
-			break;
-		}
-	}
-
-	if (numsprite)
-	{
-		d3d_DisableAlphaTest->Apply ();
-	}
-}
-
-/*
-=============
-R_DrawViewModel
-=============
-*/
-void R_DrawViewModel (void)
-{
-	currententity = &cl.viewent;
-
-	if (!r_drawviewmodel.value) return;
-	if (chase_active.value) return;
-	if (envmap) return;
-	if (!r_drawentities.value) return;
-	if (cl.items & IT_INVISIBILITY) return;
-	if (cl.stats[STAT_HEALTH] <= 0) return;
-	if (!currententity->model) return;
-
-	// hack the depth range to prevent view model from poking into walls
-	d3d_GunViewport->Apply ();
-
-	// set alias model state
-	D3D_SetAliasRenderState (true);
-
-	// create a new projection matrix for the gun, so as to keep it properly visible at different values of fov
-	// this is the last thing drawn in the 3d render so we don't bother setting it back to the way it was...
-	D3DXMatrixIdentity (&d3d_ProjectionMatrix);
-	D3DXMatrixPerspectiveFovRH (&d3d_ProjectionMatrix, 1.1989051, (float) r_refdef.vrect.width / (float) r_refdef.vrect.height, 4, 4096);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjectionMatrix);
-
-	R_DrawAliasModel (currententity);
-
-	D3D_SetAliasRenderState (false);
-}
-
 
 int SignbitsForPlane (mplane_t *out)
 {
@@ -303,7 +153,6 @@ void R_SetFrustum (void)
 	if (r_refdef.fov_x == 90) 
 	{
 		// front side is visible
-
 		VectorAdd (vpn, vright, frustum[0].normal);
 		VectorSubtract (vpn, vright, frustum[1].normal);
 
@@ -313,16 +162,19 @@ void R_SetFrustum (void)
 	else
 	{
 		// rotate VPN right by FOV_X/2 degrees
-		RotatePointAroundVector( frustum[0].normal, vup, vpn, -(90-r_refdef.fov_x / 2 ) );
+		RotatePointAroundVector (frustum[0].normal, vup, vpn, -(90 - r_refdef.fov_x / 2));
+
 		// rotate VPN left by FOV_X/2 degrees
-		RotatePointAroundVector( frustum[1].normal, vup, vpn, 90-r_refdef.fov_x / 2 );
+		RotatePointAroundVector (frustum[1].normal, vup, vpn, 90 - r_refdef.fov_x / 2);
+
 		// rotate VPN up by FOV_X/2 degrees
-		RotatePointAroundVector( frustum[2].normal, vright, vpn, 90-r_refdef.fov_y / 2 );
+		RotatePointAroundVector (frustum[2].normal, vright, vpn, 90 - r_refdef.fov_y / 2);
+
 		// rotate VPN down by FOV_X/2 degrees
-		RotatePointAroundVector( frustum[3].normal, vright, vpn, -( 90 - r_refdef.fov_y / 2 ) );
+		RotatePointAroundVector (frustum[3].normal, vright, vpn, -(90 - r_refdef.fov_y / 2));
 	}
 
-	for (i=0 ; i<4 ; i++)
+	for (i = 0; i < 4; i++)
 	{
 		frustum[i].type = PLANE_ANYZ;
 		frustum[i].dist = DotProduct (r_origin, frustum[i].normal);
@@ -338,20 +190,19 @@ R_SetupFrame
 */
 void R_SetupFrame (void)
 {
-// don't allow cheats in multiplayer
-	if (cl.maxclients > 1)
-		Cvar_Set ("r_fullbright", "0");
+	// don't allow cheats in multiplayer
+	if (cl.maxclients > 1) Cvar_Set ("r_fullbright", "0");
 
 	R_AnimateLight ();
 
 	r_framecount++;
 
-// build the transformation matrix for the given view angles
+	// build the transformation matrix for the given view angles
 	VectorCopy (r_refdef.vieworg, r_origin);
 
 	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
 
-// current viewleaf
+	// current viewleaf
 	r_oldviewleaf = r_viewleaf;
 	r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
 
@@ -362,7 +213,6 @@ void R_SetupFrame (void)
 
 	c_brush_polys = 0;
 	c_alias_polys = 0;
-
 }
 
 
@@ -375,16 +225,68 @@ void D3D_InfiniteProjectionRH (D3DMATRIX *mi)
 
 /*
 =============
-R_SetupGL
+R_SetupD3D
 =============
 */
-void R_SetupGL (void)
+// need to store this so that we can hack it for the gun and restore it after warp updates
+D3DVIEWPORT9 d3d_3DViewport;
+float FovYRadians = 0;
+
+void D3D_BackfaceCull (DWORD D3D_CULLTYPE)
 {
-	// projection matrix - this can't be set once and kept forever as refdef might change (should actually be in refdef change code!)
-	D3DXMatrixIdentity (&d3d_ProjectionMatrix);
-	D3DXMatrixPerspectiveFovRH (&d3d_ProjectionMatrix, D3DXToRadian (r_refdef.fov_y), (float) r_refdef.vrect.width / (float) r_refdef.vrect.height, 4, 4096);
-	D3D_InfiniteProjectionRH (&d3d_ProjectionMatrix);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_ProjectionMatrix);
+	if (!gl_cull.value)
+		d3d_Device->SetRenderState (D3DRS_CULLMODE, D3DCULL_NONE);
+	else d3d_Device->SetRenderState (D3DRS_CULLMODE, D3D_CULLTYPE);
+}
+
+
+void R_SetupD3D (void)
+{
+	// always clear the zbuffer
+	DWORD d3d_ClearFlags = D3DCLEAR_ZBUFFER;
+
+	// accumulate everything else we want to clear
+	if (gl_clear.value) d3d_ClearFlags |= D3DCLEAR_TARGET;
+	if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8) d3d_ClearFlags |= D3DCLEAR_STENCIL;
+
+	// we only need to clear if we're rendering 3D
+	d3d_Device->Clear (0, NULL, d3d_ClearFlags, 0x00000000, 1.0f, 0);
+
+	d3d_Device->BeginScene ();
+
+	// load identity onto the view matrix (it seems as though some cards don't like it being set one time only)
+	// we can get rid of this when we complete the transition from FVF to shaders
+	D3DXMatrixIdentity (&d3d_ViewMatrix);
+	d3d_Device->SetTransform (D3DTS_VIEW, &d3d_ViewMatrix);
+
+	// get dimensions of viewport
+	d3d_3DViewport.X = r_refdef.vrect.x * d3d_CurrentMode.Width / vid.width;
+	d3d_3DViewport.Width = r_refdef.vrect.width * d3d_CurrentMode.Width / vid.width;
+	d3d_3DViewport.Y = r_refdef.vrect.y * d3d_CurrentMode.Height / vid.height;
+	d3d_3DViewport.Height = r_refdef.vrect.height * d3d_CurrentMode.Height / vid.height;
+
+	// adjust for rounding errors by expanding the viewport by 1 in each direction
+	// if it's smaller than the screen size
+	if (d3d_3DViewport.X > 0) d3d_3DViewport.X--;
+	if (d3d_3DViewport.Y > 0) d3d_3DViewport.Y--;
+	if (d3d_3DViewport.Width < d3d_CurrentMode.Width) d3d_3DViewport.Width++;
+	if (d3d_3DViewport.Height < d3d_CurrentMode.Height) d3d_3DViewport.Height++;
+
+	// set z range
+	d3d_3DViewport.MinZ = 0.0f;
+	d3d_3DViewport.MaxZ = 1.0f;
+
+	// set the viewport
+	d3d_Device->SetViewport (&d3d_3DViewport);
+
+	// inconsequential in terms of optimization but may help prevent bugs elsewhere...
+	FovYRadians = D3DXToRadian (r_refdef.fov_y);
+
+	// projection matrix - this can't be set once and kept forever as refdef might change
+	D3DXMatrixIdentity (&d3d_PerspectiveMatrix);
+	D3DXMatrixPerspectiveFovRH (&d3d_PerspectiveMatrix, FovYRadians, (float) r_refdef.vrect.width / (float) r_refdef.vrect.height, 4, 4096);
+	D3D_InfiniteProjectionRH (&d3d_PerspectiveMatrix);
+	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_PerspectiveMatrix);
 
 	// world matrix
 	d3d_WorldMatrixStack->LoadIdentity ();
@@ -405,9 +307,10 @@ void R_SetupGL (void)
 	d3d_Device->SetTransform (D3DTS_WORLD, d3d_WorldMatrixStack->GetTop ());
 
 	// save the current world matrix
-	d3d_WorldMatrix = d3d_WorldMatrixStack->GetTop ();
+	memcpy (&d3d_WorldMatrix, d3d_WorldMatrixStack->GetTop (), sizeof (D3DXMATRIX));
 
 	// depth testing and writing
+	d3d_Device->SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
 	d3d_Device->SetRenderState (D3DRS_ZENABLE, D3DZB_TRUE);
 	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 
@@ -415,11 +318,87 @@ void R_SetupGL (void)
 	d3d_Device->SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
 
 	// backface culling
-	d3d_Device->SetRenderState (D3DRS_CULLMODE, D3DCULL_CCW);
+	D3D_BackfaceCull (D3DCULL_CCW);
 
 	// disable all alpha ops
 	d3d_DisableAlphaTest->Apply ();
 	d3d_DisableAlphaBlend->Apply ();
+}
+
+
+void R_MergeEntityToRenderFlags (entity_t *ent)
+{
+	if (ent->model->type == mod_alias)
+		r_renderflags |= R_RENDERALIAS;
+	else if (ent->model->type == mod_sprite)
+		r_renderflags |= R_RENDERSPRITE;
+	else if (ent->model->type == mod_brush)
+	{
+		// two different types of brush model - yuck yuck yuck
+		if (ent->model->name[0] == '*')
+			r_renderflags |= R_RENDERINLINEBRUSH;
+		else r_renderflags |= R_RENDERINSTANCEDBRUSH;
+	}
+	else
+	{
+		// it's a content error if this happens
+		Sys_Error ("R_MergeEntityToRenderFlags: Unimplemented Model Type");
+		return;
+	}
+}
+
+
+void R_SetupRenderState (void)
+{
+	texture_t *t;
+	extern msurface_t *skychain;
+	int i;
+
+	for (i = 0; i < cl.worldbrush->numtextures; i++)
+	{
+		// e2m3 gets this
+		if (!(t = cl.worldbrush->textures[i])) continue;
+
+		// null it
+		t->texturechain = NULL;
+		t->visframe = -1;
+	}
+
+	// renderflags
+	r_renderflags = 0;
+
+	// sky as well
+	skychain = NULL;
+
+	// now check the entities and merge into r_renderflags
+	// so that we know in advance what we need to render
+	for (i = 0; i < cl_numvisedicts; i++) R_MergeEntityToRenderFlags (cl_visedicts[i]);
+}
+
+
+// this is basically the "a lof of this goes away" thing in the old gl_refrag...
+// or at least one version of it.  see also CL_FindTouchedLeafs and the various struct defs
+void R_AddStaticEntitiesForLeaf (mleaf_t *leaf)
+{
+	for (staticent_t *se = leaf->statics; se; se = se->next)
+	{
+		// already added
+		if (se->ent->visframe == r_framecount) continue;
+
+		// add it (only if we have visible edict slots to spare)
+		if (cl_numvisedicts < MAX_VISEDICTS)
+		{
+			// the leafs containing the entities have already been bbox culled, so there's no need to check the entity!!!
+			se->ent->nocullbox = true;
+			cl_visedicts[cl_numvisedicts++] = se->ent;
+
+			// merge into renderflags
+			R_MergeEntityToRenderFlags (se->ent);
+
+			// mark as visible for this frame
+			se->ent->visframe = r_framecount;
+		}
+	}
 }
 
 
@@ -432,38 +411,36 @@ r_refdef must be set before the first call
 */
 void R_RenderScene (void)
 {
-	R_SetupFrame ();
+	D3D_BeginUnderwaterWarp ();
 
-	R_SetFrustum ();
+	// setup to draw
+	R_SetupD3D ();
+	R_SetupRenderState ();
 
-	R_SetupGL ();
+	// adds the world and any static entities to the list
+	R_DrawWorld ();
 
-	R_MarkLeaves ();	// done here so we know if we're in water
+	// don't let sound get messed up if going slow
+	S_ExtraUpdate ();
 
-	R_DrawWorld ();		// adds static entities to the list
+	// draw entities
+	// note - sprites need to be drawn the same time as particles
+	D3D_DrawInstancedBrushModels ();
 
-	S_ExtraUpdate ();	// don't let sound get messed up if going slow
-
-	R_DrawEntitiesOnList ();
-
-	R_RenderDlights ();
-
+	// draw everything else
 	R_DrawWaterSurfaces ();
+
+	D3D_DrawAliasModels ();
 
 	R_DrawParticles ();
 
-	// note - must be last as it messes with the viewport and the projection matrix
-	R_DrawViewModel ();
-}
+	// sprites deferred to same time as particles as they have similar properties & characteristics
+	D3D_DrawSpriteModels ();
 
+	// required by render to texture...
+	d3d_Device->EndScene ();
 
-/*
-=============
-R_Mirror
-=============
-*/
-void R_Mirror (void)
-{
+	D3D_EndUnderwaterWarp ();
 }
 
 
@@ -476,6 +453,9 @@ r_refdef must be set before the first call
 */
 void R_RenderView (void)
 {
+	// get frametime
+	r_frametime = cl.time - cl.oldtime;
+
 	double	time1, time2;
 
 	if (r_norefresh.value)
@@ -491,7 +471,13 @@ void R_RenderView (void)
 		c_alias_polys = 0;
 	}
 
-	mirror = false;
+	// set up to draw
+	R_SetupFrame ();
+
+	R_SetFrustum ();
+
+	// done here so we know if we're in water
+	R_MarkLeaves ();
 
 	// render normal view
 	R_RenderScene ();
@@ -499,6 +485,6 @@ void R_RenderView (void)
 	if (r_speeds.value)
 	{
 		time2 = Sys_FloatTime ();
-		Con_Printf ("%3i ms  %4i wpoly %4i epoly\n", (int)((time2-time1)*1000), c_brush_polys, c_alias_polys); 
+		Con_Printf ("%3i ms  %4i wpoly %4i epoly\n", (int) ((time2 - time1) * 1000), c_brush_polys, c_alias_polys);
 	}
 }

@@ -1,0 +1,32 @@
+#include <windows.h>
+#include "resource.h"
+
+// bitmaps and other image types
+IDB_SPLASH				BITMAP		"splash.bmp"
+IDR_PARTICLEDOT			RCDATA		"particledot.png"
+IDR_PARTICLESMOKE			RCDATA		"particlesmoke.png"
+IDR_PARTICLETRACER		RCDATA		"particletracer.png"
+IDR_PARTICLEBLOOD1		RCDATA		"particleblood1.png"
+IDR_PARTICLEBLOOD2		RCDATA		"particleblood2.png"
+IDR_PARTICLEBLOOD3		RCDATA		"particleblood3.png"
+IDR_PARTICLEBLOOD4		RCDATA		"particleblood4.png"
+IDR_PARTICLEBLOOD5		RCDATA		"particleblood5.png"
+IDR_PARTICLEBLOOD6		RCDATA		"particleblood6.png"
+IDR_PARTICLEBLOOD7		RCDATA		"particleblood7.png"
+IDR_PARTICLEBLOOD8		RCDATA		"particleblood8.png"
+IDR_CROSSHAIR			RCDATA		"CrosshairFont.png"
+
+// fx files
+IDR_INSTANCEDBRUSH		RCDATA		"InstancedBrush.fx"
+IDR_BRUSH				RCDATA		"Brush.fx"
+IDR_LIQUID				RCDATA		"Liquid.fx"
+IDR_ALIAS				RCDATA		"AliasModel.fx"
+IDR_FLAT2D				RCDATA		"Flat2D.fx"
+IDR_SPRITE				RCDATA		"Sprite.fx"
+IDR_PARTICLE			RCDATA		"Particle.fx"
+IDR_UNDERWATER			RCDATA		"Underwater.fx"
+IDR_SKY				RCDATA		"Sky.fx"
+
+// icons
+IDI_APPICON				ICON			"dq.ico"
+

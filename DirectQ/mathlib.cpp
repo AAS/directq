@@ -276,11 +276,6 @@ dist2 = p->normal[0]*emaxs[0] + p->normal[1]*emaxs[1] + p->normal[2]*emaxs[2];
 	if (dist2 < p->dist)
 		sides |= 2;
 
-#ifdef PARANOID
-if (sides == 0)
-	Sys_Error ("BoxOnPlaneSide: sides==0");
-#endif
-
 	return sides;
 }
 
@@ -324,9 +319,9 @@ int VectorCompare (vec3_t v1, vec3_t v2)
 
 void VectorMA (vec3_t veca, float scale, vec3_t vecb, vec3_t vecc)
 {
-	vecc[0] = veca[0] + scale*vecb[0];
-	vecc[1] = veca[1] + scale*vecb[1];
-	vecc[2] = veca[2] + scale*vecb[2];
+	vecc[0] = veca[0] + scale * vecb[0];
+	vecc[1] = veca[1] + scale * vecb[1];
+	vecc[2] = veca[2] + scale * vecb[2];
 }
 
 
@@ -495,20 +490,14 @@ quotient must fit in 32 bits.
 ====================
 */
 
-void FloorDivMod (double numer, double denom, int *quotient,
-		int *rem)
+void FloorDivMod (double numer, double denom, int *quotient, int *rem)
 {
 	int		q, r;
 	double	x;
 
-#ifndef PARANOID
+	// this was #ifndef PARANOID - should it have been #ifdef?
 	if (denom <= 0.0)
 		Sys_Error ("FloorDivMod: bad denominator %d\n", denom);
-
-//	if ((floor(numer) != numer) || (floor(denom) != denom))
-//		Sys_Error ("FloorDivMod: non-integer numer or denom %f %f\n",
-//				numer, denom);
-#endif
 
 	if (numer >= 0.0)
 	{

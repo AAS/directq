@@ -21,7 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-dprograms_t		*progs;
+dprograms_t		qcprogs;
 dfunction_t		*pr_functions;
 char			*pr_strings;
 ddef_t			*pr_fielddefs;
@@ -38,17 +38,17 @@ int		type_size[8] = {1,sizeof(string_t)/4,1,3,1,1,sizeof(func_t)/4,sizeof(void *
 ddef_t *ED_FieldAtOfs (int ofs);
 bool	ED_ParseEpair (void *base, ddef_t *key, char *s);
 
-cvar_t	nomonsters = {"nomonsters", "0"};
-cvar_t	gamecfg = {"gamecfg", "0"};
-cvar_t	scratch1 = {"scratch1", "0"};
-cvar_t	scratch2 = {"scratch2", "0"};
-cvar_t	scratch3 = {"scratch3", "0"};
-cvar_t	scratch4 = {"scratch4", "0"};
-cvar_t	savedgamecfg = {"savedgamecfg", "0", true};
-cvar_t	saved1 = {"saved1", "0", true};
-cvar_t	saved2 = {"saved2", "0", true};
-cvar_t	saved3 = {"saved3", "0", true};
-cvar_t	saved4 = {"saved4", "0", true};
+cvar_t	nomonsters ("nomonsters", "0");
+cvar_t	gamecfg ("gamecfg", "0");
+cvar_t	scratch1 ("scratch1", "0");
+cvar_t	scratch2 ("scratch2", "0");
+cvar_t	scratch3 ("scratch3", "0");
+cvar_t	scratch4 ("scratch4", "0");
+cvar_t	savedgamecfg ("savedgamecfg", "0", CVAR_ARCHIVE);
+cvar_t	saved1 ("saved1", "0", CVAR_ARCHIVE);
+cvar_t	saved2 ("saved2", "0", CVAR_ARCHIVE);
+cvar_t	saved3 ("saved3", "0", CVAR_ARCHIVE);
+cvar_t	saved4 ("saved4", "0", CVAR_ARCHIVE);
 
 #define	MAX_FIELD_LEN	64
 #define GEFV_CACHESIZE	2
@@ -69,7 +69,7 @@ Sets everything to NULL
 */
 void ED_ClearEdict (edict_t *e)
 {
-	memset (&e->v, 0, progs->entityfields * 4);
+	memset (&e->v, 0, qcprogs.entityfields * 4);
 	e->free = false;
 }
 
@@ -89,23 +89,78 @@ edict_t *ED_Alloc (void)
 	int			i;
 	edict_t		*e;
 
-	for ( i=svs.maxclients+1 ; i<sv.num_edicts ; i++)
+	// start on the edict after the clients
+	for (i = svs.maxclients + 1; i < sv.num_edicts; i++)
 	{
-		e = EDICT_NUM(i);
+		e = EDICT_NUM (i);
+
 		// the first couple seconds of server time can involve a lot of
 		// freeing and allocating, so relax the replacement policy
-		if (e->free && ( e->freetime < 2 || sv.time - e->freetime > 0.5 ) )
+		if (e->free && (e->freetime < 2 || sv.time - e->freetime > 0.5))
 		{
 			ED_ClearEdict (e);
 			return e;
 		}
 	}
-	
+
 	if (i == MAX_EDICTS)
-		Sys_Error ("ED_Alloc: no free edicts");
-		
+	{
+		// if we hit the absolute upper limit just pick the one with the lowest free time
+		float bestfree = sv.time;
+		int bestedict = -1;
+
+		for (i = svs.maxclients + 1; i < sv.num_edicts; i++)
+		{
+			e = EDICT_NUM (i);
+
+			if (e->free && e->freetime < bestfree)
+			{
+				bestedict = i;
+				bestfree = e->freetime;
+			}
+		}
+
+		if (bestedict > -1)
+		{
+			e = EDICT_NUM (bestedict);
+			ED_ClearEdict (e);
+
+			return e;
+		}
+
+		// no free edicts at all!!!
+		Sys_Error ("ED_Alloc: edict count at protocol maximum!");
+	}
+
+#define EDICT_BATCH_SIZE 128
+	if (i == sv.max_edicts)
+	{
+		Con_DPrintf ("Allocating %i new edicts\n", EDICT_BATCH_SIZE);
+
+		// allocate a new batch of edicts in temporary memory
+		edict_t *new_edicts = (edict_t *) Heap_TagAlloc (TAG_TEMPORARY1, (sv.max_edicts + EDICT_BATCH_SIZE) * pr_edict_size);
+
+		// copy the old in
+		memcpy (new_edicts, sv.edicts, sv.max_edicts * pr_edict_size);
+
+		// release the old
+		Heap_TagFree (TAG_SV_EDICTS);
+
+		// increase the max edict number
+		sv.max_edicts += EDICT_BATCH_SIZE;
+
+		// now reallocate the old
+		sv.edicts = (edict_t *) Heap_TagAlloc (TAG_SV_EDICTS, sv.max_edicts * pr_edict_size);
+
+		// copy the new back to the old
+		memcpy (sv.edicts, new_edicts, sv.max_edicts * pr_edict_size);
+
+		// now release the temp
+		Heap_TagFree (TAG_TEMPORARY1);
+	}
+
 	sv.num_edicts++;
-	e = EDICT_NUM(i);
+	e = EDICT_NUM (i);
 	ED_ClearEdict (e);
 
 	return e;
@@ -150,7 +205,7 @@ ddef_t *ED_GlobalAtOfs (int ofs)
 	ddef_t		*def;
 	int			i;
 	
-	for (i=0 ; i<progs->numglobaldefs ; i++)
+	for (i = 0; i < qcprogs.numglobaldefs; i++)
 	{
 		def = &pr_globaldefs[i];
 		if (def->ofs == ofs)
@@ -168,8 +223,8 @@ ddef_t *ED_FieldAtOfs (int ofs)
 {
 	ddef_t		*def;
 	int			i;
-	
-	for (i=0 ; i<progs->numfielddefs ; i++)
+
+	for (i = 0; i < qcprogs.numfielddefs; i++)
 	{
 		def = &pr_fielddefs[i];
 		if (def->ofs == ofs)
@@ -188,10 +243,10 @@ ddef_t *ED_FindField (char *name)
 	ddef_t		*def;
 	int			i;
 	
-	for (i=0 ; i<progs->numfielddefs ; i++)
+	for (i = 0; i < qcprogs.numfielddefs; i++)
 	{
 		def = &pr_fielddefs[i];
-		if (!strcmp(pr_strings + def->s_name,name) )
+		if (!strcmp(pr_strings + def->s_name,name))
 			return def;
 	}
 	return NULL;
@@ -208,10 +263,10 @@ ddef_t *ED_FindGlobal (char *name)
 	ddef_t		*def;
 	int			i;
 	
-	for (i=0 ; i<progs->numglobaldefs ; i++)
+	for (i = 0; i < qcprogs.numglobaldefs; i++)
 	{
 		def = &pr_globaldefs[i];
-		if (!strcmp(pr_strings + def->s_name,name) )
+		if (!strcmp(pr_strings + def->s_name,name))
 			return def;
 	}
 	return NULL;
@@ -227,11 +282,11 @@ dfunction_t *ED_FindFunction (char *name)
 {
 	dfunction_t		*func;
 	int				i;
-	
-	for (i=0 ; i<progs->numfunctions ; i++)
+
+	for (i = 0; i < qcprogs.numfunctions; i++)
 	{
 		func = &pr_functions[i];
-		if (!strcmp(pr_strings + func->s_name,name) )
+		if (!strcmp(pr_strings + func->s_name,name))
 			return func;
 	}
 	return NULL;
@@ -452,7 +507,8 @@ void ED_Print (edict_t *ed)
 	}
 
 	Con_Printf("\nEDICT %i:\n", NUM_FOR_EDICT(ed));
-	for (i=1 ; i<progs->numfielddefs ; i++)
+
+	for (i = 1; i < qcprogs.numfielddefs; i++)
 	{
 		d = &pr_fielddefs[i];
 		name = pr_strings + d->s_name;
@@ -502,7 +558,7 @@ void ED_Write (FILE *f, edict_t *ed)
 		return;
 	}
 	
-	for (i=1 ; i<progs->numfielddefs ; i++)
+	for (i = 1; i < qcprogs.numfielddefs; i++)
 	{
 		d = &pr_fielddefs[i];
 		name = pr_strings + d->s_name;
@@ -625,7 +681,8 @@ void ED_WriteGlobals (FILE *f)
 	int			type;
 
 	fprintf (f,"{\n");
-	for (i=0 ; i<progs->numglobaldefs ; i++)
+
+	for (i = 0; i < qcprogs.numglobaldefs; i++)
 	{
 		def = &pr_globaldefs[i];
 		type = def->type;
@@ -698,9 +755,9 @@ char *ED_NewString (char *string)
 {
 	char	*newstring, *new_p;
 	int		i,l;
-	
+
 	l = strlen(string) + 1;
-	newstring = (char *) Hunk_Alloc (l);
+	newstring = (char *) Heap_TagAlloc (TAG_PROGS, l);
 	new_p = newstring;
 
 	for (i=0 ; i< l ; i++)
@@ -729,7 +786,7 @@ Can parse either fields or globals
 returns false if error
 =============
 */
-bool	ED_ParseEpair (void *base, ddef_t *key, char *s)
+bool ED_ParseEpair (void *base, ddef_t *key, char *s)
 {
 	int		i;
 	char	string[128];
@@ -739,13 +796,13 @@ bool	ED_ParseEpair (void *base, ddef_t *key, char *s)
 	dfunction_t	*func;
 	
 	d = (void *)((int *)base + key->ofs);
-	
+
 	switch (key->type & ~DEF_SAVEGLOBAL)
 	{
 	case ev_string:
 		*(string_t *)d = ED_NewString (s) - pr_strings;
 		break;
-		
+
 	case ev_float:
 		*(float *)d = atof (s);
 		break;
@@ -813,11 +870,11 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 
 	init = false;
 
-// clear it
+	// clear it
 	if (ent != sv.edicts)	// hack
-		memset (&ent->v, 0, progs->entityfields * 4);
+		memset (&ent->v, 0, qcprogs.entityfields * 4);
 
-// go through all the dictionary pairs
+	// go through all the dictionary pairs
 	while (1)
 	{	
 	// parse key
@@ -827,19 +884,19 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 		if (!data)
 			Sys_Error ("ED_ParseEntity: EOF without closing brace");
 		
-// anglehack is to allow QuakeEd to write single scalar angles
-// and allow them to be turned into vectors. (FIXME...)
-if (!strcmp(com_token, "angle"))
-{
-	strcpy (com_token, "angles");
-	anglehack = true;
-}
-else
-	anglehack = false;
+		// anglehack is to allow QuakeEd to write single scalar angles
+		// and allow them to be turned into vectors. (FIXME...)
+		if (!strcmp(com_token, "angle"))
+		{
+			strcpy (com_token, "angles");
+			anglehack = true;
+		}
+		else
+			anglehack = false;
 
-// FIXME: change light to _light to get rid of this hack
-if (!strcmp(com_token, "light"))
-	strcpy (com_token, "light_lev");	// hack for single light def
+		// FIXME: change light to _light to get rid of this hack
+		if (!strcmp(com_token, "light"))
+			strcpy (com_token, "light_lev");	// hack for single light def
 
 		strcpy (keyname, com_token);
 
@@ -851,7 +908,7 @@ if (!strcmp(com_token, "light"))
 			n--;
 		}
 
-	// parse value	
+		// parse value	
 		data = COM_Parse (data);
 		if (!data)
 			Sys_Error ("ED_ParseEntity: EOF without closing brace");
@@ -861,24 +918,26 @@ if (!strcmp(com_token, "light"))
 
 		init = true;	
 
-// keynames with a leading underscore are used for utility comments,
-// and are immediately discarded by quake
+		// keynames with a leading underscore are used for utility comments,
+		// and are immediately discarded by quake
 		if (keyname[0] == '_')
 			continue;
 		
 		key = ED_FindField (keyname);
+
 		if (!key)
 		{
-			Con_Printf ("'%s' is not a field\n", keyname);
+			// the user doesn't need to see this
+			Con_DPrintf ("'%s' is not a field\n", keyname);
 			continue;
 		}
 
-if (anglehack)
-{
-char	temp[32];
-strcpy (temp, com_token);
-sprintf (com_token, "0 %s 0", temp);
-}
+		if (anglehack)
+		{
+			char	temp[32];
+			strcpy (temp, com_token);
+			sprintf (com_token, "0 %s 0", temp);
+		}
 
 		if (!ED_ParseEpair ((void *)&ent->v, key, com_token))
 			Host_Error ("ED_ParseEdict: parse error");
@@ -911,15 +970,18 @@ void ED_LoadFromFile (char *data)
 	edict_t		*ent;
 	int			inhibit;
 	dfunction_t	*func;
-	
+
 	ent = NULL;
 	inhibit = 0;
 	pr_global_struct->time = sv.time;
-	
-// parse ents
+
+	int ed_warning = 0;
+	int ed_number = 0;
+
+	// parse ents
 	while (1)
 	{
-// parse the opening brace	
+		// parse the opening brace	
 		data = COM_Parse (data);
 		if (!data)
 			break;
@@ -930,9 +992,10 @@ void ED_LoadFromFile (char *data)
 			ent = EDICT_NUM(0);
 		else
 			ent = ED_Alloc ();
+
 		data = ED_ParseEdict (data, ent);
 
-// remove things from different skill levels or deathmatch
+		// remove things from different skill levels or deathmatch
 		if (deathmatch.value)
 		{
 			if (((int)ent->v.spawnflags & SPAWNFLAG_NOT_DEATHMATCH))
@@ -951,33 +1014,70 @@ void ED_LoadFromFile (char *data)
 			continue;
 		}
 
-//
-// immediately call spawn function
-//
+		// immediately call spawn function
 		if (!ent->v.classname)
 		{
-			Con_Printf ("No classname for:\n");
-			ED_Print (ent);
+			// made the console spamming developer only...
+			Con_DPrintf ("No classname for:\n");
+			ed_warning++;
+			if (developer.value) ED_Print (ent);
 			ED_Free (ent);
 			continue;
 		}
 
-	// look for the spawn function
-		func = ED_FindFunction ( pr_strings + ent->v.classname );
+		// look for the spawn function
+		func = ED_FindFunction (pr_strings + ent->v.classname);
 
 		if (!func)
 		{
-			Con_Printf ("No spawn function for:\n");
-			ED_Print (ent);
+			// made the console spamming developer only...
+			Con_Printf ("No spawn function for: %s\n", (pr_strings + ent->v.classname));
+			ed_warning++;
+			if (developer.value) ED_Print (ent);
 			ED_Free (ent);
 			continue;
 		}
 
-		pr_global_struct->self = EDICT_TO_PROG(ent);
+		pr_global_struct->self = EDICT_TO_PROG (ent);
 		PR_ExecuteProgram (func - pr_functions);
-	}	
+		ed_number++;
+	}
 
-	Con_DPrintf ("%i entities inhibited\n", inhibit);
+	if (ed_warning)
+	{
+		// simplified warning for non-developers
+		Con_Printf ("Could not find classname and/or spawn functions for %i entities\n");
+		Con_Printf ("Progs.dat may be invalid for current game\n");
+		Con_Printf ("Use developer 1 and reload map for full list\n");
+	}
+
+	Con_DPrintf ("%i entities with %i inhibited\n", ed_number, inhibit);
+}
+
+
+void *PR_LoadProgsLump (byte *lumpbegin, int lumplen, int lumpitemsize)
+{
+	byte *lumpdata = (byte *) Heap_TagAlloc (TAG_PROGS, lumplen * lumpitemsize);
+	memcpy (lumpdata, lumpbegin, lumplen * lumpitemsize);
+	return lumpdata;
+}
+
+
+void PR_ClearProgs (void)
+{
+	// debugging aid; clears the progs.dat structs as appropriate so that we can
+	// more easily track attempts to use their memory in invalid situations.
+#ifdef _DEBUG
+	memset (&qcprogs, 0, sizeof (dprograms_t));
+
+	pr_functions = NULL;
+	pr_strings = NULL;
+	pr_globaldefs = NULL;
+	pr_fielddefs = NULL;
+	pr_statements = NULL;
+	pr_globals = NULL;
+	pr_global_struct = NULL;
+#endif
 }
 
 
@@ -988,44 +1088,68 @@ PR_LoadProgs
 */
 void PR_LoadProgs (void)
 {
-	int		i;
+	int i;
+	dprograms_t *progs;
 
-// flush the non-C variable lookup cache
-	for (i=0 ; i<GEFV_CACHESIZE ; i++)
-		gefvCache[i].field[0] = 0;
+	// flush the non-C variable lookup cache
+	for (i = 0; i < GEFV_CACHESIZE; i++) gefvCache[i].field[0] = 0;
 
 	CRC_Init (&pr_crc);
 
-	progs = (dprograms_t *)COM_LoadHunkFile ("progs.dat");
-	if (!progs)
-		Sys_Error ("PR_LoadProgs: couldn't load progs.dat");
-	Con_DPrintf ("Programs occupy %iK.\n", com_filesize/1024);
+	FILE *progsfile;
+	int progslen = COM_FOpenFile ("progs.dat", &progsfile);
 
-	for (i=0 ; i<com_filesize ; i++)
-		CRC_ProcessByte (&pr_crc, ((byte *)progs)[i]);
+	if (!progsfile)
+		Host_Error ("PR_LoadProgs: couldn't load progs.dat");
+	Con_DPrintf ("Programs occupy %iK.\n", progslen / 1024);
 
-// byte swap the header
-	for (i=0 ; i<sizeof(*progs)/4 ; i++)
-		((int *)progs)[i] = LittleLong ( ((int *)progs)[i] );		
+	// because progs seems prone to heap corruption errors (fixme - why?) we load the header
+	// into a non-pointer struct and the lumps into their own individual buffers to make it more robust
+	// this fixes the crash bug with game changing followed by map load
+	byte *progsbuf = new byte[progslen];
+	progs = (dprograms_t *) progsbuf;
 
-	if (progs->version != PROG_VERSION)
-		Sys_Error ("progs.dat has wrong version number (%i should be %i)", progs->version, PROG_VERSION);
-	if (progs->crc != PROGHEADER_CRC)
-		Sys_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
+	// read it all in
+	fread (progs, progslen, 1, progsfile);
 
-	pr_functions = (dfunction_t *)((byte *)progs + progs->ofs_functions);
-	pr_strings = (char *)progs + progs->ofs_strings;
-	pr_globaldefs = (ddef_t *)((byte *)progs + progs->ofs_globaldefs);
-	pr_fielddefs = (ddef_t *)((byte *)progs + progs->ofs_fielddefs);
-	pr_statements = (dstatement_t *)((byte *)progs + progs->ofs_statements);
+	// done with the file
+	fclose (progsfile);
 
-	pr_global_struct = (globalvars_t *)((byte *)progs + progs->ofs_globals);
-	pr_globals = (float *)pr_global_struct;
-	
-	pr_edict_size = progs->entityfields * 4 + sizeof (edict_t) - sizeof(entvars_t);
-	
-// byte swap the lumps
-	for (i=0 ; i<progs->numstatements ; i++)
+	// CRC the progs
+	for (i = 0; i < progslen; i++)
+		CRC_ProcessByte (&pr_crc, ((byte *) progs)[i]);
+
+	// byte swap the header
+	for (i = 0; i < sizeof (dprograms_t) / 4; i++)
+		((int *) progs)[i] = LittleLong (((int *) progs)[i]);
+
+	if (progs->version != PROG_VERSION) Host_Error ("progs.dat has wrong version number (%i should be %i)", progs->version, PROG_VERSION);
+	if (progs->crc != PROGHEADER_CRC) Host_Error ("progs.dat system vars have been modified, progdefs.h is out of date");
+
+	// copy out to the global progs header structure and set up a byte * pointer so that we can
+	// more cleanly reference the loaded progs
+	memcpy (&qcprogs, progs, sizeof (dprograms_t));
+	byte *progsdata = (byte *) progs;
+
+	// load all the progs lumps into thir own separate memory locations rather than keeping them in the single
+	// contiguous lump
+	pr_functions = (dfunction_t *) PR_LoadProgsLump (progsdata + qcprogs.ofs_functions, qcprogs.numfunctions, sizeof (dfunction_t));
+	pr_strings = (char *) PR_LoadProgsLump (progsdata + qcprogs.ofs_strings, qcprogs.numstrings, 1);
+	pr_globaldefs = (ddef_t *) PR_LoadProgsLump (progsdata + qcprogs.ofs_globaldefs, qcprogs.numglobaldefs, sizeof (ddef_t));
+	pr_fielddefs = (ddef_t *) PR_LoadProgsLump (progsdata + qcprogs.ofs_fielddefs, qcprogs.numfielddefs, sizeof (ddef_t));
+	pr_statements = (dstatement_t *) PR_LoadProgsLump (progsdata + qcprogs.ofs_statements, qcprogs.numstatements, sizeof (dstatement_t));
+	pr_globals = (float *) PR_LoadProgsLump (progsdata + qcprogs.ofs_globals, qcprogs.numglobals, sizeof (float));
+
+	// done with the loaded progs now
+	delete[] progsbuf;
+
+	// this just points at pr_globals (per comment above on it's declaration)
+	pr_global_struct = (globalvars_t *) pr_globals;
+
+	pr_edict_size = qcprogs.entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
+
+	// byte swap the lumps
+	for (i=0 ; i<qcprogs.numstatements ; i++)
 	{
 		pr_statements[i].op = LittleShort(pr_statements[i].op);
 		pr_statements[i].a = LittleShort(pr_statements[i].a);
@@ -1033,24 +1157,24 @@ void PR_LoadProgs (void)
 		pr_statements[i].c = LittleShort(pr_statements[i].c);
 	}
 
-	for (i=0 ; i<progs->numfunctions; i++)
+	for (i=0 ; i<qcprogs.numfunctions; i++)
 	{
-	pr_functions[i].first_statement = LittleLong (pr_functions[i].first_statement);
-	pr_functions[i].parm_start = LittleLong (pr_functions[i].parm_start);
-	pr_functions[i].s_name = LittleLong (pr_functions[i].s_name);
-	pr_functions[i].s_file = LittleLong (pr_functions[i].s_file);
-	pr_functions[i].numparms = LittleLong (pr_functions[i].numparms);
-	pr_functions[i].locals = LittleLong (pr_functions[i].locals);
+		pr_functions[i].first_statement = LittleLong (pr_functions[i].first_statement);
+		pr_functions[i].parm_start = LittleLong (pr_functions[i].parm_start);
+		pr_functions[i].s_name = LittleLong (pr_functions[i].s_name);
+		pr_functions[i].s_file = LittleLong (pr_functions[i].s_file);
+		pr_functions[i].numparms = LittleLong (pr_functions[i].numparms);
+		pr_functions[i].locals = LittleLong (pr_functions[i].locals);
 	}	
 
-	for (i=0 ; i<progs->numglobaldefs ; i++)
+	for (i=0 ; i<qcprogs.numglobaldefs ; i++)
 	{
 		pr_globaldefs[i].type = LittleShort (pr_globaldefs[i].type);
 		pr_globaldefs[i].ofs = LittleShort (pr_globaldefs[i].ofs);
 		pr_globaldefs[i].s_name = LittleLong (pr_globaldefs[i].s_name);
 	}
 
-	for (i=0 ; i<progs->numfielddefs ; i++)
+	for (i=0 ; i<qcprogs.numfielddefs ; i++)
 	{
 		pr_fielddefs[i].type = LittleShort (pr_fielddefs[i].type);
 		if (pr_fielddefs[i].type & DEF_SAVEGLOBAL)
@@ -1059,8 +1183,7 @@ void PR_LoadProgs (void)
 		pr_fielddefs[i].s_name = LittleLong (pr_fielddefs[i].s_name);
 	}
 
-	for (i=0 ; i<progs->numglobals ; i++)
-		((int *)pr_globals)[i] = LittleLong (((int *)pr_globals)[i]);
+	for (i = 0; i < qcprogs.numglobals; i++) ((int *) pr_globals)[i] = LittleLong (((int *) pr_globals)[i]);
 }
 
 
@@ -1069,25 +1192,15 @@ void PR_LoadProgs (void)
 PR_Init
 ===============
 */
+cmd_t ED_PrintEdict_f_Cmd ("edict", ED_PrintEdict_f);
+cmd_t ED_PrintEdicts_Cmd ("edicts", ED_PrintEdicts);
+cmd_t ED_Count_Cmd ("edictcount", ED_Count);
+cmd_t PR_Profile_f_Cmd ("profile", PR_Profile_f);
+
 void PR_Init (void)
 {
-	Cmd_AddCommand ("edict", ED_PrintEdict_f);
-	Cmd_AddCommand ("edicts", ED_PrintEdicts);
-	Cmd_AddCommand ("edictcount", ED_Count);
-	Cmd_AddCommand ("profile", PR_Profile_f);
-	Cvar_RegisterVariable (&nomonsters);
-	Cvar_RegisterVariable (&gamecfg);
-	Cvar_RegisterVariable (&scratch1);
-	Cvar_RegisterVariable (&scratch2);
-	Cvar_RegisterVariable (&scratch3);
-	Cvar_RegisterVariable (&scratch4);
-	Cvar_RegisterVariable (&savedgamecfg);
-	Cvar_RegisterVariable (&saved1);
-	Cvar_RegisterVariable (&saved2);
-	Cvar_RegisterVariable (&saved3);
-	Cvar_RegisterVariable (&saved4);
+	// used to register a buncha cvars and add some commands; not needed any more
 }
-
 
 
 edict_t *EDICT_NUM(int n)

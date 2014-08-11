@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <windows.h>
 #include "quakedef.h"
 
-extern	HWND	mainwindow;
+extern	HWND	d3d_Window;
 extern	cvar_t	bgmvolume;
 
 static bool cdValid = false;
@@ -37,6 +37,7 @@ static byte 	remap[100];
 static byte		cdrom;
 static byte		playTrack;
 static byte		maxTrack;
+static bool		using_directshow = false;
 
 UINT	wDeviceID;
 
@@ -63,7 +64,6 @@ static int CDAudio_GetAudioDiskInfo(void)
 {
 	DWORD				dwReturn;
 	MCI_STATUS_PARMS	mciStatusParms;
-
 
 	cdValid = false;
 
@@ -106,14 +106,27 @@ void CDAudio_Play(byte track, bool looping)
     MCI_PLAY_PARMS		mciPlayParms;
 	MCI_STATUS_PARMS	mciStatusParms;
 
+	using_directshow = false;
+
 	if (!enabled)
+	{
+		// try directshow
+		using_directshow = DS_Play (track, looping);
 		return;
-	
+	}
+
 	if (!cdValid)
 	{
+		// try one more time
 		CDAudio_GetAudioDiskInfo();
+
+		// didn't work
 		if (!cdValid)
+		{
+			// play with directshow instead
+			using_directshow = DS_Play (track, looping);
 			return;
+		}
 	}
 
 	track = remap[track];
@@ -158,7 +171,7 @@ void CDAudio_Play(byte track, bool looping)
 
     mciPlayParms.dwFrom = MCI_MAKE_TMSF(track, 0, 0, 0);
 	mciPlayParms.dwTo = (mciStatusParms.dwReturn << 8) | track;
-    mciPlayParms.dwCallback = (DWORD)mainwindow;
+    mciPlayParms.dwCallback = (DWORD)d3d_Window;
     dwReturn = mciSendCommand(wDeviceID, MCI_PLAY, MCI_NOTIFY | MCI_FROM | MCI_TO, (DWORD)(LPVOID) &mciPlayParms);
 	if (dwReturn)
 	{
@@ -175,9 +188,15 @@ void CDAudio_Play(byte track, bool looping)
 }
 
 
-void CDAudio_Stop(void)
+void CDAudio_Stop (void)
 {
 	DWORD	dwReturn;
+
+	if (using_directshow)
+	{
+		DS_Stop ();
+		return;
+	}
 
 	if (!enabled)
 		return;
@@ -195,6 +214,12 @@ void CDAudio_Stop(void)
 
 void CDAudio_Pause(void)
 {
+	if (using_directshow)
+	{
+		DS_Pause ();
+		return;
+	}
+
 	DWORD				dwReturn;
 	MCI_GENERIC_PARMS	mciGenericParms;
 
@@ -204,7 +229,7 @@ void CDAudio_Pause(void)
 	if (!playing)
 		return;
 
-	mciGenericParms.dwCallback = (DWORD)mainwindow;
+	mciGenericParms.dwCallback = (DWORD)d3d_Window;
     if (dwReturn = mciSendCommand(wDeviceID, MCI_PAUSE, 0, (DWORD)(LPVOID) &mciGenericParms))
 		Con_DPrintf("MCI_PAUSE failed (%i)", dwReturn);
 
@@ -215,6 +240,12 @@ void CDAudio_Pause(void)
 
 void CDAudio_Resume(void)
 {
+	if (using_directshow)
+	{
+		DS_Resume ();
+		return;
+	}
+
 	DWORD			dwReturn;
     MCI_PLAY_PARMS	mciPlayParms;
 
@@ -226,10 +257,10 @@ void CDAudio_Resume(void)
 
 	if (!wasPlaying)
 		return;
-	
+
     mciPlayParms.dwFrom = MCI_MAKE_TMSF(playTrack, 0, 0, 0);
     mciPlayParms.dwTo = MCI_MAKE_TMSF(playTrack + 1, 0, 0, 0);
-    mciPlayParms.dwCallback = (DWORD)mainwindow;
+    mciPlayParms.dwCallback = (DWORD)d3d_Window;
     dwReturn = mciSendCommand(wDeviceID, MCI_PLAY, MCI_TO | MCI_NOTIFY, (DWORD)(LPVOID) &mciPlayParms);
 	if (dwReturn)
 	{
@@ -364,6 +395,9 @@ LONG CDAudio_MessageHandler(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	if (lParam != wDeviceID)
 		return 1;
 
+	// don't handle CD messages if using directshow
+	if (using_directshow) return 0;
+
 	switch (wParam)
 	{
 		case MCI_NOTIFY_SUCCESSFUL:
@@ -401,15 +435,20 @@ void CDAudio_Update(void)
 
 	if (bgmvolume.value != cdvolume)
 	{
+		if (using_directshow)
+		{
+			DS_ChangeVolume ();
+			cdvolume = bgmvolume.value;
+			return;
+		}
+
 		if (cdvolume)
 		{
-			Cvar_SetValue ("bgmvolume", 0.0);
 			cdvolume = bgmvolume.value;
 			CDAudio_Pause ();
 		}
 		else
 		{
-			Cvar_SetValue ("bgmvolume", 1.0);
 			cdvolume = bgmvolume.value;
 			CDAudio_Resume ();
 		}
@@ -424,11 +463,7 @@ int CDAudio_Init(void)
     MCI_SET_PARMS	mciSetParms;
 	int				n;
 
-	if (cls.state == ca_dedicated)
-		return -1;
-
-	if (COM_CheckParm("-nocdaudio"))
-		return -1;
+	if (COM_CheckParm ("-nocdaudio")) return -1;
 
 	mciOpenParms.lpstrDeviceType = "cdaudio";
 	if (dwReturn = mciSendCommand(0, MCI_OPEN, MCI_OPEN_TYPE | MCI_OPEN_SHAREABLE, (DWORD) (LPVOID) &mciOpenParms))
@@ -436,6 +471,7 @@ int CDAudio_Init(void)
 		Con_Printf("CDAudio_Init: MCI_OPEN failed (%i)\n", dwReturn);
 		return -1;
 	}
+
 	wDeviceID = mciOpenParms.wDeviceID;
 
     // Set the time format to track/minute/second/frame (TMSF).
@@ -458,16 +494,16 @@ int CDAudio_Init(void)
 		cdValid = false;
 	}
 
-	Cmd_AddCommand ("cd", CD_f);
-
 	Con_Printf("CD Audio Initialized\n");
 
 	return 0;
 }
 
+cmd_t CD_f_Cmd ("cd", CD_f);
 
 void CDAudio_Shutdown(void)
 {
+	// directshow has it's own shutdown
 	if (!initialized)
 		return;
 	CDAudio_Stop();

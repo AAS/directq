@@ -49,7 +49,9 @@ typedef struct
 	char		startspot[64];
 #endif
 	char		modelname[64];		// maps/<name>.bsp, for model_precache[0]
+
 	struct model_s 	*worldmodel;
+
 	char		*model_precache[MAX_MODELS];	// NULL terminated
 	struct model_s	*models[MAX_MODELS];
 	char		*sound_precache[MAX_SOUNDS];	// NULL terminated
@@ -68,7 +70,10 @@ typedef struct
 	byte		reliable_datagram_buf[MAX_DATAGRAM];
 
 	sizebuf_t	signon;
-	byte		signon_buf[8192];
+	byte		signon_buf[MAX_MSGLEN - 2]; //8192
+
+	int		signondiff;		// Track extra bytes due to >256 model support, kludge
+	int		Protocol;
 } server_t;
 
 
@@ -125,8 +130,8 @@ typedef struct client_s
 #define	MOVETYPE_BOUNCE			10
 #ifdef QUAKE2
 #define MOVETYPE_BOUNCEMISSILE	11		// bounce w/o gravity
-#define MOVETYPE_FOLLOW			12		// track movement of aiment
 #endif
+#define MOVETYPE_FOLLOW			12		// track movement of aiment
 
 // edict->solid values
 #define	SOLID_NOT				0		// no interaction with other objects
@@ -218,8 +223,9 @@ extern	edict_t		*sv_player;
 void SV_Init (void);
 
 void SV_StartParticle (vec3_t org, vec3_t dir, int color, int count);
-void SV_StartSound (edict_t *entity, int channel, char *sample, int volume,
-    float attenuation);
+void SV_StartSound (edict_t *entity, int channel, char *sample, int volume, float attenuation);
+void SV_WriteByteShort2 (sizebuf_t *sb, int c, bool Compatibility);
+void SV_WriteByteShort (sizebuf_t *sb, int c);
 
 void SV_DropClient (bool crash);
 

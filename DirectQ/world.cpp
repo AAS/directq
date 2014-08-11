@@ -133,26 +133,27 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 	vec3_t		hullmins, hullmaxs;
 	hull_t		*hull;
 
-// decide which clipping hull to use, based on the size
+	// decide which clipping hull to use, based on the size
 	if (ent->v.solid == SOLID_BSP)
-	{	// explicit hulls in the BSP model
+	{
+		// explicit hulls in the BSP model
 		if (ent->v.movetype != MOVETYPE_PUSH)
 			Sys_Error ("SOLID_BSP without MOVETYPE_PUSH");
 
 		model = sv.models[ (int)ent->v.modelindex ];
 
 		if (!model || model->type != mod_brush)
-			Sys_Error ("MOVETYPE_PUSH with a non bsp model");
+			Sys_Error ("SOLID_BSP with a non bsp model");
 
 		VectorSubtract (maxs, mins, size);
 		if (size[0] < 3)
-			hull = &model->hulls[0];
+			hull = &model->bh->hulls[0];
 		else if (size[0] <= 32)
-			hull = &model->hulls[1];
+			hull = &model->bh->hulls[1];
 		else
-			hull = &model->hulls[2];
+			hull = &model->bh->hulls[2];
 
-// calculate an offset value to center the origin
+		// calculate an offset value to center the origin
 		VectorSubtract (hull->clip_mins, mins, offset);
 		VectorAdd (offset, ent->v.origin, offset);
 	}
@@ -272,30 +273,28 @@ void SV_UnlinkEdict (edict_t *ent)
 /*
 ====================
 SV_TouchLinks
+
 ====================
 */
-void SV_TouchLinks ( edict_t *ent, areanode_t *node )
+void SV_TouchLinks (edict_t *ent, areanode_t *node)
 {
 	link_t		*l, *next;
 	edict_t		*touch;
 	int			old_self, old_other;
 
-// touch linked edicts
-	for (l = node->trigger_edicts.next ; l != &node->trigger_edicts ; l = next)
+	// touch linked edicts
+	for (l = node->trigger_edicts.next; l != &node->trigger_edicts; l = next)
 	{
 		next = l->next;
 		touch = EDICT_FROM_AREA(l);
-		if (touch == ent)
+
+		if (touch == ent) continue;
+		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER) continue;
+
+		if (ent->v.absmin[0] > touch->v.absmax[0] || ent->v.absmin[1] > touch->v.absmax[1] || ent->v.absmin[2] > touch->v.absmax[2] ||
+			ent->v.absmax[0] < touch->v.absmin[0] || ent->v.absmax[1] < touch->v.absmin[1] || ent->v.absmax[2] < touch->v.absmin[2])
 			continue;
-		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER)
-			continue;
-		if (ent->v.absmin[0] > touch->v.absmax[0]
-		|| ent->v.absmin[1] > touch->v.absmax[1]
-		|| ent->v.absmin[2] > touch->v.absmax[2]
-		|| ent->v.absmax[0] < touch->v.absmin[0]
-		|| ent->v.absmax[1] < touch->v.absmin[1]
-		|| ent->v.absmax[2] < touch->v.absmin[2] )
-			continue;
+
 		old_self = pr_global_struct->self;
 		old_other = pr_global_struct->other;
 
@@ -304,18 +303,22 @@ void SV_TouchLinks ( edict_t *ent, areanode_t *node )
 		pr_global_struct->time = sv.time;
 		PR_ExecuteProgram (touch->v.touch);
 
+		// the PR_ExecuteProgram above can alter the linked edicts
+		if (next != l->next && l->next)
+		{
+			Con_DPrintf ("Warning: fixed up link in SV_TouchLinks\n");
+			next = l->next;
+		}
+
 		pr_global_struct->self = old_self;
 		pr_global_struct->other = old_other;
 	}
 	
-// recurse down both sides
-	if (node->axis == -1)
-		return;
-	
-	if ( ent->v.absmax[node->axis] > node->dist )
-		SV_TouchLinks ( ent, node->children[0] );
-	if ( ent->v.absmin[node->axis] < node->dist )
-		SV_TouchLinks ( ent, node->children[1] );
+	// recurse down both sides
+	if (node->axis == -1) return;
+
+	if (ent->v.absmax[node->axis] > node->dist) SV_TouchLinks (ent, node->children[0]);
+	if (ent->v.absmin[node->axis] < node->dist) SV_TouchLinks (ent, node->children[1]);
 }
 
 
@@ -334,28 +337,27 @@ void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node)
 
 	if (node->contents == CONTENTS_SOLID)
 		return;
-	
-// add an efrag if the node is a leaf
 
-	if ( node->contents < 0)
+	// add an efrag if the node is a leaf
+	// this is used for sending ents to the client so it needs to stay
+	if (node->contents < 0)
 	{
 		if (ent->num_leafs == MAX_ENT_LEAFS)
 			return;
 
-		leaf = (mleaf_t *)node;
-		leafnum = leaf - sv.worldmodel->leafs - 1;
+		leaf = (mleaf_t *) node;
+		leafnum = leaf - sv.worldmodel->bh->leafs - 1;
 
 		ent->leafnums[ent->num_leafs] = leafnum;
 		ent->num_leafs++;			
 		return;
 	}
-	
-// NODE_MIXED
 
+	// NODE_MIXED
 	splitplane = node->plane;
 	sides = BOX_ON_PLANE_SIDE(ent->v.absmin, ent->v.absmax, splitplane);
-	
-// recurse down the contacted sides
+
+	// recurse down the contacted sides
 	if (sides & 1)
 		SV_FindTouchedLeafs (ent, node->children[0]);
 		
@@ -382,12 +384,10 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 	if (ent->free)
 		return;
 
-// set the abs box
-
-#ifdef QUAKE2
-	if (ent->v.solid == SOLID_BSP && 
-	(ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) )
-	{	// expand for rotation
+	// set the abs box
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) )
+	{
+		// expand for rotation
 		float		max, v;
 		int			i;
 
@@ -401,6 +401,7 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 			if (v > max)
 				max = v;
 		}
+
 		for (i=0 ; i<3 ; i++)
 		{
 			ent->v.absmin[i] = ent->v.origin[i] - max;
@@ -408,7 +409,6 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 		}
 	}
 	else
-#endif
 	{
 		VectorAdd (ent->v.origin, ent->v.mins, ent->v.absmin);	
 		VectorAdd (ent->v.origin, ent->v.maxs, ent->v.absmax);
@@ -439,7 +439,7 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 // link to PVS leafs
 	ent->num_leafs = 0;
 	if (ent->v.modelindex)
-		SV_FindTouchedLeafs (ent, sv.worldmodel->nodes);
+		SV_FindTouchedLeafs (ent, sv.worldmodel->bh->nodes);
 
 	if (ent->v.solid == SOLID_NOT)
 		return;
@@ -495,8 +495,10 @@ int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
 	while (num >= 0)
 	{
 		if (num < hull->firstclipnode || num > hull->lastclipnode)
+		{
 			Sys_Error ("SV_HullPointContents: bad node number");
-	
+		}
+
 		node = hull->clipnodes + num;
 		plane = hull->planes + node->planenum;
 		
@@ -524,7 +526,7 @@ int SV_PointContents (vec3_t p)
 {
 	int		cont;
 
-	cont = SV_HullPointContents (&sv.worldmodel->hulls[0], 0, p);
+	cont = SV_HullPointContents (&sv.worldmodel->bh->hulls[0], 0, p);
 	if (cont <= CONTENTS_CURRENT_0 && cont >= CONTENTS_CURRENT_DOWN)
 		cont = CONTENTS_WATER;
 	return cont;
@@ -532,7 +534,7 @@ int SV_PointContents (vec3_t p)
 
 int SV_TruePointContents (vec3_t p)
 {
-	return SV_HullPointContents (&sv.worldmodel->hulls[0], 0, p);
+	return SV_HullPointContents (&sv.worldmodel->bh->hulls[0], 0, p);
 }
 
 //===========================================================================
@@ -646,22 +648,12 @@ bool SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t 
 
 	side = (t1 < 0);
 
-// move up to the node
+	// move up to the node
 	if (!SV_RecursiveHullCheck (hull, node->children[side], p1f, midf, p1, mid, trace) )
 		return false;
 
-#ifdef PARANOID
-	if (SV_HullPointContents (sv_hullmodel, mid, node->children[side])
-	== CONTENTS_SOLID)
-	{
-		Con_Printf ("mid PointInHullSolid\n");
-		return false;
-	}
-#endif
-	
-	if (SV_HullPointContents (hull, node->children[side^1], mid)
-	!= CONTENTS_SOLID)
-// go past the node
+	// go past the node
+	if (SV_HullPointContents (hull, node->children[side^1], mid) != CONTENTS_SOLID)
 		return SV_RecursiveHullCheck (hull, node->children[side^1], midf, p2f, mid, p2, trace);
 	
 	if (trace->allsolid)

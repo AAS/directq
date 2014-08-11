@@ -1,0 +1,51 @@
+Release 1.5 updates.
+====================
+
+* Removed -cachedir command-line option.
+* Removed registered restriction on file loading.
+* Removed registered restriction on modified games.
+* Removed Sys_Error on invalid pop.lmp
+* Adjusted file opening so that directory paths will override pak file contents.
+* Removed name restrictions on pak files.
+* Removed restriction on number of files in a pak.
+* Added "game" command and game changing.
+* Increased SECONDARY_BUFFER_SIZE to 0x100000 (more efficient use).
+* Fixed bug in texture loader where free slots weren't being reused.
+* Added games menu.
+* Added r_rapidfire cvar to control "rapid fire muzzleflash" dynamic lights (default 0).
+* Fixed quoth mods not getting hipnotic hud layout.
+* Reworked particle system to allow for multiple textures and adjustable render params (still classic system though).
+* Increased progs stack depth and size.
+* Fixed occasional lockup in SV_TouchLinks (credit Tyrann for fix, Spirit for publicising the bug).
+* Added "gamedir" command (same behaviour as "game").
+* Added ability for "game" and "gamedir" to take multiple args.
+* Added (buggy) automap - use "toggleautomap" command.
+* Implemented several QIP bugfixes.
+* Removed limit on number of file handles.
+* Implemented basic DP extensions framework (don't get excited - no extensions implemented yet!)
+* Added sv_oldvelocity cvar (default 1) to revert velocity bounding to original (fixed method changes gameplay).
+* Made all cvars in sv_phys.cpp server cvars (broadcast if changed) - (seems the right thing to do).
+* Reworked translucency handling again, added independent water/lava/slime/tele sliders and "lock alpha sliders" cvar (r_lockalpha, default 1).
+* Removed gl_flashblend 1 mode (it was nice to have it for completeness sake, but when PS 2.0 is needed is this really necessary?)
+* Fixed static entities not frame interpolated.
+* Added cl_crossx and cl_crossy functionality.
+* Added scr_crosshairscale (consistency with fitzquake) and scr_crosshaircolor (0-13, palette lookup based, default 0).
+* Added crosshair options to HUD menu (ugly but functional).
+* Removed #ifdef PARANOID code.
+* Demoted several Sys_Error events to either Host_Error or Con_DPrintf with fixup.
+* Finished resolution changing (...I hope...)
+* Cleaned out some of the inherited global variables mess in vidnt.
+* Fixed bottom edge of underwater warp screen.
+* Added GPL header to all files.
+
+
+
+
+
+
+
+
+
+
+
+

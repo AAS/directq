@@ -18,7 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 #include "quakedef.h"
-
+#include <windows.h>
 /*
 
 key up events are sent even if in console mode
@@ -31,6 +31,7 @@ char	key_lines[32][MAXCMDLINE];
 int		key_linepos;
 int		shift_down=false;
 int		key_lastpress;
+int		key_insert = 0;
 
 int		edit_line=0;
 int		history_line=0;
@@ -152,6 +153,120 @@ keyname_t keynames[] =
 
 ==============================================================================
 */
+int Cmd_Match (char *partial, int matchcycle, bool conout);
+int match_count = 0;
+int match_cycle = 0;
+char match_buf[256] = {0};
+
+void Key_PrintMatch (char *cmd)
+{
+	Q_strcpy (key_lines[edit_line] + 1, cmd);
+	key_linepos = Q_strlen (cmd) + 1;
+	key_lines[edit_line][key_linepos] = ' ';
+	key_linepos++;
+	key_lines[edit_line][key_linepos] = 0;
+}
+
+
+void Key_PrintContentMatch (char *matchedcontent)
+{
+	// find the text position after the command
+	for (int i = 0; ; i++)
+	{
+		// this should never happen
+		if (!key_lines[edit_line][i]) return;
+
+		if (key_lines[edit_line][i] == ' ')
+		{
+			// switch the next to 0 so we can strcat it
+			key_lines[edit_line][i + 1] = 0;
+			break;
+		}
+	}
+
+	// add the completed content and switch the cursor pos
+	strcat (key_lines[edit_line], matchedcontent);
+	key_linepos = strlen (key_lines[edit_line]);
+}
+
+
+void Key_ContentMatch (char **contentlist, int *cycle)
+{
+	static char matched[256] = {0};
+
+	if (!cycle[0])
+	{
+		// grab the text after the command
+		// we need to store this for subsequent commands
+		for (int i = 0; ; i++)
+		{
+			// this should never happen
+			if (!key_lines[edit_line][i]) return;
+
+			if (key_lines[edit_line][i] == ' ')
+			{
+				// we can't just store the pointer as the text may have changed due to autocompletion
+				Q_strcpy (matched, &key_lines[edit_line][i + 1]);
+				break;
+			}
+		}
+
+		if (!matched[0])
+		{
+			// return the first item on the list
+			Key_PrintContentMatch (contentlist[0]);
+			cycle[0] = 1;
+			return;
+		}
+
+		// find the first matching one
+		for (int i = 0; ; i++)
+		{
+			if (!contentlist[i]) 
+			{
+				// no match (should this gracefully fail or inform the user of no match?)
+				cycle[0] = 0;
+				Key_PrintContentMatch ("** (No Match)");
+				return;
+			}
+
+			if (!strnicmp (contentlist[i], matched, strlen (matched)))
+			{
+				// do the completion
+				Key_PrintContentMatch (contentlist[i]);
+				cycle[0] = i + 1;
+				return;
+			}
+		}
+
+		// never reached but i feel happier with it here...
+		return;
+	}
+
+	for (int i = cycle[0], passes = 0; ; i++)
+	{
+		// if we run out of maps we restart the cycle at 0
+		if (!contentlist[i])
+		{
+			i = 0;
+
+			// keep track of the number of passes through the list
+			passes++;
+		}
+
+		// should never happen
+		if (passes > 1) return;
+
+		// check for a match
+		if (!strnicmp (contentlist[i], matched, strlen (matched)))
+		{
+			// do the completion
+			Key_PrintContentMatch (contentlist[i]);
+			cycle[0] = i + 1;
+			return;
+		}
+	}
+}
 
 
 /*
@@ -164,42 +279,138 @@ Interactive line editing and console scrollback
 void Key_Console (int key)
 {
 	char	*cmd;
-	
+	char	*s;
+	int		i;
+	HANDLE	th;
+	char	*clipText, *textCopied;
+	static int contentcycle = 0;
+
+	// content autocompletion lists
+	extern char **spinbox_bsps;
+	extern char **skybox_menulist;
+	extern char **demolist;
+
 	if (key == K_ENTER)
 	{
-		Cbuf_AddText (key_lines[edit_line]+1);	// skip the >
+		Cbuf_AddText (key_lines[edit_line] + 1);	// skip the >
 		Cbuf_AddText ("\n");
 		Con_Printf ("%s\n",key_lines[edit_line]);
+
 		edit_line = (edit_line + 1) & 31;
 		history_line = edit_line;
 		key_lines[edit_line][0] = ']';
+		key_lines[edit_line][1] = 0;
+
 		key_linepos = 1;
-		if (cls.state == ca_disconnected)
-			SCR_UpdateScreen ();	// force an update, because the command
-									// may take some time
+
+		// force an update, because the command may take some time
+		if (cls.state == ca_disconnected) SCR_UpdateScreen ();
+
 		return;
 	}
 
 	if (key == K_TAB)
-	{	// command completion
-		cmd = Cmd_CompleteCommand (key_lines[edit_line]+1);
-		if (!cmd)
-			cmd = Cvar_CompleteVariable (key_lines[edit_line]+1);
-		if (cmd)
+	{
+		// see are we matching content to a command or matching a command
+		if (!strnicmp (&key_lines[edit_line][1], "map ", 4))
 		{
-			Q_strcpy (key_lines[edit_line]+1, cmd);
-			key_linepos = Q_strlen(cmd)+1;
-			key_lines[edit_line][key_linepos] = ' ';
-			key_linepos++;
-			key_lines[edit_line][key_linepos] = 0;
+			if (spinbox_bsps) Key_ContentMatch (spinbox_bsps, &contentcycle);
 			return;
 		}
+		else if (!strnicmp (&key_lines[edit_line][1], "loadsky ", 8))
+		{
+			if (skybox_menulist) Key_ContentMatch (skybox_menulist, &contentcycle);
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "playdemo ", 9))
+		{
+			if (demolist) Key_ContentMatch (demolist, &contentcycle);
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "timedemo ", 9))
+		{
+			if (demolist) Key_ContentMatch (demolist, &contentcycle);
+			return;
+		}
+		else contentcycle = 0;
+
+		if (!match_count)
+		{
+			// copy to the match buffer, null terminate (in case the cursor is in the middle of a line)
+			strcpy (match_buf, key_lines[edit_line] + 1);
+			match_buf[key_linepos - 1] = 0;
+
+			// init the match cycle
+			match_cycle = 0;
+
+			// get the first match
+			match_count = Cmd_Match (match_buf, match_cycle, true);
+		}
+		else
+		{
+			// get subsequent matches (no console output for these)
+			Cmd_Match (match_buf, match_cycle, false);
+		}
+
+		// run the cycle
+		if (++match_cycle >= match_count) match_cycle = 0;
+
+		return;
 	}
-	
-	if (key == K_BACKSPACE || key == K_LEFTARROW)
+	else
+	{
+		contentcycle = 0;
+		match_count = 0;
+	}
+
+	if (key == K_LEFTARROW)
+	{
+		if (key_linepos > 1) key_linepos--;
+
+		return;
+	}
+
+	if (key == K_BACKSPACE)
 	{
 		if (key_linepos > 1)
+		{
+			strcpy (key_lines[edit_line] + key_linepos - 1, key_lines[edit_line] + key_linepos);
 			key_linepos--;
+		}
+
+		return;
+	}
+
+	if (key == K_DEL)
+	{
+		// delete char on cursor
+		if (key_linepos < strlen(key_lines[edit_line]))
+			strcpy (key_lines[edit_line] + key_linepos, key_lines[edit_line] + key_linepos + 1);
+
+		return;
+	}
+
+	if (key == K_RIGHTARROW)
+	{
+		// if we're at the end, get one character from previous line, otherwise just go right one
+		if (strlen (key_lines[edit_line]) == key_linepos)
+		{
+			// no character to get
+			if (strlen(key_lines[(edit_line + 31) & 31]) <= key_linepos) return;
+
+			key_lines[edit_line][key_linepos] = key_lines[(edit_line + 31) & 31][key_linepos];
+			key_linepos++;
+			key_lines[edit_line][key_linepos] = 0;
+		}
+		else key_linepos++;
+
+		return;
+	}
+
+	if (key == K_INS)
+	{
+		// toggle insert mode
+		key_insert ^= 1;
 		return;
 	}
 
@@ -239,17 +450,19 @@ void Key_Console (int key)
 		return;
 	}
 
-	if (key == K_PGUP || key==K_MWHEELUP)
+	if (key == K_PGUP || key == K_MWHEELUP)
 	{
 		con_backscroll += 2;
-		if (con_backscroll > con_totallines - (vid.height>>3) - 1)
-			con_backscroll = con_totallines - (vid.height>>3) - 1;
+
+		if (con_backscroll > con_totallines - (vid.height >> 3) - 1)
+			con_backscroll = con_totallines - (vid.height >> 3) - 1;
 		return;
 	}
 
-	if (key == K_PGDN || key==K_MWHEELDOWN)
+	if (key == K_PGDN || key == K_MWHEELDOWN)
 	{
 		con_backscroll -= 2;
+
 		if (con_backscroll < 0)
 			con_backscroll = 0;
 		return;
@@ -257,27 +470,107 @@ void Key_Console (int key)
 
 	if (key == K_HOME)
 	{
-		con_backscroll = con_totallines - (vid.height>>3) - 1;
+		// expected behaviour
+		key_linepos = 1;
 		return;
 	}
 
 	if (key == K_END)
 	{
-		con_backscroll = 0;
+		// expected behaviour
+		key_linepos = strlen (key_lines[edit_line]);
 		return;
 	}
-	
-	if (key < 32 || key > 127)
-		return;	// non printable
-		
-	if (key_linepos < MAXCMDLINE-1)
+
+	if ((key == 'C' || key == 'c') && GetKeyState (VK_CONTROL) < 0)
 	{
-		key_lines[edit_line][key_linepos] = key;
-		key_linepos++;
-		key_lines[edit_line][key_linepos] = 0;
+		if (OpenClipboard (NULL))
+		{
+			// set up the text; note - SetClipboardData needs a handle, not a pointer, so
+			// we need to go through this rigmarole to get it.
+			HGLOBAL hCopyText = (HGLOBAL) GlobalAlloc (GMEM_MOVEABLE | GMEM_DDESHARE | GMEM_ZEROINIT, 256);
+			char *CopyText = (char *) GlobalLock (hCopyText);
+
+			// because [0] is the "]" prompt
+			strcpy (CopyText, &key_lines[edit_line][1]);
+			GlobalUnlock (hCopyText);
+
+			// ensure that there's nothing there before we begin
+			EmptyClipboard ();
+
+			// copy it in
+			SetClipboardData (CF_TEXT, (HANDLE) hCopyText);
+
+			// done.  note - per MSDN, the system owns the data now so we can't free it
+			CloseClipboard ();
+			return;
+		}
 	}
 
+	if ((key == 'V' || key == 'v') && GetKeyState (VK_CONTROL) < 0)
+	{
+		if (OpenClipboard (NULL))
+		{
+			th = GetClipboardData (CF_TEXT);
+
+			if (th)
+			{
+				clipText = (char *) GlobalLock (th);
+
+				if (clipText)
+				{
+					textCopied = (char *) Heap_QMalloc (GlobalSize (th) + 1);
+					strcpy (textCopied, clipText);
+
+					// Substitutes a NULL for every token
+					strtok (textCopied, "\n\r\b");
+
+					i = strlen (textCopied);
+
+					if (i + key_linepos >= MAXCMDLINE) i = MAXCMDLINE - key_linepos;
+
+					if (i > 0)
+					{
+						textCopied[i] = 0;
+						strcat (key_lines[edit_line], textCopied);
+						key_linepos += i;
+					}
+
+					Heap_QFreeFast (textCopied);
+				}
+
+				GlobalUnlock (th);
+			}
+
+			CloseClipboard ();
+			return;
+		}
+	}
+
+	// non-printable
+	if (key < 32 || key > 127) return;
+
+	if (key_linepos < MAXCMDLINE - 1)
+	{
+		int i;
+
+		// check insert mode
+		if (key_insert)
+		{
+			// can't do strcpy to move string to right
+			if ((i = strlen (key_lines[edit_line]) - 1) == 254) i--;
+			for (; i >= key_linepos; i--) key_lines[edit_line][i + 1] = key_lines[edit_line][i];
+		}
+
+		// only null terminate if at the end
+		i = key_lines[edit_line][key_linepos];
+		key_lines[edit_line][key_linepos] = key;
+		key_linepos++;
+
+		if (!i) key_lines[edit_line][key_linepos] = 0;
+	}
 }
+
 
 //============================================================================
 
@@ -373,16 +666,18 @@ char *Key_KeynumToString (int keynum)
 {
 	keyname_t	*kn;	
 	static	char	tinystr[2];
-	
+
 	if (keynum == -1)
 		return "<KEY NOT FOUND>";
+
 	if (keynum > 32 && keynum < 127)
-	{	// printable ascii
+	{
+		// printable ascii
 		tinystr[0] = keynum;
 		tinystr[1] = 0;
 		return tinystr;
 	}
-	
+
 	for (kn=keynames ; kn->name ; kn++)
 		if (keynum == kn->keynum)
 			return kn->name;
@@ -404,20 +699,21 @@ void Key_SetBinding (int keynum, char *binding)
 	if (keynum == -1)
 		return;
 
-// free old bindings
+	// free old bindings
 	if (keybindings[keynum])
 	{
-		Z_Free (keybindings[keynum]);
+		Heap_QFreeFull (keybindings[keynum]);
 		keybindings[keynum] = NULL;
 	}
-			
-// allocate memory for new binding
+
+	// allocate memory for new binding
 	l = Q_strlen (binding);	
-	newbind = (char *) Z_Malloc (l+1);
+	newbind = (char *) Heap_QMalloc (l + 1);
 	Q_strcpy (newbind, binding);
 	newbind[l] = 0;
 	keybindings[keynum] = newbind;	
 }
+
 
 /*
 ===================
@@ -471,7 +767,9 @@ void Key_Bind_f (void)
 		Con_Printf ("bind <key> [command] : attach a command to a key\n");
 		return;
 	}
+
 	b = Key_StringToKeynum (Cmd_Argv(1));
+
 	if (b==-1)
 	{
 		Con_Printf ("\"%s\" isn't a valid key\n", Cmd_Argv(1));
@@ -486,8 +784,8 @@ void Key_Bind_f (void)
 			Con_Printf ("\"%s\" is not bound\n", Cmd_Argv(1) );
 		return;
 	}
-	
-// copy the rest of the command line
+
+	// copy the rest of the command line
 	cmd[0] = 0;		// start out with a null string
 	for (i=2 ; i< c ; i++)
 	{
@@ -510,10 +808,16 @@ void Key_WriteBindings (FILE *f)
 {
 	int		i;
 
-	for (i=0 ; i<256 ; i++)
+	for (i = 0; i < 256; i++)
+	{
 		if (keybindings[i])
+		{
 			if (*keybindings[i])
-				fprintf (f, "bind \"%s\" \"%s\"\n", Key_KeynumToString(i), keybindings[i]);
+			{
+				fprintf (f, "bind \"%s\" \"%s\"\n", Key_KeynumToString (i), keybindings[i]);
+			}
+		}
+	}
 }
 
 
@@ -522,6 +826,10 @@ void Key_WriteBindings (FILE *f)
 Key_Init
 ===================
 */
+cmd_t Key_Bind_f_Cmd ("bind", Key_Bind_f);
+cmd_t Key_Unbind_f_Cmd ("unbind", Key_Unbind_f);
+cmd_t Key_Unbindall_f_Cmd ("unbindall", Key_Unbindall_f);
+
 void Key_Init (void)
 {
 	int		i;
@@ -533,11 +841,10 @@ void Key_Init (void)
 	}
 	key_linepos = 1;
 	
-//
-// init ascii characters in console mode
-//
+	// init ascii characters in console mode
 	for (i=32 ; i<128 ; i++)
 		consolekeys[i] = true;
+
 	consolekeys[K_ENTER] = true;
 	consolekeys[K_TAB] = true;
 	consolekeys[K_LEFTARROW] = true;
@@ -545,6 +852,10 @@ void Key_Init (void)
 	consolekeys[K_UPARROW] = true;
 	consolekeys[K_DOWNARROW] = true;
 	consolekeys[K_BACKSPACE] = true;
+	consolekeys[K_DEL] = true;
+	consolekeys[K_INS] = true;
+	consolekeys[K_HOME] = true;
+	consolekeys[K_END] = true;
 	consolekeys[K_PGUP] = true;
 	consolekeys[K_PGDN] = true;
 	consolekeys[K_SHIFT] = true;
@@ -582,15 +893,6 @@ void Key_Init (void)
 	menubound[K_ESCAPE] = true;
 	for (i=0 ; i<12 ; i++)
 		menubound[K_F1+i] = true;
-
-//
-// register our functions
-//
-	Cmd_AddCommand ("bind",Key_Bind_f);
-	Cmd_AddCommand ("unbind",Key_Unbind_f);
-	Cmd_AddCommand ("unbindall",Key_Unbindall_f);
-
-
 }
 
 /*
@@ -601,6 +903,9 @@ Called by the system between frames for both key up and key down events
 Should NOT be called during an interrupt!
 ===================
 */
+void Menu_ToggleMenu (void);
+void M_Keydown (int key);
+
 void Key_Event (int key, bool down)
 {
 	char	*kb;
@@ -651,7 +956,7 @@ void Key_Event (int key, bool down)
 			break;
 		case key_game:
 		case key_console:
-			M_ToggleMenu_f ();
+			Menu_ToggleMenu ();
 			break;
 		default:
 			Sys_Error ("Bad key_dest");
@@ -691,7 +996,7 @@ void Key_Event (int key, bool down)
 //
 	if (cls.demoplayback && down && consolekeys[key] && key_dest == key_game)
 	{
-		M_ToggleMenu_f ();
+		Menu_ToggleMenu ();
 		return;
 	}
 
@@ -744,24 +1049,6 @@ void Key_Event (int key, bool down)
 		Sys_Error ("Bad key_dest");
 	}
 }
-
-
-/*
-===================
-Key_ClearStates
-===================
-*/
-void Key_ClearStates (void)
-{
-	int		i;
-
-	for (i=0 ; i<256 ; i++)
-	{
-		keydown[i] = false;
-		key_repeats[i] = 0;
-	}
-}
-
 
 
 // ===================================================================================================================================
@@ -827,9 +1114,14 @@ void ClearAllStates (void)
 
 	// send an up event for each key, to make sure the server clears them all
 	for (i = 0; i < 256; i++)
-		Key_Event (i, false);
+	{
+		// trigger the up action for all down keys
+		if (keydown[i]) Key_Event (i, false);
 
-	Key_ClearStates ();
+		// clear repeats
+		key_repeats[i] = 0;
+	}
+
 	IN_ClearStates ();
 }
 

@@ -31,7 +31,6 @@ typedef union eval_s
 	int				edict;
 } eval_t;	
 
-#define	MAX_ENT_LEAFS	16
 typedef struct edict_s
 {
 	bool	free;
@@ -50,7 +49,7 @@ typedef struct edict_s
 
 //============================================================================
 
-extern	dprograms_t		*progs;
+extern	dprograms_t		qcprogs;
 extern	dfunction_t		*pr_functions;
 extern	char			*pr_strings;
 extern	ddef_t			*pr_globaldefs;
@@ -64,6 +63,7 @@ extern	int				pr_edict_size;	// in bytes
 //============================================================================
 
 void PR_Init (void);
+void PR_ClearProgs (void);
 
 void PR_ExecuteProgram (func_t fnum);
 void PR_LoadProgs (void);
@@ -84,9 +84,6 @@ void ED_WriteGlobals (FILE *f);
 void ED_ParseGlobals (char *data);
 
 void ED_LoadFromFile (char *data);
-
-//define EDICT_NUM(n) ((edict_t *)(sv.edicts+ (n)*pr_edict_size))
-//define NUM_FOR_EDICT(e) (((byte *)(e) - sv.edicts)/pr_edict_size)
 
 edict_t *EDICT_NUM(int n);
 int NUM_FOR_EDICT(edict_t *e);
