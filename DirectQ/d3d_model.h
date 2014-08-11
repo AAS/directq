@@ -220,8 +220,8 @@ typedef struct msurface_s
 	int			numverts;
 	int			numindexes;
 
-	// subdivision just uses the regular verts and indexes now
 	brushpolyvert_t	*verts;
+	unsigned short *indexes;
 
 	struct msurface_s *texturechain;
 
@@ -254,10 +254,6 @@ typedef struct msurface_s
 	// extents of the surf in world space
 	float		mins[3];
 	float		maxs[3];
-
-	// vertex buffers
-	int			vbframe;
-	int			iboffset;
 
 	// true if the surf intersected the frustum
 	bool		intersect;

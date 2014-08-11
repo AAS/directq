@@ -70,8 +70,6 @@ typedef struct d3d_surfstate_s
 	int TotalIndexes;
 	int VertsToLock;
 	int IndexesToLock;
-
-	int VBFrame;
 } d3d_surfstate_t;
 
 
@@ -81,7 +79,6 @@ typedef struct d3d_brushsurf_s
 {
 	msurface_t *surf;
 	entity_t *ent;
-	int vbframe;
 } d3d_brushsurf_t;
 
 d3d_surfstate_t d3d_SurfState;
@@ -111,8 +108,6 @@ void D3DBrush_CreateBuffers (void)
 
 		D3D_PrelockVertexBuffer (d3d_SurfVBO);
 
-		// need to go to a new VB frame to force caches to invalidate here
-		d3d_SurfState.VBFrame++;
 		d3d_SurfState.TotalVertexes = 0;
 	}
 
@@ -160,9 +155,6 @@ void D3DBrush_ReleaseBuffers (void)
 	SAFE_RELEASE (d3d_SurfVBO);
 	SAFE_RELEASE (d3d_SurfIBO);
 	SAFE_RELEASE (d3d_SurfDecl);
-
-	// invalidate any cached surfs to make sure that nothing will use these buffers after they've been released!!!
-	d3d_SurfState.VBFrame++;
 }
 
 
@@ -185,57 +177,84 @@ void D3DBrush_SetBuffers (void)
 }
 
 
-void D3DBrush_TransformSurface (msurface_t *surf, entity_t *ent)
+brushpolyvert_t *D3DBrush_TransformSurface (brushpolyvert_t *src, brushpolyvert_t *dst, int numverts, D3DMATRIX *m, bool rotated)
 {
-	// rebuild the verts
-	D3DMATRIX *m = &ent->matrix;
-	brushhdr_t *hdr = ent->model->brushhdr;
-
-	// rebuild the vert positions from scratch and apply the transform; a full transform is only needed
-	// if the model needs to be rotated, otherwise we apply a simpler translate only (save CPU overhead)
-	if (ent->rotated)
+	if (rotated)
 	{
-		// full matrix transform
-		for (int i = 0; i < surf->numverts; i++)
+		for (int i = 0; i < numverts; i++, src++, dst++)
 		{
-			float *vec;
-			int lindex = hdr->surfedges[surf->firstedge + i];
+			dst->xyz[0] = src->xyz[0] * m->_11 + src->xyz[1] * m->_21 + src->xyz[2] * m->_31 + m->_41;
+			dst->xyz[1] = src->xyz[0] * m->_12 + src->xyz[1] * m->_22 + src->xyz[2] * m->_32 + m->_42;
+			dst->xyz[2] = src->xyz[0] * m->_13 + src->xyz[1] * m->_23 + src->xyz[2] * m->_33 + m->_43;
 
-			if (lindex > 0)
-				vec = hdr->vertexes[hdr->edges[lindex].v[0]].position;
-			else vec = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+			dst->st[0] = src->st[0];
+			dst->st[1] = src->st[1];
 
-			surf->verts[i].xyz[0] = vec[0] * m->_11 + vec[1] * m->_21 + vec[2] * m->_31 + m->_41;
-			surf->verts[i].xyz[1] = vec[0] * m->_12 + vec[1] * m->_22 + vec[2] * m->_32 + m->_42;
-			surf->verts[i].xyz[2] = vec[0] * m->_13 + vec[1] * m->_23 + vec[2] * m->_33 + m->_43;
+			dst->lm[0] = src->lm[0];
+			dst->lm[1] = src->lm[1];
 		}
 	}
-	else if (ent->translated)
+	else
 	{
-		// lightweight translate only
-		for (int i = 0; i < surf->numverts; i++)
+		for (int i = 0; i < numverts; i++, src++, dst++)
 		{
-			float *vec;
-			int lindex = hdr->surfedges[surf->firstedge + i];
+			dst->xyz[0] = src->xyz[0] + m->_41;
+			dst->xyz[1] = src->xyz[1] + m->_42;
+			dst->xyz[2] = src->xyz[2] + m->_43;
 
-			if (lindex > 0)
-				vec = hdr->vertexes[hdr->edges[lindex].v[0]].position;
-			else vec = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+			dst->st[0] = src->st[0];
+			dst->st[1] = src->st[1];
 
-			surf->verts[i].xyz[0] = vec[0] + m->_41;
-			surf->verts[i].xyz[1] = vec[1] + m->_42;
-			surf->verts[i].xyz[2] = vec[2] + m->_43;
+			dst->lm[0] = src->lm[0];
+			dst->lm[1] = src->lm[1];
 		}
 	}
+
+	return dst;
+}
+
+
+unsigned short *D3DBrush_TransferIndexes (unsigned short *src, unsigned short *dst, int numindexes, int offset)
+{
+	// > 15 is rare so don't do it
+	while (numindexes > 7)
+	{
+		dst[0] = src[0] + offset;
+		dst[1] = src[1] + offset;
+		dst[2] = src[2] + offset;
+		dst[3] = src[3] + offset;
+		dst[4] = src[4] + offset;
+		dst[5] = src[5] + offset;
+		dst[6] = src[6] + offset;
+		dst[7] = src[7] + offset;
+
+		dst += 8;
+		src += 8;
+		numindexes -= 8;
+	}
+
+	// duff's device ftw!
+	switch (numindexes)
+	{
+	case 8: *dst++ = offset + *src++;
+	case 7: *dst++ = offset + *src++;
+	case 6: *dst++ = offset + *src++;
+	case 5: *dst++ = offset + *src++;
+	case 4: *dst++ = offset + *src++;
+	case 3: *dst++ = offset + *src++;
+	case 2: *dst++ = offset + *src++;
+	case 1: *dst++ = offset + *src++;
+	default: break;
+	}
+
+	return dst;
 }
 
 
 void D3DBrush_FlushSurfaces (void)
 {
-	if (d3d_NumBrushSurfs)
+	if (d3d_NumBrushSurfs && d3d_SurfState.VertsToLock && d3d_SurfState.IndexesToLock)
 	{
-		bool vblocked = false;
-		bool iblocked = false;
 		brushpolyvert_t *verts = NULL;
 		unsigned short *ndx = NULL;
 
@@ -245,10 +264,8 @@ void D3DBrush_FlushSurfaces (void)
 			if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to lock vertex buffer");
 
 			d3d_SurfState.TotalVertexes = 0;
-			d3d_SurfState.VBFrame++;
-			vblocked = true;
 		}
-		else if (d3d_SurfState.VertsToLock)
+		else
 		{
 			hr = d3d_SurfVBO->Lock (d3d_SurfState.TotalVertexes * sizeof (brushpolyvert_t),
 				d3d_SurfState.VertsToLock * sizeof (brushpolyvert_t),
@@ -256,7 +273,6 @@ void D3DBrush_FlushSurfaces (void)
 				D3DLOCK_NOOVERWRITE);
 
 			if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to lock vertex buffer");
-			vblocked = true;
 		}
 
 		if (d3d_SurfState.TotalIndexes + d3d_SurfState.IndexesToLock >= MaxSurfIndexes)
@@ -265,9 +281,8 @@ void D3DBrush_FlushSurfaces (void)
 			if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to lock index buffer");
 
 			d3d_SurfState.TotalIndexes = 0;
-			iblocked = true;
 		}
-		else if (d3d_SurfState.IndexesToLock)
+		else
 		{
 			// we expect this to always be true
 			hr = d3d_SurfIBO->Lock (d3d_SurfState.TotalIndexes * sizeof (unsigned short),
@@ -276,106 +291,44 @@ void D3DBrush_FlushSurfaces (void)
 				D3DLOCK_NOOVERWRITE);
 
 			if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to lock index buffer");
-			iblocked = true;
-		}
-		else
-		{
-			// this should never happen.....
-			// Con_Printf ("Nothing to lock!\n");
 		}
 
-		// initial DIP params
-		int FirstVertex = d3d_SurfState.TotalVertexes;
-		int FirstIndex = d3d_SurfState.TotalIndexes;
-		int NumVertexes = 0;
-		int NumIndexes = 0;
-
-		for (int i = 0; i < d3d_NumBrushSurfs; i++)
+		for (int i = 0, ndxofs = d3d_SurfState.TotalVertexes; i < d3d_NumBrushSurfs; i++)
 		{
-			d3d_brushsurf_t *ms = &d3d_BrushSurfs[i];
-			msurface_t *surf = ms->surf;
-			entity_t *ent = ms->ent;
+			msurface_t *surf = d3d_BrushSurfs[i].surf;
+			entity_t *ent = d3d_BrushSurfs[i].ent;
 
-			if (verts && ms->vbframe != d3d_SurfState.VBFrame)
-			{
-				// if an entity needs to be transformed transform it now
-				if (ent && (ent->translated || ent->rotated))
-					D3DBrush_TransformSurface (surf, ent);
-
-				// copy vertexes
-				if (surf->numverts == 4)
-				{
-					// if the surf has 4 verts we express it as a strip which might help certain hardware
-					// (5 verts can also be expressed as a strip???) (to do - move to load time)
-					memcpy (verts, surf->verts, sizeof (brushpolyvert_t) * 2);
-					memcpy (&verts[2], &surf->verts[3], sizeof (brushpolyvert_t));
-					memcpy (&verts[3], &surf->verts[2], sizeof (brushpolyvert_t));
-				}
-				else memcpy (verts, surf->verts, surf->numverts * sizeof (brushpolyvert_t));
-
-				verts += surf->numverts;
-
-				// store out cache position for this surf
-				surf->iboffset = d3d_SurfState.TotalVertexes;
-				surf->vbframe = d3d_SurfState.VBFrame;
-
-				d3d_SurfState.TotalVertexes += surf->numverts;
-			}
-
-			// correct the first vertex param
-			if (surf->iboffset < FirstVertex) FirstVertex = surf->iboffset;
-
-			if (surf->numverts == 4)
-			{
-				// 0/1/2 1/3/2 2/3/4
-				// if the surf has 4 verts we express it as a strip which might help certain hardware
-				// (5 verts can also be expressed as a strip???) (to do - move to load time) (2/3/4 for the third)
-				ndx[0] = 0 + surf->iboffset;
-				ndx[1] = 1 + surf->iboffset;
-				ndx[2] = 2 + surf->iboffset;
-				ndx[3] = 2 + surf->iboffset;
-				ndx[4] = 1 + surf->iboffset;
-				ndx[5] = 3 + surf->iboffset;
-				ndx += 6;
-			}
+			// an entity always needs to be transformed now as we're not updating the source verts any more
+			if (ent)
+				verts = D3DBrush_TransformSurface (surf->verts, verts, surf->numverts, &ent->matrix, ent->rotated);
 			else
 			{
-				for (int n = 2; n < surf->numverts; n++, ndx += 3)
-				{
-					ndx[0] = surf->iboffset;
-					ndx[1] = surf->iboffset + n - 1;
-					ndx[2] = surf->iboffset + n;
-				}
+				memcpy (verts, surf->verts, surf->numverts * sizeof (brushpolyvert_t));
+				verts += surf->numverts;
 			}
 
-			d3d_SurfState.TotalIndexes += surf->numindexes;
-
-			// these counts are always incremented
-			NumIndexes += surf->numindexes;
-			NumVertexes += surf->numverts;
+			// fast-transfer our indexes
+			ndx = D3DBrush_TransferIndexes (surf->indexes, ndx, surf->numindexes, ndxofs);
+			ndxofs += surf->numverts;
 		}
 
-		if (vblocked)
-		{
-			hr = d3d_SurfVBO->Unlock ();
-			if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to unlock vertex buffer");
-			d3d_RenderDef.numlock++;
-		}
+		hr = d3d_SurfVBO->Unlock ();
+		if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to unlock vertex buffer");
+		d3d_RenderDef.numlock++;
 
-		if (iblocked)
-		{
-			hr = d3d_SurfIBO->Unlock ();
-			if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to unlock index buffer");
-			d3d_RenderDef.numlock++;
-		}
+		hr = d3d_SurfIBO->Unlock ();
+		if (FAILED (hr)) Sys_Error ("D3DBrush_FlushSurfaces: failed to unlock index buffer");
+		d3d_RenderDef.numlock++;
 
 		// now draw it all
-		D3D_DrawIndexedPrimitive (FirstVertex, NumVertexes, FirstIndex, NumIndexes / 3);
+		D3D_DrawIndexedPrimitive (d3d_SurfState.TotalVertexes, d3d_SurfState.VertsToLock, d3d_SurfState.TotalIndexes, d3d_SurfState.IndexesToLock / 3);
 
-		// Con_Printf ("%i brush surfs\n", d3d_NumBrushSurfs);
+		// reset counters
+		d3d_SurfState.TotalIndexes += d3d_SurfState.IndexesToLock;
+		d3d_SurfState.TotalVertexes += d3d_SurfState.VertsToLock;
 	}
 
-	// reset counters
+	// these are done outside the loop
 	d3d_NumBrushSurfs = 0;
 	d3d_SurfState.IndexesToLock = 0;
 	d3d_SurfState.VertsToLock = 0;
@@ -392,12 +345,6 @@ void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent)
 	if (d3d_SurfState.VertsToLock >= MaxSurfVertexes) D3DBrush_FlushSurfaces ();
 	if (d3d_SurfState.IndexesToLock >= MaxSurfIndexes) D3DBrush_FlushSurfaces ();
 
-	// only check for movement if we're not orphaning the buffers; if we are doing so all cached versions become invalid anyway
-	if (ent && ent->brushstate.bmmoved) surf->vbframe = -1;
-
-	// don't use the cache on a software T&L device because hopping around randomly in the buffer is painful for it
-	if (!d3d_GlobalCaps.supportHardwareTandL) surf->vbframe = -1;
-
 	// grab a new one from the list
 	d3d_brushsurf_t *ms = &d3d_BrushSurfs[d3d_NumBrushSurfs];
 	d3d_NumBrushSurfs++;
@@ -405,12 +352,9 @@ void D3DBrush_SubmitSurface (msurface_t *surf, entity_t *ent)
 	// add this surf to the list
 	ms->surf = surf;
 	ms->ent = ent;
-	ms->vbframe = surf->vbframe;
 
 	// increment the lock size counters
-	if (ms->vbframe != d3d_SurfState.VBFrame)
-		d3d_SurfState.VertsToLock += surf->numverts;
-
+	d3d_SurfState.VertsToLock += surf->numverts;
 	d3d_SurfState.IndexesToLock += surf->numindexes;
 	d3d_RenderDef.brush_polys++;
 }

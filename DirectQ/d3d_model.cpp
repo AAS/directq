@@ -1111,6 +1111,16 @@ void Mod_CalcSurfaceBoundsAndExtents (model_t *mod, msurface_t *surf)
 }
 
 
+unsigned short stripindexes[] =
+{
+	 0,  1,  2,  1,  3,  2,
+	 2,  3,  4,  3,  5,  4,
+	 4,  5,  6,  5,  7,  6,
+	 6,  7,  8,  7,  9,  8,
+	 8,  9, 10,  9, 11, 10,
+	10, 11, 12, 11, 13, 12
+};
+
 void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf)
 {
 	// just set these up for now, we generate them in the next step
@@ -1123,9 +1133,15 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf)
 	VectorClear (surf->midpoint);
 
 	// removing colinear points does *nothing* for performance with this engine.  i know, i tested it.
-	for (int i = 0; i < surf->numverts; i++, verts++)
+//	for (int i = 0; i < surf->numverts; i++, verts++)
+	for (int i = 0, j = surf->numverts; i < surf->numverts; i++, j--)
 	{
 		int lindex = hdr->surfedges[surf->firstedge + i];
+		int stripdst = i ? (i * 2 - 1) : 0;
+
+		if (stripdst >= surf->numverts) stripdst = j * 2;
+
+		verts = &surf->verts[stripdst];
 
 		if (lindex > 0)
 		{
@@ -1159,6 +1175,93 @@ void Mod_LoadSurfaceVertexes (model_t *mod, msurface_t *surf)
 
 	// get final mindpoint
 	VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
+
+	brushpolyvert_t *tempverts = (brushpolyvert_t *) scratchbuf;
+	surf->indexes = (unsigned short *) MainHunk->Alloc (surf->numindexes * sizeof (unsigned short));
+
+#if 1
+	// convert the polygon to a triangle strip layout which may be faster on some hardware
+	unsigned short *ndx = surf->indexes;
+
+	for (int i = 2; i < surf->numverts; i++, ndx += 3)
+	{
+		ndx[0] = i - 2;
+		ndx[1] = (i & 1) ? i : (i - 1);
+		ndx[2] = (i & 1) ? (i - 1) : i;
+	}
+
+	/*
+	// to do - write this in directly above to bypass the memcpy; speed up map loading
+	for (int i = 0, j = surf->numverts; i < surf->numverts; i++, j--)
+	{
+		int stripdst = i ? (i * 2 - 1) : 0;
+		if (stripdst >= surf->numverts) stripdst = j * 2;
+
+		memcpy (&tempverts[stripdst], &surf->verts[i], sizeof (brushpolyvert_t));
+	}
+
+	memcpy (surf->verts, tempverts, sizeof (brushpolyvert_t) * surf->numverts);
+	*/
+#else
+	// attempt to convert the surface to a triangle strip layout which may give better performance on some hardware
+	// (to do - find a general rule for this...)
+	if (surf->numverts == 7)
+	{
+		memcpy (&tempverts[0], &surf->verts[0], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[1], &surf->verts[1], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[3], &surf->verts[2], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[5], &surf->verts[3], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[6], &surf->verts[4], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[4], &surf->verts[5], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[2], &surf->verts[6], sizeof (brushpolyvert_t));
+		memcpy (surf->verts, tempverts, sizeof (brushpolyvert_t) * surf->numverts);
+
+		memcpy (surf->indexes, stripindexes, surf->numindexes * sizeof (unsigned short));
+	}
+	else if (surf->numverts == 6)
+	{
+		memcpy (&tempverts[0], &surf->verts[0], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[1], &surf->verts[1], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[3], &surf->verts[2], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[5], &surf->verts[3], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[4], &surf->verts[4], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[2], &surf->verts[5], sizeof (brushpolyvert_t));
+		memcpy (surf->verts, tempverts, sizeof (brushpolyvert_t) * surf->numverts);
+
+		memcpy (surf->indexes, stripindexes, surf->numindexes * sizeof (unsigned short));
+	}
+	else if (surf->numverts == 5)
+	{
+		memcpy (&tempverts[0], &surf->verts[0], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[1], &surf->verts[1], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[3], &surf->verts[2], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[4], &surf->verts[3], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[2], &surf->verts[4], sizeof (brushpolyvert_t));
+		memcpy (surf->verts, tempverts, sizeof (brushpolyvert_t) * surf->numverts);
+
+		memcpy (surf->indexes, stripindexes, surf->numindexes * sizeof (unsigned short));
+	}
+	else if (surf->numverts == 4)
+	{
+		memcpy (&tempverts[0], &surf->verts[0], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[1], &surf->verts[1], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[3], &surf->verts[2], sizeof (brushpolyvert_t));
+		memcpy (&tempverts[2], &surf->verts[3], sizeof (brushpolyvert_t));
+		memcpy (surf->verts, tempverts, sizeof (brushpolyvert_t) * surf->numverts);
+
+		memcpy (surf->indexes, stripindexes, surf->numindexes * sizeof (unsigned short));
+	}
+	else
+	{
+		// single triangle or other sized polygon
+		for (int i = 2, n = 0; i < surf->numverts; i++)
+		{
+			surf->indexes[n++] = 0;
+			surf->indexes[n++] = i - 1;
+			surf->indexes[n++] = i;
+		}
+	}
+#endif
 }
 
 
@@ -1193,9 +1296,6 @@ void Mod_LoadSurfaces (model_t *mod, byte *mod_base, lump_t *l)
 		surf->numverts = (unsigned short) LittleShort (face->numedges);
 		surf->numindexes = (surf->numverts - 2) * 3;
 		surf->flags = 0;
-
-		// invalidate the initial frame to force a cache first time
-		surf->vbframe = -1;
 
 		// turb surfs need these so that they can recalculate the warp correctly
 		surf->bspverts = surf->numverts;

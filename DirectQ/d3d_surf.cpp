@@ -555,65 +555,16 @@ void D3D_SetupBrushModel (entity_t *ent)
 	}
 	*/
 
+	// calculate dynamic lighting for the inline bmodel
 	if (mod->name[0] == '*')
-	{
-		// calculate dynamic lighting for the inline bmodel
 		R_PushDlights (mod->brushhdr->nodes + mod->brushhdr->hulls[0].firstclipnode);
 
-		// check has the model moved
-		if (ent->brushstate.bmrelinked)
-		{
-			ent->brushstate.bmmoved = true;
-			ent->brushstate.bmrelinked = false;
-			VectorCopy2 (ent->brushstate.bmoldorigin, ent->origin);
-			VectorCopy2 (ent->brushstate.bmoldangles, ent->angles);
-
-			// if the bm needs to be recached it needs to be retransformed too even if it is not rotated or
-			// translated as the previously cached version may have been previously transformed
-			ent->translated = ent->rotated = true;
-		}
-		else
-		{
-			// initially assume that it hasn't moved
-			ent->brushstate.bmmoved = false;
-			ent->translated = ent->rotated = false;
-
-			// check each of origin and angles so that we know how to transform it
-			if (!VectorCompare (ent->origin, ent->brushstate.bmoldorigin))
-			{
-				ent->brushstate.bmmoved = true;
-				ent->translated = true;
-				VectorCopy2 (ent->brushstate.bmoldorigin, ent->origin);
-			}
-
-			if (!VectorCompare (ent->angles, ent->brushstate.bmoldangles))
-			{
-				ent->brushstate.bmmoved = true;
-				ent->rotated = true;
-				VectorCopy2 (ent->brushstate.bmoldangles, ent->angles);
-			}
-		}
-	}
-	else
-	{
-		// instanced models never use the cache because vbframe and iboffset are stored in the surf,
-		// which may be shared by multiple entities.  we really should store this in the entity perhaps?
-		// (we can't because iboffset is different for each surf)
-		ent->brushstate.bmmoved = true;
-
-		// always fully transform instanced models as the previous instance may not have been
-		ent->translated = ent->rotated = true;
-	}
-
-	if (ent->translated || ent->rotated)
-	{
-		// store transform for model - we need to run this in software as we are potentially submitting
-		// multiple brush models in a single batch, all of which will be merged with the world render.
-		D3DMatrix_Identity (&ent->matrix);
-		ent->angles[0] = -ent->angles[0];	// stupid quake bug
-		D3D_RotateForEntity (ent, &ent->matrix);
-		ent->angles[0] = -ent->angles[0];	// stupid quake bug
-	}
+	// store transform for model - we need to run this in software as we are potentially submitting
+	// multiple brush models in a single batch, all of which will be merged with the world render.
+	D3DMatrix_Identity (&ent->matrix);
+	ent->angles[0] = -ent->angles[0];	// stupid quake bug
+	D3D_RotateForEntity (ent, &ent->matrix);
+	ent->angles[0] = -ent->angles[0];	// stupid quake bug
 
 	msurface_t *surf = mod->brushhdr->surfaces + mod->brushhdr->firstmodelsurface;
 

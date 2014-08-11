@@ -1134,7 +1134,7 @@ void D3DAlias_DrawViewModel (void)
 	ent->nocullbox = true;
 
 	// the viewmodel is always fully transformed
-	ent->rotated = ent->translated = true;
+	ent->rotated = true;
 
 	// delerp muzzleflashes here
 	D3DAlias_DelerpMuzzleFlashes (ent->model->aliashdr);

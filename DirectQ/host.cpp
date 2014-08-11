@@ -669,16 +669,7 @@ void Host_Frame (DWORD time)
 	if (host_maxfps.value < 1) Cvar_Set (&host_maxfps, 1);
 
 	// attempt to compensate for integer division by rounding to the nearest
-	DWORD dwLockTime;
-
-#ifdef _DEBUG
-	// debug builds get to use host_maxfps because it's handy for testing with
-	dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
-#else
-	if (sv.active || cls.demorecording)
-		dwLockTime = (DWORD) ((1000.0f / 72.0f) + 0.5f);
-	else dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
-#endif
+	DWORD dwLockTime = (DWORD) ((1000.0f / host_maxfps.value) + 0.5f);
 
 	if (!cls.timedemo && (dwRealTime - dwOldRealTime) < dwLockTime)
 	{

@@ -44,7 +44,6 @@ typedef struct brushstate_s
 	vec3_t bmoldorigin;
 	vec3_t bmoldangles;
 	bool bmrelinked;
-	bool bmmoved;
 } brushstate_t;
 
 
@@ -135,7 +134,6 @@ typedef struct entity_s
 
 	// check transforms for all model types
 	bool			rotated;
-	bool			translated;
 
 	// cached info about models
 	// these can't be in a union as the entity slot could be reused for a different model type

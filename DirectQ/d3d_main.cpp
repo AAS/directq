@@ -57,9 +57,9 @@ void D3DMain_CreateBuffers (void)
 			ndx[1] = i + 1;
 			ndx[2] = i + 2;
 
-			ndx[3] = i + 2;
-			ndx[4] = i + 1;
-			ndx[5] = i + 3;
+			ndx[3] = i + 1;
+			ndx[4] = i + 3;
+			ndx[5] = i + 2;
 		}
 
 		hr = d3d_MainIBO->Unlock ();
@@ -351,10 +351,6 @@ void D3D_AddVisEdict (entity_t *ent)
 		if (ent->angles[0] || ent->angles[1] || ent->angles[2])
 			ent->rotated = true;
 		else ent->rotated = false;
-
-		if (ent->origin[0] || ent->origin[1] || ent->origin[2])
-			ent->translated = true;
-		else ent->translated = false;
 
 		if (d3d_RenderDef.numvisedicts < MAX_VISEDICTS)
 		{
