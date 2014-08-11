@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -28,9 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "winquake.h"
 #include "resource.h"
 #include <commctrl.h>
-
-#pragma comment (lib, "d3d9.lib")
-#pragma comment (lib, "d3dx9.lib")
 
 void D3D_SetDefaultStates (void);
 void D3D_SetAllStates (void);
@@ -44,6 +38,97 @@ D3DTEXTUREFILTERTYPE d3d_3DFilterMip = D3DTEXF_LINEAR;
 LPDIRECT3D9 d3d_Object = NULL;
 LPDIRECT3DDEVICE9 d3d_Device = NULL;
 
+// entrypoints for d3d
+// because we don't know which version of d3d9 is going to be on a target machine we load dynamically
+HINSTANCE hInstD3D9 = NULL;
+HINSTANCE hInstD3DX = NULL;
+
+FARPROC D3DX_GetProcAddress (char *procname)
+{
+	FARPROC proc = NULL;
+
+	if (hInstD3DX && procname)
+		proc = GetProcAddress (hInstD3DX, procname);
+
+	return proc;
+}
+
+
+DIRECT3DCREATE9PROC QDirect3DCreate9 = NULL;
+D3DXMATRIXPERSPECTIVEFOVRHPROC QD3DXMatrixPerspectiveFovRH = NULL;
+D3DXCREATEEFFECTPROC QD3DXCreateEffect = NULL;
+D3DXLOADSURFACEFROMSURFACEPROC QD3DXLoadSurfaceFromSurface = NULL;
+D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC QD3DXMatrixPerspectiveOffCenterRH = NULL;
+D3DXMATRIXORTHOOFFCENTERPROC QD3DXMatrixOrthoOffCenterRH = NULL;
+D3DXMATRIXMULTIPLYPROC QD3DXMatrixMultiply = NULL;
+D3DXMATRIXSCALINGPROC QD3DXMatrixScaling = NULL;
+D3DXMATRIXTRANSLATIONPROC QD3DXMatrixTranslation = NULL;
+D3DXMATRIXROTATIONXPROC QD3DXMatrixRotationX = NULL;
+D3DXMATRIXROTATIONYPROC QD3DXMatrixRotationY = NULL;
+D3DXMATRIXROTATIONZPROC QD3DXMatrixRotationZ = NULL;
+D3DXLOADSURFACEFROMMEMORYPROC QD3DXLoadSurfaceFromMemory = NULL;
+D3DXFILTERTEXTUREPROC QD3DXFilterTexture = NULL;
+D3DXGETPIXELSHADERPROFILEPROC QD3DXGetPixelShaderProfile = NULL;
+D3DXGETVERTEXSHADERPROFILEPROC QD3DXGetVertexShaderProfile = NULL;
+D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA = NULL;
+D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx = NULL;
+D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA = NULL;
+D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface = NULL;
+
+// this needs to default to 42 and be capped at that level as using d3dx versions later than the SDK we compile with it problematical
+cvar_t d3dx_version ("d3dx_version", 42, CVAR_ARCHIVE);
+
+void D3D_LoadD3DXVersion (int ver)
+{
+	// no versions of the dll below 24 exist, but DirectQ requires 32 to compile it's shaders so prevent attempts to use anything lower.
+	// a version of -1 (or any other negative number) can be used for a "best available" 
+	if (ver < 0) ver = 42;
+	if (ver < 32) ver = 32;
+
+	// never go higher than 42 - see above
+	if (ver > 42) ver = 42;
+
+	// select the best version of d3dx available to us
+	for (int i = ver; i; i--)
+	{
+		UNLOAD_LIBRARY (hInstD3DX);
+		hInstD3DX = LoadLibrary (va ("d3dx9_%i.dll", i));
+
+		if (hInstD3DX)
+		{
+			// it's known-good that these all have entrypoints in d3dx9 up to version 42, but who knows about potential future versions?
+			if (!(QD3DXMatrixPerspectiveFovRH = (D3DXMATRIXPERSPECTIVEFOVRHPROC) D3DX_GetProcAddress ("D3DXMatrixPerspectiveFovRH"))) continue;
+			if (!(QD3DXCreateEffect = (D3DXCREATEEFFECTPROC) D3DX_GetProcAddress ("D3DXCreateEffect"))) continue;
+			if (!(QD3DXLoadSurfaceFromSurface = (D3DXLOADSURFACEFROMSURFACEPROC) D3DX_GetProcAddress ("D3DXLoadSurfaceFromSurface"))) continue;
+			if (!(QD3DXMatrixPerspectiveOffCenterRH = (D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC) D3DX_GetProcAddress ("D3DXMatrixPerspectiveOffCenterRH"))) continue;
+			if (!(QD3DXMatrixOrthoOffCenterRH = (D3DXMATRIXORTHOOFFCENTERPROC) D3DX_GetProcAddress ("D3DXMatrixOrthoOffCenterRH"))) continue;
+			if (!(QD3DXMatrixMultiply = (D3DXMATRIXMULTIPLYPROC) D3DX_GetProcAddress ("D3DXMatrixMultiply"))) continue;
+			if (!(QD3DXMatrixScaling = (D3DXMATRIXSCALINGPROC) D3DX_GetProcAddress ("D3DXMatrixScaling"))) continue;
+			if (!(QD3DXMatrixTranslation = (D3DXMATRIXTRANSLATIONPROC) D3DX_GetProcAddress ("D3DXMatrixTranslation"))) continue;
+			if (!(QD3DXMatrixRotationX = (D3DXMATRIXROTATIONXPROC) D3DX_GetProcAddress ("D3DXMatrixRotationX"))) continue;
+			if (!(QD3DXMatrixRotationY = (D3DXMATRIXROTATIONYPROC) D3DX_GetProcAddress ("D3DXMatrixRotationY"))) continue;
+			if (!(QD3DXMatrixRotationZ = (D3DXMATRIXROTATIONZPROC) D3DX_GetProcAddress ("D3DXMatrixRotationZ"))) continue;
+			if (!(QD3DXLoadSurfaceFromMemory = (D3DXLOADSURFACEFROMMEMORYPROC) D3DX_GetProcAddress ("D3DXLoadSurfaceFromMemory"))) continue;
+			if (!(QD3DXFilterTexture = (D3DXFILTERTEXTUREPROC) D3DX_GetProcAddress ("D3DXFilterTexture"))) continue;
+			if (!(QD3DXGetPixelShaderProfile = (D3DXGETPIXELSHADERPROFILEPROC) D3DX_GetProcAddress ("D3DXGetPixelShaderProfile"))) continue;
+			if (!(QD3DXGetVertexShaderProfile = (D3DXGETVERTEXSHADERPROFILEPROC) D3DX_GetProcAddress ("D3DXGetVertexShaderProfile"))) continue;
+			if (!(QD3DXSaveSurfaceToFileA = (D3DXSAVESURFACETOFILEPROC) D3DX_GetProcAddress ("D3DXSaveSurfaceToFileA"))) continue;
+			if (!(QD3DXCreateTextureFromFileInMemoryEx = (D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromFileInMemoryEx"))) continue;
+			if (!(QD3DXCreateTextureFromResourceExA = (D3DXCREATETEXTUREFROMRESOURCEEXAPROC) D3DX_GetProcAddress ("D3DXCreateTextureFromResourceExA"))) continue;
+			if (!(QD3DXCreateRenderToSurface = (D3DXCREATERENDERTOSURFACEPROC) D3DX_GetProcAddress ("D3DXCreateRenderToSurface"))) continue;
+
+			// done
+			Con_SafePrintf ("Loaded D3DX version %i (d3dx9_%i.dll)\n", i, i);
+			Cvar_Set (&d3dx_version, i);
+			return;
+		}
+	}
+
+	// no d3dx9 available (this should never happen)
+	UNLOAD_LIBRARY (hInstD3DX);
+	Sys_Error ("Couldn't load D3DX version %i (d3dx9_%i.dll)\n\nConsider upgrading or installing/reinstalling DirectX 9.", ver, ver);
+}
+
 D3DADAPTER_IDENTIFIER9 d3d_Adapter;
 D3DCAPS9 d3d_DeviceCaps;
 d3d_global_caps_t d3d_GlobalCaps;
@@ -52,8 +137,10 @@ D3DPRESENT_PARAMETERS d3d_PresentParams;
 // for various render-to-texture and render-to-surface stuff
 LPDIRECT3DSURFACE9 d3d_BackBuffer = NULL;
 
-void D3D_InitUnderwaterTexture (void);
-void D3D_KillUnderwaterTexture (void);
+bool d3d_SceneBegun = false;
+
+void D3D_Init3DSceneTexture (void);
+void D3D_Kill3DSceneTexture (void);
 
 
 // global video state
@@ -88,6 +175,10 @@ void Menu_VideoBuild (void);
 // hlsl
 void D3D_InitHLSL (void);
 void D3D_ShutdownHLSL (void);
+
+// lightmaps
+void D3D_LoseLightmapResources (void);
+void D3D_RecoverLightmapResources (void);
 
 // fixme - merge these two
 HWND d3d_Window;
@@ -156,7 +247,7 @@ D3DFORMAT d3d_AdapterModeDescs[] =
 
 // rather than having lots and lots and lots of globals all holding multiple instances of the same data, let's do
 // something radical, scary and potentially downright dangerous, and clean things up a bit.
-DWORD		WindowStyle, ExWindowStyle;
+DWORD WindowStyle, ExWindowStyle;
 
 void ClearAllStates (void);
 void AppActivate (BOOL fActive, BOOL minimize);
@@ -246,7 +337,7 @@ D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 	// prefer faster formats (but prefer to get a stencil buffer)
 	D3DFORMAT DepthStencilFormats[] = {D3DFMT_D24S8, D3DFMT_D24X8, D3DFMT_D16, D3DFMT_UNKNOWN};
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		// ran out of formats
 		if (DepthStencilFormats[i] == D3DFMT_UNKNOWN) break;
@@ -445,8 +536,9 @@ void D3D_PreloadTextures (void);
 void D3D_RecoverDeviceResources (void)
 {
 	// recreate anything that needs to be recreated
-	D3D_InitUnderwaterTexture ();
+	D3D_Init3DSceneTexture ();
 	D3D_InitHLSL ();
+	D3D_RecoverLightmapResources ();
 
 	// recover all states back to what they should be
 	D3D_SetAllStates ();
@@ -465,9 +557,10 @@ void D3D_LoseDeviceResources (void)
 {
 	// release anything that needs to be released
 	D3D_ClearOcclusionQueries ();
-	D3D_KillUnderwaterTexture ();
-	D3D_ReleaseBuffers ();
+	D3D_Kill3DSceneTexture ();
+	D3D_VBOReleaseBuffers ();
 	D3D_ShutdownHLSL ();
+	D3D_LoseLightmapResources ();
 
 	// ensure that present params are valid
 	D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
@@ -566,7 +659,7 @@ void D3D_EnumerateVideoModes (void)
 	int MaxWindowHeight = WorkArea.bottom - WorkArea.top;
 
 	// enumerate the modes in the adapter
-	for (int m = 0; ; m++)
+	for (int m = 0;; m++)
 	{
 		// end of the list
 		if (d3d_AdapterModeDescs[m] == D3DFMT_UNKNOWN) break;
@@ -620,7 +713,7 @@ void D3D_EnumerateVideoModes (void)
 			else
 			{
 				// add it to the end of the list
-				for (newmode = d3d_ModeList; ; newmode = newmode->Next)
+				for (newmode = d3d_ModeList;; newmode = newmode->Next)
 					if (!newmode->Next)
 						break;
 
@@ -1014,7 +1107,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	D3D_SetPresentParams (&d3d_PresentParams, mode);
 
 	// attempt to create the device - we can ditch all of the extra flags now :)
-	// (Quark ETP needs D3DCREATE_FPU_PRESERVE - using _controlfp during texcoord gen doesn't work
+	// (Quark ETP needs D3DCREATE_FPU_PRESERVE - using _controlfp during texcoord gen doesn't work)
 	// here as the generated coords will also lost precision when being applied
 	hr = d3d_Object->CreateDevice
 	(
@@ -1098,7 +1191,7 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	else d3d_GlobalCaps.supportOcclusion = false;
 
 	// set up everything else
-	D3D_InitUnderwaterTexture ();
+	D3D_Init3DSceneTexture ();
 	D3D_InitHLSL ();
 
 	Con_Printf ("\n");
@@ -1452,7 +1545,25 @@ void D3D_VidInit (byte *palette)
 	// dump the colormap out to file so that we can have a look-see at what's in it
 	// SCR_WriteDataToTGA ("colormap.tga", vid.colormap, 256, 64, 8, 24);
 
-	if (!(d3d_Object = Direct3DCreate9 (D3D_SDK_VERSION)))
+	hInstD3D9 = LoadLibrary ("d3d9.dll");
+
+	if (!hInstD3D9)
+	{
+		Sys_Error ("D3D_InitDirect3D - failed to load Direct3D!");
+		return;
+	}
+
+	// create a regular XPDM object
+	QDirect3DCreate9 = (DIRECT3DCREATE9PROC) GetProcAddress (hInstD3D9, "Direct3DCreate9");
+
+	if (!QDirect3DCreate9)
+	{
+		Sys_Error ("D3D_InitDirect3D - GetProcAddress failed for Direct3DCreate9");
+		return;
+	}
+
+	// this is always 32 irrespective of which version of the sdk we use
+	if (!(d3d_Object = QDirect3DCreate9 (D3D_SDK_VERSION)))
 	{
 		Sys_Error ("D3D_InitDirect3D - failed to initialize Direct3D!");
 		return;
@@ -1475,6 +1586,9 @@ void D3D_VidInit (byte *palette)
 		d3d_Adapter.SubSysId,
 		d3d_Adapter.Revision
 	);
+
+	// load d3dx library - directq has been tested with versions up to 42
+	D3D_LoadD3DXVersion (d3dx_version.integer);
 
 	Con_Printf ("\n");
 
@@ -1559,51 +1673,6 @@ void D3D_ShutdownDirect3D (void)
 	{
 		d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
 		d3d_Device->Present (NULL, NULL, NULL, NULL);
-
-		extern int static_registered;
-		byte *endbin = (static_registered ? COM_LoadHunkFile ("end2.bin") : COM_LoadHunkFile ("end1.bin"));
-
-		// this is kinda crap... cute, but crap.
-		if (endbin && vid_initialized && 0)
-		{
-			d3d_Device->BeginScene ();
-
-			D3D_Set2D ();
-
-			int x = 0;
-			int y = 60;
-			bool firstline = true;
-
-			for (int i = 0; i < 80 * 25 * 2; i += 2)
-			{
-				if (endbin[i] < 127 && endbin[i] > 32)
-					Draw_Character (x, y, endbin[i] + (firstline ? 0 : 128));
-
-				x += 8;
-
-				if (x >= 640)
-				{
-					x = 0;
-					y += 12;
-					firstline = false;
-				}
-			}
-
-			Menu_PrintCenterWhite (y + 12, "Press 'Y' to Quit");
-
-			d3d_Device->EndScene ();
-			d3d_Device->Present (NULL, NULL, NULL, NULL);
-
-			do
-			{
-				key_count = -1;	// wait for a key down and up
-				Sys_SendKeyEvents ();
-
-				if (key_lastpress == 'y' || key_lastpress == 'Y') break;
-
-				Sleep (10);
-			} while (1);
-		}
 	}
 
 	// also need these... ;)
@@ -1615,6 +1684,10 @@ void D3D_ShutdownDirect3D (void)
 	// destroy the device and object
 	SAFE_RELEASE (d3d_Device);
 	SAFE_RELEASE (d3d_Object);
+
+	// unload our libraries
+	UNLOAD_LIBRARY (hInstD3DX);
+	UNLOAD_LIBRARY (hInstD3D9);
 }
 
 
@@ -1689,9 +1762,7 @@ bool D3D_CheckRecoverDevice (void)
 		case D3DERR_DRIVERINTERNALERROR:
 		default:
 			// something bad happened
-			// note: this isn't really a proper clean-up path as it doesn't do input/sound/etc cleanup either...
-			DestroyWindow (d3d_Window);
-			exit (0);
+			Sys_Quit ();
 			break;
 		}
 
@@ -2012,6 +2083,21 @@ void D3D_CheckVSync (void)
 }
 
 
+void D3D_CheckD3DXVersion (void)
+{
+	static int oldversion = d3dx_version.integer;
+
+	if (oldversion != d3dx_version.integer)
+	{
+		// this needs a resource reload as otherwise the shaders will potentially be new versions
+		D3D_LoseDeviceResources ();
+		D3D_LoadD3DXVersion (d3dx_version.integer);
+		D3D_RecoverDeviceResources ();
+		oldversion = d3dx_version.integer;
+	}
+}
+
+
 void D3D_BeginRendering (void)
 {
 	// check for device recovery and recover it if needed
@@ -2024,14 +2110,21 @@ void D3D_BeginRendering (void)
 	D3D_CheckPixelShaders ();
 	D3D_CheckTripleBuffer ();
 	D3D_CheckVSync ();
+	D3D_CheckD3DXVersion ();
 
-	// begin a new scene
-	d3d_Device->BeginScene ();
+	// flag that we haven't begun the scene yet
+	d3d_SceneBegun = false;
 }
 
 
 void D3D_EndRendering (void)
 {
+	// we might have some 2d stuff left over so draw that now
+	D3D_EndFlatDraw ();
+
+	// unbind vertex streams
+	D3D_VBOSetVBOStream (NULL);
+
 	// end the previous scene
 	d3d_Device->EndScene ();
 

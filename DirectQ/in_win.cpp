@@ -15,43 +15,40 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // in_win.c -- windows 95 mouse and joystick code
 // 02/21/97 JCB Added extended DirectInput code to support external controllers.
 // NOTE - the stock ID code is *NOT* DirectInput; it's Windows API.
-
-// for DIRECTINPUT_VERSION undefined. Defaulting to version 0x0800
-#ifndef DIRECTINPUT_VERSION
-#define DIRECTINPUT_VERSION		0x0800
-#endif
 
 #include "quakedef.h"
 #include <dinput.h>
 #include <XInput.h>
 #include "winquake.h"
 
-// statically link
-#pragma comment (lib, "dinput8.lib")
+HINSTANCE hInstDInput = NULL;
+typedef HRESULT (WINAPI *DIRECTINPUT8CREATEPROC) (HINSTANCE, DWORD, REFIID, LPVOID *, LPUNKNOWN);
+DIRECTINPUT8CREATEPROC QDirectInput8Create = NULL;
+
+// mouse format; this is microsoft's c_dfDIMouse2 format derived from a dump of the data to a text file
+// and is used so that we don't need to statically link to dinput8.lib for 8 button support
+DIOBJECTDATAFORMAT di_MouseFormatDesc[11] =
+{
+	{&GUID_XAxis, 0, 16776963, 0}, {&GUID_YAxis, 4, 16776963, 0}, {&GUID_ZAxis, 8, 2164260611, 0}, {NULL, 12, 16776972, 0}, {NULL, 13, 16776972, 0},
+	{NULL, 14, 2164260620, 0}, {NULL, 15, 2164260620, 0}, {NULL, 16, 2164260620, 0}, {NULL, 17, 2164260620, 0}, {NULL, 18, 2164260620, 0}, {NULL, 19, 2164260620, 0}
+};
+
+DIDATAFORMAT di_MouseFormat = {sizeof (DIDATAFORMAT), sizeof (DIOBJECTDATAFORMAT), DIDF_RELAXIS, 20, 11, di_MouseFormatDesc};
 
 void IN_ShutdownXInput (void);
 
-DWORD (WINAPI *QXInputGetCapabilities)
-(
-    DWORD                dwUserIndex,   // [in] Index of the gamer associated with the device
-    DWORD                dwFlags,       // [in] Input flags that identify the device type
-    XINPUT_CAPABILITIES* pCapabilities  // [out] Receives the capabilities
-) = NULL;
-
-DWORD (WINAPI *QXInputGetState)
-(
-    DWORD         dwUserIndex,  // [in] Index of the gamer associated with the device
-    XINPUT_STATE* pState        // [out] Receives the current state
-) = NULL;
+typedef DWORD (WINAPI *XINPUTGETCAPABILITIESPROC) (DWORD, DWORD, XINPUT_CAPABILITIES *);
+typedef DWORD (WINAPI *XINPUTGETSTATEPROC) (DWORD, XINPUT_STATE *);
+typedef void (WINAPI *XINPUTENABLEPROC) (BOOL);
 
 HINSTANCE hInstXInput = NULL;
+XINPUTGETCAPABILITIESPROC QXInputGetCapabilities = NULL;
+XINPUTGETSTATEPROC QXInputGetState = NULL;
+XINPUTENABLEPROC QXInputEnable = NULL;
 
 // xinput stuff
 int xiActiveController = -1;
@@ -259,6 +256,7 @@ void IN_ActivateMouse (void)
 	{
 		// toggle xinput on
 		xiActive = true;
+		QXInputEnable (TRUE);
 	}
 
 	if (mouseinitialized)
@@ -309,6 +307,7 @@ void IN_DeactivateMouse (void)
 	{
 		// toggle xinput off
 		xiActive = false;
+		QXInputEnable (FALSE);
 	}
 
 	if (mouseinitialized)
@@ -362,8 +361,7 @@ void IN_InitDInputMouse (void)
 	}
 
 	// set the data format to "mouse format".
-	// use the mouse2 format for up to 8 buttons
-	hr = di_Mouse->SetDataFormat (&c_dfDIMouse2);
+	hr = di_Mouse->SetDataFormat (&di_MouseFormat);
 
 	if (FAILED (hr))
 	{
@@ -430,18 +428,31 @@ void IN_StartupMouse (void)
 		Cvar_Set (&m_accelthreshold2, originalmouseparms[1]);
 	}
 
-	// always create the direct input interface
-	SAFE_RELEASE (di_Object);
-	hr = DirectInput8Create (GetModuleHandle (NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (LPVOID *) &di_Object, NULL);
+	hInstDInput = LoadLibrary ("dinput8.dll");
 
-	if (SUCCEEDED (hr))
+	if (hInstDInput)
 	{
-		// now create any and all directinput devices we use
-		IN_InitDInputMouse ();
+		QDirectInput8Create = (DIRECTINPUT8CREATEPROC) GetProcAddress (hInstDInput, "DirectInput8Create");
+
+		if (QDirectInput8Create)
+		{
+			// always create the direct input interface
+			hr = QDirectInput8Create (GetModuleHandle (NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (LPVOID *) &di_Object, NULL);
+
+			if (SUCCEEDED (hr) && di_Object)
+			{
+				// now create any and all directinput devices we use
+				IN_InitDInputMouse ();
+			}
+		}
 	}
 
 	// if we didn't create any directinput devices we release the interface
-	if (!di_Mouse) SAFE_RELEASE (di_Object);
+	if (!di_Mouse || !di_Object)
+	{
+		SAFE_RELEASE (di_Mouse);
+		SAFE_RELEASE (di_Object);
+	}
 
 	// now deactivate the mouse so that nothing is buffered while loading
 	IN_DeactivateMouse ();
@@ -482,6 +493,10 @@ void IN_Shutdown (void)
 
 	SAFE_RELEASE (di_Mouse);
 	SAFE_RELEASE (di_Object);
+	UNLOAD_LIBRARY (hInstDInput);
+
+	hInstDInput = NULL;
+	QDirectInput8Create = NULL;
 
 	IN_ShutdownXInput ();
 }
@@ -540,7 +555,7 @@ void IN_MouseMove (usercmd_t *cmd)
 		DIDEVICEOBJECTDATA di_MouseBuffer;
 		int NumMouseEvents;
 
-		for (NumMouseEvents = 0; ; NumMouseEvents++)
+		for (NumMouseEvents = 0;; NumMouseEvents++)
 		{
 			DWORD dwElements = 1;
 
@@ -1244,12 +1259,17 @@ void IN_JoyMove (usercmd_t *cmd)
 
 void IN_ShutdownXInput (void)
 {
-	if (hInstXInput) FreeLibrary (hInstXInput);
+	UNLOAD_LIBRARY (hInstXInput);
 
 	hInstXInput = NULL;
+	QXInputEnable = NULL;
 	QXInputGetState = NULL;
 	QXInputGetCapabilities = NULL;
 }
+
+
+// dummy proc to handle an absent XInputEnable
+void WINAPI QXInputEnableNULL (BOOL blah) {}
 
 
 void IN_StartupXInput (void)
@@ -1267,8 +1287,12 @@ void IN_StartupXInput (void)
 
 	if (!hInstXInput) goto no_xinput;
 
-	QXInputGetState = (DWORD (__stdcall *) (DWORD, XINPUT_STATE *)) GetProcAddress (hInstXInput, "XInputGetState");
-	QXInputGetCapabilities = (DWORD (__stdcall *) (DWORD, DWORD, XINPUT_CAPABILITIES *)) GetProcAddress (hInstXInput, "XInputGetCapabilities");
+	QXInputEnable = (XINPUTENABLEPROC) GetProcAddress (hInstXInput, "XInputEnable");
+	QXInputGetState = (XINPUTGETSTATEPROC) GetProcAddress (hInstXInput, "XInputGetState");
+	QXInputGetCapabilities = (XINPUTGETCAPABILITIESPROC) GetProcAddress (hInstXInput, "XInputGetCapabilities");
+
+	// this entrypoint is not present in all versions
+	if (!QXInputEnable) QXInputEnable = QXInputEnableNULL;
 
 	if (!QXInputGetCapabilities || !QXInputGetState)
 		goto no_xinput;
@@ -1278,6 +1302,7 @@ void IN_StartupXInput (void)
 	// reset to -1 each time as this can be called at runtime
 	xiActiveController = -1;
 	xiActive = false;
+	QXInputEnable (FALSE);
 
 	// only support up to 4 controllers (in a PC scenario usually just one will be attached)
 	for (int c = 0; c < 4; c++)

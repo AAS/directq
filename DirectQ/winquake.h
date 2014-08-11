@@ -21,6 +21,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // winquake.h: Win32-specific Quake header file
 
+// in case winquake.h is ever included before quakedef.h anywhere
+#include "versions.h"
+
 #ifndef __WINQUAKE_H
 #define __WINQUAKE_H
 #pragma warning( disable : 4229 )  // mgraph gets this
@@ -33,12 +36,6 @@ extern HRESULT hr;
 #include <dsound.h>
 
 extern	int			global_nCmdShow;
-
-#ifndef SERVERONLY
-
-//#define SNDBUFSIZE 65536
-
-#endif
 
 void S_ClearSounds (void);
 
@@ -68,6 +65,6 @@ void VID_SetDefaultMode (void);
 
 // these are needed in vidnt and sys_win
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
-#define D3D_WINDOW_CLASS_NAME "SATAN!SATAN!SATAN!fwuffybunnywabbit!SATAN!SATAN!SATAN!"
+#define D3D_WINDOW_CLASS_NAME "DirectQ Application"
 
 #endif

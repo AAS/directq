@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // snd_dma.c -- main control for any streaming sound output device
 
@@ -227,7 +224,7 @@ sfx_t *S_FindName (char *name)
 		Sys_Error ("Sound name too long: %s", name);
 
 	// see if already loaded
-	for (i=0 ; i < num_sfx ; i++)
+	for (i=0; i < num_sfx; i++)
 	{
 		if (!strcmp (known_sfx[i].name, name))
 		{
@@ -325,7 +322,7 @@ channel_t *SND_PickChannel(int entnum, int entchannel)
 // Check for replacement sound, or find the best one to replace
     first_to_die = -1;
     life_left = 0x7fffffff;
-    for (ch_idx=NUM_AMBIENTS ; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS ; ch_idx++)
+    for (ch_idx=NUM_AMBIENTS; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS; ch_idx++)
     {
 		if (entchannel != 0		// channel 0 never overrides
 		&& channels[ch_idx].entnum == entnum
@@ -464,7 +461,7 @@ void S_StartSound(int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float f
 // if an identical sound has also been started this frame, offset the pos
 // a bit to keep it from just making the first one louder
 	check = &channels[NUM_AMBIENTS];
-    for (ch_idx=NUM_AMBIENTS ; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS ; ch_idx++, check++)
+    for (ch_idx=NUM_AMBIENTS; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS; ch_idx++, check++)
     {
 		if (check == target_chan)
 			continue;
@@ -477,15 +474,15 @@ void S_StartSound(int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float f
 			target_chan->end -= skip;
 			break;
 		}
-		
 	}
 }
+
 
 void S_StopSound(int entnum, int entchannel)
 {
 	int i;
 
-	for (i=0 ; i<MAX_DYNAMIC_CHANNELS ; i++)
+	for (i=0; i<MAX_DYNAMIC_CHANNELS; i++)
 	{
 		if (channels[i].entnum == entnum
 			&& channels[i].entchannel == entchannel)
@@ -618,12 +615,12 @@ void S_UpdateAmbientSounds (void)
 	l = Mod_PointInLeaf (listener_origin, cl.worldmodel);
 	if (!l || !ambient_level.value)
 	{
-		for (ambient_channel = 0 ; ambient_channel< NUM_AMBIENTS ; ambient_channel++)
+		for (ambient_channel = 0; ambient_channel< NUM_AMBIENTS; ambient_channel++)
 			channels[ambient_channel].sfx = NULL;
 		return;
 	}
 
-	for (ambient_channel = 0 ; ambient_channel< NUM_AMBIENTS ; ambient_channel++)
+	for (ambient_channel = 0; ambient_channel< NUM_AMBIENTS; ambient_channel++)
 	{
 		chan = &channels[ambient_channel];	
 		chan->sfx = ambient_sfx[ambient_channel];
@@ -917,7 +914,7 @@ void S_SoundList(void)
 	int		size, total;
 
 	total = 0;
-	for (sfx=known_sfx, i=0 ; i<num_sfx ; i++, sfx++)
+	for (sfx=known_sfx, i=0; i<num_sfx; i++, sfx++)
 	{
 		sc = sfx->sndcache;
 

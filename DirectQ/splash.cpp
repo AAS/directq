@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 #include "quakedef.h"
@@ -61,7 +58,7 @@ LRESULT CALLBACK SplashProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			int DeskHeight = GetDeviceCaps (DesktopDC, VERTRES);
 			ReleaseDC (NULL, DesktopDC);
 
-			// center and show the splash window
+			// center and show the splash window (resizing it to the bitmap size as we go)
 			SetWindowPos (hWnd, NULL, (DeskWidth - BMPWidth) / 2, (DeskHeight - BMPHeight) / 2, BMPWidth, BMPHeight, SWP_SHOWWINDOW);
 		}
 
@@ -72,9 +69,32 @@ LRESULT CALLBACK SplashProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 		{
 			hdc = BeginPaint (hWnd, &ps);
 			Gdiplus::Graphics g (hdc);
-			g.DrawImage (SplashBMP->TheBitmap, 0, 0, SplashBMP->TheBitmap->GetWidth (), SplashBMP->TheBitmap->GetHeight ());
+
+			int w = SplashBMP->TheBitmap->GetWidth ();
+			int h = SplashBMP->TheBitmap->GetHeight ();
+
+			g.DrawImage (SplashBMP->TheBitmap, 0, 0, w, h);
+
+			// this pretty much replicates the functionality of my splash screen maker app but brings it back into the engine
+			// unicode sucks cocks in hell, by the way.
+			Gdiplus::FontFamily   fontFamily (L"Arial");
+			Gdiplus::Font         font (&fontFamily, 10, Gdiplus::FontStyleBold, Gdiplus::UnitPoint);
+			Gdiplus::RectF        rectF (0, (h / 2) + 10, w, h);
+			Gdiplus::StringFormat stringFormat;
+			Gdiplus::SolidBrush   solidBrush (Gdiplus::Color (255, 192, 192, 192));
+
+			stringFormat.SetAlignment (Gdiplus::StringAlignmentCenter);
+			stringFormat.SetLineAlignment (Gdiplus::StringAlignmentNear);
+
+			g.SetTextRenderingHint (Gdiplus::TextRenderingHintAntiAliasGridFit);
+			g.DrawString (QASCIIToUnicode ("Release "DIRECTQ_VERSION), -1, &font, rectF, &stringFormat, &solidBrush);
+
+			g.Flush (Gdiplus::FlushIntentionFlush);
+			g.ReleaseHDC (hdc);
 			EndPaint (hWnd, &ps);
 		}
+
+		// sleep a little to give the splash a chance to show
 		Sleep (500);
 		return 0;
 

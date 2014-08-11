@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // sv_main.c -- server main program
 
@@ -114,7 +111,7 @@ static void SV_SetProtocol_f (void)
 
 	char *newprotocol = Cmd_Argv (1);
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!protolist[i]) break;
 
@@ -174,7 +171,7 @@ void SV_StartParticle (vec3_t org, vec3_t dir, int color, int count)
 	MSG_WriteCoord (&sv.datagram, org[0]);
 	MSG_WriteCoord (&sv.datagram, org[1]);
 	MSG_WriteCoord (&sv.datagram, org[2]);
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 	{
 		v = dir[i]*16;
 		if (v > 127)
@@ -428,7 +425,7 @@ void SV_ConnectClient (int clientnum)
 	{
 	// call the progs to get default spawn parms for the new client
 		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->SetNewParms);
-		for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
+		for (i=0; i<NUM_SPAWN_PARMS; i++)
 			client->spawn_parms[i] = (&SVProgs->GlobalStruct->parm1)[i];
 	}
 
@@ -457,7 +454,7 @@ void SV_CheckForNewClients (void)
 			break;
 
 		// init a new client structure
-		for (i=0 ; i<svs.maxclients ; i++)
+		for (i=0; i<svs.maxclients; i++)
 			if (!svs.clients[i].active)
 				break;
 		if (i == svs.maxclients)
@@ -507,6 +504,7 @@ byte	*fatpvs = NULL;
 
 // control how fat the fatpvs is
 cvar_t sv_pvsfat ("sv_pvsfat", "8", CVAR_ARCHIVE | CVAR_SERVER);
+cvar_t sv_novis ("sv_novis", "0", CVAR_SERVER);
 
 void SV_AddToFatPVS (vec3_t org, mnode_t *node)
 {
@@ -523,7 +521,7 @@ void SV_AddToFatPVS (vec3_t org, mnode_t *node)
 			if (node->contents != CONTENTS_SOLID)
 			{
 				pvs = Mod_LeafPVS ((mleaf_t *) node, sv.worldmodel);
-				for (i = 0; i < fatbytes ; i++) fatpvs[i] |= pvs[i];
+				for (i = 0; i < fatbytes; i++) fatpvs[i] |= pvs[i];
 			}
 
 			return;
@@ -600,7 +598,7 @@ loc0:;
 loc1:;
 		leafnum = ((mleaf_t *) node) - sv.worldmodel->brushhdr->leafs - 1;
 
-		if (pvs[leafnum >> 3] & (1 << (leafnum & 7)))
+		if ((pvs[leafnum >> 3] & (1 << (leafnum & 7))) || sv_novis.integer)
 			ent->touchleaf = true;
 
 		return;
@@ -608,7 +606,7 @@ loc1:;
 
 	// NODE_MIXED
 	splitplane = node->plane;
-	sides = BoxOnPlaneSide (ent->v.absmin, ent->v.absmax, splitplane);
+	sides = BOX_ON_PLANE_SIDE (ent->v.absmin, ent->v.absmax, splitplane);
 
 	// recurse down the contacted sides, start dropping out if we hit anything
 	if ((sides & 1) && !ent->touchleaf && node->children[0]->contents != CONTENTS_SOLID)
@@ -678,7 +676,7 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 			SV_FindTouchedLeafs (ent, sv.worldmodel->brushhdr->nodes, pvs);
 
 			// if the entity didn't touch any leafs in the pvs don't send it to the client
-			if (!ent->touchleaf)
+			if (!ent->touchleaf && !sv_novis.integer)
 			{
 				//NumCulledEnts++;
 				continue;
@@ -805,7 +803,7 @@ void SV_CleanupEnts (void)
 	edict_t	*ent;
 	
 	ent = NEXT_EDICT(SVProgs->Edicts);
-	for (e=1 ; e<SVProgs->NumEdicts ; e++, ent = NEXT_EDICT(ent))
+	for (e=1; e<SVProgs->NumEdicts; e++, ent = NEXT_EDICT(ent))
 	{
 		ent->v.effects = (int)ent->v.effects & ~EF_MUZZLEFLASH;
 	}
@@ -1003,11 +1001,11 @@ void SV_UpdateToReliableMessages (void)
 	client_t *client;
 
 	// check for changes to be sent over the reliable streams
-	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 	{
 		if (host_client->old_frags != host_client->edict->v.frags)
 		{
-			for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
+			for (j=0, client = svs.clients; j<svs.maxclients; j++, client++)
 			{
 				if (!client->active)
 					continue;
@@ -1020,7 +1018,7 @@ void SV_UpdateToReliableMessages (void)
 		}
 	}
 
-	for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
+	for (j=0, client = svs.clients; j<svs.maxclients; j++, client++)
 	{
 		if (!client->active)
 			continue;
@@ -1068,7 +1066,7 @@ void SV_SendClientMessages (void)
 	SV_UpdateToReliableMessages ();
 
 	// build individual updates
-	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 	{
 		if (!host_client->active)
 			continue;
@@ -1298,7 +1296,7 @@ void SV_SaveSpawnparms (void)
 
 	svs.serverflags = SVProgs->GlobalStruct->serverflags;
 
-	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 	{
 		if (!host_client->active)
 			continue;
@@ -1306,7 +1304,7 @@ void SV_SaveSpawnparms (void)
 	// call the progs to get default spawn parms for the new client
 		SVProgs->GlobalStruct->self = EDICT_TO_PROG(host_client->edict);
 		SVProgs->ExecuteProgram (SVProgs->GlobalStruct->SetChangeParms);
-		for (j=0 ; j<NUM_SPAWN_PARMS ; j++)
+		for (j=0; j<NUM_SPAWN_PARMS; j++)
 			host_client->spawn_parms[j] = (&SVProgs->GlobalStruct->parm1)[j];
 	}
 }

@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // r_misc.c
 
@@ -27,266 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 
 extern HWND d3d_Window;
-
-
-/*
-============================================================================================================
-
-		VBOs
-
-============================================================================================================
-*/
-
-#define MAX_BUFFER_SIZE		65534
-
-static LPDIRECT3DVERTEXBUFFER9 d3d_VBO = NULL;
-static LPDIRECT3DINDEXBUFFER9 d3d_IBO = NULL;
-
-void D3D_VBOCreateOnDemand (void)
-{
-	if (!d3d_VBO)
-	{
-		// we don't anticipate ever having more than 64 bytes per vert, but we could increase it if we ever do
-		hr = d3d_Device->CreateVertexBuffer
-		(
-			64 * MAX_BUFFER_SIZE,
-			D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-			0,
-			D3DPOOL_DEFAULT,
-			&d3d_VBO,
-			NULL
-		);
-
-		if (FAILED (hr))
-		{
-			Sys_Error ("D3D_VBOCreateOnDemand: failed to create a vertex buffer");
-			return;
-		}
-	}
-
-	if (!d3d_IBO)
-	{
-		hr = d3d_Device->CreateIndexBuffer
-		(
-			sizeof (unsigned short) * MAX_BUFFER_SIZE,
-			D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-			D3DFMT_INDEX16,
-			D3DPOOL_DEFAULT,
-			&d3d_IBO,
-			NULL
-		);
-
-		if (FAILED (hr))
-		{
-			Sys_Error ("D3D_VBOCreateOnDemand: failed to create an index buffer");
-			return;
-		}
-	}
-}
-
-
-bool bufferslocked = false;
-
-typedef struct d3d_vbotexturedef_s
-{
-	DWORD colorop;
-	DWORD colorarg1;
-	DWORD colorarg2;
-
-	DWORD alphaop;
-	DWORD alphaarg1;
-	DWORD alphaarg2;
-
-	LPDIRECT3DTEXTURE9 tex;
-} d3d_vbotexturedef_t;
-
-typedef struct d3d_vbomark_s
-{
-	d3d_vbotexturedef_t TextureDefs[3];
-
-	int firstvertex;
-	int numvertexes;
-
-	int firstindex;
-	int numindexes;
-} d3d_vbomark_t;
-
-// marcher hits ~100
-#define MAX_VBO_MARKS	256
-
-d3d_vbomark_t d3d_VBOMarks[MAX_VBO_MARKS];
-d3d_vbomark_t *d3d_CurrentVBOMark = NULL;
-
-int d3d_NumVBOMarks;
-int d3d_VBOPolySize;
-int d3d_VBOTotalVertexes;
-int d3d_VBOTotalIndexes;
-
-
-void D3D_BeginVertexes (void **vertexes, void **indexes, int polysize)
-{
-	d3d_VBOPolySize = polysize;
-
-	D3D_VBOCreateOnDemand ();
-	d3d_VBO->Lock (0, 0, vertexes, D3DLOCK_DISCARD);
-	d3d_IBO->Lock (0, 0, indexes, D3DLOCK_DISCARD);
-
-	bufferslocked = true;
-
-	d3d_CurrentVBOMark = &d3d_VBOMarks[0];
-	memset (d3d_CurrentVBOMark, 0, sizeof (d3d_vbomark_t));
-
-	d3d_CurrentVBOMark->numindexes = d3d_CurrentVBOMark->numvertexes = 0;
-	d3d_CurrentVBOMark->firstindex = d3d_CurrentVBOMark->firstvertex = 0;
-
-	d3d_VBOTotalIndexes = d3d_VBOTotalVertexes = 0;
-
-	d3d_NumVBOMarks = 1;
-}
-
-
-void D3D_EndVertexes (void)
-{
-	if (bufferslocked)
-	{
-		d3d_VBO->Unlock ();
-		d3d_IBO->Unlock ();
-
-		bufferslocked = false;
-	}
-
-	if (d3d_NumVBOMarks)
-	{
-		d3d_RenderDef.numsss++;
-		d3d_Device->SetStreamSource (0, d3d_VBO, 0, d3d_VBOPolySize);
-		d3d_Device->SetIndices (d3d_IBO);
-
-		for (int i = 0; i < d3d_NumVBOMarks; i++)
-		{
-			d3d_CurrentVBOMark = &d3d_VBOMarks[i];
-
-			// the current mark contains no verts or indexes...!
-			if (!d3d_CurrentVBOMark->numindexes || !d3d_CurrentVBOMark->numvertexes) continue;
-
-			d3d_vbotexturedef_t *TextureDef = d3d_CurrentVBOMark->TextureDefs;
-
-			for (int t = 0; t < 3; t++, TextureDef++)
-			{
-				D3D_SetTextureColorMode (t, TextureDef->colorop, TextureDef->colorarg1, TextureDef->colorarg2);
-				D3D_SetTextureAlphaMode (t, TextureDef->alphaop, TextureDef->alphaarg1, TextureDef->alphaarg2);
-				D3D_SetTexture (t, TextureDef->tex);
-			}
-
-			d3d_Device->DrawIndexedPrimitive (D3DPT_TRIANGLELIST, 0, d3d_CurrentVBOMark->firstvertex, d3d_CurrentVBOMark->numvertexes, d3d_CurrentVBOMark->firstindex, d3d_CurrentVBOMark->numindexes / 3);
-		}
-	}
-}
-
-
-void D3D_SetVBOColorMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
-{
-	d3d_CurrentVBOMark->TextureDefs[stage].colorop = mode;
-	d3d_CurrentVBOMark->TextureDefs[stage].colorarg1 = arg1;
-	d3d_CurrentVBOMark->TextureDefs[stage].colorarg2 = arg2;
-}
-
-
-void D3D_SetVBOAlphaMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
-{
-	d3d_CurrentVBOMark->TextureDefs[stage].alphaop = mode;
-	d3d_CurrentVBOMark->TextureDefs[stage].alphaarg1 = arg1;
-	d3d_CurrentVBOMark->TextureDefs[stage].alphaarg2 = arg2;
-}
-
-
-void D3D_SetVBOTexture (DWORD stage, LPDIRECT3DTEXTURE9 texture)
-{
-	d3d_CurrentVBOMark->TextureDefs[stage].tex = texture;
-}
-
-
-bool D3D_CheckVBO (int numverts, int numindexes)
-{
-	if (d3d_VBOTotalVertexes + numverts >= 65000 || d3d_VBOTotalIndexes + numindexes >= 65000 || d3d_NumVBOMarks >= MAX_VBO_MARKS)
-		return false;
-	else return true;
-}
-
-
-void D3D_GotoNewVBOMark (void)
-{
-	d3d_vbomark_t *d3d_PreviousVBOMark = d3d_CurrentVBOMark;
-
-	d3d_CurrentVBOMark = &d3d_VBOMarks[d3d_NumVBOMarks];
-	memset (d3d_CurrentVBOMark, 0, sizeof (d3d_vbomark_t));
-
-	d3d_CurrentVBOMark->numindexes = 0;
-	d3d_CurrentVBOMark->numvertexes = 0;
-
-	d3d_CurrentVBOMark->firstindex = d3d_PreviousVBOMark->firstindex + d3d_PreviousVBOMark->numindexes;
-	d3d_CurrentVBOMark->firstvertex = d3d_PreviousVBOMark->firstvertex + d3d_PreviousVBOMark->numvertexes;
-
-	d3d_NumVBOMarks++;
-}
-
-
-void D3D_UpdateVBOMark (int numverts, int numindexes)
-{
-	d3d_CurrentVBOMark->numvertexes += numverts;
-	d3d_CurrentVBOMark->numindexes += numindexes;
-
-	d3d_VBOTotalVertexes += numverts;
-	d3d_VBOTotalIndexes += numindexes;
-}
-
-
-void D3D_GetVertexBufferSpace (void **data)
-{
-	// create on demand
-	D3D_VBOCreateOnDemand ();
-	d3d_VBO->Lock (0, 0, data, D3DLOCK_DISCARD);
-}
-
-
-void D3D_GetIndexBufferSpace (void **data)
-{
-	// create on demand
-	D3D_VBOCreateOnDemand ();
-	d3d_IBO->Lock (0, 0, data, D3DLOCK_DISCARD);
-}
-
-
-void D3D_SubmitVertexes (int numverts, int numindexes, int polysize)
-{
-	// always unlock!
-	d3d_VBO->Unlock ();
-	d3d_IBO->Unlock ();
-
-	if (numverts || numindexes)
-	{
-		d3d_RenderDef.numsss++;
-		d3d_Device->SetStreamSource (0, d3d_VBO, 0, polysize);
-		d3d_Device->SetIndices (d3d_IBO);
-
-		d3d_Device->DrawIndexedPrimitive (D3DPT_TRIANGLELIST, 0, 0, numverts, 0, (numindexes / 3));
-	}
-}
-
-
-BOOL D3D_AreBuffersFull (int numverts, int numindexes)
-{
-	if (numverts >= 65534) return TRUE;
-	if (numindexes >= 65536) return TRUE;
-
-	return FALSE;
-}
-
-
-void D3D_ReleaseBuffers (void)
-{
-	SAFE_RELEASE (d3d_VBO);
-	SAFE_RELEASE (d3d_IBO);
-}
 
 
 /*
@@ -304,8 +41,8 @@ void D3D_TranslateMatrix (D3DMATRIX *matrix, float x, float y, float z)
 	D3DXMATRIX *m = D3D_MakeD3DXMatrix (matrix);
 	D3DXMATRIX tmp;
 
-	D3DXMatrixTranslation (&tmp, x, y, z);
-	D3DXMatrixMultiply (m, &tmp, m);
+	QD3DXMatrixTranslation (&tmp, x, y, z);
+	QD3DXMatrixMultiply (m, &tmp, m);
 }
 
 
@@ -314,8 +51,8 @@ void D3D_ScaleMatrix (D3DMATRIX *matrix, float x, float y, float z)
 	D3DXMATRIX *m = D3D_MakeD3DXMatrix (matrix);
 	D3DXMATRIX tmp;
 
-	D3DXMatrixScaling (&tmp, x, y, z);
-	D3DXMatrixMultiply (m, &tmp, m);
+	QD3DXMatrixScaling (&tmp, x, y, z);
+	QD3DXMatrixMultiply (m, &tmp, m);
 }
 
 
@@ -326,20 +63,20 @@ void D3D_RotateMatrix (D3DMATRIX *matrix, float x, float y, float z, float angle
 
 	if (x)
 	{
-		D3DXMatrixRotationX (&tmp, D3DXToRadian (angle) * x);
-		D3DXMatrixMultiply (m, &tmp, m);
+		QD3DXMatrixRotationX (&tmp, D3DXToRadian (angle) * x);
+		QD3DXMatrixMultiply (m, &tmp, m);
 	}
 
 	if (y)
 	{
-		D3DXMatrixRotationY (&tmp, D3DXToRadian (angle) * y);
-		D3DXMatrixMultiply (m, &tmp, m);
+		QD3DXMatrixRotationY (&tmp, D3DXToRadian (angle) * y);
+		QD3DXMatrixMultiply (m, &tmp, m);
 	}
 
 	if (z)
 	{
-		D3DXMatrixRotationZ (&tmp, D3DXToRadian (angle) * z);
-		D3DXMatrixMultiply (m, &tmp, m);
+		QD3DXMatrixRotationZ (&tmp, D3DXToRadian (angle) * z);
+		QD3DXMatrixMultiply (m, &tmp, m);
 	}
 }
 
@@ -356,7 +93,7 @@ void D3D_MultMatrix (D3DMATRIX *matrix1, D3DMATRIX *matrix2)
 	D3DXMATRIX *m1 = D3D_MakeD3DXMatrix (matrix1);
 	D3DXMATRIX *m2 = D3D_MakeD3DXMatrix (matrix1);
 
-	D3DXMatrixMultiply (m1, m1, m2);
+	QD3DXMatrixMultiply (m1, m1, m2);
 }
 
 
@@ -390,12 +127,31 @@ char *vs_version;
 char *ps_version;
 
 // effects
-LPD3DXEFFECT d3d_LiquidFX;
-LPD3DXEFFECT d3d_SkyFX;
+LPD3DXEFFECT d3d_LiquidFX = NULL;
+LPD3DXEFFECT d3d_SkyFX = NULL;
+LPD3DXEFFECT d3d_UnderwaterFX = NULL;
 
 // vertex declarations
 LPDIRECT3DVERTEXDECLARATION9 d3d_LiquidDeclaration = NULL;
 LPDIRECT3DVERTEXDECLARATION9 d3d_SkyDeclaration = NULL;
+LPDIRECT3DVERTEXDECLARATION9 d3d_UnderwaterDeclaration = NULL;
+
+void D3D_UpgradeShader (char *EffectString, char *old)
+{
+	for (int i = 0;; i++)
+	{
+		if (!EffectString[i]) return;
+
+		if (!strnicmp (&EffectString[i], old, 8))
+		{
+			EffectString[i + 4] = '3';
+			return;
+		}
+	}
+
+	// never reached
+}
+
 
 bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff, int vsver, int psver)
 {
@@ -406,34 +162,30 @@ bool D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff, int vsver, i
 	// from a text file in Visual Studio doesn't NULL terminate the file, causing it to blow up.
 	int len = Sys_LoadResourceData (resourceid, (void **) &EffectString);
 
-	if (vsver >= 3 && psver >= 3)
-	{
-		for (int i = 0; ; i++)
-		{
-			if (!EffectString[i]) break;
+	// allow a higher vs level in case we have software emulated vs
+	if (vsver >= 3) D3D_UpgradeShader (EffectString, " vs_2_0 ");
+	if (psver >= 3) D3D_UpgradeShader (EffectString, " ps_2_0 ");
 
-			if (!strnicmp (&EffectString[i], " vs_2_0 ", 8))
-			{
-				EffectString[i + 4] = '3';
-				continue;
-			}
+	// basline flags
+	DWORD ShaderFlags = D3DXSHADER_SKIPVALIDATION | D3DXFX_DONOTSAVESTATE;
 
-			if (!strnicmp (&EffectString[i], " ps_2_0 ", 8))
-			{
-				EffectString[i + 4] = '3';
-				continue;
-			}
-		}
-	}
+	// add extra flags if they're available
+#ifdef D3DXFX_NOT_CLONEABLE
+	ShaderFlags |= D3DXFX_NOT_CLONEABLE;
+#endif
 
-	hr = D3DXCreateEffect
+#ifdef D3DXSHADER_OPTIMIZATION_LEVEL3
+	ShaderFlags |= D3DXSHADER_OPTIMIZATION_LEVEL3;
+#endif
+
+	hr = QD3DXCreateEffect
 	(
 		d3d_Device,
 		EffectString,
 		len,
 		NULL,
 		NULL,
-		D3DXSHADER_SKIPVALIDATION | D3DXFX_DONOTSAVESTATE,
+		ShaderFlags,
 		NULL,
 		eff,
 		&errbuf
@@ -473,9 +225,18 @@ void D3D_InitHLSL (void)
 
 	d3d_Device->CreateVertexDeclaration (vdsky, &d3d_SkyDeclaration);
 
+	D3DVERTEXELEMENT9 vdunderwater[] =
+	{
+		{0, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITIONT, 0},
+		{0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+		{0xff, 0, D3DDECLTYPE_UNUSED, 0, 0, 0}
+	};
+
+	d3d_Device->CreateVertexDeclaration (vdunderwater, &d3d_UnderwaterDeclaration);
+
 	// now set up effects
-	vs_version = (char *) D3DXGetVertexShaderProfile (d3d_Device);
-	ps_version = (char *) D3DXGetPixelShaderProfile (d3d_Device);
+	vs_version = (char *) QD3DXGetVertexShaderProfile (d3d_Device);
+	ps_version = (char *) QD3DXGetPixelShaderProfile (d3d_Device);
 	d3d_GlobalCaps.supportPixelShaders = false;
 
 	if (!SilentLoad) Con_Printf ("\n");
@@ -508,7 +269,7 @@ void D3D_InitHLSL (void)
 	int vsvermaj = D3DSHADER_VERSION_MAJOR (d3d_DeviceCaps.VertexShaderVersion);
 	int psvermaj = D3DSHADER_VERSION_MAJOR (d3d_DeviceCaps.PixelShaderVersion);
 
-	if (vsvermaj < 2 || psvermaj < 2)
+	if (vsvermaj < 2 || psvermaj < 2 || vsvermaj < psvermaj)
 	{
 		Con_Printf ("Vertex or Pixel Shaders version is too low.\n");
 		return;
@@ -517,6 +278,7 @@ void D3D_InitHLSL (void)
 	// load effects - if we get this far we know that pixel shaders are available
 	if (!D3D_LoadEffect ("Liquid Shader", IDR_LIQUID, &d3d_LiquidFX, vsvermaj, psvermaj)) return;
 	if (!D3D_LoadEffect ("Sky Shader", IDR_SKY, &d3d_SkyFX, vsvermaj, psvermaj)) return;
+	if (!D3D_LoadEffect ("Screen Shader", IDR_SCREEN, &d3d_UnderwaterFX, vsvermaj, psvermaj)) return;
 
 	if (!SilentLoad) Con_Printf ("Created Shaders OK\n");
 
@@ -531,6 +293,7 @@ void D3D_ShutdownHLSL (void)
 	// effects
 	SAFE_RELEASE (d3d_LiquidFX);
 	SAFE_RELEASE (d3d_SkyFX);
+	SAFE_RELEASE (d3d_UnderwaterFX);
 
 	// declarations
 	SAFE_RELEASE (d3d_LiquidDeclaration);
@@ -769,7 +532,7 @@ void D3D_AlphaListStageChange (int oldtype, int newtype)
 }
 
 
-void D3D_SortAlphaList (void)
+void D3D_RenderAlphaList (void)
 {
 	// nothing to add
 	if (!d3d_NumAlphaList) return;
@@ -1015,6 +778,10 @@ R_Init
 */
 cvar_t r_lerporient ("r_lerporient", "1", CVAR_ARCHIVE);
 cvar_t r_lerpframe ("r_lerpframe", "1", CVAR_ARCHIVE);
+
+// allow the old QER names as aliases
+cvar_alias_t r_interpolate_model_animation ("r_interpolate_model_animation", &r_lerpframe);
+cvar_alias_t r_interpolate_model_transform ("r_interpolate_model_transform", &r_lerporient);
 
 // these cvars do nothing for now; they only exist to soak up abuse from nehahra maps which expect them to be there
 cvar_t r_oldsky ("r_oldsky", "1", CVAR_NEHAHRA);
@@ -1351,6 +1118,10 @@ void R_RevalidateSkybox (void);
 
 void R_NewMap (void)
 {
+	// we're going to be creating some default pool resources here, so
+	// evict the managed resources to get the default stuff into best locations
+	d3d_Device->EvictManagedResources ();
+
 	// init frame counters
 	d3d_RenderDef.skyframe = -1;
 	d3d_RenderDef.framecount = 1;

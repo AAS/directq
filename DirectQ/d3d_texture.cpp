@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -40,7 +37,7 @@ CSpaceBuffer *Pool_Textures = NULL;
 image_t *d3d_Textures = NULL;
 int d3d_NumTextures = 0;
 
-void D3D_KillUnderwaterTexture (void);
+void D3D_Kill3DSceneTexture (void);
 
 // other textures we use
 extern LPDIRECT3DTEXTURE9 char_texture;
@@ -145,7 +142,7 @@ D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
 {
 	// wrap this monster so that we can more easily modify it if required
-	hr = D3DXCreateTextureFromFileInMemoryEx
+	hr = QD3DXCreateTextureFromFileInMemoryEx
 	(
 		d3d_Device,
 		data,
@@ -301,7 +298,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 	else
 	{
 		// sigh - more path seperator consistency here
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!texname[i]) break;
 			if (texname[i] == '/') texname[i] = '\\';
@@ -366,7 +363,7 @@ retry_nonstd:;
 			mdlstring += 4;
 
 			// remove the ".ext" part
-			for (int i = 0; ; i++)
+			for (int i = 0;; i++)
 			{
 				// replace
 				texname[i + extpos] = mdlstring[i];
@@ -437,7 +434,7 @@ ext_tex_load:;
 		{
 			if (texname[c] == '/' || texname[c] == '\\')
 			{
-				for (int cc = 0; ; cc++)
+				for (int cc = 0;; cc++)
 				{
 					char fc = COM_FReadChar (fh);
 
@@ -460,7 +457,7 @@ ext_tex_load:;
 		// now go round again to load it for real
 		goto ext_tex_load;
 #else
-		for (int cc = 0; ; cc++)
+		for (int cc = 0;; cc++)
 		{
 			char fc = COM_FReadChar (fh);
 
@@ -520,7 +517,7 @@ ext_tex_load:;
 
 void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags)
 {
-	hr = D3DXCreateTextureFromResourceExA
+	hr = QD3DXCreateTextureFromResourceExA
 	(
 		d3d_Device,
 		NULL,
@@ -550,17 +547,39 @@ void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags
 }
 
 
+bool d3d_ImagePadded = false;
+
 void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int height, int flags)
 {
 	// scaled image
 	image_t scaled;
+	byte *padbytes = NULL;
 
 	// explicit NULL
 	texture[0] = NULL;
 
-	// check scaling here first
-	scaled.width = D3D_PowerOf2Size (width);
-	scaled.height = D3D_PowerOf2Size (height);
+	// determine the scaling mode
+	if (!(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) && !(d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_POW2))
+	{
+		// allow unconditional np2 textures
+		scaled.width = width;
+		scaled.height = height;
+	}
+	else if ((d3d_DeviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) && !(flags & IMAGE_MIPMAP))
+	{
+		// conditional np2 textures
+		scaled.width = width;
+		scaled.height = height;
+
+		// conditional np2 doesn't allow compression
+		flags |= IMAGE_NOCOMPRESS;
+	}
+	else
+	{
+		// check scaling here first
+		scaled.width = D3D_PowerOf2Size (width);
+		scaled.height = D3D_PowerOf2Size (height);
+	}
 
 	// clamp to max texture size
 	if (scaled.width > d3d_DeviceCaps.MaxTextureWidth) scaled.width = d3d_DeviceCaps.MaxTextureWidth;
@@ -568,8 +587,7 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 
 	// d3d specifies that compressed formats should be a multiple of 4
 	// would you believe marcher has a 1x1 texture in it?
-	// because we're doing powers of 2, every power of 2 above 4 is going to be a multiple of 4 also
-	if ((scaled.width < 4) || (scaled.height < 4)) flags |= IMAGE_NOCOMPRESS;
+	if ((scaled.width & 3) || (scaled.height & 3)) flags |= IMAGE_NOCOMPRESS;
 
 	// create the texture at the scaled size
 	hr = d3d_Device->CreateTexture
@@ -600,19 +618,53 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	SrcRect.right = width;
 
 	DWORD FilterFlags = 0;
+	d3d_ImagePadded = false;
 
 	if (scaled.width == width && scaled.height == height)
 	{
 		// no need
 		FilterFlags |= D3DX_FILTER_NONE;
 	}
+	else if ((flags & IMAGE_PADDABLE) && !(flags & IMAGE_32BIT))
+	{
+		// create a buffer for padding
+		padbytes = (byte *) Zone_Alloc (scaled.width * scaled.height);
+		byte *dst = padbytes;
+		byte *src = (byte *) data;
+
+		for (int y = 0; y < height; y++, dst += scaled.width, src += width)
+			for (int x = 0; x < width; x++) dst[x] = src[x];
+
+		d3d_ImagePadded = true;
+	}
+	else if ((flags & IMAGE_PADDABLE) && (flags & IMAGE_32BIT))
+	{
+		// create a buffer for padding
+		padbytes = (byte *) Zone_Alloc (scaled.width * scaled.height * 4);
+		unsigned int *dst = (unsigned int *) padbytes;
+		unsigned int *src = (unsigned int *) data;
+
+		for (int y = 0; y < height; y++, dst += scaled.width, src += width)
+			for (int x = 0; x < width; x++) dst[x] = src[x];
+
+		d3d_ImagePadded = true;
+	}
 	else
 	{
-		// higher quality filters blur and fade excessively
-		FilterFlags |= D3DX_FILTER_LINEAR;
+		FilterFlags |= D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER;
 
 		// it's generally assumed that mipmapped textures should also wrap
 		if (flags & IMAGE_MIPMAP) FilterFlags |= (D3DX_FILTER_MIRROR_U | D3DX_FILTER_MIRROR_V);
+	}
+
+	if (d3d_ImagePadded)
+	{
+		// no filter needed now
+		FilterFlags |= D3DX_FILTER_NONE;
+
+		// the source data has changed so change these too
+		width = scaled.width;
+		height = scaled.height;
 	}
 
 	if (!texturepal)
@@ -637,12 +689,12 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 //	if (flags & IMAGE_HALFLIFE) activepal = (PALETTEENTRY *) palette;
 	if (flags & IMAGE_LUMA) activepal = lumapal;
 
-	hr = D3DXLoadSurfaceFromMemory
+	hr = QD3DXLoadSurfaceFromMemory
 	(
 		texsurf,
 		NULL,
 		NULL,
-		data,
+		padbytes ? padbytes : data,
 		(flags & IMAGE_32BIT) ? D3DFMT_A8R8G8B8 : D3DFMT_P8,
 		(flags & IMAGE_32BIT) ? width * 4 : width,
 		(flags & IMAGE_32BIT) ? NULL : activepal,
@@ -653,14 +705,17 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 
 	if (FAILED (hr))
 	{
-		Sys_Error ("D3D_UploadTexture: D3DXLoadSurfaceFromMemory failed");
+		Sys_Error ("D3D_UploadTexture: QD3DXLoadSurfaceFromMemory failed");
 		return;
 	}
 
 	texsurf->Release ();
 
+	// if we padded the image we need to hand back the memory used now
+	if (padbytes) Zone_Free (padbytes);
+
 	// good old box filter - triangle is way too slow, linear doesn't work well for mipmapping
-	if (flags & IMAGE_MIPMAP) D3DXFilterTexture (texture[0], NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
+	if (flags & IMAGE_MIPMAP) QD3DXFilterTexture (texture[0], NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
 
 	// tell Direct 3D that we're going to be needing to use this managed resource shortly
 	texture[0]->PreLoad ();
@@ -725,7 +780,7 @@ bool D3D_MakeLumaTexture (LPDIRECT3DTEXTURE9 tex)
 
 	// unlock and rebuild the mipmap chain
 	tex->UnlockRect (0);
-	D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
+	QD3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
 	tex->AddDirtyRect (NULL);
 
 	return isrealluma;
@@ -920,6 +975,9 @@ image_t *D3D_LoadTexture (char *identifier, int width, int height, byte *data, i
 		}
 	}
 
+	// notify that we padded the image
+	if (d3d_ImagePadded) tex->flags |= IMAGE_PADDED;
+
 	// return the texture we got
 	return tex;
 }
@@ -984,12 +1042,12 @@ void D3D_ReleaseTextures (void)
 
 	// VBOs
 	// VBOs aren't textures but - hey! - what's mutual incompatibility when we're such fantastic friends?
-	D3D_ReleaseBuffers ();
+	D3D_VBOReleaseBuffers ();
 
 	// standard lightmaps
 	SAFE_DELETE (d3d_Lightmaps);
 
-	D3D_KillUnderwaterTexture ();
+	D3D_Kill3DSceneTexture ();
 
 	// resource textures
 	R_ReleaseResourceTextures ();
@@ -1157,7 +1215,7 @@ void D3D_RescaleIndividualLuma (LPDIRECT3DTEXTURE9 tex)
 
 	// unlock and rebuild the mipmap chain
 	tex->UnlockRect (0);
-	D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
+	QD3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
 	tex->AddDirtyRect (NULL);
 }
 

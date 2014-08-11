@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // gl_warp.c -- sky and water polygons
 
@@ -25,12 +22,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_model.h"
 #include "d3d_quake.h"
 
-extern cvar_t r_maxvertexsubmission;
-
 extern	model_t	*loadmodel;
 
-LPDIRECT3DTEXTURE9 underwatertexture = NULL;
-LPDIRECT3DSURFACE9 underwatersurface = NULL;
+LPDIRECT3DTEXTURE9 d3d_3DSceneTexture = NULL;
+LPDIRECT3DSURFACE9 d3d_3DSceneSurface = NULL;
+LPD3DXRENDERTOSURFACE d3d_RenderToSurface = NULL;
 LPDIRECT3DTEXTURE9 simpleskytexture = NULL;
 LPDIRECT3DTEXTURE9 solidskytexture = NULL;
 LPDIRECT3DTEXTURE9 alphaskytexture = NULL;
@@ -43,13 +39,6 @@ bool SkyboxValid = false;
 void D3D_AddSurfaceVertToRender (polyvert_t *vert, D3DMATRIX *m = NULL);
 
 
-typedef struct warpverts_s
-{
-	float v[3];
-	float st[2];
-} warpverts_t;
-
-
 /*
 ==============================================================================================================================
 
@@ -58,9 +47,9 @@ typedef struct warpverts_s
 ==============================================================================================================================
 */
 
-bool UnderwaterValid = false;
+bool SceneTextureValid = false;
 cvar_t r_waterwarp ("r_waterwarp", 1, CVAR_ARCHIVE);
-bool d3d_UpdateWarp = false;
+bool d3d_Update3DScene = false;
 
 typedef struct uwvert_s
 {
@@ -78,13 +67,13 @@ typedef struct uwbackup_s
 uwvert_t *underwaterverts = NULL;
 uwbackup_t *underwaterbackup = NULL;
 
-float CompressST (float in)
+float CompressST (float in, float tess)
 {
 	// compress the texture slightly so that the edges of the screen look right
 	float out = in;
 
 	// 0 to 1
-	out /= 32.0f;
+	out /= tess;
 
 	// 1 to 99
 	out *= 98.0f;
@@ -94,27 +83,29 @@ float CompressST (float in)
 	out /= 100.0f;
 
 	// back to 0 to 32 scale
-	out *= 32.0f;
+	out *= tess;
 
 	return out;
 }
 
 
-void D3D_InitUnderwaterTexture (void)
+void D3D_Kill3DSceneTexture (void)
 {
-	// alloc underwater verts one time only
-	// store 2 extra s/t so we can cache the original values for updates
-	if (!underwaterverts) underwaterverts = (uwvert_t *) Pool_Permanent->Alloc (2112 * sizeof (uwvert_t));
-	if (!underwaterbackup) underwaterbackup = (uwbackup_t *) Pool_Permanent->Alloc (2112 * sizeof (uwbackup_t));
+	// just release it
+	SAFE_RELEASE (d3d_3DSceneSurface);
+	SAFE_RELEASE (d3d_3DSceneTexture);
+	SAFE_RELEASE (d3d_RenderToSurface);
+}
 
-	// ensure that it's gone before creating
-	SAFE_RELEASE (underwatersurface);
-	SAFE_RELEASE (underwatertexture);
+
+void D3D_Init3DSceneTexture (void)
+{
+	// ensure that it's all gone before creating
+	D3D_Kill3DSceneTexture ();
 
 	// assume that it's invalid until we prove otherwise
-	UnderwaterValid = false;
+	SceneTextureValid = false;
 
-	// create the update texture as a rendertarget at half screen resolution
 	// rendertargets seem to relax power of 2 requirements, best of luck finding THAT in the documentation
 	hr = d3d_Device->CreateTexture
 	(
@@ -124,17 +115,57 @@ void D3D_InitUnderwaterTexture (void)
 		D3DUSAGE_RENDERTARGET,
 		d3d_GlobalCaps.supportXRGB ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8,
 		D3DPOOL_DEFAULT,
-		&underwatertexture,
+		&d3d_3DSceneTexture,
 		NULL
 	);
 
 	// couldn't create it so don't do underwater updates
-	if (FAILED (hr)) return;
+	if (FAILED (hr))
+	{
+		// destroy anything that was created
+		D3D_Kill3DSceneTexture ();
+		return;
+	}
+
+	hr = QD3DXCreateRenderToSurface
+	(
+		d3d_Device,
+		d3d_CurrentMode.Width,
+		d3d_CurrentMode.Height,
+		d3d_CurrentMode.Format,
+		TRUE,
+		d3d_GlobalCaps.DepthStencilFormat,
+		&d3d_RenderToSurface
+	);
+
+	// couldn't create it so don't do underwater updates
+	if (FAILED (hr))
+	{
+		// destroy anything that was created
+		D3D_Kill3DSceneTexture ();
+		return;
+	}
+
+	// get the surface that we're going to render to
+	hr = d3d_3DSceneTexture->GetSurfaceLevel (0, &d3d_3DSceneSurface);
+
+	// couldn't create it so don't do underwater updates
+	if (FAILED (hr))
+	{
+		// destroy anything that was created
+		D3D_Kill3DSceneTexture ();
+		return;
+	}
 
 	// we're good now
-	UnderwaterValid = true;
+	SceneTextureValid = true;
 
-	// tesselation for warps
+	// alloc underwater verts one time only
+	// store 2 extra s/t so we can cache the original values for updates
+	if (!underwaterverts) underwaterverts = (uwvert_t *) Pool_Permanent->Alloc (2112 * sizeof (uwvert_t));
+	if (!underwaterbackup) underwaterbackup = (uwbackup_t *) Pool_Permanent->Alloc (2112 * sizeof (uwbackup_t));
+
+	// tesselation for underwater warps
 	uwvert_t *wv = underwaterverts;
 	uwbackup_t *wb = underwaterbackup;
 
@@ -149,8 +180,8 @@ void D3D_InitUnderwaterTexture (void)
 			wv->x = x;
 			wv->y = y;
 			wv->z = 0;
-			wv->s = CompressST (s);
-			wv->t = CompressST (t);
+			wv->s = CompressST (s, 32);
+			wv->t = CompressST (t, 32);
 			wb->s = wv->s;
 			wb->t = wv->t;
 			wv++;
@@ -159,8 +190,8 @@ void D3D_InitUnderwaterTexture (void)
 			wv->x = (x + tessw);
 			wv->y = y;
 			wv->z = 0;
-			wv->s = CompressST (s + 1);
-			wv->t = CompressST (t);
+			wv->s = CompressST (s + 1, 32);
+			wv->t = CompressST (t, 32);
 			wb->s = wv->s;
 			wb->t = wv->t;
 			wv++;
@@ -170,104 +201,80 @@ void D3D_InitUnderwaterTexture (void)
 }
 
 
-void D3D_KillUnderwaterTexture (void)
-{
-	// just release it
-	SAFE_RELEASE (underwatersurface);
-	SAFE_RELEASE (underwatertexture);
-}
-
-
-void D3D_BeginUnderwaterWarp (void)
+bool IsUnderwater (void)
 {
 	extern cshift_t cshift_empty;
 
-	// couldn't create the underwater texture or we don't want to warp
-	if (!UnderwaterValid || (r_waterwarp.integer != 1)) return;
-
-	// no viewleaf yet
-	if (!d3d_RenderDef.viewleaf) return;
+	if (!r_waterwarp.integer) return false;
 
 	// no warps present on these leafs
 	if ((d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY ||
 		d3d_RenderDef.viewleaf->contents == CONTENTS_SKY ||
 		d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID) &&
-		!cl.inwater) return;
+		!cl.inwater) return false;
 
 	// additional check for noclipping
-	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY && cshift_empty.percent == 0) return;
+	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY && cshift_empty.percent == 0) return false;
 
 	// skip the first few frames because we get invalid viewleaf contents in them
-	if (d3d_RenderDef.framecount < 3) return;
+	if (d3d_RenderDef.framecount < 3) return false;
 
-	extern LPDIRECT3DSURFACE9 d3d_BackBuffer;
-
-	// store out the backbuffer
-	hr = d3d_Device->GetRenderTarget (0, &d3d_BackBuffer);
-
-	if (FAILED (hr)) return;
-
-	// get the surface to render to
-	// (note - it *might* seem more efficient to keep this open all the time, but it's a HORRENDOUS slowdown,
-	// even when we're not rendering any underwater surfs...)
-	hr = underwatertexture->GetSurfaceLevel (0, &underwatersurface);
-
-	if (FAILED (hr))
-	{
-		SAFE_RELEASE (d3d_BackBuffer);
-		return;
-	}
-
-	// set the underwater surface as the rendertarget
-	hr = d3d_Device->SetRenderTarget (0, underwatersurface);
-
-	if (FAILED (hr))
-	{
-		SAFE_RELEASE (d3d_BackBuffer);
-		return;
-	}
-
-	// flag that we need to draw the warp update
-	d3d_UpdateWarp = true;
+	// we're underwater now
+	return true;
 }
 
 
-void D3D_EndUnderwaterWarp (void)
+bool d3d_IsUnderwater = false;
+
+bool D3D_Begin3DScene (void)
+{
+	// couldn't create the underwater texture or we don't want to warp
+	if (!SceneTextureValid) return false;
+
+	// no viewleaf yet
+	if (!d3d_RenderDef.viewleaf) return false;
+
+	d3d_IsUnderwater = IsUnderwater ();
+
+	// no post-processing needed
+	if (!v_blend[3] && d3d_GlobalCaps.usingPixelShaders) return false;
+	if (!d3d_IsUnderwater && !d3d_GlobalCaps.usingPixelShaders) return false;
+
+	// begin the render to texture scene
+	if (FAILED (hr = d3d_RenderToSurface->BeginScene (d3d_3DSceneSurface, NULL))) return false;
+
+	// flag that we need to draw the warp update
+	d3d_Update3DScene = true;
+
+	// we're rendering to texture now
+	return true;
+}
+
+
+void D3D_End3DScene (void)
 {
 	// no warps
-	if (!d3d_UpdateWarp) return;
+	if (!d3d_Update3DScene) return;
 
-	SAFE_RELEASE (underwatersurface);
-
-	extern LPDIRECT3DSURFACE9 d3d_BackBuffer;
-
-	// restore backbuffer (we expect this to work because we had previously set a rendertarget successfully)
-	d3d_Device->SetRenderTarget (0, d3d_BackBuffer);
-
-	// destroy the surfaces
-	SAFE_RELEASE (d3d_BackBuffer);
+	d3d_RenderToSurface->EndScene (D3DX_FILTER_NONE);
+	d3d_Device->BeginScene ();
+	d3d_SceneBegun = true;
 }
 
 
 cvar_t r_waterwarptime ("r_waterwarptime", 2.0f, CVAR_ARCHIVE);
 cvar_t r_waterwarpscale ("r_waterwarpscale", 0.125f, CVAR_ARCHIVE);
 
-void D3D_DrawUnderwaterWarp (void)
+void D3D_Draw3DSceneToBackbuffer (void)
 {
 	// no warps
-	if (!d3d_UpdateWarp) return;
+	if (!d3d_Update3DScene) return;
 
 	// for the next frame
-	d3d_UpdateWarp = false;
+	d3d_Update3DScene = false;
 
-	// XYZRHW causes Z-fighting artefacts on alpha-blended overlay surfs, so send it through T&L
-	D3DXMATRIX m;
-	D3DXMatrixIdentity (&m);
-	d3d_Device->SetTransform (D3DTS_VIEW, &m);
-	d3d_Device->SetTransform (D3DTS_WORLD, &m);
-
-	D3DXMatrixOrthoOffCenterRH (&m, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
-	d3d_Device->SetTransform (D3DTS_PROJECTION, &m);
+	// update time for the underwater warp
+	float rdt = cl.time * r_waterwarptime.value * 0.5f;
 
 	// ensure
 	D3D_DisableAlphaBlend ();
@@ -282,12 +289,91 @@ void D3D_DrawUnderwaterWarp (void)
 	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
 	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
 
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+
+	// this is slow by comparison to the fixed pipeline, but we make up for it by getting the underwater blend for free
+	if (d3d_GlobalCaps.usingPixelShaders)
+	{
+		D3D_SetTextureMipmap (0, D3DTEXF_NONE, D3DTEXF_NONE, D3DTEXF_NONE);
+		D3D_SetTexCoordIndexes (0, 0, 0);
+
+		UINT numpasses;
+		float polyblend[4] = {1, 1, 1, 0};
+
+		// add in the polyblend (gets a fairly large perf boost here)
+		if (gl_polyblend.value && v_blend[3])
+		{
+			polyblend[0] = (float) v_blend[0] / 255.0f;
+			polyblend[1] = (float) v_blend[1] / 255.0f;
+			polyblend[2] = (float) v_blend[2] / 255.0f;
+			polyblend[3] = (float) v_blend[3] / 255.0f;
+		}
+
+		// default is a straight passthru with standard texture size
+		int passnum = 1;
+		int texturescale = 1;
+
+		// using a post-processing shader
+		hr = d3d_Device->SetVertexDeclaration (d3d_UnderwaterDeclaration);
+		hr = d3d_UnderwaterFX->SetTechnique ("ScreenUpdate");
+		hr = d3d_UnderwaterFX->Begin (&numpasses, D3DXFX_DONOTSAVESTATE);
+		hr = d3d_UnderwaterFX->SetTexture ("ScreenTexture", d3d_3DSceneTexture);
+
+		if (d3d_IsUnderwater)
+		{
+			passnum = 0;
+			texturescale = 32;
+
+			hr = d3d_UnderwaterFX->SetFloat ("warptime", rdt);
+			hr = d3d_UnderwaterFX->SetFloat ("warpscale", r_waterwarpscale.value);
+		}
+		else if (v_blend[3])
+			passnum = 2;
+
+		hr = d3d_UnderwaterFX->SetFloatArray ("polyblend", polyblend, 4);
+		hr = d3d_UnderwaterFX->BeginPass (passnum);
+
+		// easier vertex submission
+		float verts[6][6] =
+		{
+			{0, 0, 0, 1, 0, 0},
+			{d3d_CurrentMode.Width, 0, 0, 1, texturescale, 0},
+			{d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 1, texturescale, texturescale},
+			{0, 0, 0, 1, 0, 0},
+			{d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 1, texturescale, texturescale},
+			{0, d3d_CurrentMode.Height, 0, 1, 0, texturescale}
+		};
+
+		D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, 2, verts, sizeof (float) * 6);
+
+		d3d_UnderwaterFX->EndPass ();
+		d3d_UnderwaterFX->End ();
+
+		d3d_Device->SetVertexShader (NULL);
+		d3d_Device->SetPixelShader (NULL);
+
+		D3D_SetFVF (D3DFVF_XYZ | D3DFVF_XYZRHW);
+		D3D_SetTexture (0, NULL);
+
+		// disable regular polyblend
+		v_blend[3] = 0;
+
+		// done
+		return;
+	}
+
+	// XYZRHW causes Z-fighting artefacts on alpha-blended overlay surfs, so send it through T&L
+	D3DXMATRIX m;
+	D3DXMatrixIdentity (&m);
+	d3d_Device->SetTransform (D3DTS_VIEW, &m);
+	d3d_Device->SetTransform (D3DTS_WORLD, &m);
+
+	QD3DXMatrixOrthoOffCenterRH (&m, 0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
+	d3d_Device->SetTransform (D3DTS_PROJECTION, &m);
+
 	// T&L used - see above
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
-	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
-	D3D_SetTexture (0, underwatertexture);
-
-	float rdt = cl.time * r_waterwarptime.value * 0.5f;
+	D3D_SetTexture (0, d3d_3DSceneTexture);
 
 	for (int i = 0, v = 0; i < 32; i++, v += 66)
 	{
@@ -307,7 +393,7 @@ void D3D_DrawUnderwaterWarp (void)
 			verts->t = (backup->t + sin (backup->s + rdt) * r_waterwarpscale.value) * 0.03125f;
 		}
 
-		d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLESTRIP, 64, wv, sizeof (uwvert_t));
+		D3D_DrawUserPrimitive (D3DPT_TRIANGLESTRIP, 64, wv, sizeof (uwvert_t));
 	}
 }
 
@@ -617,7 +703,7 @@ void D3D_EmitWarpSurface (d3d_modelsurf_t *modelsurf)
 	if ((int) modelsurf->tex->teximage->d3d_Texture != previouswarptexture) recommit = true;
 
 	// check for a full buffer or state change and draw the verts if so
-	if (D3D_AreBuffersFull (d3d_NumWarpVerts + modelsurf->surf->numverts, d3d_NumWarpIndexes + (modelsurf->surf->numverts - 2) * 3) || recommit)
+	if (D3D_AreBuffersFull (d3d_NumWarpVerts + modelsurf->surf->numverts, d3d_NumWarpIndexes + modelsurf->surf->numindexes) || recommit)
 	{
 		D3D_SubmitVertexes (d3d_NumWarpVerts, d3d_NumWarpIndexes, sizeof (warpverts_t));
 
@@ -670,7 +756,7 @@ void D3D_DrawWaterSurfaces (void)
 {
 	bool stateset = false;
 
-	// initialize the turb surfaces data and determine if we need to draw anything
+	// initialize the turb surfaces data
 	D3D_InitializeTurb ();
 
 	// even if we're fully alpha we still pass through here so that we can add items to the alpha list
@@ -867,7 +953,7 @@ void D3D_UpdateSkyAlpha (void)
 	LPDIRECT3DSURFACE9 CopySurf;
 
 	d3d_Device->CreateOffscreenPlainSurface (Level0Desc.Width, Level0Desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &CopySurf, NULL);
-	D3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, skysurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+	QD3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, skysurf, NULL, NULL, D3DX_FILTER_NONE, 0);
 	CopySurf->LockRect (&Level0Rect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
 
 	// alloc texels
@@ -894,7 +980,7 @@ void D3D_UpdateSkyAlpha (void)
 	}
 
 	CopySurf->UnlockRect ();
-	D3DXLoadSurfaceFromSurface (skysurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+	QD3DXLoadSurfaceFromSurface (skysurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
 
 	CopySurf->Release ();
 	skysurf->Release ();
@@ -909,16 +995,12 @@ extern cvar_t gl_fogbegin;
 extern cvar_t gl_fogdensity;
 extern cvar_t gl_fogsky;
 
-// for restoring fog
-void D3D_PrepareFog (void);
-
 void D3D_AddSkySphereToRender (float scale)
 {
 	D3D_UpdateSkyAlpha ();
 
 	// darkplaces warp
-	d3d_Device->SetStreamSource (0, d3d_DPSkyVerts, 0, sizeof (warpverts_t));
-	d3d_Device->SetIndices (d3d_DPSkyIndexes);
+	D3D_VBOSetVBOStream (d3d_DPSkyVerts, d3d_DPSkyIndexes, sizeof (warpverts_t));
 
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
 
@@ -1361,14 +1443,17 @@ void R_AddSkyboxToRender (void)
 		D3D_SetTexture (0, skyboxtextures[skytexorder[i]]);
 
 		// use UP drawing here so that we're not abusing the vertex buffer
-		warpverts_t verts[4];
+		warpverts_t verts[6];
 
 		MakeSkyVec (&verts[0], skymins[0][i], skymins[1][i], i);
 		MakeSkyVec (&verts[1], skymins[0][i], skymaxs[1][i], i);
 		MakeSkyVec (&verts[2], skymaxs[0][i], skymaxs[1][i], i);
-		MakeSkyVec (&verts[3], skymaxs[0][i], skymins[1][i], i);
 
-		d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts, sizeof (warpverts_t));
+		MakeSkyVec (&verts[3], skymins[0][i], skymins[1][i], i);
+		MakeSkyVec (&verts[4], skymaxs[0][i], skymaxs[1][i], i);
+		MakeSkyVec (&verts[5], skymaxs[0][i], skymins[1][i], i);
+
+		D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, 2, verts, sizeof (warpverts_t));
 		d3d_RenderDef.brush_polys++;
 	}
 }

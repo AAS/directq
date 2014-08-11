@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 #include "quakedef.h"
@@ -93,7 +90,7 @@ void Host_Status_f (void)
 	print ("map:     %s\n", sv.name);
 	print ("players: %i active (%i max)\n\n", net_activeconnections, svs.maxclients);
 
-	for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
+	for (j=0, client = svs.clients; j<svs.maxclients; j++, client++)
 	{
 		if (!client->active)
 			continue;
@@ -235,12 +232,12 @@ void Host_Ping_f (void)
 
 	SV_ClientPrintf ("Client ping times:\n");
 
-	for (i=0, client = svs.clients ; i<svs.maxclients ; i++, client++)
+	for (i=0, client = svs.clients; i<svs.maxclients; i++, client++)
 	{
 		if (!client->active)
 			continue;
 		total = 0;
-		for (j=0 ; j<NUM_PING_TIMES ; j++)
+		for (j=0; j<NUM_PING_TIMES; j++)
 			total+=client->ping_times[j];
 		total /= NUM_PING_TIMES;
 		SV_ClientPrintf ("%4i %s\n", (int)(total*1000), client->name);
@@ -276,7 +273,7 @@ void Host_Map_f (void)
 	cls.demonum = -1;		// stop demo loop in case this fails
 
 	CL_Disconnect ();
-	Host_ShutdownServer(false);		
+	Host_ShutdownServer (false);
 
 	key_dest = key_game;			// remove console or menu
 	SCR_BeginLoadingPlaque ();
@@ -284,6 +281,7 @@ void Host_Map_f (void)
 	cls.mapstring[0] = 0;
 
 	// umm - did i write this?  whatever, it breaks the spawnparms below...
+	// nope, this is original ID code.
 	for (i = 0; i < Cmd_Argc (); i++)
 	{
 		strcat (cls.mapstring, Cmd_Argv(i));
@@ -458,8 +456,9 @@ void Host_SavegameComment (char *text)
 	memcpy (text + 22, kills, strlen (kills));
 
 	// convert space to _ to make stdio happy
+	// also convert \0 - this is a hack to fix a hack in aguirre quake
 	for (i = 0; i < SAVEGAME_COMMENT_LENGTH; i++)
-		if (text[i] == ' ')
+		if (text[i] < 33 || text[i] > 126)
 			text[i] = '_';
 
 	// null terminate
@@ -485,7 +484,7 @@ void Host_DoSavegame (char *savename)
 	int		i;
 	char	comment[SAVEGAME_COMMENT_LENGTH + 1];
 
-	for (i = 0; ; i++)
+	for (i = 0;; i++)
 	{
 		if (savename[i] == 0) break;
 
@@ -522,7 +521,7 @@ void Host_DoSavegame (char *savename)
 	fprintf (f, "%i\n", SAVEGAME_VERSION);
 	Host_SavegameComment (comment);
 	fprintf (f, "%s\n", comment);
-	for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
+	for (i=0; i<NUM_SPAWN_PARMS; i++)
 		fprintf (f, "%f\n", svs.clients->spawn_parms[i]);
 	fprintf (f, "%d\n", current_skill);
 	fprintf (f, "%s\n", sv.name);
@@ -590,7 +589,7 @@ void Host_Savegame_f (void)
 		return;
 	}
 
-	for (i=0 ; i<svs.maxclients ; i++)
+	for (i=0; i<svs.maxclients; i++)
 	{
 		if (svs.clients[i].active && (svs.clients[i].edict->v.health <= 0) )
 		{
@@ -635,7 +634,7 @@ void Host_Loadgame_f (void)
 
 	char *loadname = Cmd_Args ();
 
-	for (i = 0; ; i++)
+	for (i = 0;; i++)
 	{
 		if (loadname[i] == 0) break;
 
@@ -682,21 +681,22 @@ void Host_Loadgame_f (void)
 	}
 
 	fscanf (f, "%s\n", str);
-	for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
+
+	for (i=0; i<NUM_SPAWN_PARMS; i++)
 		fscanf (f, "%f\n", &spawn_parms[i]);
 
 	// this silliness is so we can load 1.06 save files, which have float skill values
 	fscanf (f, "%f\n", &tfloat);
-	current_skill = (int)(tfloat + 0.1);
-	Cvar_Set ("skill", (float)current_skill);
+	current_skill = (int) (tfloat + 0.1);
+	Cvar_Set ("skill", (float) current_skill);
 
 	// ensure these aren't silly
 	Cvar_Set ("deathmatch", 0.0f);
 	Cvar_Set ("coop", 0.0f);
 	Cvar_Set ("teamplay", 0.0f);
 
-	fscanf (f, "%s\n",mapname);
-	fscanf (f, "%f\n",&time);
+	fscanf (f, "%s\n", mapname);
+	fscanf (f, "%f\n", &time);
 
 	CL_Disconnect_f ();
 
@@ -712,7 +712,7 @@ void Host_Loadgame_f (void)
 	sv.loadgame = true;
 
 	// load the light styles
-	for (i=0 ; i<MAX_LIGHTSTYLES ; i++)
+	for (i=0; i<MAX_LIGHTSTYLES; i++)
 	{
 		fscanf (f, "%s\n", str);
 		sv.lightstyles[i] = (char *) Pool_Map->Alloc (strlen(str)+1);
@@ -723,7 +723,7 @@ void Host_Loadgame_f (void)
 	entnum = -1;		// -1 is the globals
 	while (!feof(f))
 	{
-		for (i=0 ; i<sizeof(str)-1 ; i++)
+		for (i=0; i<sizeof(str)-1; i++)
 		{
 			r = fgetc (f);
 			if (r == EOF || !r)
@@ -771,7 +771,7 @@ void Host_Loadgame_f (void)
 
 	fclose (f);
 
-	for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
+	for (i=0; i<NUM_SPAWN_PARMS; i++)
 		svs.clients->spawn_parms[i] = spawn_parms[i];
 
 	CL_EstablishConnection ("local");
@@ -865,7 +865,7 @@ void Host_Please_f (void)
 	if (Cmd_Argc () != 2)
 		return;
 
-	for (j=0, cl = svs.clients ; j<svs.maxclients ; j++, cl++)
+	for (j=0, cl = svs.clients; j<svs.maxclients; j++, cl++)
 	{
 		if (!cl->active)
 			continue;
@@ -1187,7 +1187,7 @@ void Host_Spawn_f (void)
 
 		// copy spawn parms out of the client_t
 
-		for (i=0 ; i< NUM_SPAWN_PARMS ; i++)
+		for (i=0; i< NUM_SPAWN_PARMS; i++)
 			(&SVProgs->GlobalStruct->parm1)[i] = host_client->spawn_parms[i];
 
 		// call the spawn function
@@ -1205,7 +1205,7 @@ void Host_Spawn_f (void)
 	MSG_WriteByte (&host_client->message, svc_time);
 	MSG_WriteFloat (&host_client->message, SV_TIME);
 
-	for (i=0, client = svs.clients ; i<svs.maxclients ; i++, client++)
+	for (i=0, client = svs.clients; i<svs.maxclients; i++, client++)
 	{
 		MSG_WriteByte (&host_client->message, svc_updatename);
 		MSG_WriteByte (&host_client->message, i);
@@ -1219,7 +1219,7 @@ void Host_Spawn_f (void)
 	}
 
 	// send all current light styles
-	for (i=0 ; i<MAX_LIGHTSTYLES ; i++)
+	for (i=0; i<MAX_LIGHTSTYLES; i++)
 	{
 		MSG_WriteByte (&host_client->message, svc_lightstyle);
 		MSG_WriteByte (&host_client->message, (char)i);
@@ -1250,7 +1250,7 @@ void Host_Spawn_f (void)
 	// with a permanent head tilt
 	ent = GetEdictForNumber( 1 + (host_client - svs.clients) );
 	MSG_WriteByte (&host_client->message, svc_setangle);
-	for (i=0 ; i < 2 ; i++)
+	for (i=0; i < 2; i++)
 		MSG_WriteAngle (&host_client->message, ent->v.angles[i], true);
 	MSG_WriteAngle (&host_client->message, 0, true);
 
@@ -1539,7 +1539,7 @@ edict_t	*FindViewthing (void)
 	int		i;
 	edict_t	*e;
 	
-	for (i=0 ; i<SVProgs->NumEdicts ; i++)
+	for (i=0; i<SVProgs->NumEdicts; i++)
 	{
 		e = GetEdictForNumber(i);
 		if ( !strcmp (SVProgs->Strings + e->v.classname, "viewthing") )

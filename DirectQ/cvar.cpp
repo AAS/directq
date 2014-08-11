@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // cvar.c -- dynamic variable tracking
 
@@ -224,7 +221,29 @@ static void Cvar_Register (cvar_t *variable)
 	nehahra = true;
 
 	// first check to see if it has already been defined
-	if (Cvar_FindVar (variable->name)) return;
+	cvar_t *check = Cvar_FindVar (variable->name);
+
+	if (check)
+	{
+		// if the new variable is compatible one then silently ignore it
+		if (variable->usage & CVAR_COMPAT) return;
+
+		if (check->usage & CVAR_COMPAT)
+		{
+			// stomp the old variable with the new one
+			Zone_Free (check->name);
+			Zone_Free (check->string);
+
+			check->name = variable->name;
+			check->string = variable->string;
+			check->usage = variable->usage;
+			check->value = variable->value;
+			check->integer = variable->integer;
+		}
+
+		// silently ignore
+		return;
+	}
 
 	// unhack (note: this is not actually necessary as the game isn't up yet, but for the
 	// sake of correctness we do it anyway)
@@ -255,7 +274,7 @@ void Cvar_WriteVariables (FILE *f)
 {
 	cvar_t	*var;
 
-	for (var = cvar_vars ; var ; var = var->next)
+	for (var = cvar_vars; var; var = var->next)
 		if (var->usage & CVAR_ARCHIVE)
 			fprintf (f, "%s \"%s\"\n", var->name, var->string);
 }

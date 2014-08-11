@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // cl_parse.c  -- parse a message received from the server
 
@@ -200,7 +197,7 @@ void CL_ParseStartSoundPacket(void)
 	if (ent > MAX_EDICTS)
 		Host_Error ("CL_ParseStartSoundPacket: ent = %i", ent);
 	
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		pos[i] = MSG_ReadCoord ();
  
     S_StartSound (ent, channel, cl.sound_precache[sound_num], pos, volume/255.0, attenuation);
@@ -393,20 +390,7 @@ void CL_DoWebDownload (char *filename)
 	}
 	else
 	{
-		switch (DLResult)
-		{
-		case DL_ERR_NOT_IMPLEMENTED:
-			Con_Printf ("Download unavailable\n");
-			break;
-
-		case DL_ERR_ABORT:
-			Con_Printf ("Download aborted\n");
-			break;
-
-		default:
-			Con_Printf ("Download failed\n");
-			break;
-		}
+		Con_Printf ("\nDownload failed with error:\n  %s\n", Web_GetErrorString (DLResult));
 		return;
 	}
 }
@@ -623,6 +607,21 @@ relinked.  Other attributes can change without relinking.
 */
 int	bitcounts[16];
 
+void CL_ClearInterpolation (entity_t *ent)
+{
+	ent->frame_start_time = 0;
+	ent->lastpose = ent->currpose = -1;
+
+	ent->translate_start_time = 0;
+	ent->lastorigin[0] = ent->lastorigin[1] = ent->lastorigin[2] = 0;
+	ent->currorigin[0] = ent->currorigin[1] = ent->currorigin[2] = 0;
+
+	ent->rotate_start_time = 0;
+	ent->lastangles[0] = ent->lastangles[1] = ent->lastangles[2] = 0;
+	ent->currangles[0] = ent->currangles[1] = ent->currangles[2] = 0;
+}
+
+
 void CL_ParseUpdate (int bits)
 {
 	int			i;
@@ -799,6 +798,10 @@ void CL_ParseUpdate (int bits)
 			if (model->synctype == ST_RAND)
 				ent->syncbase = (float) (rand () &0x7fff) / 0x7fff;
 			else ent->syncbase = 0.0;
+
+			// ST_RAND is not always set on animations that should be out of lockstep
+			ent->posebase = (float) (rand () & 0x7ff) / 0x7ff;
+			ent->skinbase = (float) (rand () & 0x7ff) / 0x7ff;
 		}
 		else forcelink = true;	// hack to make null model players work
 
@@ -806,16 +809,8 @@ void CL_ParseUpdate (int bits)
 		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
 
 		// if the model has changed we must also reset the interpolation data
-		// pose1 and pose2 are critical as they might be pointing to invalid frames in the new model!!!
-		ent->frame_start_time = 0;
-		ent->frame_interval = 0;
-		ent->pose1 = ent->pose2 = 0;
-		ent->translate_start_time = 0;
-		ent->origin1[0] = ent->origin1[1] = ent->origin1[2] = 0;
-		ent->origin2[0] = ent->origin2[1] = ent->origin2[2] = 0;
-		ent->rotate_start_time = 0;
-		ent->angles1[0] = ent->angles1[1] = ent->angles1[2] = 0;
-		ent->angles2[0] = ent->angles2[1] = ent->angles2[2] = 0;
+		// lastpose and currpose are critical as they might be pointing to invalid frames in the new model!!!
+		CL_ClearInterpolation (ent);
 
 		// reset frame and skin too...!
 		if (!(bits & U_FRAME)) ent->frame = 0;
@@ -829,19 +824,12 @@ void CL_ParseUpdate (int bits)
 		VectorCopy (ent->msg_origins[0], ent->origin);
 		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
 		VectorCopy (ent->msg_angles[0], ent->angles);
+
 		ent->forcelink = true;
 
 		// fix "dying throes" interpolation bug - reset interpolation data if the entity wasn't updated
-		// pose1 and pose2 are critical here; the rest is done for completeness sake.
-		ent->frame_start_time = 0;
-		ent->frame_interval = 0;
-		ent->pose1 = ent->pose2 = 0;
-		ent->translate_start_time = 0;
-		ent->origin1[0] = ent->origin1[1] = ent->origin1[2] = 0;
-		ent->origin2[0] = ent->origin2[1] = ent->origin2[2] = 0;
-		ent->rotate_start_time = 0;
-		ent->angles1[0] = ent->angles1[1] = ent->angles1[2] = 0;
-		ent->angles2[0] = ent->angles2[1] = ent->angles2[2] = 0;
+		// lastpose and currpose are critical here; the rest is done for completeness sake.
+		CL_ClearInterpolation (ent);
 	}
 }
 
@@ -903,7 +891,7 @@ void CL_ParseClientdata (void)
 
 	VectorCopy (cl.mvelocity[0], cl.mvelocity[1]);
 
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 	{
 		if (bits & (SU_PUNCH1<<i) )
 			cl.punchangle[i] = MSG_ReadChar();
@@ -920,7 +908,7 @@ void CL_ParseClientdata (void)
 	if (cl.items != i)
 	{
 		// set flash times
-		for (j=0 ; j<32 ; j++)
+		for (j=0; j<32; j++)
 			if ( (i & (1<<j)) && !(cl.items & (1<<j)))
 				cl.item_gettime[j] = cl.time;
 		cl.items = i;
@@ -968,7 +956,7 @@ void CL_ParseClientdata (void)
 		cl.stats[STAT_AMMO] = i;
 	}
 
-	for (i=0 ; i<4 ; i++)
+	for (i=0; i<4; i++)
 	{
 		j = MSG_ReadByte ();
 		if (cl.stats[STAT_SHELLS+i] != j)
@@ -1036,13 +1024,13 @@ void CL_NewTranslation (int slot)
 		if (top < 128)	// the artists made some backwards ranges.  sigh.
 			memcpy (dest + TOP_RANGE, source + top, 16);
 		else
-			for (j=0 ; j<16 ; j++)
+			for (j=0; j<16; j++)
 				dest[TOP_RANGE+j] = source[top+15-j];
 				
 		if (bottom < 128)
 			memcpy (dest + BOTTOM_RANGE, source + bottom, 16);
 		else
-			for (j=0 ; j<16 ; j++)
+			for (j=0; j<16; j++)
 				dest[BOTTOM_RANGE+j] = source[bottom+15-j];		
 	}
 }
@@ -1100,7 +1088,7 @@ void CL_ParseStaticSound (int version)
 	int			sound_num, vol, atten;
 	int			i;
 	
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		org[i] = MSG_ReadCoord ();
 
 	if (version == 2)
@@ -1268,7 +1256,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_setangle:
-			for (i=0 ; i<3 ; i++)
+			for (i=0; i<3; i++)
 				cl.viewangles[i] = MSG_ReadAngle (true);
 			break;
 

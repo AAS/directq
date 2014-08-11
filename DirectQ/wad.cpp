@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // wad.c
 
@@ -47,7 +44,7 @@ void W_CleanupName (char *in, char *out)
 	int		i;
 	int		c;
 
-	for (i=0 ; i<16 ; i++ )
+	for (i=0; i<16; i++ )
 	{
 		c = in[i];
 		if (!c)
@@ -58,7 +55,7 @@ void W_CleanupName (char *in, char *out)
 		out[i] = c;
 	}
 	
-	for ( ; i< 16 ; i++ )
+	for (; i< 16; i++ )
 		out[i] = 0;
 }
 
@@ -134,7 +131,7 @@ lumpinfo_t	*W_GetLumpinfo (char *name)
 	
 	W_CleanupName (name, clean);
 	
-	for (lump_p=wad_lumps, i=0 ; i<wad_numlumps ; i++,lump_p++)
+	for (lump_p=wad_lumps, i=0; i<wad_numlumps; i++,lump_p++)
 	{
 		if (!strcmp(clean, lump_p->name))
 			return lump_p;

@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 #include "quakedef.h"
@@ -85,7 +82,7 @@ char *pr_extensions[] =
 
 bool extension_find (char *name)
 {
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!pr_extensions[i]) break;
 		if (!stricmp (pr_extensions[i], name)) return true;
@@ -131,7 +128,7 @@ void PR_Extension_List_f (void)
 
 	count = 0;
 
-	for (i = 0; ; i++)
+	for (i = 0;; i++)
 	{
 		if (!pr_extensions[i]) break;
 
@@ -322,7 +319,7 @@ void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 	vec3_t	base, transformed;
 	int		i, j, k, l;
 
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		if (min[i] > max[i])
 			SVProgs->RunError ("backwards mins/maxs");
 
@@ -351,13 +348,13 @@ void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 		rmin[0] = rmin[1] = rmin[2] = 9999;
 		rmax[0] = rmax[1] = rmax[2] = -9999;
 		
-		for (i=0 ; i<= 1 ; i++)
+		for (i=0; i<= 1; i++)
 		{
 			base[0] = bounds[i][0];
-			for (j=0 ; j<= 1 ; j++)
+			for (j=0; j<= 1; j++)
 			{
 				base[1] = bounds[j][1];
-				for (k=0 ; k<= 1 ; k++)
+				for (k=0; k<= 1; k++)
 				{
 					base[2] = bounds[k][2];
 					
@@ -366,7 +363,7 @@ void SetMinMaxSize (edict_t *e, float *min, float *max, bool rotate)
 					transformed[1] = xvector[1]*base[0] + yvector[1]*base[1];
 					transformed[2] = base[2];
 					
-					for (l=0 ; l<3 ; l++)
+					for (l=0; l<3; l++)
 					{
 						if (transformed[l] < rmin[l])
 							rmin[l] = transformed[l];
@@ -652,7 +649,7 @@ void PF_random (void)
 	float		num;
 		
 	num = (rand ()&0x7fff) / ((float)0x7fff);
-	
+
 	G_FLOAT(OFS_RETURN) = num;
 }
 
@@ -887,7 +884,7 @@ int PF_newcheckclient (int check)
 	else
 		i = check + 1;
 
-	for ( ;  ; i++)
+	for (; ; i++)
 	{
 		if (i == svs.maxclients+1)
 			i = 1;
@@ -1083,13 +1080,13 @@ void PF_findradius (void)
 	rad = G_FLOAT(OFS_PARM1);
 
 	ent = NEXT_EDICT(SVProgs->Edicts);
-	for (i=1 ; i<SVProgs->NumEdicts ; i++, ent = NEXT_EDICT(ent))
+	for (i=1; i<SVProgs->NumEdicts; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
 			continue;
 		if (ent->v.solid == SOLID_NOT)
 			continue;
-		for (j=0 ; j<3 ; j++)
+		for (j=0; j<3; j++)
 			eorg[j] = org[j] - (ent->v.origin[j] + (ent->v.mins[j] + ent->v.maxs[j])*0.5);			
 		if (Length(eorg) > rad)
 			continue;
@@ -1194,7 +1191,7 @@ void PF_Find (void)
 	if (!s)
 		SVProgs->RunError ("PF_Find: bad search string");
 
-	for (e++ ; e < SVProgs->NumEdicts ; e++)
+	for (e++; e < SVProgs->NumEdicts; e++)
 	{
 		ed = GetEdictForNumber(e);
 		if (ed->free)
@@ -1236,7 +1233,7 @@ void PF_precache_sound (void)
 	G_INT(OFS_RETURN) = G_INT(OFS_PARM0);
 	PR_CheckEmptyString (s);
 	
-	for (i=0 ; i<MAX_SOUNDS ; i++)
+	for (i=0; i<MAX_SOUNDS; i++)
 	{
 		if (!sv.sound_precache[i])
 		{
@@ -1395,7 +1392,7 @@ void PF_lightstyle (void)
 	if (sv.state != ss_active)
 		return;
 	
-	for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
+	for (j=0, client = svs.clients; j<svs.maxclients; j++, client++)
 		if (client->active || client->spawned)
 		{
 			MSG_WriteChar (&client->message, svc_lightstyle);
@@ -1524,7 +1521,7 @@ void PF_aim (void)
 	bestent = NULL;
 	
 	check = NEXT_EDICT(SVProgs->Edicts);
-	for (i=1 ; i<SVProgs->NumEdicts ; i++, check = NEXT_EDICT(check) )
+	for (i=1; i<SVProgs->NumEdicts; i++, check = NEXT_EDICT(check) )
 	{
 		if (check->v.takedamage != DAMAGE_AIM)
 			continue;
@@ -1532,7 +1529,7 @@ void PF_aim (void)
 			continue;
 		if (teamplay.value && ent->v.team > 0 && ent->v.team == check->v.team)
 			continue;	// don't aim at teammate
-		for (j=0 ; j<3 ; j++)
+		for (j=0; j<3; j++)
 			end[j] = check->v.origin[j]
 			+ 0.5*(check->v.mins[j] + check->v.maxs[j]);
 		VectorSubtract (end, start, dir);
@@ -1844,7 +1841,7 @@ void PF_setspawnparms (void)
 	// copy spawn parms out of the client_t
 	client = svs.clients + (i-1);
 
-	for (i=0 ; i< NUM_SPAWN_PARMS ; i++)
+	for (i=0; i< NUM_SPAWN_PARMS; i++)
 		(&SVProgs->GlobalStruct->parm1)[i] = client->spawn_parms[i];
 }
 

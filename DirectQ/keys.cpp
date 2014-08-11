@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 #include "quakedef.h"
 
@@ -197,7 +194,7 @@ void Key_PrintMatch (char *cmd)
 void Key_PrintContentMatch (char *matchedcontent)
 {
 	// find the text position after the command
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		// this should never happen
 		if (!key_lines[edit_line][i]) return;
@@ -224,7 +221,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 	{
 		// grab the text after the command
 		// we need to store this for subsequent commands
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			// this should never happen
 			if (!key_lines[edit_line][i]) return;
@@ -246,7 +243,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 		}
 
 		// find the first matching one
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!contentlist[i]) 
 			{
@@ -269,7 +266,7 @@ void Key_ContentMatch (char **contentlist, int *cycle)
 		return;
 	}
 
-	for (int i = cycle[0], passes = 0; ; i++)
+	for (int i = cycle[0], passes = 0;; i++)
 	{
 		// if we run out of maps we restart the cycle at 0
 		if (!contentlist[i])
@@ -332,7 +329,7 @@ void Key_Console (int key)
 		key_linepos = 1;
 
 		// force an update, because the command may take some time
-		if (cls.state == ca_disconnected) SCR_UpdateScreen ();
+		if (cls.state != ca_connected) SCR_UpdateScreen ();
 
 		return;
 	}
@@ -703,7 +700,7 @@ int Key_StringToKeynum (char *str)
 	if (!str[1])
 		return str[0];
 
-	for (kn=keynames ; kn->name ; kn++)
+	for (kn=keynames; kn->name; kn++)
 	{
 		if (!stricmp(str,kn->name))
 			return kn->keynum;
@@ -736,7 +733,7 @@ char *Key_KeynumToString (int keynum)
 		return tinystr;
 	}
 
-	for (kn=keynames ; kn->name ; kn++)
+	for (kn=keynames; kn->name; kn++)
 		if (keynum == kn->keynum)
 			return kn->name;
 
@@ -802,7 +799,7 @@ void Key_Unbindall_f (void)
 {
 	int		i;
 	
-	for (i=0 ; i<256 ; i++)
+	for (i=0; i<256; i++)
 		if (keybindings[i])
 			Key_SetBinding (i, "");
 }
@@ -845,7 +842,7 @@ void Key_Bind_f (void)
 
 	// copy the rest of the command line
 	cmd[0] = 0;		// start out with a null string
-	for (i=2 ; i< c ; i++)
+	for (i=2; i< c; i++)
 	{
 		if (i > 2)
 			strcat (cmd, " ");
@@ -910,7 +907,7 @@ void Key_Init (void)
 {
 	int		i;
 
-	for (i=0 ; i<32 ; i++)
+	for (i=0; i<32; i++)
 	{
 		key_lines[i][0] = ']';
 		key_lines[i][1] = 0;
@@ -918,7 +915,7 @@ void Key_Init (void)
 	key_linepos = 1;
 	
 	// init ascii characters in console mode
-	for (i=32 ; i<128 ; i++)
+	for (i=32; i<128; i++)
 		consolekeys[i] = true;
 
 	consolekeys[K_ENTER] = true;
@@ -940,9 +937,9 @@ void Key_Init (void)
 	consolekeys['`'] = false;
 	consolekeys['~'] = false;
 
-	for (i=0 ; i<256 ; i++)
+	for (i=0; i<256; i++)
 		keyshift[i] = i;
-	for (i='a' ; i<='z' ; i++)
+	for (i='a'; i<='z'; i++)
 		keyshift[i] = i - 'a' + 'A';
 	keyshift['1'] = '!';
 	keyshift['2'] = '@';
@@ -967,7 +964,7 @@ void Key_Init (void)
 	keyshift['\\'] = '|';
 
 	menubound[K_ESCAPE] = true;
-	for (i=0 ; i<12 ; i++)
+	for (i=0; i<12; i++)
 		menubound[K_F1+i] = true;
 }
 
@@ -1188,6 +1185,8 @@ Map from windows to quake keynums
 */
 int MapKey (int key)
 {
+//			key	22740993	int
+
 	key = (key >> 16) & 255;
 
 	if (key > 127) return 0;

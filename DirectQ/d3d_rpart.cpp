@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 #include "quakedef.h"
@@ -312,14 +309,14 @@ void R_EntityParticles (entity_t *ent)
 	count = 50;
 
 	if (!avelocities[0][0])
-		for (i=0 ; i<NUMVERTEXNORMALS*3 ; i++)
+		for (i=0; i<NUMVERTEXNORMALS*3; i++)
 			avelocities[0][i] = (rand()&255) * 0.01;
 
 	particle_type_t *pt = R_NewParticleType (ent->origin);
 
 	float *norm = r_avertexnormals;
 
-	for (i=0 ; i<NUMVERTEXNORMALS ; i++, norm += 3)
+	for (i=0; i<NUMVERTEXNORMALS; i++, norm += 3)
 	{
 		angle = cl.time * avelocities[i][0];
 		sy = sin(angle);
@@ -512,7 +509,7 @@ void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength)
 		p->grav = -1;
 		p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
 
-		for (j=0 ; j<3 ; j++)
+		for (j=0; j<3; j++)
 		{
 			p->org[j] = org[j] + ((rand()%32)-16);
 			p->vel[j] = (rand()%512)-256;
@@ -537,7 +534,7 @@ void R_BlobExplosion (vec3_t org)
 	
 	particle_type_t *pt = R_NewParticleType (org);
 
-	for (i=0 ; i<1024 ; i++)
+	for (i=0; i<1024; i++)
 	{
 		if (!(p = R_NewParticle (pt))) return;
 
@@ -549,7 +546,7 @@ void R_BlobExplosion (vec3_t org)
 			p->dvel[0] = p->dvel[1] = p->dvel[2] = 4;
 			p->color = 66 + rand()%6;
 
-			for (j=0 ; j<3 ; j++)
+			for (j=0; j<3; j++)
 			{
 				p->org[j] = org[j] + ((rand()%32)-16);
 				p->vel[j] = (rand()%512)-256;
@@ -560,7 +557,7 @@ void R_BlobExplosion (vec3_t org)
 			p->dvel[0] = p->dvel[1] = -4;
 			p->color = 150 + rand()%6;
 
-			for (j=0 ; j<3 ; j++)
+			for (j=0; j<3; j++)
 			{
 				p->org[j] = org[j] + ((rand()%32)-16);
 				p->vel[j] = (rand()%512)-256;
@@ -1011,7 +1008,7 @@ void R_SetupParticleType (particle_type_t *pt)
 }
 
 
-void R_SetupParticles (void)
+void D3D_AddParticesToAlphaList (void)
 {
 	// 4096 is the initial batch size so never go lower than that
 	if (cl_maxparticles.integer < 1024) Cvar_Set (&cl_maxparticles, 1024);
@@ -1126,9 +1123,13 @@ void R_UpdateParticles (void)
 }
 
 
+cvar_t r_drawparticles ("r_drawparticles", "1");
+
 // particles were HUGELY inefficient in the VBO so I've put them back to UserPrimitives
 void R_AddParticleTypeToRender (particle_type_t *pt)
 {
+	if (!r_drawparticles.value) return;
+
 	// state setup
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
@@ -1152,7 +1153,6 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 	// set up particle vertex pointer
 	Pool_PolyVerts->Rewind ();
 	partverts_t *partverts = (partverts_t *) Pool_PolyVerts->Alloc (1);
-	extern cvar_t r_maxvertexsubmission;
 
 	// walk the list starting at the first active particle
 	for (particle_t *p = pt->particles; p; p = p->next)
@@ -1160,13 +1160,13 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		// final sanity check on colour to avoid array bounds errors
 		if (p->color < 0 || p->color > 255) continue;
 
-		if ((int) p->tex != cachedtexture || numverts >= r_maxvertexsubmission.integer)
+		if ((int) p->tex != cachedtexture)
 		{
 			// submit everything in the current batch (in there was one)
 			if (numverts)
 			{
 				Pool_PolyVerts->Rewind ();
-				d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLELIST, numverts / 3, partverts, sizeof (partverts_t));
+				D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, numverts / 3, partverts, sizeof (partverts_t));
 				numverts = 0;
 			}
 
@@ -1206,6 +1206,8 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 		Pool_PolyVerts->Alloc (sizeof (partverts_t) * 3);
 		partverts_t *verts = &partverts[numverts];
 
+		// may the good lord one day have mercy on our suffering and grant unto us geometry shaders in d3d9.
+		// until then we have to put up with this crap.  could we avoid the nonsense with a software VBO?
 		verts[0].x = p->org[0];
 		verts[0].y = p->org[1];
 		verts[0].z = p->org[2];
@@ -1232,7 +1234,7 @@ void R_AddParticleTypeToRender (particle_type_t *pt)
 	}
 
 	// draw anything left over
-	if (numverts) d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLELIST, numverts / 3, partverts, sizeof (partverts_t));
+	if (numverts) D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, numverts / 3, partverts, sizeof (partverts_t));
 }
 
 

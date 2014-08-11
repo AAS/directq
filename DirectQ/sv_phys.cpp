@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // sv_phys.c
 
@@ -226,7 +223,7 @@ int ClipVelocity (vec3_t in, vec3_t normal, vec3_t out, float overbounce)
 	
 	backoff = DotProduct (in, normal) * overbounce;
 
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 	{
 		change = normal[i]*backoff;
 		out[i] = in[i] - change;
@@ -275,12 +272,12 @@ int SV_FlyMove (edict_t *ent, float time, trace_t *steptrace)
 	
 	time_left = time;
 
-	for (bumpcount=0 ; bumpcount<numbumps ; bumpcount++)
+	for (bumpcount=0; bumpcount<numbumps; bumpcount++)
 	{
 		if (!ent->v.velocity[0] && !ent->v.velocity[1] && !ent->v.velocity[2])
 			break;
 
-		for (i=0 ; i<3 ; i++)
+		for (i=0; i<3; i++)
 			end[i] = ent->v.origin[i] + time_left * ent->v.velocity[i];
 
 		trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, end, false, ent);
@@ -343,10 +340,10 @@ int SV_FlyMove (edict_t *ent, float time, trace_t *steptrace)
 //
 // modify original_velocity so it parallels all of the clip planes
 //
-		for (i=0 ; i<numplanes ; i++)
+		for (i=0; i<numplanes; i++)
 		{
 			ClipVelocity (original_velocity, planes[i], new_velocity, 1);
-			for (j=0 ; j<numplanes ; j++)
+			for (j=0; j<numplanes; j++)
 				if (j != i)
 				{
 					if (DotProduct (new_velocity, planes[j]) < 0)
@@ -584,7 +581,7 @@ void SV_PushMove (edict_t *pusher, float movetime)
 			}
 
 			// move back any entities we already moved
-			for (i=0 ; i<num_moved ; i++)
+			for (i=0; i<num_moved; i++)
 			{
 				VectorCopy (moved_from[i], moved_edict[i]->v.origin);
 				SV_LinkEdict (moved_edict[i], false);
@@ -619,7 +616,7 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 		return;
 	}
 
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		amove[i] = pusher->v.avelocity[i] * movetime;
 
 	VectorSubtract (vec3_origin, amove, a);
@@ -638,7 +635,7 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 	num_moved = 0;
 	check = NEXT_EDICT(SVProgs->Edicts);
 
-	for (e=1 ; e<SVProgs->NumEdicts ; e++, check = NEXT_EDICT(check))
+	for (e=1; e<SVProgs->NumEdicts; e++, check = NEXT_EDICT(check))
 	{
 		if (check->free)
 			continue;
@@ -718,7 +715,7 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 			}
 			
 		// move back any entities we already moved
-			for (i=0 ; i<num_moved ; i++)
+			for (i=0; i<num_moved; i++)
 			{
 				VectorCopy (moved_from[i], moved_edict[i]->v.origin);
 				VectorSubtract (moved_edict[i]->v.angles, amove, moved_edict[i]->v.angles);
@@ -821,9 +818,9 @@ void SV_CheckStuck (edict_t *ent)
 		return;
 	}
 	
-	for (z=0 ; z< 18 ; z++)
-		for (i=-1 ; i <= 1 ; i++)
-			for (j=-1 ; j <= 1 ; j++)
+	for (z=0; z< 18; z++)
+		for (i=-1; i <= 1; i++)
+			for (j=-1; j <= 1; j++)
 			{
 				ent->v.origin[0] = org[0] + i;
 				ent->v.origin[1] = org[1] + j;
@@ -950,7 +947,7 @@ int SV_TryUnstick (edict_t *ent, vec3_t oldvel)
 	VectorCopy (ent->v.origin, oldorg);
 	VectorCopy (vec3_origin, dir);
 
-	for (i=0 ; i<8 ; i++)
+	for (i=0; i<8; i++)
 	{
 // try pushing a little in an axial direction
 		switch (i)
@@ -1516,8 +1513,8 @@ void SV_Physics_Step (edict_t *ent)
 			VectorAdd (ent->v.origin, ent->v.maxs, maxs);
 
 			point[2] = mins[2] - 1;
-			for	(x=0 ; x<=1 ; x++)
-				for	(y=0 ; y<=1 ; y++)
+			for	(x=0; x<=1; x++)
+				for	(y=0; y<=1; y++)
 				{
 					point[0] = x ? maxs[0] : mins[0];
 					point[1] = y ? maxs[1] : mins[1];
@@ -1600,7 +1597,7 @@ void SV_Physics (void)
 // treat each object in turn
 //
 	ent = SVProgs->Edicts;
-	for (i=0 ; i<SVProgs->NumEdicts ; i++, ent = NEXT_EDICT(ent))
+	for (i=0; i<SVProgs->NumEdicts; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
 			continue;

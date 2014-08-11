@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -263,7 +260,7 @@ int Menu_GameConfigCustomDraw (int y)
 
 void Menu_FixupSpin (int *spinnum, char **spintext)
 {
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!spintext[i])
 		{

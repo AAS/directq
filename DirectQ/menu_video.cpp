@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -48,9 +45,7 @@ extern cvar_t g_gamma;
 extern cvar_t b_gamma;
 extern cvar_t r_anisotropicfilter;
 extern cvar_t vid_vsync;
-extern cvar_t r_filterrefresh;
 extern cvar_t gl_triplebuffer;
-extern cvar_t r_maxvertexsubmission;
 extern cvar_t r_hlsl;
 
 // dummy cvars for temp stuff
@@ -73,9 +68,6 @@ extern d3d_ModeDesc_t *d3d_ModeList;
 #define MENU_TAG_FULL			(1 << 31)
 #endif
 
-
-char **filterrefreshstrings = NULL;
-int filterrefreshnum = 0;
 
 void VID_ApplyModeChange (void)
 {
@@ -104,12 +96,6 @@ bool Menu_VideoCheckNeedApply (void)
 
 int Menu_VideoCustomDraw (int y)
 {
-	// 5 is an arbitrary upper limit here
-	if (r_filterrefresh.value < 0) Cvar_Set (&r_filterrefresh, 0.0f);
-	if (r_filterrefresh.value > 5) Cvar_Set (&r_filterrefresh, 5.0f);
-
-	Cvar_Set (&r_filterrefresh, (float) filterrefreshnum / 4.0f);
-
 	// check for "Apply" on d3d_mode change
 	if (!Menu_VideoCheckNeedApply ())
 		menu_Video.DisableMenuOptions (TAG_VIDMODEAPPLY);
@@ -147,7 +133,7 @@ do_aniso:
 	if (d3d_DeviceCaps.MaxAnisotropy < 2) return y;
 
 	// store the selected anisotropic filter into the r_aniso cvar
-	for (int af = 1, i = 0; ; i++, af <<= 1)
+	for (int af = 1, i = 0;; i++, af <<= 1)
 	{
 		if (i == menu_anisonum)
 		{
@@ -163,43 +149,6 @@ do_aniso:
 
 void Menu_VideoCustomEnter (void)
 {
-	if (!filterrefreshstrings)
-	{
-		filterrefreshstrings = (char **) Pool_Permanent->Alloc (22 * sizeof (char *));
-
-		for (int i = 0; i < 21; i++)
-		{
-			filterrefreshstrings[i] = (char *) Pool_Permanent->Alloc (16);
-			filterrefreshstrings[i][0] = 0;
-		}
-
-		filterrefreshstrings[21] = NULL;
-	}
-
-	// 5 is an arbitrary upper limit here
-	if (r_filterrefresh.value < 0) Cvar_Set (&r_filterrefresh, 0.0f);
-	if (r_filterrefresh.value > 5) Cvar_Set (&r_filterrefresh, 5.0f);
-
-	filterrefreshnum = r_filterrefresh.value * 4;
-
-	if (filterrefreshnum < 0) filterrefreshnum = 0;
-	if (filterrefreshnum > 10) filterrefreshnum = 10;
-
-	extern D3DDISPLAYMODE d3d_DesktopMode;
-	int rrate = d3d_CurrentMode.RefreshRate;
-
-	if (!rrate) rrate = d3d_DesktopMode.RefreshRate;
-	if (!rrate) rrate = 60;
-
-	sprintf (filterrefreshstrings[0], "Off");
-
-	for (int i = 1; ; i++)
-	{
-		if (!filterrefreshstrings[i]) break;
-
-		sprintf (filterrefreshstrings[i], "%0.1f Hz", (float) rrate * (float) i / 4.0f);
-	}
-
 	// take it from the d3d_mode cvar
 	menu_videomodenum = (int) d3d_mode.value;
 
@@ -223,7 +172,7 @@ void Menu_VideoCustomEnter (void)
 	Cvar_Set (&r_anisotropicfilter, real_aniso);
 
 	// now derive the menu entry from it
-	for (int i = 0, af = 1; ; i++, af <<= 1)
+	for (int i = 0, af = 1;; i++, af <<= 1)
 	{
 		if (af == real_aniso)
 		{
@@ -279,12 +228,11 @@ void Menu_VideoBuild (void)
 	// add the rest of the options to ensure that they;re kept in order
 	menu_Video.AddOption (new CQMenuSpacer ());
 	menu_Video.AddOption (new CQMenuTitle ("Configure Video Options"));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuSpinControl ("Filter Refresh", &filterrefreshnum, &filterrefreshstrings));
 
 	if (d3d_DeviceCaps.MaxAnisotropy > 1)
 	{
 		// count the number of modes available
-		for (int i = 1, mode = 1; ; i++, mode *= 2)
+		for (int i = 1, mode = 1;; i++, mode *= 2)
 		{
 			if (mode == d3d_DeviceCaps.MaxAnisotropy)
 			{
@@ -310,9 +258,8 @@ void Menu_VideoBuild (void)
 	if (d3d_GlobalCaps.supportPixelShaders)
 		menu_Video.AddOption (new CQMenuCvarToggle ("Use Pixel Shaders", &r_hlsl, 0, 1));
 
-	menu_Video.AddOption (new CQMenuCvarSlider ("Vertex Batch Size", &r_maxvertexsubmission, 1, 60001, 1000));
+	if (d3d_DeviceCaps.MaxAnisotropy > 1 || d3d_GlobalCaps.supportPixelShaders) menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 
-	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
 	menu_Video.AddOption (new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
 	menu_Video.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));

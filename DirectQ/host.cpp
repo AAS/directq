@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // host.c -- coordinates spawning and killing of local servers
 
@@ -307,7 +304,7 @@ void SV_BroadcastPrintf (char *fmt, ...)
 	_vsnprintf (string, 1024, fmt,argptr);
 	va_end (argptr);
 
-	for (i=0 ; i<svs.maxclients ; i++)
+	for (i=0; i<svs.maxclients; i++)
 		if (svs.clients[i].active && svs.clients[i].spawned)
 		{
 			MSG_WriteByte (&svs.clients[i].message, svc_print);
@@ -381,7 +378,7 @@ void SV_DropClient (bool crash)
 	net_activeconnections--;
 
 	// send notification to all clients
-	for (i=0, client = svs.clients ; i<svs.maxclients ; i++, client++)
+	for (i=0, client = svs.clients; i<svs.maxclients; i++, client++)
 	{
 		if (!client->active)
 			continue;
@@ -457,7 +454,7 @@ void Host_ShutdownServer(bool crash)
 	if (count)
 		Con_Printf ("Host_ShutdownServer: NET_SendToAll failed for %u clients\n", count);
 
-	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 		if (host_client->active)
 			SV_DropClient(crash);
 
@@ -623,31 +620,12 @@ Host_Frame
 Runs all active servers
 ==================
 */
-float host_refreshrate = 0;
-cvar_t r_filterrefresh ("r_filterrefresh", 0.0f, CVAR_ARCHIVE);
-
-void Host_SetRefreshRate (int rate)
-{
-	// 5 is an arbitrary upper limit here
-	if (r_filterrefresh.value < 0) Cvar_Set (&r_filterrefresh, 0.0f);
-	if (r_filterrefresh.value > 5) Cvar_Set (&r_filterrefresh, 5.0f);
-
-	// sanity check
-	if (rate < 1) rate = 666;
-
-	if (!r_filterrefresh.value)
-		host_refreshrate = 0;
-	else host_refreshrate = (1.0 / (float) (rate * r_filterrefresh.value));
-}
-
 
 void D3D_UpdateOcclusionQueries (void);
 void S_FrameCheck (void);
 
 void Host_Frame (DWORD time)
 {
-	static float host_refreshtime = 666;
-
 	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver)) return;
 
@@ -689,19 +667,12 @@ void Host_Frame (DWORD time)
 	}
 
 	host_time += host_frametime;
-	host_refreshtime += host_frametime;
 
 	// fetch results from server
 	if (cls.state == ca_connected) CL_ReadFromServer ();
 
-	// never refresh at > the r_filterrefresh.value x screen's refresh rate, no matter how fast everything else is running.
-	// this prevents gfx cards with limited resources from bottlenecking when everything else is
-	// running too fast (to do: is this the primary cause of lockups with OpenGL?)
-	if (host_refreshtime >= host_refreshrate)
-	{
-		SCR_UpdateScreen ();
-		host_refreshtime = 0;
-	}
+	// update display
+	SCR_UpdateScreen ();
 
 	// check for changes in the sound state
 	S_FrameCheck ();
@@ -763,10 +734,7 @@ void Host_Init (quakeparms_t *parms)
 	// as soon as the filesystem comes up we want to load the configs so that cvars will have correct
 	// values before we proceed with anything else.  this is possible to do as we've made our cvars
 	// self-registering, so we don't need to worry about subsequent registrations or cvars that don't exist.
-	Cbuf_InsertText ("exec autoexec.cfg\n");
-	Cbuf_InsertText ("exec directq.cfg\n");
-	Cbuf_InsertText ("exec config.cfg\n");
-	Cbuf_InsertText ("exec default.cfg\n");
+	COM_ExecQuakeRC ();
 
 	// execute immediately rather than deferring
 	Cbuf_Execute ();
@@ -808,13 +776,7 @@ void Host_Init (quakeparms_t *parms)
 	// everythings up now
 	full_initialized = true;
 
-	// contents of ID Quake.rc
-	Cbuf_InsertText ("startdemos demo1 demo2 demo3\n");
-	Cbuf_InsertText ("stuffcmds\n");
-	Cbuf_InsertText ("exec autoexec.cfg\n");
-	Cbuf_InsertText ("exec directq.cfg\n");
-	Cbuf_InsertText ("exec config.cfg\n");
-	Cbuf_InsertText ("exec default.cfg\n");
+	COM_ExecQuakeRC ();
 
 	// anything allocated after this point will be cleared between maps
 	host_initialized = true;

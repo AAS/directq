@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // models.c -- model loading and caching
 
@@ -485,7 +482,7 @@ void Mod_LoadTextures (lump_t *l, lump_t *e)
 		// did we get any wads?
 		if (hlWADs[0])
 		{
-			for (i = 0, j = 1; ; i++)
+			for (i = 0, j = 1;; i++)
 			{
 				// end of the list
 				if (!hlWADs[0][i]) break;
@@ -927,15 +924,15 @@ void Mod_LoadSubmodels (lump_t *l)
 	brushmodel->submodels = out;
 	brushmodel->numsubmodels = count;
 
-	for ( i=0 ; i<count ; i++, in++, out++)
+	for ( i=0; i<count; i++, in++, out++)
 	{
-		for (j=0 ; j<3 ; j++)
+		for (j=0; j<3; j++)
 		{	// spread the mins / maxs by a pixel
 			out->mins[j] = LittleFloat (in->mins[j]) - 1;
 			out->maxs[j] = LittleFloat (in->maxs[j]) + 1;
 			out->origin[j] = LittleFloat (in->origin[j]);
 		}
-		for (j=0 ; j<MAX_MAP_HULLS ; j++)
+		for (j=0; j<MAX_MAP_HULLS; j++)
 			out->headnode[j] = LittleLong (in->headnode[j]);
 		out->visleafs = LittleLong (in->visleafs);
 		out->firstface = LittleLong (in->firstface);
@@ -1041,16 +1038,48 @@ void Mod_LoadTexinfo (lump_t *l)
 
 
 /*
-================
-CalcSurfaceExtents
+=================
+Mod_CalcSurfaceBounds -- johnfitz -- calculate bounding box for per-surface frustum culling
 
-Fills in s->texturemins[] and s->extents[]
-================
+also used by the automap
+
+mh - integrated surf extents and used precalced data
+=================
 */
 int MaxExtents[2] = {0, 0};
 
-void CalcSurfaceExtents (msurface_t *surf, float *mins, float *maxs)
+void Mod_CalcSurfaceBoundsAndExtents (msurface_t *surf)
 {
+	float mins[2] = {99999999, 99999999};
+	float maxs[2] = {-99999999, -99999999};
+
+	surf->mins[0] = surf->mins[1] = surf->mins[2] = 99999999;
+	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -99999999;
+
+	polyvert_t *vert = surf->verts;
+
+	for (int i = 0; i < surf->numverts; i++, vert++)
+	{
+		float st[2];
+
+		if (surf->mins[0] > vert->basevert[0]) surf->mins[0] = vert->basevert[0];
+		if (surf->mins[1] > vert->basevert[1]) surf->mins[1] = vert->basevert[1];
+		if (surf->mins[2] > vert->basevert[2]) surf->mins[2] = vert->basevert[2];
+		if (surf->maxs[0] < vert->basevert[0]) surf->maxs[0] = vert->basevert[0];
+		if (surf->maxs[1] < vert->basevert[1]) surf->maxs[1] = vert->basevert[1];
+		if (surf->maxs[2] < vert->basevert[2]) surf->maxs[2] = vert->basevert[2];
+
+		st[0] = (DotProduct (vert->basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+		st[1] = (DotProduct (vert->basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+
+		if (st[0] > maxs[0]) maxs[0] = st[0]; if (st[0] < mins[0]) mins[0] = st[0];
+		if (st[1] > maxs[1]) maxs[1] = st[1]; if (st[1] < mins[1]) mins[1] = st[1];
+	}
+
+	// no extents
+	if (surf->flags & SURF_DRAWTURB) return;
+
+	// now do extents
 	for (int i = 0; i < 2; i++)
 	{	
 		int bmins = floor (mins[i] / 16);
@@ -1072,38 +1101,6 @@ void CalcSurfaceExtents (msurface_t *surf, float *mins, float *maxs)
 
 /*
 =================
-Mod_CalcSurfaceBounds -- johnfitz -- calculate bounding box for per-surface frustum culling
-
-also used by the automap
-=================
-*/
-void Mod_CalcSurfaceBounds (msurface_t *surf)
-{
-	mvertex_t *v;
-
-	surf->mins[0] = surf->mins[1] = surf->mins[2] = 99999999;
-	surf->maxs[0] = surf->maxs[1] = surf->maxs[2] = -99999999;
-
-	for (int i = 0; i < surf->numverts; i++)
-	{
-		int e = brushmodel->surfedges[surf->firstedge + i];
-
-		if (e >= 0)
-			v = &brushmodel->vertexes[brushmodel->edges[e].v[0]];
-		else v = &brushmodel->vertexes[brushmodel->edges[-e].v[1]];
-
-		if (surf->mins[0] > v->position[0]) surf->mins[0] = v->position[0];
-		if (surf->mins[1] > v->position[1]) surf->mins[1] = v->position[1];
-		if (surf->mins[2] > v->position[2]) surf->mins[2] = v->position[2];
-		if (surf->maxs[0] < v->position[0]) surf->maxs[0] = v->position[0];
-		if (surf->maxs[1] < v->position[1]) surf->maxs[1] = v->position[1];
-		if (surf->maxs[2] < v->position[2]) surf->maxs[2] = v->position[2];
-	}
-}
-
-
-/*
-=================
 Mod_LoadSurfaces
 =================
 */
@@ -1118,10 +1115,9 @@ void Mod_LoadSurfaces (lump_t *l)
 	}
 
 	int count = l->filelen / sizeof (*face);
-	msurface_t *surf = (msurface_t *) Pool_Map->Alloc (count * sizeof (*surf));	
+	msurface_t *surf = (msurface_t *) Pool_Map->Alloc (count * sizeof (msurface_t));	
 
 	brushmodel->surfaces = surf;
-	brushmodel->alphasurfaces = NULL;
 	brushmodel->numsurfaces = count;
 
 	for (int surfnum = 0; surfnum < count; surfnum++, face++, surf++)
@@ -1132,9 +1128,8 @@ void Mod_LoadSurfaces (lump_t *l)
 		// verts/etc
 		surf->firstedge = LittleLong (face->firstedge);
 		surf->numverts = (unsigned short) LittleShort (face->numedges);
+		surf->numindexes = (surf->numverts - 2) * 3;
 		surf->flags = 0;
-
-		Mod_CalcSurfaceBounds (surf);
 
 		if (LittleShort (face->side)) surf->flags |= SURF_PLANEBACK;			
 
@@ -1160,6 +1155,10 @@ void Mod_LoadSurfaces (lump_t *l)
 			else surf->samples = brushmodel->lightdata + LittleLong (face->lightofs);
 		}
 
+		// set the drawing flags flag
+		if (!strncmp (surf->texinfo->texture->name, "sky", 3))
+			surf->flags |= SURF_DRAWSKY;
+
 		if (surf->texinfo->texture->name[0] == '*')
 		{
 			// set contents flags
@@ -1180,63 +1179,47 @@ void Mod_LoadSurfaces (lump_t *l)
 
 			// subdivide for warps
 			R_GenerateTurbSurface (loadmodel, surf);
-			continue;
 		}
-
-		// setup the base vertexes and get their pointer (warps don't have these yet)
-		polyvert_t *verts = (polyvert_t *) Pool_Map->Alloc (surf->numverts * sizeof (polyvert_t));
-
-		// these surf types aren't subdivided and have no warp verts
-		surf->verts = verts;
-
-		// keep code cleaner looking
-		brushhdr_t *hdr = loadmodel->brushhdr;
-
-		VectorClear (surf->midpoint);
-
-		float mins[2] = {99999999, 99999999};
-		float maxs[2] = {-99999999, -99999999};
-
-		for (int i = 0; i < surf->numverts; i++, verts++)
+		else
 		{
-			int lindex = hdr->surfedges[face->firstedge + i];
-			mtexinfo_t *ti = surf->texinfo;
+			// just set these up for now, we generate them in the next step
+			surf->verts = (polyvert_t *) Pool_Map->Alloc (surf->numverts * sizeof (polyvert_t));
 
-			// store a pointer to the base vert so as to cut down on memory usage
-			if (lindex > 0)
-				verts->basevert = hdr->vertexes[hdr->edges[lindex].v[0]].position;
-			else verts->basevert = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+			// keep code cleaner looking
+			brushhdr_t *hdr = loadmodel->brushhdr;
+			polyvert_t *verts = surf->verts;
 
-			// accumulate into midpoint
-			VectorAdd (surf->midpoint, verts->basevert, surf->midpoint);
+			VectorClear (surf->midpoint);
 
-			// now generate base s, base t, mins and maxs (lightmaps will have to wait...)
-			for (int j = 0; j < 2; j++)
+			for (int i = 0; i < surf->numverts; i++, verts++)
 			{
-				verts->st[j] = (DotProduct (verts->basevert, ti->vecs[j]) + ti->vecs[j][3]);
+				int lindex = hdr->surfedges[surf->firstedge + i];
 
-				if (verts->st[j] < mins[j]) mins[j] = verts->st[j];
-				if (verts->st[j] > maxs[j]) maxs[j] = verts->st[j];
+				// store a pointer to the base vert so as to cut down on memory usage
+				if (lindex > 0)
+					verts->basevert = hdr->vertexes[hdr->edges[lindex].v[0]].position;
+				else verts->basevert = hdr->vertexes[hdr->edges[-lindex].v[1]].position;
+
+				// accumulate into midpoint
+				VectorAdd (surf->midpoint, verts->basevert, surf->midpoint);
+
+				// texcoords
+				verts->st[0] = (DotProduct (verts->basevert, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]) / (float) surf->texinfo->texture->width;
+				verts->st[1] = (DotProduct (verts->basevert, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]) / (float) surf->texinfo->texture->height;
 			}
 
-			// final s and t
-			verts->st[0] /= (float) ti->texture->width;
-			verts->st[1] /= (float) ti->texture->height;
+			// flag for the surf completing vertex allocation
+			surf->flags |= SURF_VERTCOMPLETE;
+
+			// get final mindpoint
+			VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
 		}
 
-		// calc extents (sky and solid only, and sky doesn't even need it)
-		CalcSurfaceExtents (surf, mins, maxs);
+		// surface extents and bounds for frustum culling
+		Mod_CalcSurfaceBoundsAndExtents (surf);
 
-		// get final mindpoint
-		VectorScale (surf->midpoint, 1.0f / (float) surf->numverts, surf->midpoint);
-
-		// set the drawing flags flag
-		if (!strncmp (surf->texinfo->texture->name, "sky", 3))
-		{
-			// sky surfaces are not subdivided but they store verts face main memory and they don't evaluate texcoords
-			surf->flags |= SURF_DRAWSKY;
-			continue;
-		}
+		// no extents
+		if (surf->flags & SURF_DRAWTURB) continue;
 
 		// check extents against max extents
 		if (surf->extents[0] > MaxExtents[0]) MaxExtents[0] = surf->extents[0];
@@ -1543,10 +1526,10 @@ void Mod_MakeHull0 (void)
 	hull->lastclipnode = count-1;
 	hull->planes = brushmodel->planes;
 
-	for (i=0 ; i<count ; i++, out++, in++)
+	for (i=0; i<count; i++, out++, in++)
 	{
 		out->planenum = in->plane - brushmodel->planes;
-		for (j=0 ; j<2 ; j++)
+		for (j=0; j<2; j++)
 		{
 			child = in->children[j];
 			if (child->contents < 0)
@@ -1608,7 +1591,7 @@ void Mod_LoadSurfedges (lump_t *l)
 	brushmodel->surfedges = out;
 	brushmodel->numsurfedges = count;
 
-	for ( i=0 ; i<count ; i++)
+	for ( i=0; i<count; i++)
 		out[i] = LittleLong (in[i]);
 }
 
@@ -2021,7 +2004,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 				pheader->skinwidth, 
 				pheader->skinheight,
 				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS
+				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_PADDABLE
 			);
 
 			// load fullbright
@@ -2034,7 +2017,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 				pheader->skinwidth, 
 				pheader->skinheight,
 				(byte *) (pskintype + 1),
-				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
+				IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA | IMAGE_PADDABLE
 			);
 
 			pskintype = (daliasskintype_t *) ((byte *) (pskintype + 1) + s);
@@ -2071,7 +2054,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 					pheader->skinwidth, 
 					pheader->skinheight,
 					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS
+					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_PADDABLE
 				);
 
 				// so does this
@@ -2081,7 +2064,7 @@ void *Mod_LoadAllSkins (aliashdr_t *pheader, daliasskintype_t *pskintype)
 					pheader->skinwidth, 
 					pheader->skinheight,
 					(byte *) (pskintype),
-					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA
+					IMAGE_MIPMAP | IMAGE_ALIAS | IMAGE_LUMA | IMAGE_PADDABLE
 				);
 
 				pskintype = (daliasskintype_t *) ((byte *) (pskintype) + s);
@@ -2224,8 +2207,21 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	// build the draw lists
 	GL_MakeAliasModelDisplayLists (pheader, pinstverts, pintriangles);
 
-	// always lerp it until we determine otherwise
-	pheader->nolerp = false;
+	// all skins must be the same size
+	if (pheader->skins[0].texture[0]->flags & IMAGE_PADDED)
+	{
+		// unpad texcoords for the model
+		int scaled_width = D3D_PowerOf2Size (pheader->skins[0].texture[0]->width);
+		int scaled_height = D3D_PowerOf2Size (pheader->skins[0].texture[0]->height);
+
+		for (int i = 0; i < pheader->nummesh; i++)
+		{
+			pheader->meshverts[i].s = (pheader->meshverts[i].s * pheader->skins[0].texture[0]->width) / scaled_width;
+			pheader->meshverts[i].t = (pheader->meshverts[i].t * pheader->skins[0].texture[0]->height) / scaled_height;
+		}
+	}
+
+	// set the final header
 	mod->aliashdr = pheader;
 
 	// copy it out to the cache
@@ -2294,8 +2290,23 @@ void *Mod_LoadSpriteFrame (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 		width,
 		height,
 		(byte *) (pinframe + 1),
-		IMAGE_MIPMAP | IMAGE_ALPHA | (thespr->version == SPR32_VERSION ? (IMAGE_SPRITE | IMAGE_32BIT) : IMAGE_SPRITE)
+		IMAGE_MIPMAP | IMAGE_ALPHA | IMAGE_PADDABLE | (thespr->version == SPR32_VERSION ? (IMAGE_SPRITE | IMAGE_32BIT) : IMAGE_SPRITE)
 	);
+
+	if (pspriteframe->texture->flags & IMAGE_PADDED)
+	{
+		// unpad texcoords
+		int scaled_width = D3D_PowerOf2Size (width);
+		int scaled_height = D3D_PowerOf2Size (height);
+
+		pspriteframe->s = (float) width / (float) scaled_width;
+		pspriteframe->t = (float) height / (float) scaled_height;
+	}
+	else
+	{
+		pspriteframe->s = 1;
+		pspriteframe->t = 1;
+	}
 
 	return (void *) ((byte *) pinframe + sizeof (dspriteframe_t) + size);
 }
@@ -2332,7 +2343,7 @@ void *Mod_LoadSpriteGroup (msprite_t *thespr, void *pin, mspriteframe_t **ppfram
 
 	pspritegroup->intervals = poutintervals;
 
-	for (i=0 ; i<numframes ; i++)
+	for (i=0; i<numframes; i++)
 	{
 		*poutintervals = LittleFloat (pin_intervals->interval);
 		if (*poutintervals <= 0.0)

@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // sys_win.c -- Win32 system interface code
 
@@ -27,6 +24,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "resource.h"
 #include "shlobj.h"
 
+HHOOK hKeyboardHook = NULL;
+bool bWindowActive = false;
+void AllowAccessibilityShortcutKeys (bool bAllowKeys);
 
 int Sys_LoadResourceData (int resourceid, void **resbuf)
 {
@@ -53,8 +53,7 @@ static HANDLE	hFile;
 static HANDLE	heventParent;
 static HANDLE	heventChild;
 
-volatile int sys_checksum;
-
+int sys_time_period = 1;
 
 int	Sys_FileExists (char *path)
 {
@@ -90,7 +89,7 @@ void Sys_mkdir (char *path)
 		Q_strncpy (fullpath, path, 255);
 	else _snprintf (fullpath, 255, "%s/%s", com_gamedir, path);
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!fullpath[i]) break;
 
@@ -137,9 +136,9 @@ void Sys_Init (void)
 	}
 
 	// make sure that what timeGetDevCaps reported back is actually supported!
-	for (int i = tc.wPeriodMin;; i++)
+	for (sys_time_period = tc.wPeriodMin;; sys_time_period++)
 	{
-		MMRESULT mmr = timeBeginPeriod (i);
+		MMRESULT mmr = timeBeginPeriod (sys_time_period);
 
 		// can't support this time period
 		if (mmr == TIMERR_NOCANDO) continue;
@@ -148,7 +147,7 @@ void Sys_Init (void)
 		if (mmr == TIMERR_NOERROR) break;
 
 		// as soon as we hit more than 1/10 second accuracy we abort
-		if (i > 100)
+		if (sys_time_period > 100)
 		{
 			MessageBox
 			(
@@ -216,6 +215,7 @@ void Sys_Error (char *error, ...)
 		in_sys_error2 = 1;
 	}
 
+	timeEndPeriod (sys_time_period);
 	exit (1);
 }
 
@@ -223,6 +223,9 @@ void Sys_Error (char *error, ...)
 void Sys_Quit (void)
 {
 	Host_Shutdown ();
+	timeEndPeriod (sys_time_period);
+	UnhookWindowsHookEx (hKeyboardHook);
+	AllowAccessibilityShortcutKeys (true);
 	exit (0);
 }
 
@@ -237,14 +240,23 @@ unfortunately this code is STILL used throughout the engine
 float Sys_FloatTime (void)
 {
 	// adjust for rounding errors
-	return ((float) timeGetTime () + 0.5f) / 1000.0f;
+	return ((float) Sys_DWORDTime () + 0.5f) / 1000.0f;
 }
 
 
 DWORD Sys_DWORDTime (void)
 {
-	// adjust for rounding errors
-	return timeGetTime ();
+	static LONGLONG starttime = timeGetTime ();
+
+	LONGLONG now = timeGetTime ();
+
+	while (now < starttime)
+	{
+		now += 0xffffffff;
+		now += 1;
+	}
+
+	return (DWORD) (now - starttime);
 }
 
 
@@ -254,7 +266,7 @@ void Sys_SendKeyEvents (void)
 
 	while (PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE))
 	{
-	// we always update if there are any event, even if we're paused
+		// we always update if there are any event, even if we're paused
 		scr_skipupdate = 0;
 
 		if (!GetMessage (&msg, NULL, 0, 0))
@@ -441,7 +453,7 @@ void SetQuakeDirectory (void)
 		if (!drives[d].valid) continue;
 
 		// check some well-known directories (where we might reasonably expect to find Quake)
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!WellKnownDirectories[i]) break;
 			if (CheckWellKnownDirectory (drives[d].letter, WellKnownDirectories[i])) return;
@@ -471,7 +483,7 @@ void SetQuakeDirectory (void)
 	// oh shit
 	Splash_Destroy ();
 	MessageBox (NULL, "Could not locate Quake on your PC.\n\nPerhaps you need to move DirectQ.exe into C:\\Quake?", "Error", MB_OK | MB_ICONERROR);
-	exit (666);
+	Sys_Quit ();
 }
 
 
@@ -496,6 +508,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 
 	if (fActive)
 	{
+		bWindowActive = true;
 		IN_ActivateMouse ();
 		IN_ShowMouse (FALSE);
 		VID_SetAppGamma ();
@@ -518,6 +531,7 @@ void AppActivate (BOOL fActive, BOOL minimize)
 	}
 	else
 	{
+		bWindowActive = false;
 		IN_DeactivateMouse ();
 		IN_ShowMouse (TRUE);
 		VID_SetOSGamma ();
@@ -535,6 +549,64 @@ void AppActivate (BOOL fActive, BOOL minimize)
 }
 
 
+STICKYKEYS StartupStickyKeys = {sizeof (STICKYKEYS), 0};
+TOGGLEKEYS StartupToggleKeys = {sizeof (TOGGLEKEYS), 0};
+FILTERKEYS StartupFilterKeys = {sizeof (FILTERKEYS), 0};    
+
+
+void AllowAccessibilityShortcutKeys (bool bAllowKeys)
+{
+	if (bAllowKeys)
+	{
+		// Restore StickyKeys/etc to original state and enable Windows key
+		STICKYKEYS sk = StartupStickyKeys;
+		TOGGLEKEYS tk = StartupToggleKeys;
+		FILTERKEYS fk = StartupFilterKeys;
+
+		SystemParametersInfo (SPI_SETSTICKYKEYS, sizeof (STICKYKEYS), &StartupStickyKeys, 0);
+		SystemParametersInfo (SPI_SETTOGGLEKEYS, sizeof (TOGGLEKEYS), &StartupToggleKeys, 0);
+		SystemParametersInfo (SPI_SETFILTERKEYS, sizeof (FILTERKEYS), &StartupFilterKeys, 0);
+	}
+	else
+	{
+		// Disable StickyKeys/etc shortcuts but if the accessibility feature is on,
+		// then leave the settings alone as its probably being usefully used
+		STICKYKEYS skOff = StartupStickyKeys;
+
+		if ((skOff.dwFlags & SKF_STICKYKEYSON) == 0)
+		{
+			// Disable the hotkey and the confirmation
+			skOff.dwFlags &= ~SKF_HOTKEYACTIVE;
+			skOff.dwFlags &= ~SKF_CONFIRMHOTKEY;
+
+			SystemParametersInfo (SPI_SETSTICKYKEYS, sizeof (STICKYKEYS), &skOff, 0);
+		}
+
+		TOGGLEKEYS tkOff = StartupToggleKeys;
+
+		if ((tkOff.dwFlags & TKF_TOGGLEKEYSON) == 0)
+		{
+			// Disable the hotkey and the confirmation
+			tkOff.dwFlags &= ~TKF_HOTKEYACTIVE;
+			tkOff.dwFlags &= ~TKF_CONFIRMHOTKEY;
+
+			SystemParametersInfo (SPI_SETTOGGLEKEYS, sizeof (TOGGLEKEYS), &tkOff, 0);
+		}
+
+		FILTERKEYS fkOff = StartupFilterKeys;
+
+		if ((fkOff.dwFlags & FKF_FILTERKEYSON) == 0)
+		{
+			// Disable the hotkey and the confirmation
+			fkOff.dwFlags &= ~FKF_HOTKEYACTIVE;
+			fkOff.dwFlags &= ~FKF_CONFIRMHOTKEY;
+
+			SystemParametersInfo (SPI_SETFILTERKEYS, sizeof (FILTERKEYS), &fkOff, 0);
+		}
+	}
+}
+
+
 /* main window procedure */
 LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
@@ -544,8 +616,22 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 	if (Msg == uiWheelMessage) Msg = WM_MOUSEWHEEL;
 
+	// this is a WEIRD way of doing a window proc...
     switch (Msg)
     {
+	case WM_SYSCOMMAND:
+		switch (wParam & ~0x0F)
+		{
+        case SC_SCREENSAVE:
+        case SC_MONITORPOWER:
+			// prevent from happening
+			break;
+
+		default:
+			return DefWindowProc (hWnd, Msg, wParam, lParam);
+		}
+		break;
+
 	case WM_PAINT:
 		// minimal WM_PAINT processing
 		ValidateRect (hWnd, NULL);
@@ -662,6 +748,32 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 
 
+LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
+{
+	// do not process message
+	if (nCode < 0 || nCode != HC_ACTION)
+		return CallNextHookEx (hKeyboardHook, nCode, wParam, lParam);
+
+	bool bEatKeystroke = false;
+	KBDLLHOOKSTRUCT *p = (KBDLLHOOKSTRUCT *) lParam;
+
+	switch (wParam)
+	{
+	case WM_KEYDOWN:
+	case WM_KEYUP:
+		bEatKeystroke = (bWindowActive && ((p->vkCode == VK_LWIN) || (p->vkCode == VK_RWIN)));
+		break;
+
+	default:
+		break;
+	}
+
+	if (bEatKeystroke)
+		return 1;
+	else return CallNextHookEx (hKeyboardHook, nCode, wParam, lParam);
+}
+
+
 void Host_Frame (DWORD time);
 void D3D_CreateShadeDots (void);
 
@@ -712,7 +824,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		LPSetProcessDPIAware pSetProcessDPIAware = (LPSetProcessDPIAware) GetProcAddress (hUser32, "SetProcessDPIAware");
 
 		if (pSetProcessDPIAware) pSetProcessDPIAware ();
-		FreeLibrary (hUser32);
+		UNLOAD_LIBRARY (hUser32);
 	}
 
 	// init memory pools
@@ -776,7 +888,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// set up and register the window class (d3d doesn't need CS_OWNDC)
 	WNDCLASS wc;
 
-	wc.style = CS_HREDRAW | CS_VREDRAW | CS_CLASSDC;
+	wc.style = CS_CLASSDC;
 	wc.lpfnWndProc = (WNDPROC) MainWndProc;
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
@@ -794,6 +906,17 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	}
 
 	DWORD time, oldtime, newtime;
+
+    // Save the current sticky/toggle/filter key settings so they can be restored them later
+    SystemParametersInfo (SPI_GETSTICKYKEYS, sizeof (STICKYKEYS), &StartupStickyKeys, 0);
+    SystemParametersInfo (SPI_GETTOGGLEKEYS, sizeof (TOGGLEKEYS), &StartupToggleKeys, 0);
+    SystemParametersInfo (SPI_GETFILTERKEYS, sizeof (FILTERKEYS), &StartupFilterKeys, 0);
+ 
+    // Disable when full screen
+    AllowAccessibilityShortcutKeys (false);
+
+	// Initialization
+    hKeyboardHook = SetWindowsHookEx (WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle (NULL), 0);
 
 	Sys_Init ();
 	Host_Init (&parms);

@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // sv_move.c -- monster movement
 
@@ -51,8 +48,8 @@ bool SV_CheckBottom (edict_t *ent)
 // with the tougher checks
 // the corners must be within 16 of the midpoint
 	start[2] = mins[2] - 1;
-	for	(x=0 ; x<=1 ; x++)
-		for	(y=0 ; y<=1 ; y++)
+	for	(x=0; x<=1; x++)
+		for	(y=0; y<=1; y++)
 		{
 			start[0] = x ? maxs[0] : mins[0];
 			start[1] = y ? maxs[1] : mins[1];
@@ -81,8 +78,8 @@ realcheck:
 	mid = bottom = trace.endpos[2];
 	
 // the corners must be within 16 of the midpoint	
-	for	(x=0 ; x<=1 ; x++)
-		for	(y=0 ; y<=1 ; y++)
+	for	(x=0; x<=1; x++)
+		for	(y=0; y<=1; y++)
 		{
 			start[0] = stop[0] = x ? maxs[0] : mins[0];
 			start[1] = stop[1] = y ? maxs[1] : mins[1];
@@ -126,7 +123,7 @@ bool SV_movestep (edict_t *ent, vec3_t move, bool relink)
 	if ( (int)ent->v.flags & (FL_SWIM | FL_FLY) )
 	{
 	// try one move with vertical motion, then one without
-		for (i=0 ; i<2 ; i++)
+		for (i=0; i<2; i++)
 		{
 			VectorAdd (ent->v.origin, move, neworg);
 			enemy = PROG_TO_EDICT(ent->v.enemy);
@@ -343,13 +340,13 @@ void SV_NewChaseDir (edict_t *actor, edict_t *enemy, float dist)
 
 	if (rand()&1) 	/*randomly determine direction of search*/
 	{
-		for (tdir=0 ; tdir<=315 ; tdir += 45)
+		for (tdir=0; tdir<=315; tdir += 45)
 			if (tdir!=turnaround && SV_StepDirection(actor, tdir, dist) )
 					return;
 	}
 	else
 	{
-		for (tdir=315 ; tdir >=0 ; tdir -= 45)
+		for (tdir=315; tdir >=0; tdir -= 45)
 			if (tdir!=turnaround && SV_StepDirection(actor, tdir, dist) )
 					return;
 	}
@@ -377,7 +374,7 @@ bool SV_CloseEnough (edict_t *ent, edict_t *goal, float dist)
 {
 	int		i;
 	
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 	{
 		if (goal->v.absmin[i] > ent->v.absmax[i] + dist)
 			return false;
@@ -421,8 +418,7 @@ void SV_MoveToGoal (void)
 		return;
 
 // bump around...
-	if ( (rand()&3)==1 ||
-	!SV_StepDirection (ent, ent->v.ideal_yaw, dist))
+	if ( (rand()&3)==1 || !SV_StepDirection (ent, ent->v.ideal_yaw, dist))
 	{
 		SV_NewChaseDir (ent, goal, dist);
 	}

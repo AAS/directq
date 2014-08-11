@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // net_main.c
 
@@ -162,7 +159,7 @@ static void NET_Listen_f (void)
 
 	listening = atoi(Cmd_Argv(1)) ? true : false;
 
-	for (net_driverlevel=0 ; net_driverlevel<net_numdrivers; net_driverlevel++)
+	for (net_driverlevel=0; net_driverlevel<net_numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false)
 			continue;
@@ -452,7 +449,7 @@ qsocket_t *NET_CheckNewConnections (void)
 
 	SetNetTime();
 
-	for (net_driverlevel=0 ; net_driverlevel<net_numdrivers; net_driverlevel++)
+	for (net_driverlevel=0; net_driverlevel<net_numdrivers; net_driverlevel++)
 	{
 		if (net_drivers[net_driverlevel].initialized == false) continue;
 		if (net_driverlevel && listening == false) continue;
@@ -651,7 +648,7 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 	bool	state1 [MAX_SCOREBOARD];
 	bool	state2 [MAX_SCOREBOARD];
 
-	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 	{
 		if (!host_client->netconnection)
 			continue;
@@ -683,7 +680,7 @@ int NET_SendToAll(sizebuf_t *data, int blocktime)
 	while (count)
 	{
 		count = 0;
-		for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+		for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 		{
 			if (! state1[i])
 			{
@@ -773,7 +770,7 @@ void NET_Init (void)
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
 
 	// initialize all the drivers
-	for (net_driverlevel=0 ; net_driverlevel<net_numdrivers ; net_driverlevel++)
+	for (net_driverlevel=0; net_driverlevel<net_numdrivers; net_driverlevel++)
 		{
 		controlSocket = net_drivers[net_driverlevel].Init();
 		if (controlSocket == -1)

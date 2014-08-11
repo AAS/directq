@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // gpl blah etc, just read "gnu.txt" that comes with this...
 
@@ -753,7 +750,7 @@ void HUD_DrawLevelName (int x, int y)
 	Q_strncpy (str, cl.levelname, 1023);
 
 	// deal with 'cute' messages in the level name (die die die)
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!str[i]) break;
 
@@ -772,7 +769,7 @@ void HUD_DrawLevelName (int x, int y)
 
 	int l = strlen (str);
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (str[i])
 			str[i] += 128;
@@ -936,7 +933,8 @@ void HUD_DeathmatchOverlay (void)
 			// draw name
 			Draw_String (x + 128, y, s->name);
 		}
-		else Draw_String (x + 64, y, s->name);
+		else
+			Draw_String (x + 64, y, s->name);
 
 		y += 12;
 	}
@@ -1628,52 +1626,21 @@ void HUD_MiniDeathmatchOverlay (void)
 
 void HUD_DrawFPS (bool force)
 {
-#if 0
-	// consistency
-	char str[17];
-	static int oldframecount = 0;
-	static float oldtime = 0, fps = 0;
-
-	// positioning
-	int x = HUD_GetX (&hud_fps_x, NULL);
-	int y = HUD_GetY (&hud_fps_y, NULL);
-
-	float time = realtime - oldtime;
-	int frames = host_framecount - oldframecount;
-
-	if (time < 0 || frames < 0)
-	{
-		oldtime = realtime;
-		oldframecount = host_framecount;
-		return;
-	}
-
-	// update value every 1/4 second
-	if (time > 0.25)
-	{
-		fps = (float) frames / time;
-		oldtime = realtime;
-		oldframecount = host_framecount;
-	}
-
-	if (scr_showfps.value || force)
-	{
-		// adjust for rounding errors
-		_snprintf (str, 16, "%4i fps", (int) (fps + 0.5f));
-		Draw_String (x, y, str);
-	}
-#else
-	static int frames = 0;
-	static float fpsrate = 0;
-	char str[17];
-	static DWORD dwOldFrameTime = 0;
 	extern DWORD dwRealTime;
+	static DWORD dwLastTime = dwRealTime;
+	static int lastframe = host_framecount;
 
-	if (++frames >= 16 && dwRealTime > dwOldFrameTime)
+	DWORD fps_frametime = dwRealTime - dwLastTime;
+	int fps_frames = host_framecount - lastframe;
+
+	static float fps_fps = 0;
+
+	if (fps_frametime > 200)
 	{
-		fpsrate = ((float) (frames * 1000)) / (dwRealTime - dwOldFrameTime);
-		frames = 0;
-		dwOldFrameTime = dwRealTime;
+		fps_fps = ((float) (fps_frames * 1000)) / ((float) fps_frametime);
+
+		dwLastTime = dwRealTime;
+		lastframe = host_framecount;
 	}
 
 	if (scr_showfps.value || force)
@@ -1681,12 +1648,11 @@ void HUD_DrawFPS (bool force)
 		// positioning
 		int x = HUD_GetX (&hud_fps_x, NULL);
 		int y = HUD_GetY (&hud_fps_y, NULL);
+		char str[17];
 
-		// adjust for rounding errors
-		_snprintf (str, 16, "%4.1f fps", fpsrate);
+		_snprintf (str, 16, "%4.1f fps", fps_fps);
 		Draw_String (x, y, str);
 	}
-#endif
 }
 
 

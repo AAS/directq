@@ -15,12 +15,46 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
+
 #include "quakedef.h"
 #include "winquake.h"
+
+HINSTANCE hInstDSound = NULL;
+
+typedef HRESULT (WINAPI *DIRECTSOUNDCREATE8PROC) (LPCGUID, LPDIRECTSOUND8 *, LPUNKNOWN);
+typedef HRESULT (WINAPI *DIRECTSOUNDENUMERATEPROC) (LPDSENUMCALLBACKA, LPVOID);
+
+DIRECTSOUNDCREATE8PROC QDirectSoundCreate8 = NULL;
+DIRECTSOUNDENUMERATEPROC QDirectSoundEnumerate = NULL;
+
+void DS_Unload (void)
+{
+	UNLOAD_LIBRARY (hInstDSound);
+
+	QDirectSoundCreate8 = NULL;
+	QDirectSoundEnumerate = NULL;
+}
+
+
+bool DS_LoadProcs (void)
+{
+	DS_Unload ();
+
+	if (!(hInstDSound = LoadLibrary ("dsound.dll"))) return false;
+
+	QDirectSoundCreate8 = (DIRECTSOUNDCREATE8PROC) GetProcAddress (hInstDSound, "DirectSoundCreate8");
+	QDirectSoundEnumerate = (DIRECTSOUNDENUMERATEPROC) GetProcAddress (hInstDSound, "DirectSoundEnumerateA");
+
+	if (!QDirectSoundCreate8 || !QDirectSoundEnumerate)
+	{
+		DS_Unload ();
+		return false;
+	}
+
+	return true;
+}
+
 
 // 64K is > 1 second at 16-bit, 22050 Hz
 #define	WAV_BUFFERS				64
@@ -122,6 +156,7 @@ void FreeSound (void)
 	ds_SecondaryBuffer8 = NULL;
 	lpData = NULL;
 	dsound_init = false;
+	DS_Unload ();
 }
 
 
@@ -140,7 +175,7 @@ BOOL CALLBACK DSEnumCallback (LPGUID lpGuid, LPCSTR lpcstrDescription, LPCSTR lp
 	LPDIRECTSOUND8 ds_FakeDevice;
 
 	// create a fake device to test for caps
-	hr = DirectSoundCreate8 (lpGuid, &ds_FakeDevice, NULL);
+	hr = QDirectSoundCreate8 (lpGuid, &ds_FakeDevice, NULL);
 
 	// couldn't create so continue enumerating
 	if (FAILED (hr)) return TRUE;
@@ -277,7 +312,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	ds_BestSampleRate = 0;
 
 	// run the enumeration
-	DirectSoundEnumerate (DSEnumCallback, NULL);
+	QDirectSoundEnumerate (DSEnumCallback, NULL);
 
 	// at this stage we've either got our primary sound device (or a better one, if installed)
 	// in the variables, or we got nothing at all...
@@ -291,7 +326,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	while (1)
 	{
 		// attempt to create it
-		hr = DirectSoundCreate8 (&ds_BestGuid, &ds_Device, NULL);
+		hr = QDirectSoundCreate8 (&ds_BestGuid, &ds_Device, NULL);
 
 		// success
 		if (SUCCEEDED (hr)) break;
@@ -354,7 +389,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	// create the secondary buffer we'll actually work with
 	memset (&ds_BufferDesc, 0, sizeof (ds_BufferDesc));
 	ds_BufferDesc.dwSize = sizeof (DSBUFFERDESC);
-	ds_BufferDesc.dwFlags = DSBCAPS_CTRLFREQUENCY | DSBCAPS_LOCSOFTWARE | DSBCAPS_CTRLFX;
+	ds_BufferDesc.dwFlags = DSBCAPS_CTRLFREQUENCY | DSBCAPS_LOCSOFTWARE;
 	ds_BufferDesc.dwBufferBytes = SECONDARY_BUFFER_SIZE;
 	ds_BufferDesc.lpwfxFormat = &format;
 
@@ -454,27 +489,24 @@ Returns false if nothing is found.
 */
 bool SNDDMA_Init (void)
 {
-	sndinitstat	stat;
-
 	dsound_init = false;
 
-	// assume DirectSound won't initialize
-	// (which may have been reasonable in 1996...)
-	stat = SIS_FAILURE;
-
-	stat = SNDDMA_InitDirect ();;
-
-	if (snd_firsttime)
+	if (DS_LoadProcs ())
 	{
-		if (stat == SIS_SUCCESS)
-			Con_SafePrintf ("DirectSound Initialization Complete\n");
-		else Con_SafePrintf ("DirectSound failed to init\n");
-	}
-	else
-	{
-		if (stat == SIS_SUCCESS)
-			Con_SafePrintf ("DirectSound Restart OK\n");
-		else Con_SafePrintf ("DirectSound Restart Failed\n");
+		sndinitstat	stat = SNDDMA_InitDirect ();;
+
+		if (snd_firsttime)
+		{
+			if (stat == SIS_SUCCESS)
+				Con_SafePrintf ("DirectSound Initialization Complete\n");
+			else Con_SafePrintf ("DirectSound failed to init\n");
+		}
+		else
+		{
+			if (stat == SIS_SUCCESS)
+				Con_SafePrintf ("DirectSound Restart OK\n");
+			else Con_SafePrintf ("DirectSound Restart Failed\n");
+		}
 	}
 
 	if (!dsound_init)

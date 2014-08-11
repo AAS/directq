@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -28,12 +25,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void R_PushDlights (mnode_t *headnode);
 void D3D_AddSkySurfaceToRender (msurface_t *surf, D3DMATRIX *m);
 void D3D_DrawWaterSurfaces (void);
-
+void D3D_FinalizeSky (void);
+void R_MarkLeaves (void);
 
 cvar_t r_lockpvs ("r_lockpvs", "0");
-cvar_t r_maxvertexsubmission ("r_maxvertexsubmission", "65000", CVAR_ARCHIVE);
-
-cvar_alias_t bleeble ("bleeble", &r_lockpvs);
 
 void D3D_RotateForEntity (entity_t *e);
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
@@ -65,18 +60,113 @@ void D3D_AllocModelSurf (msurface_t *surf, texture_t *tex, D3DMATRIX *matrix)
 }
 
 
+d3d_shader_t d3d_BrushShader3TMULuma =
+{
+	{
+		// number of stages and type
+		3,
+		VBO_SHADER_TYPE_FIXED
+	},
+	{
+		// color
+		{D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT}
+	},
+	{
+		// alpha
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	}
+};
+
+d3d_shader_t d3d_BrushShader2TMULumaPass1 =
+{
+	{
+		// number of stages and type
+		3,
+		VBO_SHADER_TYPE_FIXED
+	},
+	{
+		// color
+		{D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3DTOP_DISABLE}
+	},
+	{
+		// alpha
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	}
+};
+
+d3d_shader_t d3d_BrushShader2TMULumaPass2 =
+{
+	{
+		// number of stages and type
+		3,
+		VBO_SHADER_TYPE_FIXED
+	},
+	{
+		// color
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	},
+	{
+		// alpha
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	}
+};
+
+d3d_shader_t d3d_BrushShaderNoLuma =
+{
+	{
+		// number of stages and type
+		3,
+		VBO_SHADER_TYPE_FIXED
+	},
+	{
+		// color
+		{D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3DTOP_DISABLE}
+	},
+	{
+		// alpha
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	}
+};
+
 void D3D_DrawModelSurfs (bool fbon, bool pass2 = false)
 {
-	int cachedlightmap = 0;
-	int cachedtexture = 0;
+	// set up overbright modes in shaders
+	if (D3D_OVERBRIGHT_MODULATE == D3DTOP_MODULATE4X)
+	{
+		// if we're doing 4x overbright we need to double the texture intensity.
+		// not certain how legal this hack is...
+		d3d_BrushShader2TMULumaPass2.ColorDef[0].Op = D3DTOP_ADD;
+		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg1 = D3DTA_TEXTURE;
+		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg2 = D3DTA_TEXTURE;
+	}
+	else
+	{
+		d3d_BrushShader2TMULumaPass2.ColorDef[0].Op = D3DTOP_SELECTARG1;
+		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg1 = D3DTA_TEXTURE;
+		d3d_BrushShader2TMULumaPass2.ColorDef[0].Arg2 = D3DTA_CURRENT;
+	}
 
-	int numverts = 0;
-	int numindexes = 0;
-
-	brushpolyvert_t *brushverts = NULL;
-	unsigned short *brushindexes = NULL;
+	d3d_BrushShaderNoLuma.ColorDef[1].Op = D3D_OVERBRIGHT_MODULATE;
+	d3d_BrushShader3TMULuma.ColorDef[2].Op = D3D_OVERBRIGHT_MODULATE;
 
 	bool stateset = false;
+	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (brushpolyvert_t));
 
 	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
 	{
@@ -120,7 +210,6 @@ void D3D_DrawModelSurfs (bool fbon, bool pass2 = false)
 				D3D_SetTexCoordIndexes (0);
 			}
 
-			D3D_BeginVertexes ((void **) &brushverts, (void **) &brushindexes, sizeof (brushpolyvert_t));
 			stateset = true;
 		}
 
@@ -129,133 +218,34 @@ void D3D_DrawModelSurfs (bool fbon, bool pass2 = false)
 		for (d3d_modelsurf_t *modelsurf = rt->surfchain; modelsurf; modelsurf = modelsurf->surfchain)
 		{
 			msurface_t *surf = modelsurf->surf;
-			d3d_RenderDef.brush_polys++;
 
-			if (!D3D_CheckVBO (surf->numverts, (surf->numverts - 2) * 3))
-			{
-				D3D_EndVertexes ();
-				D3D_BeginVertexes ((void **) &brushverts, (void **) &brushindexes, sizeof (brushpolyvert_t));
-				numindexes = 0;
-				numverts = 0;
+			// VBO overflow check
+			D3D_VBOCheckOverflow (surf->numverts, surf->numindexes);
 
-				// force a texture change too on the new VBO
-				cachedtexture = -1;
-			}
+			// ensure that the surface lightmap texture is correct
+			surf->d3d_Lightmap->EnsureSurfaceTexture (surf);
 
-			// a change of lightmap or of texture needs a new batch
-			if ((int) surf->d3d_LightmapTex != cachedlightmap || (int) tex->teximage != cachedtexture)
-			{
-				if (numverts || numindexes)
-				{
-					// go to a new vbo mark
-					D3D_GotoNewVBOMark ();
-				}
+			// set the appropriate shader
+			if (tex->lumaimage && d3d_GlobalCaps.NumTMUs > 2)
+				D3D_VBOAddShader (&d3d_BrushShader3TMULuma, surf->d3d_LightmapTex, tex->lumaimage->d3d_Texture, tex->teximage->d3d_Texture);
+			else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && !pass2)
+				D3D_VBOAddShader (&d3d_BrushShader2TMULumaPass1, surf->d3d_LightmapTex, tex->lumaimage->d3d_Texture);
+			else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && pass2)
+				D3D_VBOAddShader (&d3d_BrushShader2TMULumaPass2, tex->teximage->d3d_Texture);
+			else D3D_VBOAddShader (&d3d_BrushShaderNoLuma, surf->d3d_LightmapTex, tex->teximage->d3d_Texture);
 
-				// update textures (D3D_SetTexture will soak up state changes here)
-				// this needs to be done here otherwise we won't get correct textures set owing to moving the cache outside the main loop
-				if (tex->lumaimage && d3d_GlobalCaps.NumTMUs > 2)
-				{
-					// 3 TMUs with luma
-					D3D_SetVBOColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
-					D3D_SetVBOColorMode (2, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
-
-					D3D_SetVBOTexture (1, tex->lumaimage->d3d_Texture);
-					D3D_SetVBOTexture (2, tex->teximage->d3d_Texture);
-				}
-				else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && !pass2)
-				{
-					// 2 TMUs first pass blends lightmap with luma
-					D3D_SetVBOColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
-					D3D_SetVBOColorMode (2, D3DTOP_DISABLE);
-
-					D3D_SetVBOTexture (1, tex->lumaimage->d3d_Texture);
-				}
-				else if (tex->lumaimage && d3d_GlobalCaps.NumTMUs < 3 && pass2)
-				{
-					// 2 TMUs 2nd pass blends texture with first pass
-					// if we're doing 4x overbright we need to double the texture intensity.
-					if (D3D_OVERBRIGHT_MODULATE == D3DTOP_MODULATE4X)
-						D3D_SetVBOColorMode (0, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_TEXTURE);
-					else D3D_SetVBOColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
-
-					D3D_SetVBOColorMode (1, D3DTOP_DISABLE);
-
-					// texture goes into TMU0 for this one...
-					D3D_SetVBOTexture (0, tex->teximage->d3d_Texture);
-				}
-				else
-				{
-					// no luma common path
-					D3D_SetVBOColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
-					D3D_SetVBOColorMode (2, D3DTOP_DISABLE);
-
-					D3D_SetVBOTexture (1, tex->teximage->d3d_Texture);
-				}
-
-				// and the lightmap
-				if (!pass2)
-				{
-					// this is valid if we're not doing the 2nd pass for 2 TMU devices
-					D3D_SetVBOColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_CURRENT);
-					D3D_SetVBOTexture (0, surf->d3d_LightmapTex);
-				}
-
-				// store back cached stuff
-				cachedlightmap = (int) surf->d3d_LightmapTex;
-				cachedtexture = (int) tex->teximage;
-			}
-
-			// write out the matrix to the surf so that it transforms correctly
+			// add it to the VBO
 			surf->matrix = modelsurf->matrix;
-
-			// emit indexes
-			for (int v = 2; v < surf->numverts; v++)
-			{
-				brushindexes[numindexes++] = numverts;
-				brushindexes[numindexes++] = numverts + v - 1;
-				brushindexes[numindexes++] = numverts + v;
-			}
-
-			D3DMATRIX *m = surf->matrix;
-			polyvert_t *src = surf->verts;
-
-			// emit vertexes
-			for (int v = 0; v < surf->numverts; v++, src++, brushverts++)
-			{
-				if (m)
-				{
-					brushverts->xyz[0] = src->basevert[0] * m->_11 + src->basevert[1] * m->_21 + src->basevert[2] * m->_31 + m->_41;
-					brushverts->xyz[1] = src->basevert[0] * m->_12 + src->basevert[1] * m->_22 + src->basevert[2] * m->_32 + m->_42;
-					brushverts->xyz[2] = src->basevert[0] * m->_13 + src->basevert[1] * m->_23 + src->basevert[2] * m->_33 + m->_43;
-				}
-				else
-				{
-					brushverts->xyz[0] = src->basevert[0];
-					brushverts->xyz[1] = src->basevert[1];
-					brushverts->xyz[2] = src->basevert[2];
-				}
-
-				brushverts->st[0] = src->st[0];
-				brushverts->st[1] = src->st[1];
-
-				brushverts->lm[0] = src->lm[0];
-				brushverts->lm[1] = src->lm[1];
-			}
-
-			// explicitly NULL the surface matrix
+			D3D_VBOAddSurfaceVerts (surf);
 			surf->matrix = NULL;
-			numverts += surf->numverts;
-
-			D3D_UpdateVBOMark (surf->numverts, (surf->numverts - 2) * 3);
+			d3d_RenderDef.brush_polys++;
 		}
 	}
 
-	// set indexes for the last primitive (if any)
-	// required always so that the buffer will unlock
+	D3D_VBORender ();
+
 	if (stateset)
 	{
-		D3D_EndVertexes ();
-
 		if (pass2)
 		{
 			// disable blend mode
@@ -399,35 +389,41 @@ __inline void R_MarkLeafSurfs (mleaf_t *leaf, int visframe)
 	{
 		do
 		{
+			// mark frustum intersection
+			(*mark)->intersect = leaf->intersect;
+
+			// mark as visible
 			(*mark)->visframe = visframe;
+
+			// go to next surf
 			mark++;
 		} while (--c);
 	}
 }
 
 
-__inline void R_PlaneSide (mplane_t *plane, float *dot, int *side)
+__inline float R_PlaneSide (mplane_t *plane)
 {
+	float dot = 0;
+
 	// find which side of the node we are on
 	switch (plane->type)
 	{
 	case PLANE_X:
-		*dot = d3d_RenderDef.worldentity.modelorg[0] - plane->dist;
+		dot = d3d_RenderDef.worldentity.modelorg[0] - plane->dist;
 		break;
 	case PLANE_Y:
-		*dot = d3d_RenderDef.worldentity.modelorg[1] - plane->dist;
+		dot = d3d_RenderDef.worldentity.modelorg[1] - plane->dist;
 		break;
 	case PLANE_Z:
-		*dot = d3d_RenderDef.worldentity.modelorg[2] - plane->dist;
+		dot = d3d_RenderDef.worldentity.modelorg[2] - plane->dist;
 		break;
 	default:
-		*dot = DotProduct (d3d_RenderDef.worldentity.modelorg, plane->normal) - plane->dist;
+		dot = DotProduct (d3d_RenderDef.worldentity.modelorg, plane->normal) - plane->dist;
 		break;
 	}
 
-	if (*dot >= 0)
-		*side = 0;
-	else *side = 1;
+	return dot;
 }
 
 
@@ -456,13 +452,9 @@ void R_StoreEfrags (efrag_t **ppefrag);
 
 void R_RecursiveWorldNode (mnode_t *node)
 {
-	int			side;
-	msurface_t	*surf;
-	float		dot;
-
 	if (node->contents == CONTENTS_SOLID) return;
 	if (node->visframe != d3d_RenderDef.visframecount) return;
-	if (R_CullBox (node->minmaxs, node->minmaxs + 3)) return;
+	if (R_CullBox (node)) return;
 
 	// if a leaf node, draw stuff
 	if (node->contents < 0)
@@ -477,7 +469,11 @@ void R_RecursiveWorldNode (mnode_t *node)
 
 	// node is just a decision point, so go down the appropriate sides
 	// find which side of the node we are on
-	R_PlaneSide (node->plane, &dot, &side);
+	float dot = R_PlaneSide (node->plane);
+	int c = node->numsurfaces;
+	int side = (dot >= 0 ? 0 : 1);
+	int sidebit = (dot >= 0 ? 0 : SURF_PLANEBACK);
+	msurface_t *surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface;
 
 	// check max dot
 	if (dot > r_clipdist) r_clipdist = dot;
@@ -487,89 +483,26 @@ void R_RecursiveWorldNode (mnode_t *node)
 	R_RecursiveWorldNode (node->children[side]);
 
 	// add stuff to the draw lists
-	if (node->numsurfaces)
+	for (; c; c--, surf++)
 	{
-		int c = node->numsurfaces;
+		// the SURF_PLANEBACK test never actually evaluates to true with GLQuake as the surf
+		// will have the same plane and facing as the node here.  oh well...
+		if (surf->visframe != d3d_RenderDef.framecount) continue;
+		if ((surf->flags & SURF_PLANEBACK) != sidebit) continue;
 
-		if (dot < 0 -BACKFACE_EPSILON)
-			side = SURF_PLANEBACK;
-		else if (dot > BACKFACE_EPSILON)
-			side = 0;
-
-		for (surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface; c; c--, surf++)
-		{
-			// the SURF_PLANEBACK test never actually evaluates to true with GLQuake as the surf
-			// will have the same plane and facing as the node here
-			if (surf->visframe != d3d_RenderDef.framecount) continue;
+		// only check for culling if both the leaf and the node containing this surf intersect the frustum
+		if (surf->intersect && node->intersect)
 			if (R_CullBox (surf->mins, surf->maxs)) continue;
 
-			D3D_AddSurfToDrawLists (surf);
+		// it's OK to add it now
+		D3D_AddSurfToDrawLists (surf);
 
-			// in case a bad BSP overlaps the surfs in it's nodes
-			surf->visframe = -1;
-		}
+		// in case a bad BSP overlaps the surfs in it's nodes
+		surf->visframe = -1;
 	}
 
 	// recurse down the back side
 	R_RecursiveWorldNode (node->children[!side]);
-}
-
-
-void R_NoRecursiveWorldNode (void)
-{
-	// don't bother depth-sorting these
-	// some Quake weirdness here
-	// this info taken from qbsp source code:
-	// leaf 0 is a common solid with no faces
-	for (int i = 1; i <= cl.worldmodel->brushhdr->numleafs; i++)
-	{
-		mleaf_t *leaf = &cl.worldmodel->brushhdr->leafs[i];
-
-		// leaf not visible
-		if (leaf->contents == CONTENTS_SOLID) continue;
-		if (leaf->visframe != d3d_RenderDef.visframecount) continue;
-
-		// need to cull here too otherwise we'll get static ents we shouldn't
-		if (R_CullBox (leaf->minmaxs, leaf->minmaxs + 3)) continue;
-
-		// mark the surfs
-		R_MarkLeafSurfs (leaf, d3d_RenderDef.framecount);
-
-		// add static entities contained in the leaf to the list
-		R_StoreEfrags (&leaf->efrags);
-	}
-
-	int side;
-	float dot;
-
-	for (int i = 0; i < cl.worldmodel->brushhdr->numnodes; i++)
-	{
-		mnode_t *node = &cl.worldmodel->brushhdr->nodes[i];
-
-		// node culling
-		if (node->contents == CONTENTS_SOLID) continue;
-		if (node->visframe != d3d_RenderDef.visframecount) continue;
-		if (R_CullBox (node->minmaxs, node->minmaxs + 3)) continue;
-
-		// find which side of the node we are on
-		R_PlaneSide (node->plane, &dot, &side);
-
-		// check max dot
-		if (dot > r_clipdist) r_clipdist = dot;
-		if (-dot > r_clipdist) r_clipdist = -dot;
-
-		for (int j = 0; j < node->numsurfaces; j++)
-		{
-			msurface_t *surf = cl.worldmodel->brushhdr->surfaces + node->firstsurface + j;
-
-			// surf culling
-			if (surf->visframe != d3d_RenderDef.framecount) continue;
-			if ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)) continue;
-			if (R_CullBox (surf->mins, surf->maxs)) continue;
-
-			D3D_AddSurfToDrawLists (surf);
-		}
-	}
 }
 
 
@@ -596,9 +529,6 @@ void R_AutomapSurfaces (void)
 		R_StoreEfrags (&leaf->efrags);
 	}
 
-	int side;
-	float dot;
-
 	// setup modelorg to a point so far above the viewpoint that it may as well be infinite
 	d3d_RenderDef.worldentity.modelorg[0] = (cl.worldmodel->mins[0] + cl.worldmodel->maxs[0]) / 2;
 	d3d_RenderDef.worldentity.modelorg[1] = (cl.worldmodel->mins[1] + cl.worldmodel->maxs[1]) / 2;
@@ -617,7 +547,8 @@ void R_AutomapSurfaces (void)
 		if (R_CullBox (node->minmaxs, node->minmaxs + 3)) continue;
 
 		// find which side of the node we are on
-		R_PlaneSide (node->plane, &dot, &side);
+		float dot = R_PlaneSide (node->plane);
+		int sidebit = (dot >= 0 ? 0 : SURF_PLANEBACK);
 
 		// check max dot
 		if (dot > r_clipdist) r_clipdist = dot;
@@ -631,7 +562,7 @@ void R_AutomapSurfaces (void)
 			if (surf->visframe != d3d_RenderDef.framecount) continue;
 			if (surf->flags & SURF_DRAWSKY) continue;
 			if (surf->mins[2] > (r_refdef.vieworg[2] + r_automap_nearclip.integer + r_automap_z)) continue;
-			if ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)) continue;
+			if ((surf->flags & SURF_PLANEBACK) != sidebit) continue;
 
 			D3D_AddSurfToDrawLists (surf);
 		}
@@ -719,7 +650,18 @@ void D3D_DrawAlphaBrushModel (entity_t *ent)
 			dest->lm[1] = src->lm[1];
 		}
 
-		d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, surf->numverts - 2, verts, sizeof (brushpolyvert_t));
+		unsigned short *indexes = (unsigned short *) Pool_PolyVerts->Alloc (surf->numverts * 3 * sizeof (unsigned short));
+		unsigned short *n = indexes;
+
+		for (int i = 2; i < surf->numverts; i++, n += 3)
+		{
+			n[0] = 0;
+			n[1] = i - 1;
+			n[2] = i;
+		}
+
+		// triangle fans are evil
+		D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, surf->numverts, surf->numverts - 2, indexes, verts, sizeof (brushpolyvert_t));
 		d3d_RenderDef.brush_polys++;
 	}
 }
@@ -876,14 +818,22 @@ void D3D_SetupBrushModel (entity_t *ent)
 
 void D3D_BuildWorld (void)
 {
-	// bound to sensible values - this max size is chosen to work with the menu slider
-	// it also provides 5000 ish vertexes of headroom for primitives that may overshoot
-	if (r_maxvertexsubmission.integer < 1) Cvar_Set (&r_maxvertexsubmission, 1);
-	if (r_maxvertexsubmission.integer > 60001) Cvar_Set (&r_maxvertexsubmission, 60001);
+	// mark visible leafs
+	R_MarkLeaves ();
 
 	// clear surface chains
 	for (int i = 0; i < d3d_NumRegisteredTextures; i++)
 		d3d_RegisteredTextures[i].surfchain = NULL;
+
+	// clear texture chains
+	for (int i = 0; i < cl.worldmodel->brushhdr->numtextures; i++)
+	{
+		texture_t *tex = cl.worldmodel->brushhdr->textures[i];
+		if (!tex) continue;
+
+		tex->texturechain = NULL;
+		tex->chaintail = NULL;
+	}
 
 	if (!Pool_ModelSurfs) Pool_ModelSurfs = new CSpaceBuffer ("Model Surfs", 16, POOL_MAP);
 
@@ -907,8 +857,6 @@ void D3D_BuildWorld (void)
 	// the automap has a different viewpoint so R_RecursiveWorldNode is not valid for it
 	if (d3d_RenderDef.automap)
 		R_AutomapSurfaces ();
-	else if (0)
-		R_NoRecursiveWorldNode ();
 	else R_RecursiveWorldNode (cl.worldmodel->brushhdr->nodes);
 
 	if (r_drawentities.integer)
@@ -927,6 +875,15 @@ void D3D_BuildWorld (void)
 			D3D_SetupBrushModel (ent);
 		}
 	}
+
+	// upload any lightmaps that were modified
+	d3d_Lightmaps->UploadLightmap ();
+
+	// some sky modes require extra stuff to be added after the surfs so handle those now
+	D3D_FinalizeSky ();
+
+	// finish solid surfaces by adding any such to the solid buffer
+	D3D_AddWorldSurfacesToRender ();
 }
 
 

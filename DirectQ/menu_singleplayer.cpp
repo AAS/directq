@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -237,7 +234,7 @@ void Menu_ParseSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 	start = NULL;
 
 	// locate the opening brace
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (str[i] == '{')
 		{
@@ -449,7 +446,7 @@ void Menu_SaveLoadScanSaves (void)
 
 	if (saveloadlist)
 	{
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!saveloadlist[i]) break;
 			Zone_Free (saveloadlist[i]);
@@ -661,7 +658,7 @@ void Menu_SaveLoadOnDelete (int itemnum)
 		_snprintf (delfile, MAX_PATH, "%s\\save\\%s", com_gamedir, ActiveSaveInfoArray[itemnum]->SaveInfo.filename);
 
 		// change / to \\ 
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!delfile[i]) break;
 			if (delfile[i] == '/') delfile[i] = '\\';

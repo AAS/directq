@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 // particle images
@@ -33,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // shaders
 #define IDR_LIQUID					420
 #define IDR_SKY						430
+#define IDR_SCREEN				440
 
 // bitmaps and other images
 #define IDR_SPLASH					600
@@ -45,4 +43,5 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // lookup tables
 #define IDR_ANORMDOTS				1010
 #define IDR_ANORMS					1020
+
 

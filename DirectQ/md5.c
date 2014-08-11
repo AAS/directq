@@ -28,6 +28,8 @@ documentation and/or software.
  
 */
 
+#include "versions.h"
+
 #pragma warning (disable: 4131)
 
 #include "global.h"

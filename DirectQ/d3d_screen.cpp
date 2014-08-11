@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
@@ -83,6 +80,8 @@ console is:
 
 float		scr_con_current;
 float		scr_conlines;		// lines of console to display
+
+cvar_t		scr_showcoords ("scr_showcoords", "0");
 
 // timeout when loading plaque is up
 #define SCR_DEFTIMEOUT 60
@@ -170,9 +169,9 @@ void SCR_CenterPrint (char *str)
 	// only log if the previous centerprint has already been cleared
 	if (scr_centerlog.integer && !cl.intermission && scr_centertime_off < 0.01)
 	{
-		Con_SilentPrintf ("\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");
+		Con_SilentPrintf ("\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");
 		Con_SilentPrintf ("\n%s\n\n", str);
-		Con_SilentPrintf ("\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+		Con_SilentPrintf ("\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
 
 		// ensure (required as a standard Con_Printf immediately following a centerprint will screw up the notify lines)
 		Con_ClearNotify ();
@@ -238,6 +237,7 @@ void SCR_DrawCenterString (void)
 		for (j = 0; j < l; j++, x += 8)
 		{
 			Draw_Character (x, y, start[j]);
+
 			if (!remaining--)
 				return;
 		}
@@ -731,7 +731,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 	}
 
 	// copy from the rendertarget to system memory
-	hr = D3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
+	hr = QD3DXLoadSurfaceFromSurface (surf, NULL, NULL, rts, NULL, NULL, D3DX_FILTER_NONE, 0);
 
 	if (FAILED (hr))
 	{
@@ -888,7 +888,7 @@ void SCR_ScreenShot_f (void)
 	// d3dx doesn't support tga writes (BASTARDS) so we made our own
 	if (ssfmt == D3DXIFF_TGA)
 		SCR_WriteSurfaceToTGA (checkname, Surf);
-	else D3DXSaveSurfaceToFileA (checkname, ssfmt, Surf, NULL, NULL);
+	else QD3DXSaveSurfaceToFileA (checkname, ssfmt, Surf, NULL, NULL);
 
 	// not releasing is a memory leak!!!
 	Surf->Release ();
@@ -1184,7 +1184,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 	lines[0] = textbuf;
 
 	// count the number of lines
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		// end
 		if (textbuf[i] == 0) break;
@@ -1202,7 +1202,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 
 	int maxline = 0;
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!lines[i]) break;
 		if (strlen (lines[i]) > maxline) maxline = strlen (lines[i]);
@@ -1223,7 +1223,7 @@ void SCR_DrawNotifyString (char *text, char *caption, int flags)
 
 	y += 20;
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!lines[i]) break;
 
@@ -1323,26 +1323,6 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 
 
 //=============================================================================
-
-/*
-===============
-SCR_BringDownConsole
-
-Brings the console down and fades the palettes back to normal
-================
-*/
-void SCR_BringDownConsole (void)
-{
-	int		i;
-
-	scr_centertime_off = 0;
-
-	for (i = 0; i < 20 && scr_conlines != scr_con_current; i++)
-		SCR_UpdateScreen ();
-
-	cl.cshifts[0].percent = 0;		// no area contents palette on next frame
-}
-
 
 void SCR_SetupToDrawHUD (void)
 {
@@ -1490,19 +1470,15 @@ void HUD_IntermissionOverlay (void);
 void HUD_FinaleOverlay (void);
 void SHOWLMP_drawall (void);
 
-void Host_SetRefreshRate (int rate);
-
 void SCR_UpdateScreen (void)
 {
+	// ensure that everything needed is up
+	if (!hInstD3D9) return;
+	if (!hInstD3DX) return;
+	if (!d3d_Device) return;
+
 	extern D3DDISPLAYMODE d3d_DesktopMode;
 	extern D3DDISPLAYMODE d3d_CurrentMode;
-
-	// bcause this can potentially change we must check and set it each frame
-	if (d3d_CurrentMode.RefreshRate > 0)
-		Host_SetRefreshRate (d3d_CurrentMode.RefreshRate);
-	else if (d3d_DesktopMode.RefreshRate > 0)
-		Host_SetRefreshRate (d3d_DesktopMode.RefreshRate);
-	else Host_SetRefreshRate (666);
 
 	extern bool d3d_DeviceLost;
 
@@ -1522,15 +1498,16 @@ void SCR_UpdateScreen (void)
 	// not initialized yet
 	if (!scr_initialized || !con_initialized || !d3d_Device) return;
 
-	// see if we are using pixel shaders
-	d3d_GlobalCaps.usingPixelShaders = (d3d_GlobalCaps.supportPixelShaders && r_hlsl.integer);
-
 	// begin rendering; get the size of the refresh window and set up for the render
 	// this is also used for lost device recovery mode
 	D3D_BeginRendering ();
 
 	// if we've just lost the device we're going into recovery mode, so don't draw anything
 	if (d3d_DeviceLost) return;
+
+	// see if we are using pixel shaders - this needs to be done after begin rendering in case anything in there
+	// upsets the availability
+	d3d_GlobalCaps.usingPixelShaders = (d3d_GlobalCaps.supportPixelShaders && r_hlsl.integer);
 
 	// determine size of refresh window
 	if (oldfov != scr_fov.value)
@@ -1598,18 +1575,25 @@ void SCR_UpdateScreen (void)
 			HUD_DrawHUD ();
 			SCR_DrawConsole ();
 			if (!scr_drawloading) SHOWLMP_drawall ();
+
+			extern int r_speedstime;
+
+			if (r_speeds.value && r_speedstime >= 0 && !con_forcedup)
+			{
+				Draw_String (vid.width - 100, 20, va ("%5i ms   ", r_speedstime));
+				Draw_String (vid.width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
+				Draw_String (vid.width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
+				Draw_String (vid.width - 100, 50, va ("%5i stream", d3d_RenderDef.numsss));
+			}
+
+			if (scr_showcoords.integer && !con_forcedup)
+			{
+				Draw_String (10, 10, va ("%0.3f %0.3f %0.3f", r_origin[0], r_origin[1], r_origin[2]));
+			}
+
 			if (!scr_drawloading) M_Draw ();
 		}
 		else SCR_DrawAutomapStats ();
-	}
-
-	extern int r_speedstime;
-
-	if (r_speeds.value && r_speedstime >= 0 && !con_forcedup)
-	{
-		Draw_String (vid.width - 100, 20, va ("%5i ms   ", r_speedstime));
-		Draw_String (vid.width - 100, 30, va ("%5i wpoly", d3d_RenderDef.brush_polys));
-		Draw_String (vid.width - 100, 40, va ("%5i epoly", d3d_RenderDef.alias_polys));
 	}
 
 	D3D_EndRendering ();

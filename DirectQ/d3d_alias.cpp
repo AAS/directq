@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // gl_mesh.c: triangle model functions
 
@@ -33,14 +30,6 @@ image_t d3d_PlayerSkins[256];
 
 void D3D_RotateForEntity (entity_t *e);
 void D3D_RotateForEntity (entity_t *e, D3DMATRIX *m);
-
-typedef struct aliaspolyvert_s
-{
-	float xyz[3];
-	D3DCOLOR color;
-	float st[2];
-} aliaspolyvert_t;
-
 
 /*
 =================================================================
@@ -143,8 +132,6 @@ void GL_MakeAliasModelDisplayLists (aliashdr_t *hdr, stvert_t *stverts, dtriangl
 float **r_avertexnormal_dots_lerp = NULL;
 
 
-extern cvar_t r_maxvertexsubmission;
-
 float Mesh_ScaleVert (aliashdr_t *hdr, drawvertx_t *invert, int index)
 {
 	float outvert = invert->v[index];
@@ -186,7 +173,7 @@ void DelerpMuzzleFlashes (aliashdr_t *hdr)
 		// get difference in front to back movement
 		float vdiff = Mesh_ScaleVert (hdr, vertsf1, 0) - Mesh_ScaleVert (hdr, vertsf0, 0);
 
-		// if it's above a certain treshold, assume a muzzleflash and mark for nolerp
+		// if it's above a certain treshold, assume a muzzleflash and mark for no lerp
 		// 10 is the approx lowest range of visible front to back in a view model, so that seems reasonable to work with
 		if (vdiff > 10)
 			vertsf0->lerpvert = false;
@@ -210,78 +197,29 @@ void DelerpMuzzleFlashes (aliashdr_t *hdr)
 
 
 
-__inline void D3D_LerpVert (aliaspolyvert_t *dest, aliasmesh_t *av, aliasstate_t *aliasstate, drawvertx_t *verts1, drawvertx_t *verts2, D3DMATRIX *m = NULL)
-{
-	verts1 += av->vertindex;
-	verts2 += av->vertindex;
-
-	float vert[3];
-
-	if (verts1->lerpvert)
-	{
-		vert[0] = (float) verts1->v[0] * aliasstate->frontlerp + (float) verts2->v[0] * aliasstate->backlerp;
-		vert[1] = (float) verts1->v[1] * aliasstate->frontlerp + (float) verts2->v[1] * aliasstate->backlerp;
-		vert[2] = (float) verts1->v[2] * aliasstate->frontlerp + (float) verts2->v[2] * aliasstate->backlerp;
-	}
-	else if (aliasstate->backlerp > aliasstate->frontlerp)
-	{
-		vert[0] = verts2->v[0];
-		vert[1] = verts2->v[1];
-		vert[2] = verts2->v[2];
-	}
-	else
-	{
-		vert[0] = verts1->v[0];
-		vert[1] = verts1->v[1];
-		vert[2] = verts1->v[2];
-	}
-
-	if (m)
-	{
-		dest->xyz[0] = vert[0] * m->_11 + vert[1] * m->_21 + vert[2] * m->_31 + m->_41;
-		dest->xyz[1] = vert[0] * m->_12 + vert[1] * m->_22 + vert[2] * m->_32 + m->_42;
-		dest->xyz[2] = vert[0] * m->_13 + vert[1] * m->_23 + vert[2] * m->_33 + m->_43;
-	}
-	else
-	{
-		dest->xyz[0] = vert[0];
-		dest->xyz[1] = vert[1];
-		dest->xyz[2] = vert[2];
-	}
-
-	// do texcoords here too
-	dest->st[0] = av->s;
-	dest->st[1] = av->t;
-}
-
-
-__inline void D3D_LerpLight (aliaspolyvert_t *dest, entity_t *e, aliasmesh_t *av, aliasstate_t *aliasstate, drawvertx_t *verts1, drawvertx_t *verts2)
-{
-	float l;
-
-	verts1 += av->vertindex;
-	verts2 += av->vertindex;
-
-	// pre-interpolated shadedots
-	if (verts1->lerpvert)
-		l = (aliasstate->shadedots[verts1->lightnormalindex] * aliasstate->frontlerp + aliasstate->shadedots[verts2->lightnormalindex] * aliasstate->backlerp);
-	else if (aliasstate->backlerp > aliasstate->frontlerp)
-		l = aliasstate->shadedots[verts2->lightnormalindex];
-	else l = aliasstate->shadedots[verts1->lightnormalindex];
-
-	// set light color
-	dest->color = D3DCOLOR_ARGB
-	(
-		BYTE_CLAMP (e->alphaval),
-		vid.lightmap[BYTE_CLAMP (l * e->shadelight[0])],
-		vid.lightmap[BYTE_CLAMP (l * e->shadelight[1])],
-		vid.lightmap[BYTE_CLAMP (l * e->shadelight[2])]
-	);
-}
-
-
 extern vec3_t lightspot;
 extern mplane_t *lightplane;
+
+d3d_shader_t d3d_ShadowShader =
+{
+	{
+		// number of stages and type
+		3,
+		VBO_SHADER_TYPE_FIXED
+	},
+	{
+		// color
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	},
+	{
+		// alpha
+		{D3DTOP_MODULATE, D3DTA_CURRENT, D3DTA_DIFFUSE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	}
+};
 
 void D3D_DrawAliasShadows (entity_t **ents, int numents)
 {
@@ -292,15 +230,8 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 	if (shadealpha < 1) return;
 
 	bool stateset = false;
-
 	DWORD shadecolor = D3DCOLOR_ARGB (shadealpha, 0, 0, 0);
-
-	unsigned short *aliasindexes = NULL;
-	aliaspolyvert_t *aliasverts = NULL;
-
-	D3D_BeginVertexes ((void **) &aliasverts, (void **) &aliasindexes, sizeof (aliaspolyvert_t));
-	int numverts = 0;
-	int numindexes = 0;
+	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (aliaspolyvert_t));
 
 	for (int i = 0; i < numents; i++)
 	{
@@ -325,9 +256,6 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 			D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 			D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-			D3D_SetVBOColorMode (0, D3DTOP_DISABLE);
-			D3D_SetVBOAlphaMode (0, D3DTOP_MODULATE);
-
 			D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
 
 			if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
@@ -348,14 +276,9 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 			stateset = true;
 		}
 
-		if (!D3D_CheckVBO (hdr->nummesh, hdr->numindexes))
-		{
-			// end this VBO batch and begin a new one
-			D3D_EndVertexes ();
-			D3D_BeginVertexes ((void **) &aliasverts, (void **) &aliasindexes, sizeof (aliaspolyvert_t));
-			numverts = 0;
-			numindexes = 0;
-		}
+		// note the hack here - just sending NULL into the shader won't add it!!!
+		D3D_VBOCheckOverflow (hdr->nummesh, hdr->numindexes);
+		D3D_VBOAddShader (&d3d_ShadowShader, NULL, d3d_PlayerSkins[0].d3d_Texture);
 
 		// build the transformation for this entity.
 		// we need to run this in software as we are now potentially submitting multiple alias models in a single batch
@@ -367,28 +290,13 @@ void D3D_DrawAliasShadows (entity_t **ents, int numents)
 		D3D_TranslateMatrix (&ent->matrix, hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2]);
 		D3D_ScaleMatrix (&ent->matrix, hdr->scale[0], hdr->scale[1], hdr->scale[2]);
 
-		for (int i = 0; i < hdr->nummesh; i++, aliasverts++)
-		{
-			D3D_LerpVert (aliasverts, &hdr->meshverts[i], aliasstate, hdr->vertexes[ent->pose1], hdr->vertexes[ent->pose2], &ent->matrix);
-
-			// flatten
-			aliasverts->xyz[2] = aliasstate->lightspot[2] + 0.1f;
-
-			// shadow colour is constant
-			aliasverts->color = shadecolor;
-		}
-
-		for (int i = 0; i < hdr->numindexes; i++)
-			aliasindexes[numindexes++] = hdr->indexes[i] + numverts;
-
 		// accumulate vert counts
-		numverts += hdr->nummesh;
-		D3D_UpdateVBOMark (hdr->nummesh, hdr->numindexes);
+		D3D_VBOAddShadowVerts (ent, hdr, aliasstate, shadecolor);
 		d3d_RenderDef.alias_polys += hdr->numtris;
 	}
 
 	// required even if there is nothing so that the buffers will unlock
-	D3D_EndVertexes ();
+	D3D_VBORender ();
 
 	if (stateset)
 	{
@@ -412,58 +320,76 @@ D3D_SetupAliasFrame
 */
 extern cvar_t r_lerpframe;
 
-float D3D_SetupAliasFrame (entity_t *e, aliashdr_t *hdr)
+float D3D_SetupAliasFrame (entity_t *ent, aliashdr_t *hdr)
 {
 	int pose, numposes;
 	float interval;
-	bool lerpmdl = !hdr->nolerp;
+	bool lerpmdl = true;
 	float blend;
+	float frame_interval;
 
 	// silently revert to frame 0
-	if ((e->frame >= hdr->numframes) || (e->frame < 0)) e->frame = 0;
+	if ((ent->frame >= hdr->numframes) || (ent->frame < 0)) ent->frame = 0;
 
-	pose = hdr->frames[e->frame].firstpose;
-	numposes = hdr->frames[e->frame].numposes;
+	pose = hdr->frames[ent->frame].firstpose;
+	numposes = hdr->frames[ent->frame].numposes;
 
 	if (numposes > 1)
 	{
-		interval = hdr->frames[e->frame].interval;
-		pose += (int) (cl.time / interval) % numposes;
+		// client-side animations
+		interval = hdr->frames[ent->frame].interval;
+
+		// software quake adds syncbase here so that animations using the same model aren't in lockstep
+		// trouble is that syncbase is always 0 for them so we provide new fields for it instead...
+		pose += (int) ((cl.time + ent->posebase) / interval) % numposes;
 
 		// not really needed for non-interpolated mdls, but does no harm
-		e->frame_interval = interval;
+		frame_interval = interval;
 	}
-	else e->frame_interval = 0.1;
+	else frame_interval = 0.1;
 
-	// conditions for turning lerping off
+	// conditions for turning lerping off (the SNG bug is no longer an issue)
 	if (hdr->nummeshframes == 1) lerpmdl = false;			// only one pose
-	if (e == &cl.viewent && e->frame == 0) lerpmdl = false;	// super-nailgun spinning down bug
-	if (e->pose1 == e->pose2) lerpmdl = false;				// both frames are identical
+	if (ent->lastpose == ent->currpose) lerpmdl = false;		// both frames are identical
 	if (!r_lerpframe.value) lerpmdl = false;
 
-	// interpolation - this code is a total BITCH and needs to be replaced with the Q2 interpolation code sometime REAL soon
-	if (e->pose1 == e->pose2 && e->pose2 == 0 && e != &cl.viewent)
+	// interpolation
+	if (ent->currpose == -1 || ent->lastpose == -1)
+	{
+		// new entity so reset to no interpolation initially
+		ent->frame_start_time = cl.time;
+		ent->lastpose = ent->currpose = pose;
+		blend = 0;
+	}
+	else if (ent->lastpose == ent->currpose && ent->currpose == 0 && ent != &cl.viewent)
 	{
 		// "dying throes" interpolation bug - begin a new sequence with both poses the same
 		// this happens when an entity is spawned client-side
-		e->frame_start_time = cl.time;
-		e->pose1 = e->pose2 = pose;
+		ent->frame_start_time = cl.time;
+		ent->lastpose = ent->currpose = pose;
 		blend = 0;
 	}
-	else if (e->pose2 != pose || !lerpmdl)
+	else if (pose == 0 && ent == &cl.viewent)
+	{
+		// don't interpolate from previous pose on frame 0 of the viewent
+		ent->frame_start_time = cl.time;
+		ent->lastpose = ent->currpose = pose;
+		blend = 0;
+	}
+	else if (ent->currpose != pose || !lerpmdl)
 	{
 		// begin a new interpolation sequence
-		e->frame_start_time = cl.time;
-		e->pose1 = e->pose2;
-		e->pose2 = pose;
+		ent->frame_start_time = cl.time;
+		ent->lastpose = ent->currpose;
+		ent->currpose = pose;
 		blend = 0;
 	}
-	else blend = (cl.time - e->frame_start_time) / e->frame_interval;
+	else blend = (cl.time - ent->frame_start_time) / frame_interval;
 
 	// if a viewmodel is switched and the previous had a current frame number higher than the number of frames
 	// in the new one, DirectQ will crash so we need to fix that.  this is also a general case sanity check.
-	if (e->pose1 >= hdr->nummeshframes) e->pose1 = e->pose2 = 0; else if (e->pose1 < 0) e->pose1 = e->pose2 = hdr->nummeshframes - 1;
-	if (e->pose2 >= hdr->nummeshframes) e->pose1 = e->pose2 = 0; else if (e->pose2 < 0) e->pose1 = e->pose2 = hdr->nummeshframes - 1;
+	if (ent->lastpose >= hdr->nummeshframes) ent->lastpose = ent->currpose = 0; else if (ent->lastpose < 0) ent->lastpose = ent->currpose = hdr->nummeshframes - 1;
+	if (ent->currpose >= hdr->nummeshframes) ent->lastpose = ent->currpose = 0; else if (ent->currpose < 0) ent->lastpose = ent->currpose = hdr->nummeshframes - 1;
 
 	// don't let blend pass 1
 	if (cl.paused || blend > 1.0) blend = 1.0;
@@ -496,10 +422,6 @@ void D3D_SetupAliasModel (entity_t *ent)
 		;	// no bbox culling on certain entities
 	else if (R_CullBox (mins, maxs))
 	{
-		// if it was culled set it's occlusion status to false so that next time it comes into the view frustum
-		// it will be visible until such a time as we prove otherwise
-		ent->occluded = false;
-
 		// no further setup needed
 		return;
 	}
@@ -520,8 +442,12 @@ void D3D_SetupAliasModel (entity_t *ent)
 	}
 
 	// setup the frame for drawing and store the interpolation blend
-	aliasstate->backlerp = D3D_SetupAliasFrame (ent, hdr);
-	aliasstate->frontlerp = 1.0f - aliasstate->backlerp;
+	// this can't be moved back to the client because static entities and the viewmodel need to go through it
+	float blend = D3D_SetupAliasFrame (ent, hdr);
+
+	// use cubic interpolation
+	aliasstate->lastlerp = 2 * (blend * blend * blend) - 3 * (blend * blend) + 1;
+	aliasstate->currlerp = 3 * (blend * blend) - 2 * (blend * blend * blend);
 
 	// get lighting information
 	vec3_t shadelight;
@@ -542,7 +468,8 @@ void D3D_SetupAliasModel (entity_t *ent)
 	aliasstate->lightplane = lightplane;
 
 	// get texturing info
-	int anim = (int) (cl.time * 10) & 3;
+	// software quake randomises the base animation and so should we
+	int anim = (int) ((cl.time + ent->skinbase) * 10) & 3;
 
 	// base texture
 	aliasstate->teximage = hdr->skins[ent->skinnum].texture[anim];
@@ -607,40 +534,72 @@ void R_DrawBBox (entity_t *ent)
 	bboxverts[7][1] = ent->origin[1] + ent->model->maxs[1];
 	bboxverts[7][2] = ent->origin[2] + ent->model->maxs[2];
 
-	d3d_Device->DrawIndexedPrimitiveUP (D3DPT_TRIANGLELIST, 0, 8, 12, bboxindexes, D3DFMT_INDEX16, bboxverts, sizeof (vec3_t));
+	D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, 8, 12, bboxindexes, bboxverts, sizeof (vec3_t));
 	d3d_RenderDef.alias_polys++;
 }
 
 
+d3d_shader_t d3d_AliasShaderLuma =
+{
+	{
+		// number of stages and type
+		3,
+		VBO_SHADER_TYPE_FIXED
+	},
+	{
+		// color
+		{D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_DIFFUSE},
+		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3DTOP_DISABLE}
+	},
+	{
+		// alpha
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	}
+};
+
+d3d_shader_t d3d_AliasShaderNoLuma =
+{
+	{
+		// number of stages and type
+		3,
+		VBO_SHADER_TYPE_FIXED
+	},
+	{
+		// color
+		{D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	},
+	{
+		// alpha
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE},
+		{D3DTOP_DISABLE}
+	}
+};
+
 void D3D_DrawAliasBatch (entity_t **ents, int numents)
 {
-	aliaspolyvert_t *aliasverts;
-	unsigned short *aliasindexes;
-
-	// conditions for a switch
-	int cachedtexture = 0;
-	int cachedfullbright = 0;
-	int numverts = 0;
-	int numindexes = 0;
-
-	// even if the ent has alpha we're modulating color with diffuse and diffuse will have alpha so
-	// we don't need an explicit alpha mode
-	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (1, D3DTOP_DISABLE);
-	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
-	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
-
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
 	D3D_SetTexCoordIndexes (0, 0);
 	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 
+	// set correct overbright mode
+	d3d_AliasShaderLuma.ColorDef[1].Op = D3D_OVERBRIGHT_MODULATE;
+	d3d_AliasShaderNoLuma.ColorDef[0].Op = D3D_OVERBRIGHT_MODULATE;
+
 	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
 	// begin a new render batch
-	D3D_GetVertexBufferSpace ((void **) &aliasverts);
-	D3D_GetIndexBufferSpace ((void **) &aliasindexes);
+	D3D_VBOBegin (D3DPT_TRIANGLELIST, sizeof (aliaspolyvert_t));
+
+	// need to track when skins change so that we can emit a new shader
+	int lastskin = 0;
 
 	for (int i = 0; i < numents; i++)
 	{
@@ -658,42 +617,16 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 		if (!aliasstate->teximage) continue;
 		if (!aliasstate->teximage->d3d_Texture) continue;
 
-		// a change of texture signifies a new batch
-		if ((int) aliasstate->teximage != cachedtexture || (int) aliasstate->lumaimage != cachedfullbright || 
-			D3D_AreBuffersFull (numverts + hdr->nummesh, numindexes + hdr->numindexes))
+		D3D_VBOCheckOverflow (hdr->nummesh, hdr->numindexes);
+
+		if ((int) aliasstate->teximage != lastskin)
 		{
-			if (numverts || numindexes)
-			{
-				D3D_SubmitVertexes (numverts, numindexes, sizeof (aliaspolyvert_t));
-				D3D_GetVertexBufferSpace ((void **) &aliasverts);
-				D3D_GetIndexBufferSpace ((void **) &aliasindexes);
-				numverts = 0;
-				numindexes = 0;
-			}
-
-			// switch textures (if required) and begin a new batch
+			// add a new shader if the skin changes
 			if (aliasstate->lumaimage)
-			{
-				D3D_SetTextureColorMode (0, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-				D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
+				D3D_VBOAddShader (&d3d_AliasShaderLuma, aliasstate->lumaimage->d3d_Texture, aliasstate->teximage->d3d_Texture);
+			else D3D_VBOAddShader (&d3d_AliasShaderNoLuma, aliasstate->teximage->d3d_Texture);
 
-				// luma pass
-				D3D_SetTexture (0, aliasstate->lumaimage->d3d_Texture);
-				D3D_SetTexture (1, aliasstate->teximage->d3d_Texture);
-			}
-			else
-			{
-				// straight up modulation
-				D3D_SetTextureColorMode (0, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-				D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
-
-				// bind texture for baseline skin
-				D3D_SetTexture (0, aliasstate->teximage->d3d_Texture);
-			}
-
-			// reset/rewind/etc
-			cachedtexture = (int) aliasstate->teximage;
-			cachedfullbright = (int) aliasstate->lumaimage;
+			lastskin = (int) aliasstate->teximage;
 		}
 
 		// build the transformation for this entity.
@@ -701,24 +634,13 @@ void D3D_DrawAliasBatch (entity_t **ents, int numents)
 		D3D_LoadIdentity (&ent->matrix);
 		D3D_RotateForEntity (ent, &ent->matrix);
 
-		// submit this entity to the renderer
-		for (int i = 0; i < hdr->nummesh; i++, aliasverts++)
-		{
-			// now if only we could get this properly into HLSL we'd avoid the software matrix transform...
-			D3D_LerpLight (aliasverts, ent, &hdr->meshverts[i], aliasstate, hdr->vertexes[ent->pose1], hdr->vertexes[ent->pose2]);
-			D3D_LerpVert (aliasverts, &hdr->meshverts[i], aliasstate, hdr->vertexes[ent->pose1], hdr->vertexes[ent->pose2], &ent->matrix);
-		}
-
-		for (int i = 0; i < hdr->numindexes; i++)
-			aliasindexes[numindexes++] = hdr->indexes[i] + numverts;
-
-		// accumulate vert counts
-		numverts += hdr->nummesh;
+		// submit it
+		D3D_VBOAddAliasVerts (ent, hdr, aliasstate);
 		d3d_RenderDef.alias_polys += hdr->numtris;
 	}
 
-	// required always so that the buffer will unlock
-	D3D_SubmitVertexes (numverts, numindexes, sizeof (aliaspolyvert_t));
+	// render the alias verts
+	D3D_VBORender ();
 
 	// done
 	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
@@ -758,6 +680,8 @@ void D3D_RegisterOcclusionQuery (entity_t *ent)
 	// occlusions not supported
 	if (!d3d_GlobalCaps.supportOcclusion) return;
 
+	if (ent->effects & EF_NEVEROCCLUDE) return;
+
 	// already has one
 	if (ent->occlusion)
 	{
@@ -777,30 +701,6 @@ void D3D_RegisterOcclusionQuery (entity_t *ent)
 		Pool_Occlusions = new CSpaceBuffer ("Occlusion Queries", 4, POOL_PERMANENT);
 		d3d_OcclusionQueries = (d3d_occlusionquery_t *) Pool_Occlusions->Alloc (1);
 		d3d_NumOcclusionQueries = 0;
-	}
-	else
-	{
-		// look for an idle query object
-		for (int i = 0; i < d3d_NumOcclusionQueries; i++)
-		{
-			if (d3d_OcclusionQueries[i].State == QUERY_IDLE)
-			{
-				// remove the occlusion from the entity
-				d3d_OcclusionQueries[i].Entity->occlusion = NULL;
-
-				// this query can now be reused for this entity
-				ent->occlusion = &d3d_OcclusionQueries[i];
-
-				// don't NULL the query object as it already exists
-				ent->occlusion->Entity = ent;
-
-				// entity is not occluded
-				ent->occluded = false;
-
-				// got it
-				return;
-			}
-		}
 	}
 
 	// create a new query
@@ -906,38 +806,26 @@ void D3D_RunOcclusionQueries (entity_t **ents, int numents)
 	if (!d3d_GlobalCaps.supportOcclusion) return;
 
 	bool stateset = false;
-	int occlusion_cutoff = 0;
 
-	// if (numoccluded) Con_Printf ("occluded %i entities\n", numoccluded);
+	//if (numoccluded) Con_Printf ("occluded %i entities\n", numoccluded);
 
-#define MAX_OCCLUSION_CUTOFF 1048576
-
-	// set a dynamic occlusion cutoff point based on the number of tris rendered in the previous frame
-	// (we assume this won't change too much from frame to frame) so that lighter scenes aren't bogged
-	// down with queries whereas heavier scenes get the benefit of them.  this way performs better than
-	// using the number of tris that would have been rendered in this frame if we had no queries.
-	// complex view models may give abberant results here, but in practice it doesn't seem to matter.
-	if (d3d_RenderDef.last_alias_polys < 1)
-		occlusion_cutoff = MAX_OCCLUSION_CUTOFF;
-	else
-	{
-		// value is arbitrary and non-scientific but seems to work well
-		occlusion_cutoff = MAX_OCCLUSION_CUTOFF / d3d_RenderDef.last_alias_polys;
-
-		// always cutoff at really small models
-		if (occlusion_cutoff < 96) occlusion_cutoff = 96;
-	}
-
-	//Con_Printf ("last: %i   cutoff: %i\n", d3d_RenderDef.last_alias_polys, occlusion_cutoff);
 	numoccluded = 0;
 
-	// if (d3d_NumOcclusionQueries) Con_Printf ("%i occlusion queries\n", d3d_NumOcclusionQueries);
+	//if (d3d_NumOcclusionQueries) Con_Printf ("%i occlusion queries\n", d3d_NumOcclusionQueries);
 
 	for (int i = 0; i < numents; i++)
 	{
-		// don't bother with entities that are so simple the overhead would be too high
-		if (ents[i]->model->aliashdr->numtris < occlusion_cutoff)
+		// some ents never get occlusion queries on them
+		if (ents[i]->effects & EF_NEVEROCCLUDE) continue;
+
+		// don't bother if the model is too simple
+		if (ents[i]->model->aliashdr->numtris < 24) continue;
+
+		// if there are a small enough number of entities on screen we don't bother either
+		if (d3d_NumAliasEdicts < 5)
 		{
+			// hack for a specific bug in the renderer where if you're in a 90 degree corner and so is a torch, and the viewmodel
+			// pokes into the torch, the torch becomes occluded
 			ents[i]->occluded = false;
 			continue;
 		}
@@ -945,7 +833,7 @@ void D3D_RunOcclusionQueries (entity_t **ents, int numents)
 		// register a query for the entity
 		D3D_RegisterOcclusionQuery (ents[i]);
 
-		// no occlusion object
+		// no occlusion object (should never happen...)
 		if (!ents[i]->occlusion)
 		{
 			// not occluded
@@ -1013,6 +901,7 @@ void D3D_UpdateOcclusionQueries (void)
 		entity_t *ent = d3d_OcclusionQueries[i].Entity;
 
 		if (!ent->occlusion) continue;
+		if (ent->effects & EF_NEVEROCCLUDE) continue;
 
 		d3d_occlusionquery_t *q = ent->occlusion;
 
@@ -1050,7 +939,7 @@ void D3D_UpdateOcclusionQueries (void)
 }
 
 
-void R_SetupAliasModels (void)
+void D3D_RenderAliasModels (void)
 {
 	if (!r_drawentities.integer) return;
 
@@ -1141,7 +1030,7 @@ void R_DrawViewModel (void)
 	if (d3d_RenderDef.fov_x >= 84)
 	{
 		D3DXMATRIX fovmatrix;
-		D3DXMatrixPerspectiveFovRH (&fovmatrix, D3DXToRadian (68.038704f), ((float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height), 4, 4096);
+		QD3DXMatrixPerspectiveFovRH (&fovmatrix, D3DXToRadian (68.038704f), ((float) d3d_CurrentMode.Width / (float) d3d_CurrentMode.Height), 4, 4096);
 		d3d_Device->SetTransform (D3DTS_PROJECTION, &fovmatrix);
 	}
 

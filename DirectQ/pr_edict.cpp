@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // sv_edict.c -- entity dictionary
 
@@ -312,7 +309,7 @@ eval_t *GetEdictFieldValue(edict_t *ed, char *field)
 	int				i;
 	static int		rep = 0;
 
-	for (i=0 ; i<GEFV_CACHESIZE ; i++)
+	for (i=0; i<GEFV_CACHESIZE; i++)
 	{
 		if (!strcmp(field, gefvCache[i].field))
 		{
@@ -469,7 +466,7 @@ char *PR_GlobalString (int ofs)
 	}
 	
 	i = strlen(line);
-	for ( ; i<20 ; i++)
+	for (; i<20; i++)
 		strcat (line," ");
 	strcat (line," ");
 		
@@ -489,7 +486,7 @@ char *PR_GlobalStringNoContents (int ofs)
 		_snprintf (line,128,"%i(%s)", ofs, SVProgs->Strings + def->s_name);
 	
 	i = strlen(line);
-	for ( ; i<20 ; i++)
+	for (; i<20; i++)
 		strcat (line," ");
 	strcat (line," ");
 		
@@ -535,7 +532,7 @@ void ED_Print (edict_t *ed)
 	// if the value is still all 0, skip the field
 		type = d->type & ~DEF_SAVEGLOBAL;
 		
-		for (j=0 ; j<type_size[type] ; j++)
+		for (j=0; j<type_size[type]; j++)
 			if (v[j])
 				break;
 		if (j == type_size[type])
@@ -584,7 +581,7 @@ void ED_Write (FILE *f, edict_t *ed)
 
 	// if the value is still all 0, skip the field
 		type = d->type & ~DEF_SAVEGLOBAL;
-		for (j=0 ; j<type_size[type] ; j++)
+		for (j=0; j<type_size[type]; j++)
 			if (v[j])
 				break;
 		if (j == type_size[type])
@@ -615,7 +612,7 @@ void ED_PrintEdicts (void)
 	
 	Con_Printf ("%i entities\n", SVProgs->NumEdicts);
 
-	for (i=0 ; i<SVProgs->NumEdicts ; i++)
+	for (i=0; i<SVProgs->NumEdicts; i++)
 		ED_PrintNum (i);
 }
 
@@ -653,7 +650,7 @@ void ED_Count (void)
 	int		active, models, solid, step;
 
 	active = models = solid = step = 0;
-	for (i=0 ; i<SVProgs->NumEdicts ; i++)
+	for (i=0; i<SVProgs->NumEdicts; i++)
 	{
 		ent = GetEdictForNumber(i);
 		if (ent->free)
@@ -776,7 +773,7 @@ char *ED_NewString (char *string)
 	newstring = (char *) Pool_Map->Alloc (l);
 	new_p = newstring;
 
-	for (i=0 ; i< l ; i++)
+	for (i=0; i< l; i++)
 	{
 		if (string[i] == '\\' && i < l-1)
 		{
@@ -827,7 +824,7 @@ bool ED_ParseEpair (void *base, ddef_t *key, char *s)
 		strcpy (string, s);
 		v = string;
 		w = string;
-		for (i=0 ; i<3 ; i++)
+		for (i=0; i<3; i++)
 		{
 			while (*v && *v != ' ')
 				v++;
@@ -1074,7 +1071,7 @@ void SV_AddEntityStat (edict_t *ed)
 		es->firstword = (char *) Pool_Map->Alloc (strlen (classname) + 1);
 		strcpy (es->firstword, classname);
 
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!es->firstword[i]) break;
 

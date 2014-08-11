@@ -24,11 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // be a little kinder to the CRT in Quake by telling it to act like it's single-threaded
 // #define _CRT_DISABLE_PERFCRIT_LOCKS
 
-// here we define a windows version to ensure that we'll always compile OK
-#define WINVER 0x0500
-#define _WIN32_WINNT 0x0500
-
-#define DIRECTQ_VERSION "1.8.2"
+#include "versions.h"
 
 // let's be able to do assertions everywhere
 #include <assert.h>
@@ -48,6 +44,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma warning (disable: 4996)
 #pragma warning (disable: 4995)
 #pragma warning (disable: 4312)
+
+WCHAR *QASCIIToUnicode (char *strasc);
+char *QUnicodeToASCII (WCHAR *struni);
+
 
 typedef char quakepath[260];
 
@@ -349,6 +349,7 @@ void Chase_Update (void);
 
 // object release for all COM objects and interfaces
 #define SAFE_RELEASE(COM_Generic) {if ((COM_Generic)) {(COM_Generic)->Release (); (COM_Generic) = NULL;}}
+#define UNLOAD_LIBRARY(libinst) {if (libinst) {FreeLibrary (libinst); (libinst) = NULL;}}
 
 // and for C++ new stuffies
 #define SAFE_DELETE(p) {if (p) delete (p); (p) = NULL;}

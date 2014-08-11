@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // cl_main.c  -- client main loop
 
@@ -350,7 +347,7 @@ dlight_t *CL_FindDlight (int key)
 	if (key)
 	{
 		dl = cl_dlights;
-		for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
+		for (i=0; i<MAX_DLIGHTS; i++, dl++)
 		{
 			if (dl->key == key)
 			{
@@ -364,7 +361,7 @@ dlight_t *CL_FindDlight (int key)
 	// then look for anything else
 	dl = cl_dlights;
 
-	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
+	for (i=0; i<MAX_DLIGHTS; i++, dl++)
 	{
 		if (dl->die < cl.time)
 		{
@@ -486,6 +483,106 @@ CL_RelinkEntities
 */
 extern cvar_t r_lerporient;
 
+void CL_EntityInterpolateOrigins (entity_t *ent)
+{
+	if (r_lerporient.integer)
+	{
+		float timepassed = cl.time - ent->translate_start_time;
+		float blend = 0;
+		vec3_t delta = {0, 0, 0};
+
+		if (ent->translate_start_time == 0 || timepassed > 1)
+		{
+			ent->translate_start_time = cl.time;
+
+			VectorCopy (ent->origin, ent->lastorigin);
+			VectorCopy (ent->origin, ent->currorigin);
+		}
+
+		if (!VectorCompare (ent->origin, ent->currorigin))
+		{
+			ent->translate_start_time = cl.time;
+
+			VectorCopy (ent->currorigin, ent->lastorigin);
+			VectorCopy (ent->origin,  ent->currorigin);
+
+			blend = 0;
+		}
+		else
+		{
+			blend = timepassed / 0.1;
+
+			if (cl.paused || blend > 1) blend = 1;
+		}
+
+		VectorSubtract (ent->currorigin, ent->lastorigin, delta);
+
+		// use cubic interpolation
+		float lastlerp = 2 * (blend * blend * blend) - 3 * (blend * blend) + 1;
+		float currlerp = 3 * (blend * blend) - 2 * (blend * blend * blend);
+
+		ent->origin[0] = ent->lastorigin[0] * lastlerp + ent->currorigin[0] * currlerp;
+		ent->origin[1] = ent->lastorigin[1] * lastlerp + ent->currorigin[1] * currlerp;
+		ent->origin[2] = ent->lastorigin[2] * lastlerp + ent->currorigin[2] * currlerp;
+	}
+}
+
+
+void CL_EntityInterpolateAngles (entity_t *ent)
+{
+	if (r_lerporient.integer)
+	{
+		float timepassed = cl.time - ent->rotate_start_time;
+		float blend = 0;
+		vec3_t delta = {0, 0, 0};
+
+		if (ent->rotate_start_time == 0 || timepassed > 1)
+		{
+			ent->rotate_start_time = cl.time;
+
+			VectorCopy (ent->angles, ent->lastangles);
+			VectorCopy (ent->angles, ent->currangles);
+		}
+
+		if (!VectorCompare (ent->angles, ent->currangles))
+		{
+			ent->rotate_start_time = cl.time;
+
+			VectorCopy (ent->currangles, ent->lastangles);
+			VectorCopy (ent->angles,  ent->currangles);
+
+			blend = 0;
+		}
+		else
+		{
+			blend = timepassed / 0.1;
+
+			if (cl.paused || blend > 1) blend = 1;
+		}
+
+		VectorSubtract (ent->currangles, ent->lastangles, delta);
+
+		// always interpolate along the shortest path
+		if (delta[0] > 180) delta[0] -= 360; else if (delta[0] < -180) delta[0] += 360;
+		if (delta[1] > 180) delta[1] -= 360; else if (delta[1] < -180) delta[1] += 360;
+		if (delta[2] > 180) delta[2] -= 360; else if (delta[2] < -180) delta[2] += 360;
+
+		// get currangles on the shortest path
+		VectorAdd (ent->lastangles, delta, delta);
+
+		// use cubic interpolation
+		float lastlerp = 2 * (blend * blend * blend) - 3 * (blend * blend) + 1;
+		float currlerp = 3 * (blend * blend) - 2 * (blend * blend * blend);
+
+		ent->angles[0] = ent->lastangles[0] * lastlerp + delta[0] * currlerp;
+		ent->angles[1] = ent->lastangles[1] * lastlerp + delta[1] * currlerp;
+		ent->angles[2] = ent->lastangles[2] * lastlerp + delta[2] * currlerp;
+	}
+}
+
+
+void CL_ClearInterpolation (entity_t *ent);
+
 void CL_RelinkEntities (void)
 {
 	// reset visedicts count and structs
@@ -498,8 +595,6 @@ void CL_RelinkEntities (void)
 	float		bobjrotate;
 	vec3_t		oldorg;
 	dlight_t	*dl;
-	float timepassed;
-	float blend;
 
 	// determine partial update time	
 	frac = CL_LerpPoint ();
@@ -515,10 +610,7 @@ void CL_RelinkEntities (void)
 		{
 			d = cl.mviewangles[0][j] - cl.mviewangles[1][j];
 
-			if (d > 180) 
-				d -= 360;
-			else if (d < -180)
-				d += 360;
+			if (d > 180) d -= 360; else if (d < -180) d += 360;
 
 			cl.viewangles[j] = cl.mviewangles[1][j] + frac * d;
 		}
@@ -537,16 +629,11 @@ void CL_RelinkEntities (void)
 		// if the object wasn't included in the last packet, remove it
 		if (ent->msgtime != cl.mtime[0])
 		{
+			// clear it's interpolation data too
+			CL_ClearInterpolation (ent);
 			ent->model = NULL;
-
-			// clear it's interpolation data
-			ent->frame_start_time     = 0;
-			ent->translate_start_time = 0;
-			ent->rotate_start_time    = 0;
-
-			// and the poses
-			ent->pose1 = ent->pose2 = 0;
-
+			ent->occluded = false;
+			ent->effects &= ~EF_NEVEROCCLUDE;
 			continue;
 		}
 
@@ -573,115 +660,28 @@ void CL_RelinkEntities (void)
 					// assume a teleportation, not a motion
 					f = 1;
 				}
-
-				if (f >= 1)
-				{
-					// clear interpolation data
-					ent->translate_start_time = 0;
-					ent->rotate_start_time    = 0;
-				}
 			}
 
-			// interpolate the origin and angles
+			if (f >= 1) CL_ClearInterpolation (ent);
+
+			// interpolate the origin and angles (does this make the QER interpolation invalid?)
+			// using cubic with this gives a serious case of the herky jerkies when playing demos
 			for (j = 0; j < 3; j++)
 			{
 				ent->origin[j] = ent->msg_origins[1][j] + f * delta[j];
 
 				d = ent->msg_angles[0][j] - ent->msg_angles[1][j];
 
-				if (d > 180)
-					d -= 360;
-				else if (d < -180)
-					d += 360;
+				// interpolate along the shortest path
+				if (d > 180) d -= 360; else if (d < -180) d += 360;
 
 				ent->angles[j] = ent->msg_angles[1][j] + f * d;
 			}
 		}
 
 		// blend the positions
-		// (moved from R_RotateForEntity to here so that the blended position is available everywhere on the client)
-		// (fixes a lot of interpolation related bugs and makes other hacky workarounds unnecessary :))
-		// positional interpolation
-		timepassed = cl.time - ent->translate_start_time;
-
-		if (ent->translate_start_time == 0 || timepassed > 1)
-		{
-			ent->translate_start_time = cl.time;
-
-			VectorCopy (ent->origin, ent->origin1);
-			VectorCopy (ent->origin, ent->origin2);
-		}
-
-		if (!VectorCompare (ent->origin, ent->origin2))
-		{
-			ent->translate_start_time = cl.time;
-
-			VectorCopy (ent->origin2, ent->origin1);
-			VectorCopy (ent->origin,  ent->origin2);
-
-			blend = 0;
-		}
-		else
-		{
-			blend = timepassed / 0.1;
-
-			if (cl.paused || blend > 1) blend = 1;
-		}
-
-		VectorSubtract (ent->origin2, ent->origin1, delta);
-
-		// switch off interpolation
-		bool nolerp = false;
-
-		if (ent->model->type == mod_alias)
-			nolerp = ent->model->aliashdr->nolerp;
-
-		if (r_lerporient.value && !nolerp)
-		{
-			// set interpolated origin
-			ent->origin[0] = ent->origin1[0] + (blend * delta[0]);
-			ent->origin[1] = ent->origin1[1] + (blend * delta[1]);
-			ent->origin[2] = ent->origin1[2] + (blend * delta[2]);
-
-			// orientation interpolation (Euler angles, yuck!)
-			timepassed = cl.time - ent->rotate_start_time; 
-
-			if (ent->rotate_start_time == 0 || timepassed > 1)
-			{
-				ent->rotate_start_time = cl.time;
-
-				VectorCopy (ent->angles, ent->angles1);
-				VectorCopy (ent->angles, ent->angles2);
-			}
-
-			if (!VectorCompare (ent->angles, ent->angles2))
-			{
-				ent->rotate_start_time = cl.time;
-
-				VectorCopy (ent->angles2, ent->angles1);
-				VectorCopy (ent->angles,  ent->angles2);
-
-				blend = 0;
-			}
-			else
-			{
-				blend = timepassed / 0.1;
-
-				if (cl.paused || blend > 1) blend = 1;
-			}
-
-			VectorSubtract (ent->angles2, ent->angles1, delta);
-
-			// always interpolate along the shortest path
-			if (delta[0] > 180) delta[0] -= 360; else if (delta[0] < -180) delta[0] += 360;
-			if (delta[1] > 180) delta[1] -= 360; else if (delta[1] < -180) delta[1] += 360;
-			if (delta[2] > 180) delta[2] -= 360; else if (delta[2] < -180) delta[2] += 360;
-
-			// set interpolated angles
-			ent->angles[0] = ent->angles1[0] + (blend * delta[0]);
-			ent->angles[1] = ent->angles1[1] + (blend * delta[1]);
-			ent->angles[2] = ent->angles1[2] + (blend * delta[2]);
-		}
+		CL_EntityInterpolateOrigins (ent);
+		CL_EntityInterpolateAngles (ent);
 
 		// rotate binary objects locally
 		if (ent->model->flags & EF_ROTATE)
@@ -792,9 +792,15 @@ void CL_RelinkEntities (void)
 		}
 
 		if (ent->model->flags & EF_GIB)
+		{
 			R_RocketTrail (oldorg, ent->origin, 2);
+			ent->effects |= EF_NEVEROCCLUDE;
+		}
 		else if (ent->model->flags & EF_ZOMGIB)
+		{
 			R_RocketTrail (oldorg, ent->origin, 4);
+			ent->effects |= EF_NEVEROCCLUDE;
+		}
 		else if (ent->model->flags & EF_TRACER)
 		{
 			// wizard trail
@@ -809,6 +815,8 @@ void CL_RelinkEntities (void)
 
 				R_ColourDLight (dl, 125, 492, 146);
 			}
+
+			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_TRACER2)
 		{
@@ -824,6 +832,8 @@ void CL_RelinkEntities (void)
 
 				R_ColourDLight (dl, 408, 242, 117);
 			}
+
+			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_ROCKET)
 		{
@@ -834,9 +844,14 @@ void CL_RelinkEntities (void)
 			dl->die = cl.time + 0.01;
 
 			R_ColourDLight (dl, 408, 242, 117);
+
+			ent->effects |= EF_NEVEROCCLUDE;
 		}
 		else if (ent->model->flags & EF_GRENADE)
+		{
 			R_RocketTrail (oldorg, ent->origin, 1);
+			ent->effects |= EF_NEVEROCCLUDE;
+		}
 		else if (ent->model->flags & EF_TRACER3)
 		{
 			// vore trail
@@ -851,6 +866,8 @@ void CL_RelinkEntities (void)
 
 				R_ColourDLight (dl, 399, 141, 228);
 			}
+
+			ent->effects |= EF_NEVEROCCLUDE;
 		}
 
 		ent->forcelink = false;

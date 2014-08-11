@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // view.c -- player eye positioning
 // renamed to cl_view to keep it grouped with the rest of the client code
@@ -271,6 +268,7 @@ cshift_t	cshift_lava = { {255,80,0}, 128 };
 
 int			v_blend[4];
 
+cvar_t cl_damagered ("cl_damagered", "3", CVAR_ARCHIVE);
 
 /*
 ===============
@@ -286,23 +284,22 @@ void V_ParseDamage (void)
 	entity_t	*ent;
 	float	side;
 	float	count;
-	
+
 	armor = MSG_ReadByte ();
 	blood = MSG_ReadByte ();
-	for (i=0 ; i<3 ; i++)
+
+	for (i = 0; i < 3; i++)
 		from[i] = MSG_ReadCoord ();
 
-	count = blood*0.5 + armor*0.5;
-	if (count < 10)
-		count = 10;
+	count = blood * 0.5 + armor * 0.5;
 
-	cl.faceanimtime = cl.time + 0.2;		// but sbar face into pain frame
+	if (count < 10) count = 10;
 
-	cl.cshifts[CSHIFT_DAMAGE].percent += 3*count;
-	if (cl.cshifts[CSHIFT_DAMAGE].percent < 0)
-		cl.cshifts[CSHIFT_DAMAGE].percent = 0;
-	if (cl.cshifts[CSHIFT_DAMAGE].percent > 150)
-		cl.cshifts[CSHIFT_DAMAGE].percent = 150;
+	cl.faceanimtime = cl.time + 0.2;
+	cl.cshifts[CSHIFT_DAMAGE].percent += cl_damagered.value * count;
+
+	if (cl.cshifts[CSHIFT_DAMAGE].percent < 0) cl.cshifts[CSHIFT_DAMAGE].percent = 0;
+	if (cl.cshifts[CSHIFT_DAMAGE].percent > 150) cl.cshifts[CSHIFT_DAMAGE].percent = 150;
 
 	if (armor > blood)		
 	{
@@ -323,19 +320,17 @@ void V_ParseDamage (void)
 		cl.cshifts[CSHIFT_DAMAGE].destcolor[2] = 0;
 	}
 
-//
-// calculate view angle kicks
-//
+	// calculate view angle kicks
 	ent = cl_entities[cl.viewentity];
-	
+
 	VectorSubtract (from, ent->origin, from);
 	VectorNormalize (from);
-	
+
 	AngleVectors (ent->angles, forward, right, up);
 
 	side = DotProduct (from, right);
 	v_dmg_roll = count*side*v_kickroll.value;
-	
+
 	side = DotProduct (from, forward);
 	v_dmg_pitch = count*side*v_kickpitch.value;
 
@@ -350,14 +345,10 @@ V_cshift_f
 */
 void V_cshift_f (void)
 {
-	// yes, this annoyed me - now to see can i get waterwarp working with it...
-	for (int i = 0; i < 666; i++)
-		Con_DPrintf ("BURN IN HELL 1337 QC H4X0RZ!!!\n");
-
-	cshift_empty.destcolor[0] = atoi(Cmd_Argv(1));
-	cshift_empty.destcolor[1] = atoi(Cmd_Argv(2));
-	cshift_empty.destcolor[2] = atoi(Cmd_Argv(3));
-	cshift_empty.percent = atoi(Cmd_Argv(4));
+	cshift_empty.destcolor[0] = atoi (Cmd_Argv (1));
+	cshift_empty.destcolor[1] = atoi (Cmd_Argv (2));
+	cshift_empty.destcolor[2] = atoi (Cmd_Argv (3));
+	cshift_empty.percent = atoi (Cmd_Argv (4));
 }
 
 
@@ -458,21 +449,23 @@ void V_CalcBlend (void)
 
 	for (j = 0; j < NUM_CSHIFTS; j++)	
 	{
-		if (!gl_cshiftpercent.value) continue;
+		// no shift
+		if (!cl.cshifts[j].percent) continue;
 
-		a2 = ((cl.cshifts[j].percent * gl_cshiftpercent.value) / 100.0) / 255.0;
+		// calc alpha amount
+		a2 = (float) cl.cshifts[j].percent / 255.0;
 
-		if (!a2) continue;
-
+		// evaluate blends
 		a = a + a2 * (1 - a);
-
 		a2 = a2 / a;
 
-		r = r * (1 - a2) + cl.cshifts[j].destcolor[0]*a2;
-		g = g * (1 - a2) + cl.cshifts[j].destcolor[1]*a2;
-		b = b * (1 - a2) + cl.cshifts[j].destcolor[2]*a2;
+		// blend it in
+		r = r * (1 - a2) + cl.cshifts[j].destcolor[0] * a2;
+		g = g * (1 - a2) + cl.cshifts[j].destcolor[1] * a2;
+		b = b * (1 - a2) + cl.cshifts[j].destcolor[2] * a2;
 	}
 
+	// set final amounts
 	v_blend[0] = r;
 	v_blend[1] = g;
 	v_blend[2] = b;

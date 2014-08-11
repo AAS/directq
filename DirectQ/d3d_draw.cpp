@@ -29,69 +29,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 char *gfxlmps[] =
 {
-	"bigbox.lmp",
-	"box_bl.lmp",
-	"box_bm.lmp",
-	"box_br.lmp",
-	"box_ml.lmp",
-	"box_mm.lmp",
-	"box_mm2.lmp",
-	"box_mr.lmp",
-	"box_tl.lmp",
-	"box_tm.lmp",
-	"box_tr.lmp",
-	"colormap.lmp",
-	"complete.lmp",
-	"conback.lmp",
-	"dim_drct.lmp",
-	"dim_ipx.lmp",
-	"dim_modm.lmp",
-	"dim_mult.lmp",
-	"dim_tcp.lmp",
-	"finale.lmp",
-	"help0.lmp",
-	"help1.lmp",
-	"help2.lmp",
-	"help3.lmp",
-	"help4.lmp",
-	"help5.lmp",
-	"inter.lmp",
-	"loading.lmp",
-	"mainmenu.lmp",
-	"menudot1.lmp",
-	"menudot2.lmp",
-	"menudot3.lmp",
-	"menudot4.lmp",
-	"menudot5.lmp",
-	"menudot6.lmp",
-	"menuplyr.lmp",
-	"mp_menu.lmp",
-	"netmen1.lmp",
-	"netmen2.lmp",
-	"netmen3.lmp",
-	"netmen4.lmp",
-	"netmen5.lmp",
-	"palette.lmp",
-	"pause.lmp",
-	"p_load.lmp",
-	"p_multi.lmp",
-	"p_option.lmp",
-	"p_save.lmp",
-	"qplaque.lmp",
-	"ranking.lmp",
-	"sell.lmp",
-	"sp_menu.lmp",
-	"ttl_cstm.lmp",
-	"ttl_main.lmp",
-	"ttl_sgl.lmp",
-	"vidmodes.lmp",
-	NULL
+	"bigbox.lmp", "box_bl.lmp", "box_bm.lmp", "box_br.lmp", "box_ml.lmp", "box_mm.lmp", "box_mm2.lmp", "box_mr.lmp", "box_tl.lmp", "box_tm.lmp", "box_tr.lmp",
+	"colormap.lmp", "complete.lmp", "conback.lmp", "dim_drct.lmp", "dim_ipx.lmp", "dim_modm.lmp", "dim_mult.lmp", "dim_tcp.lmp", "finale.lmp", "help0.lmp",
+	"help1.lmp", "help2.lmp", "help3.lmp", "help4.lmp", "help5.lmp", "inter.lmp", "loading.lmp", "mainmenu.lmp", "menudot1.lmp", "menudot2.lmp", "menudot3.lmp",
+	"menudot4.lmp", "menudot5.lmp", "menudot6.lmp", "menuplyr.lmp", "mp_menu.lmp", "netmen1.lmp", "netmen2.lmp", "netmen3.lmp", "netmen4.lmp", "netmen5.lmp",
+	"palette.lmp", "pause.lmp", "p_load.lmp", "p_multi.lmp", "p_option.lmp", "p_save.lmp", "qplaque.lmp", "ranking.lmp", "sell.lmp", "sp_menu.lmp", "ttl_cstm.lmp",
+	"ttl_main.lmp", "ttl_sgl.lmp", "vidmodes.lmp", NULL
 };
 
 
 void Draw_DumpLumps (void)
 {
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!gfxlmps[i]) break;
 
@@ -146,6 +95,13 @@ qpic_t *conback;
 int		texels;
 
 
+#define MAX_2D_VERTS	666
+int Num2DVerts = 0;
+LPDIRECT3DTEXTURE9 Current2DTexture = NULL;
+DWORD Current2DFVF = -1;
+DWORD Current2DAddrMode = -1;
+DWORD Current2DColor = 0;
+
 // 2d drawing
 DWORD d3d_2DTextureColor = 0xffffffff;
 
@@ -162,7 +118,7 @@ typedef struct flatpolyvert_s
 	float t;
 } flatpolyvert_t;
 
-flatpolyvert_t verts2d[4];
+flatpolyvert_t verts2d[MAX_2D_VERTS];
 
 // needed because some drivers don't obey the DPUP stride value
 typedef struct coloredpolyvert_s
@@ -173,7 +129,7 @@ typedef struct coloredpolyvert_s
 	DWORD c;
 } coloredpolyvert_t;
 
-coloredpolyvert_t verts2dcolored[4];
+coloredpolyvert_t verts2dcolored[6];
 
 void D3D_ScissorRect (float l, float t, float r, float b)
 {
@@ -212,28 +168,37 @@ __inline void D3D_EmitColoredPolyVert (int vertnum, float x, float y, D3DCOLOR c
 
 void D3D_DrawFlatPoly (float x, float y, float w, float h, D3DCOLOR c, float s, float t, float maxs, float maxt)
 {
-	D3D_EmitFlatPolyVert (0, x, y, c, s, t);
-	D3D_EmitFlatPolyVert (1, x + w, y, c, maxs, t);
-	D3D_EmitFlatPolyVert (2, x + w, y + h, c, maxs, maxt);
-	D3D_EmitFlatPolyVert (3, x, y + h, c, s, maxt);
+	D3D_EmitFlatPolyVert (Num2DVerts + 0, x, y, c, s, t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 1, x + w, y, c, maxs, t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 2, x + w, y + h, c, maxs, maxt);
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts2d, sizeof (flatpolyvert_t));
+	D3D_EmitFlatPolyVert (Num2DVerts + 3, x, y, c, s, t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 4, x + w, y + h, c, maxs, maxt);
+	D3D_EmitFlatPolyVert (Num2DVerts + 5, x, y + h, c, s, maxt);
+
+	Num2DVerts += 6;
 }
 
 
 void D3D_DrawFlatPoly (float x, float y, float w, float h, float s, float t, float maxs, float maxt)
 {
-	D3D_EmitFlatPolyVert (0, x, y, d3d_2DTextureColor, s, t);
-	D3D_EmitFlatPolyVert (1, x + w, y, d3d_2DTextureColor, maxs, t);
-	D3D_EmitFlatPolyVert (2, x + w, y + h, d3d_2DTextureColor, maxs, maxt);
-	D3D_EmitFlatPolyVert (3, x, y + h, d3d_2DTextureColor, s, maxt);
+	D3D_EmitFlatPolyVert (Num2DVerts + 0, x, y, d3d_2DTextureColor, s, t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 1, x + w, y, d3d_2DTextureColor, maxs, t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 2, x + w, y + h, d3d_2DTextureColor, maxs, maxt);
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts2d, sizeof (flatpolyvert_t));
+	D3D_EmitFlatPolyVert (Num2DVerts + 3, x, y, d3d_2DTextureColor, s, t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 4, x + w, y + h, d3d_2DTextureColor, maxs, maxt);
+	D3D_EmitFlatPolyVert (Num2DVerts + 5, x, y + h, d3d_2DTextureColor, s, maxt);
+
+	Num2DVerts += 6;
 }
 
 
 void D3D_DrawColoredPoly (float x, float y, float w, float h, D3DCOLOR c)
 {
+	// end anything left over
+	D3D_EndFlatDraw ();
+
 	// untextured
 	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
 	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
@@ -241,9 +206,12 @@ void D3D_DrawColoredPoly (float x, float y, float w, float h, D3DCOLOR c)
 	D3D_EmitColoredPolyVert (0, x, y, c);
 	D3D_EmitColoredPolyVert (1, x + w, y, c);
 	D3D_EmitColoredPolyVert (2, x + w, y + h, c);
-	D3D_EmitColoredPolyVert (3, x, y + h, c);
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts2dcolored, sizeof (coloredpolyvert_t));
+	D3D_EmitColoredPolyVert (3, x, y, c);
+	D3D_EmitColoredPolyVert (4, x + w, y + h, c);
+	D3D_EmitColoredPolyVert (5, x, y + h, c);
+
+	D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, 2, verts2dcolored, sizeof (coloredpolyvert_t));
 
 	// back to texturing
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
@@ -251,11 +219,41 @@ void D3D_DrawColoredPoly (float x, float y, float w, float h, D3DCOLOR c)
 }
 
 
-void D3D_PrepareFlatDraw (DWORD texfvf, DWORD addrmode, LPDIRECT3DTEXTURE9 stage0tex)
+void D3D_EndFlatDraw (void)
 {
-	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | texfvf);
-	D3D_SetTextureAddressMode (addrmode);
-	D3D_SetTexture (0, stage0tex);
+	// finish up what we had
+	if (Num2DVerts)
+		D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, Num2DVerts / 3, verts2d, sizeof (flatpolyvert_t));
+
+	// reset
+	Num2DVerts = 0;
+	Current2DFVF = -1;
+	Current2DAddrMode = -1;
+	Current2DTexture = NULL;
+	Current2DColor = 0;
+}
+
+
+void D3D_PrepareFlatDraw (DWORD texfvf, DWORD addrmode, LPDIRECT3DTEXTURE9 stage0tex, DWORD color)
+{
+	if (Num2DVerts >= MAX_2D_VERTS || texfvf != Current2DFVF || addrmode != Current2DAddrMode || stage0tex != Current2DTexture || color != Current2DColor)
+	{
+		// finish up what we had
+		if (Num2DVerts)
+			D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, Num2DVerts / 3, verts2d, sizeof (flatpolyvert_t));
+
+		// reset
+		Num2DVerts = 0;
+		Current2DFVF = texfvf;
+		Current2DAddrMode = addrmode;
+		Current2DTexture = stage0tex;
+		Current2DColor = color;
+
+		// set state
+		D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | texfvf);
+		D3D_SetTextureAddressMode (addrmode);
+		D3D_SetTexture (0, stage0tex);
+	}
 }
 
 
@@ -274,6 +272,7 @@ typedef struct cachepic_s
 cachepic_t *menu_cachepics = NULL;
 
 byte		*menuplyr_pixels = NULL;
+byte		*menuplyr_pixels_translated = NULL;
 
 int		pic_texels;
 int		pic_count;
@@ -354,7 +353,9 @@ qpic_t *Draw_CachePic (char *path)
 	{
 		// this should only happen once
 		menuplyr_pixels = (byte *) Pool_Game->Alloc (dat->width * dat->height);
+		menuplyr_pixels_translated = (byte *) Pool_Game->Alloc (dat->width * dat->height);
 		memcpy (menuplyr_pixels, dat->data, dat->width * dat->height);
+		memcpy (menuplyr_pixels_translated, dat->data, dat->width * dat->height);
 	}
 
 	pic->pic.width = dat->width;
@@ -362,11 +363,24 @@ qpic_t *Draw_CachePic (char *path)
 
 	gl = (glpic_t *) pic->pic.data;
 
-	gl->tex = D3D_LoadTexture (path, dat->width, dat->height, dat->data, IMAGE_ALPHA);
+	gl->tex = D3D_LoadTexture (path, dat->width, dat->height, dat->data, IMAGE_ALPHA | IMAGE_PADDABLE);
 	gl->sl = 0;
-	gl->sh = 1;
 	gl->tl = 0;
-	gl->th = 1;
+
+	if (gl->tex->flags & IMAGE_PADDED)
+	{
+		// unpad texcoords
+		int scaled_width = D3D_PowerOf2Size (dat->width);
+		int scaled_height = D3D_PowerOf2Size (dat->height);
+
+		gl->sh = (float) dat->width / (float) scaled_width;
+		gl->th = (float) dat->height / (float) scaled_height;
+	}
+	else
+	{
+		gl->sh = 1;
+		gl->th = 1;
+	}
 
 	// don't pollute the temp pool with small fry
 	Pool_Temp->Free ();
@@ -407,11 +421,24 @@ qpic_t *Draw_PicFromWad (char *name)
 
 	_snprintf (picloadname, 255, "gfx/%s.blah", name);
 
-	gl->tex = D3D_LoadTexture (picloadname, p->width, p->height, p->data, IMAGE_ALPHA);
+	gl->tex = D3D_LoadTexture (picloadname, p->width, p->height, p->data, IMAGE_ALPHA | IMAGE_PADDABLE);
 	gl->sl = 0;
-	gl->sh = 1;
 	gl->tl = 0;
-	gl->th = 1;
+
+	if (gl->tex->flags & IMAGE_PADDED)
+	{
+		// unpad texcoords
+		int scaled_width = D3D_PowerOf2Size (p->width);
+		int scaled_height = D3D_PowerOf2Size (p->height);
+
+		gl->sh = (float) p->width / (float) scaled_width;
+		gl->th = (float) p->height / (float) scaled_height;
+	}
+	else
+	{
+		gl->sh = 1;
+		gl->th = 1;
+	}
 
 	return p;
 }
@@ -513,7 +540,6 @@ Draw_Init
 ===============
 */
 extern cvar_t gl_texturedir;
-int D3D_PowerOf2Size (int size);
 int COM_BuildContentList (char ***FileList, char *basedir, char *filetype);
 
 void Draw_Init (void)
@@ -623,7 +649,7 @@ void Draw_Character (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, 8, 8, quadcoords[num].s, quadcoords[num].t, quadcoords[num].smax, quadcoords[num].tmax);
 }
 
@@ -632,7 +658,7 @@ void Draw_InvertCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, 8, 8, quadcoords[num].s, quadcoords[num].tmax, quadcoords[num].smax, quadcoords[num].t);
 }
 
@@ -641,7 +667,7 @@ void Draw_BackwardsCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, 8, 8, quadcoords[num].smax, quadcoords[num].t, quadcoords[num].s, quadcoords[num].tmax);
 }
 
@@ -650,15 +676,18 @@ void Draw_RotateCharacter (int x, int y, int num)
 {
 	if (!(num = Draw_PrepareCharacter (x, y, num))) return;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, char_texture, d3d_2DTextureColor);
 
 	// rotation needs to go direct as y and y + h are the same t texcoord
-	D3D_EmitFlatPolyVert (0, x, y, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax);
-	D3D_EmitFlatPolyVert (1, x + 8, y, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t);
-	D3D_EmitFlatPolyVert (2, x + 8, y + 8, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t);
-	D3D_EmitFlatPolyVert (3, x, y + 8, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax);
+	D3D_EmitFlatPolyVert (Num2DVerts + 0, x, y, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax);
+	D3D_EmitFlatPolyVert (Num2DVerts + 1, x + 8, y, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 2, x + 8, y + 8, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t);
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, verts2d, sizeof (flatpolyvert_t));
+	D3D_EmitFlatPolyVert (Num2DVerts + 3, x, y, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax);
+	D3D_EmitFlatPolyVert (Num2DVerts + 4, x + 8, y + 8, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t);
+	D3D_EmitFlatPolyVert (Num2DVerts + 5, x, y + 8, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax);
+
+	Num2DVerts += 6;
 }
 
 
@@ -732,7 +761,7 @@ void Draw_Pic (int x, int y, qpic_t *pic, float alpha)
 
 	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha * 255), 255, 255, 255);
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, alphacolor);
 	D3D_DrawFlatPoly (x, y, pic->width, pic->height, alphacolor, gl->sl, gl->tl, gl->sh, gl->th);
 }
 
@@ -741,14 +770,14 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, pic->width, pic->height, gl->sl, gl->tl, gl->sh, gl->th);
 }
 
 
 void Draw_Pic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic)
 {
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, texpic);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, texpic, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, w, h, 0, 0, 1, 1);
 }
 
@@ -794,11 +823,17 @@ void Draw_Crosshair (int x, int y, int size)
 	float s = xhairimage[xhairs];
 	float t = xhairimage[xhairt];
 
+	// end previous because this is a state change
+	D3D_EndFlatDraw ();
+
 	// bind it (modulate by color)
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, crosshairtexture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, crosshairtexture, xhaircolor);
 	D3D_SetTextureColorMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 	D3D_DrawFlatPoly (x, y, size, size, xhaircolor, s, t, s + 0.25, t + 0.25);
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+
+	// end this
+	D3D_EndFlatDraw ();
 }
 
 
@@ -806,7 +841,7 @@ void Draw_HalfPic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, gl->tex->d3d_Texture, d3d_2DTextureColor);
 	D3D_DrawFlatPoly (x, y, pic->width / 2, pic->height / 2, gl->sl, gl->tl, gl->sh, gl->th);
 }
 
@@ -877,7 +912,7 @@ void Draw_InvalidateMapshot (void)
 void Draw_MapshotTexture (LPDIRECT3DTEXTURE9 mstex, int x, int y)
 {
 	Draw_TextBox (x - 8, y - 8, 128, 128);
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, mstex);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_CLAMP, mstex, 0xffffffff);
 	D3D_DrawFlatPoly (x, y, 128, 128, 0, 0, 1, 1);
 }
 
@@ -902,7 +937,7 @@ void Draw_Mapshot (char *name, int x, int y)
 		// texture has changed, release the existing one
 		SAFE_RELEASE (d3d_MapshotTexture);
 
-		for (int i = COM_MAXGAMES - 1; ; i--)
+		for (int i = COM_MAXGAMES - 1;; i--)
 		{
 			// not registered
 			if (!com_games[i]) continue;
@@ -951,10 +986,7 @@ Only used for the player color selection menu
 */
 void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt, int pants)
 {
-	int			v, u, c;
-	unsigned int			*dest;
-	byte			*src;
-	int				p;
+	// force an update on first entry
 	static int old_shirt = -1;
 	static int old_pants = -1;
 
@@ -965,49 +997,25 @@ void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt,
 		return;
 	}
 
+	// recache the change
 	old_shirt = shirt;
 	old_pants = pants;
-	c = pic->width * pic->height;
 
-	// lock the texture rectangle for updating
-	LPDIRECT3DTEXTURE9 tex = ((glpic_t *) (pic->data))->tex->d3d_Texture;
-	D3DSURFACE_DESC Level0Desc;
-	D3DLOCKED_RECT Level0Rect;
+	// update for translation
+	byte *src = menuplyr_pixels;
+	byte *dst = menuplyr_pixels_translated;
 
-	LPDIRECT3DSURFACE9 LumaSurf;
+	// copy out the new pixels
+	for (int v = 0; v < pic->height; v++, dst += pic->width, src += pic->width)
+		for (int u = 0; u < pic->width; u++)
+			dst[u] = translation[src[u]];
 
-	tex->GetLevelDesc (0, &Level0Desc);
-	tex->GetSurfaceLevel (0, &LumaSurf);
+	// replace the texture fully
+	glpic_t *gl = (glpic_t *) pic->data;
+	SAFE_RELEASE (gl->tex->d3d_Texture);
+	D3D_UploadTexture (&gl->tex->d3d_Texture, menuplyr_pixels_translated, pic->width, pic->height, (gl->tex->flags & ~IMAGE_32BIT));
 
-	// copy it out to an ARGB surface
-	LPDIRECT3DSURFACE9 CopySurf;
-
-	d3d_Device->CreateOffscreenPlainSurface (Level0Desc.Width, Level0Desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &CopySurf, NULL);
-	D3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, LumaSurf, NULL, NULL, D3DX_FILTER_NONE, 0);
-	CopySurf->LockRect (&Level0Rect, NULL, 0);
-
-	dest = (unsigned *) Level0Rect.pBits;
-
-	for (v = 0; v < 64; v++, dest += 64)
-	{
-		src = &menuplyr_pixels[((v * pic->height) >> 6) * pic->width];
-
-		for (u = 0; u < 64; u++)
-		{
-			p = src[(u * pic->width) >> 6];
-
-			// bug in the previous just set colour to red rather than the correct alpha
-			dest[u] =  d_8to24table[translation[p]];
-		}
-	}
-
-	CopySurf->UnlockRect ();
-	D3DXLoadSurfaceFromSurface (LumaSurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
-
-	CopySurf->Release ();
-	LumaSurf->Release ();
-
-	// draw it normally
+	// and draw it normally
 	Draw_Pic (x, y, pic);
 }
 
@@ -1047,7 +1055,7 @@ void Draw_TileClear (int x, int y, int w, int h)
 {
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
 
-	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_WRAP, gl->tex->d3d_Texture);
+	D3D_PrepareFlatDraw (D3DFVF_TEX1, D3DTADDRESS_WRAP, gl->tex->d3d_Texture, 0xffffffff);
 	D3D_DrawFlatPoly (x, y, w, h, x / 64.0, y / 64.0, (x + w) / 64.0, (y + h) / 64.0);
 }
 
@@ -1115,6 +1123,7 @@ void Draw_PolyBlend (void)
 	if (d3d_RenderDef.automap) return;
 	if (!gl_polyblend.value) return;
 	if (!v_blend[3]) return;
+	if (d3d_GlobalCaps.usingPixelShaders) return;
 
 	DWORD blendcolor = D3DCOLOR_ARGB
 	(
@@ -1130,77 +1139,6 @@ void Draw_PolyBlend (void)
 	// disable polyblend in case the map changes while a blend is active
 	v_blend[3] = 0;
 }
-
-
-/*
-========================================================================================
-
-	BBB   L     OO    OO   DDD      AA   N  N  DDD     DDD   EEEE   AA  TTTTT  H  H
-	B  B  L    O  O  O  O  D  D    A  A  NN N  D  D    D  D  E     A  A   T    H  H
-	BBB   L    O  O  O  O  D  D    A  A  N NN  D  D    D  D  EEE   A  A   T    HHHH
-	B  B  L    O  O  O  O  D  D    AAAA  N  N  D  D    D  D  E     AAAA   T    H  H
-	BBB   LLLL  OO    OO   DDD     A  A  N  N  DDD     DDD   EEEE  A  A   T    H  H
-
-========================================================================================
-*/
-
-void Draw_DeathBlend (void)
-{
-	// don't draw it if in the automap or not connected
-	if (d3d_RenderDef.automap) return;
-	if (cls.state != ca_connected) return;
-
-	// console is full screen
-	if (scr_con_current == vid.height) return;
-
-	// no death in intermission
-	if (cl.intermission) return;
-
-	// don't draw it in multiplayer as some people might like to take a good
-	// look around after they die, and god knows there's all sorts of folks in the world
-	if (cl.maxclients > 1) return;
-
-	static float deathred = 0;
-	static float deathalpha = 0;
-	static bool wasalive = true;
-
-	// see if we're still alive
-	if (cl.stats[STAT_HEALTH] > 0)
-	{
-		// we're still alive
-		wasalive = true;
-		return;
-	}
-
-	// ok, we're dead - see did we just die or have we been dead for a while?
-	if (wasalive)
-	{
-		// init the color and blend
-		deathalpha = 0;
-		deathred = 0.666;
-
-		// signal that we've been dead before
-		wasalive = false;
-	}
-
-	// draw the death blend fade out
-	DWORD deathcolor = D3DCOLOR_ARGB
-	(
-		BYTE_CLAMP (deathalpha * 255.0f),
-		BYTE_CLAMP (deathred * 255.0f),
-		BYTE_CLAMP (0),
-		BYTE_CLAMP (0)
-	);
-
-	D3D_DrawColoredPoly (0, 0, vid.width, vid.height, deathcolor);
-
-	// update blend
-	deathalpha += d3d_RenderDef.frametime / 5.0f;
-	deathred -= d3d_RenderDef.frametime / 8.0f;
-}
-
-
-// ========================================================================================
 
 
 void D3D_Set2DShade (float shadecolor)
@@ -1231,11 +1169,17 @@ void D3D_Set2DShade (float shadecolor)
 
 
 // we'll store this out too in case we ever want to do anything with it
-void D3D_DrawUnderwaterWarp (void);
+void D3D_Draw3DSceneToBackbuffer (void);
 void SCR_SetupToDrawHUD (void);
 
 void D3D_Set2D (void)
 {
+	if (!d3d_SceneBegun)
+	{
+		d3d_Device->BeginScene ();
+		d3d_SceneBegun = true;
+	}
+
 	D3DVIEWPORT9 d3d_2DViewport;
 
 	// switch to a fullscreen viewport for 2D drawing
@@ -1261,12 +1205,18 @@ void D3D_Set2D (void)
 	vert2dscale_x = (float) d3d_CurrentMode.Width / (float) vid.width;
 	vert2dscale_y = (float) d3d_CurrentMode.Height / (float) vid.height;
 
-	// state
+	// draw the underwater warp here - all the above state is common but it uses a different orthographic matrix
+	if (!d3d_RenderDef.automap) D3D_Draw3DSceneToBackbuffer ();
+
+	// back to normal
 	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
 	D3D_SetTexCoordIndexes (0, 0, 0);
 
-	// draw the underwater warp here - all the above state is common but it uses a different orthographic matrix
-	if (!d3d_RenderDef.automap) D3D_DrawUnderwaterWarp ();
+	// initialize states
+	Num2DVerts = 0;
+	Current2DTexture = NULL;
+	Current2DFVF = -1;
+	Current2DAddrMode = -1;
 
 	// modulate alpha always here
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
@@ -1286,7 +1236,7 @@ void D3D_Set2D (void)
 	D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
 
 	// do the polyblends here for simplicity
+	// these won't happen if we're in r_hlsl 1 mode
 	Draw_PolyBlend ();
-	Draw_DeathBlend ();
 }
 

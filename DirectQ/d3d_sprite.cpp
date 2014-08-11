@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 #include "quakedef.h"
@@ -94,7 +91,7 @@ D3D_SetupSpriteModel
 =================
 */
 
-sprverts_t sprverts[4];
+sprverts_t sprverts[6];
 
 __inline void R_MakeSpriteVert (int v, vec3_t origin, float f1, vec3_t p1, float f2, vec3_t p2, float s, float t, float alphaval)
 {
@@ -218,12 +215,15 @@ void D3D_SetupSpriteModel (entity_t *ent)
 	// set texture and begin vertex
 	D3D_SetTexture (0, frame->texture->d3d_Texture);
 
-	R_MakeSpriteVert (0, fixed_origin, frame->down, up, frame->left, right, 0, 1, ent->alphaval);
+	R_MakeSpriteVert (0, fixed_origin, frame->down, up, frame->left, right, 0, frame->t, ent->alphaval);
 	R_MakeSpriteVert (1, fixed_origin, frame->up, up, frame->left, right, 0, 0, ent->alphaval);
-	R_MakeSpriteVert (2, fixed_origin, frame->up, up, frame->right, right, 1, 0, ent->alphaval);
-	R_MakeSpriteVert (3, fixed_origin, frame->down, up, frame->right, right, 1, 1, ent->alphaval);
+	R_MakeSpriteVert (2, fixed_origin, frame->up, up, frame->right, right, frame->s, 0, ent->alphaval);
 
-	d3d_Device->DrawPrimitiveUP (D3DPT_TRIANGLEFAN, 2, sprverts, sizeof (sprverts_t));
+	R_MakeSpriteVert (3, fixed_origin, frame->down, up, frame->left, right, 0, frame->t, ent->alphaval);
+	R_MakeSpriteVert (4, fixed_origin, frame->up, up, frame->right, right, frame->s, 0, ent->alphaval);
+	R_MakeSpriteVert (5, fixed_origin, frame->down, up, frame->right, right, frame->s, frame->t, ent->alphaval);
+
+	D3D_DrawUserPrimitive (D3DPT_TRIANGLELIST, 2, sprverts, sizeof (sprverts_t));
 }
 
 

@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 
@@ -547,7 +544,7 @@ void Menu_GameCustomEnter (void)
 	}
 
 	// find the current game
-	for (gamedirnum = 0; ; gamedirnum++)
+	for (gamedirnum = 0;; gamedirnum++)
 	{
 		// no more gamedirs
 		if (!gamedirs[gamedirnum])
@@ -686,7 +683,7 @@ int old_shottype_number = 0;
 void Menu_ContentCustomEnter (void)
 {
 	// select the correct shot type
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!ShotTypes[i]) break;
 
@@ -737,11 +734,11 @@ void Menu_LoadAvailableSkyboxes (void)
 	int listlen = 0;
 	char **SkyboxList = NULL;
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!sbdir[i]) break;
 
-		for (int j = 0; ; j++)
+		for (int j = 0;; j++)
 		{
 			if (!TextureExtensions[j]) break;
 
@@ -776,7 +773,7 @@ void Menu_LoadAvailableSkyboxes (void)
 
 		bool present = false;
 
-		for (int j = 0; ; j++)
+		for (int j = 0;; j++)
 		{
 			if (!NewSkyboxList[j]) break;
 
@@ -885,7 +882,7 @@ void Menu_WarpCustomEnter (void)
 	extern char CachedSkyBoxName[];
 
 	// find the current skybox
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!skybox_menulist[i]) break;
 
@@ -1619,7 +1616,7 @@ void Menu_MapsCacheInfo (mapinfo_t *info, char *entlump)
 			strcpy (info->mapname, com_token);
 
 			// evil maps with looooonnggg messages
-			for (int i = 0; ; i++)
+			for (int i = 0;; i++)
 			{
 				if (!info->mapname[i]) break;
 
@@ -2176,7 +2173,7 @@ int Menu_DemoCustomDraw2 (int y)
 				// save out
 				dsi.levelname = &dsi.stuff[0];
 
-				for (int i = 0; ; i++)
+				for (int i = 0;; i++)
 				{
 					if (dsi.stuff[i] == '/' || dsi.stuff[i] == '\\')
 					{
@@ -2186,7 +2183,7 @@ int Menu_DemoCustomDraw2 (int y)
 					}
 				}
 
-				for (int i = 0; ; i++)
+				for (int i = 0;; i++)
 				{
 					if (dsi.mapname[i] == 0) break;
 
@@ -2227,7 +2224,7 @@ int Menu_DemoCustomDraw2 (int y)
 		}
 
 		// demo_mapnum is invalid here
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!spinbox_bsps[i]) break;
 

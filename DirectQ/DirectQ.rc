@@ -20,6 +20,7 @@ IDR_YOUAREHERE			RCDATA		"YouAreHere.png"
 // shaders
 IDR_LIQUID			RCDATA		"fxLiquid.fx"
 IDR_SKY				RCDATA		"fxQ1Sky.fx"
+IDR_SCREEN			RCDATA		"fxScreen.fx"
 
 // icons
 IDI_APPICON			ICON		"dq.ico"

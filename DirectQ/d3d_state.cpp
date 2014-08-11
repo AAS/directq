@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 #include "quakedef.h"
@@ -90,6 +87,22 @@ void D3D_SetTextureStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Val
 }
 
 
+void D3D_SetColorMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
+{
+	D3D_SetTextureState (stage, D3DTSS_COLOROP, mode);
+	D3D_SetTextureState (stage, D3DTSS_COLORARG1, arg1);
+	D3D_SetTextureState (stage, D3DTSS_COLORARG2, arg2);
+}
+
+
+void D3D_SetAlphaMode (DWORD stage, DWORD mode, DWORD arg1, DWORD arg2)
+{
+	D3D_SetTextureState (stage, D3DTSS_ALPHAOP, mode);
+	D3D_SetTextureState (stage, D3DTSS_ALPHAARG1, arg1);
+	D3D_SetTextureState (stage, D3DTSS_ALPHAARG2, arg2);
+}
+
+
 DWORD d3d_SamplerStates[8][64];
 
 void D3D_SetSamplerState (DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value)
@@ -127,7 +140,7 @@ void D3D_SetTexture (DWORD Sampler, LPDIRECT3DBASETEXTURE9 pTexture)
 	}
 	else
 	{
-		d3d_Device->SetTexture (Sampler, pTexture);
+		if (pTexture) d3d_Device->SetTexture (Sampler, pTexture);
 		d3d_StageTextures[Sampler] = pTexture;
 	}
 }

@@ -15,29 +15,102 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
+// new vbo interface
+#define VBO_SHADER_TYPE_FIXED		1
+#define VBO_SHADER_TYPE_HLSL		2
+
+typedef struct d3d_fixed_shader_texture_s
+{
+	DWORD Op;
+	DWORD Arg1;
+	DWORD Arg2;
+} d3d_fixed_shader_texture_t;
+
+typedef struct d3d_shaderdef_s
+{
+	int NumStages;
+	int Type;
+} d3d_shaderdef_t;
+
+typedef struct d3d_shader_s
+{
+	d3d_shaderdef_t ShaderDef;
+	d3d_fixed_shader_texture_t ColorDef[3];
+	d3d_fixed_shader_texture_t AlphaDef[3];
+} d3d_shader_t;
+
+
+void D3D_VBOBegin (D3DPRIMITIVETYPE PrimitiveType, int Stride);
+void D3D_VBOAddShader (d3d_shader_t *Shader, LPDIRECT3DTEXTURE9 Stage0Tex, LPDIRECT3DTEXTURE9 Stage1Tex = NULL, LPDIRECT3DTEXTURE9 Stage2Tex = NULL);
+void D3D_VBOAddSurfaceVerts (msurface_t *surf);
+void D3D_VBORender (void);
+void D3D_VBOCheckOverflow (int numverts, int numindexes);
+void D3D_VBOAddAliasVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasstate);
+void D3D_VBOAddShadowVerts (entity_t *ent, aliashdr_t *hdr, aliasstate_t *aliasstate, DWORD shadecolor);
+void D3D_VBOSetVBOStream (LPDIRECT3DVERTEXBUFFER9 vbo, LPDIRECT3DINDEXBUFFER9 ibo = NULL, int stride = 0);
+void D3D_DrawUserPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride);
+void D3D_DrawUserPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT NumVertices, UINT PrimitiveCount, CONST void *pIndexData, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride);
+
+
+// dynamic linking
+typedef IDirect3D9 *(WINAPI *DIRECT3DCREATE9PROC) (UINT);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXPERSPECTIVEFOVRHPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT, FLOAT);
+typedef HRESULT (WINAPI *D3DXCREATEEFFECTPROC) (LPDIRECT3DDEVICE9, LPCVOID, UINT, CONST D3DXMACRO *, LPD3DXINCLUDE, DWORD, LPD3DXEFFECTPOOL, LPD3DXEFFECT *, LPD3DXBUFFER *);
+typedef HRESULT (WINAPI *D3DXLOADSURFACEFROMSURFACEPROC) (LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, DWORD, D3DCOLOR);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXORTHOOFFCENTERPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT, FLOAT);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXMULTIPLYPROC) (D3DXMATRIX *, CONST D3DXMATRIX *, CONST D3DXMATRIX *);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXSCALINGPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXTRANSLATIONPROC) (D3DXMATRIX *, FLOAT, FLOAT, FLOAT);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXROTATIONXPROC) (D3DXMATRIX *, FLOAT);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXROTATIONYPROC) (D3DXMATRIX *, FLOAT);
+typedef D3DXMATRIX *(WINAPI *D3DXMATRIXROTATIONZPROC) (D3DXMATRIX *, FLOAT);
+typedef HRESULT (WINAPI *D3DXLOADSURFACEFROMMEMORYPROC) (LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *, LPCVOID, D3DFORMAT, UINT, CONST PALETTEENTRY *, CONST RECT *, DWORD, D3DCOLOR);
+typedef HRESULT (WINAPI *D3DXFILTERTEXTUREPROC) (LPDIRECT3DBASETEXTURE9, CONST PALETTEENTRY *, UINT, DWORD);
+typedef LPCSTR (WINAPI *D3DXGETPIXELSHADERPROFILEPROC) (LPDIRECT3DDEVICE9);
+typedef LPCSTR (WINAPI *D3DXGETVERTEXSHADERPROFILEPROC) (LPDIRECT3DDEVICE9);
+typedef HRESULT (WINAPI *D3DXSAVESURFACETOFILEPROC) (LPCSTR, D3DXIMAGE_FILEFORMAT, LPDIRECT3DSURFACE9, CONST PALETTEENTRY *, CONST RECT *);
+typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC) (LPDIRECT3DDEVICE9, LPCVOID, UINT, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
+typedef HRESULT (WINAPI *D3DXCREATETEXTUREFROMRESOURCEEXAPROC) (LPDIRECT3DDEVICE9, HMODULE, LPCSTR, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, DWORD, DWORD, D3DCOLOR, D3DXIMAGE_INFO *, PALETTEENTRY *, LPDIRECT3DTEXTURE9 *);
+typedef HRESULT (WINAPI *D3DXCREATERENDERTOSURFACEPROC) (LPDIRECT3DDEVICE9, UINT, UINT, D3DFORMAT, BOOL, D3DFORMAT, LPD3DXRENDERTOSURFACE *);
+
+extern HINSTANCE hInstD3D9;
+extern HINSTANCE hInstD3DX;
+
+extern DIRECT3DCREATE9PROC QDirect3DCreate9;
+extern D3DXMATRIXPERSPECTIVEFOVRHPROC QD3DXMatrixPerspectiveFovRH;
+extern D3DXCREATEEFFECTPROC QD3DXCreateEffect;
+extern D3DXLOADSURFACEFROMSURFACEPROC QD3DXLoadSurfaceFromSurface;
+extern D3DXMATRIXPERSPECTIVEOFFCENTERRHPROC QD3DXMatrixPerspectiveOffCenterRH;
+extern D3DXMATRIXORTHOOFFCENTERPROC QD3DXMatrixOrthoOffCenterRH;
+extern D3DXMATRIXMULTIPLYPROC QD3DXMatrixMultiply;
+extern D3DXMATRIXSCALINGPROC QD3DXMatrixScaling;
+extern D3DXMATRIXTRANSLATIONPROC QD3DXMatrixTranslation;
+extern D3DXMATRIXROTATIONXPROC QD3DXMatrixRotationX;
+extern D3DXMATRIXROTATIONYPROC QD3DXMatrixRotationY;
+extern D3DXMATRIXROTATIONZPROC QD3DXMatrixRotationZ;
+extern D3DXLOADSURFACEFROMMEMORYPROC QD3DXLoadSurfaceFromMemory;
+extern D3DXFILTERTEXTUREPROC QD3DXFilterTexture;
+extern D3DXGETPIXELSHADERPROFILEPROC QD3DXGetPixelShaderProfile;
+extern D3DXGETVERTEXSHADERPROFILEPROC QD3DXGetVertexShaderProfile;
+extern D3DXSAVESURFACETOFILEPROC QD3DXSaveSurfaceToFileA;
+extern D3DXCREATETEXTUREFROMFILEINMEMORYEXPROC QD3DXCreateTextureFromFileInMemoryEx;
+extern D3DXCREATETEXTUREFROMRESOURCEEXAPROC QD3DXCreateTextureFromResourceExA;
+extern D3DXCREATERENDERTOSURFACEPROC QD3DXCreateRenderToSurface;
+
+// for render to texture
+extern bool d3d_SceneBegun;
+
 // VBO interface
-void D3D_ReleaseBuffers (void);
+void D3D_VBOReleaseBuffers (void);
 void D3D_SubmitVertexes (int numverts, int numindexes, int polysize);
 
 void D3D_GetIndexBufferSpace (void **data);
 void D3D_GetVertexBufferSpace (void **data);
 
 BOOL D3D_AreBuffersFull (int numverts, int numindexes);
-
-void D3D_BeginVertexes (void **vertexes, void **indexes, int polysize);
-void D3D_EndVertexes (void);
-void D3D_SetVBOColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
-void D3D_SetVBOAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
-void D3D_SetVBOTexture (DWORD stage, LPDIRECT3DTEXTURE9 texture);
-bool D3D_CheckVBO (int numverts, int numindexes);
-void D3D_GotoNewVBOMark (void);
-void D3D_UpdateVBOMark (int numverts, int numindexes);
-
 
 
 // this is our matrix interface now
@@ -56,9 +129,11 @@ extern HRESULT hr;
 // hlsl
 extern LPDIRECT3DVERTEXDECLARATION9 d3d_LiquidDeclaration;
 extern LPDIRECT3DVERTEXDECLARATION9 d3d_SkyDeclaration;
+extern LPDIRECT3DVERTEXDECLARATION9 d3d_UnderwaterDeclaration;
 
 extern LPD3DXEFFECT d3d_LiquidFX;
 extern LPD3DXEFFECT d3d_SkyFX;
+extern LPD3DXEFFECT d3d_UnderwaterFX;
 
 void D3D_InitHLSL (void);
 void D3D_ShutdownHLSL (void);
@@ -120,19 +195,24 @@ class CD3DLightmap
 public:
 	CD3DLightmap (msurface_t *surf);
 	~CD3DLightmap (void);
-	void Upload (void);
-	void UploadModified (void);
+	void UploadLightmap (void);
 	void CalcLightmapTexCoords (msurface_t *surf);
 	void CheckSurfaceForModification (msurface_t *surf);
 	bool AllocBlock (msurface_t *surf);
+	void LoseDefaultTexture (void);
+	void RecoverDefaultTexture (void);
+	void EnsureSurfaceTexture (msurface_t *surf);
 
 private:
 	bool modified;
 	int width;
 	int height;
 	int *allocated;
-	D3DLOCKED_RECT LockedRect;
-	LPDIRECT3DTEXTURE9 d3d_Texture;
+	D3DLOCKED_RECT d3d_LockedRect;
+	LPDIRECT3DTEXTURE9 d3d_MainTexture;
+	LPDIRECT3DTEXTURE9 d3d_BackupTexture;
+	bool lost;
+	RECT DirtyRect;
 
 	// next lightmap in the chain
 	CD3DLightmap *next;
@@ -177,7 +257,10 @@ extern D3DDISPLAYMODE d3d_CurrentMode;
 #define IMAGE_NOEXTERN		2048
 #define IMAGE_HALFLIFE		4096
 #define IMAGE_MAPSHOT		8192
+#define IMAGE_PADDABLE		16384
+#define IMAGE_PADDED		32768
 
+int D3D_PowerOf2Size (int size);
 
 typedef struct image_s
 {
@@ -280,7 +363,7 @@ typedef struct particle_type_s
 void D3D_AddToAlphaList (entity_t *ent);
 void D3D_AddToAlphaList (struct d3d_modelsurf_s *modelsurf);
 void D3D_AddToAlphaList (particle_type_t *particle);
-void D3D_SortAlphaList (void);
+void D3D_RenderAlphaList (void);
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
@@ -299,6 +382,9 @@ void D3D_SetTextureStatef (DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, float Val
 void D3D_SetTexture (DWORD Sampler, LPDIRECT3DBASETEXTURE9 pTexture);
 void D3D_SetFVF (DWORD FVF);
 
+void D3D_SetColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
+void D3D_SetAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
+
 // batched up states
 void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor);
 void D3D_DisableAlphaBlend (void);
@@ -309,6 +395,7 @@ void D3D_SetTextureMatrixOp (DWORD tmu0op, DWORD tmu1op = D3DTTFF_DISABLE, DWORD
 void D3D_SetTextureColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
 void D3D_SetTextureAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
 
+bool R_CullBox (mnode_t *node);
 bool R_CullBox (vec3_t mins, vec3_t maxs);
 
 float Lerp (float l1, float l2, float lerpfactor);

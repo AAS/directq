@@ -15,11 +15,10 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // console.c
+
+#include "versions.h"
 
 #ifdef NeXT
 #include <libc.h>
@@ -128,7 +127,7 @@ void Con_ClearNotify (void)
 {
 	int		i;
 	
-	for (i=0 ; i<CON_NOTIFYLINES ; i++)
+	for (i=0; i<CON_NOTIFYLINES; i++)
 		con_times[i] = 0;
 }
 
@@ -203,9 +202,9 @@ void Con_CheckResize (void)
 		memcpy (tbuf, con_text, CON_TEXTSIZE);
 		memset (con_text, ' ', CON_TEXTSIZE);
 
-		for (i=0 ; i<numlines ; i++)
+		for (i=0; i<numlines; i++)
 		{
-			for (j=0 ; j<numchars ; j++)
+			for (j=0; j<numchars; j++)
 			{
 				con_text[(con_totallines - 1 - i) * con_linewidth + j] =
 						tbuf[((con_current - i + oldtotallines) %
@@ -310,7 +309,7 @@ static void Con_Print (char *txt, bool silent)
 	while ( (c = *txt) )
 	{
 		// count word length
-		for (l=0 ; l< con_linewidth ; l++)
+		for (l=0; l< con_linewidth; l++)
 			if ( txt[l] <= ' ')
 				break;
 
@@ -616,7 +615,7 @@ void Con_DrawNotify (void)
 
 		clearnotify = 0;
 
-		for (x = 0 ; x < con_linewidth ; x++)
+		for (x = 0; x < con_linewidth; x++)
 			Draw_Character ((x + 1) << 3, v, text[x]);
 
 		// if (con_notifytime.value - time < 1.0f) D3D_Set2DShade (1.0f);
@@ -628,7 +627,11 @@ void Con_DrawNotify (void)
 	{
 		clearnotify = 0;
 		x = 0;
-		Draw_String (8, v, "say:");
+
+		Draw_Character (8, v, 's');
+		Draw_Character (16, v, 'a');
+		Draw_Character (24, v, 'y');
+		Draw_Character (32, v, ':');
 
 		while (chat_buffer[x])
 		{

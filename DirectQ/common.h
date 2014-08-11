@@ -171,6 +171,9 @@ void COM_FCloseFile (void *fh);
 
 byte *COM_LoadTempFile (char *path);
 byte *COM_LoadHunkFile (char *path);
+byte *COM_LoadZoneFile (char *path);
+
+void COM_ExecQuakeRC (void);
 
 extern bool		standard_quake, rogue, hipnotic, nehahra;
 bool IsTimeout (DWORD *PrevTime, DWORD WaitTime);

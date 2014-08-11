@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // cl_tent.c -- client side temporary entities
 
@@ -71,11 +68,6 @@ void CL_InitTEnts (void)
 
 	// don't crash as this isn't in ID1
 	cl_beam_mod = Mod_ForName ("progs/beam.mdl", false);
-
-	// don't frame interpolate the bolts
-	cl_bolt1_mod->aliashdr->nolerp = true;
-	cl_bolt2_mod->aliashdr->nolerp = true;
-	cl_bolt3_mod->aliashdr->nolerp = true;
 
 	// sounds
 	cl_sfx_wizhit = S_PrecacheSound ("wizard/hit.wav");
@@ -649,7 +641,6 @@ void CL_UpdateTEnts (void)
 			ent->angles[0] = pitch;
 			ent->angles[1] = yaw;
 			ent->angles[2] = rand () % 360;
-			ent->model->aliashdr->nolerp = true;
 
 			// spotted by metlslime - inner loop used i as well!
 			for (int j = 0; j < 3; j++)
@@ -657,6 +648,9 @@ void CL_UpdateTEnts (void)
 				org[j] += dist[j] * 30;
 				ent->origin[j] = org[j];
 			}
+
+			// never occlude these wee buggers
+			ent->effects |= EF_NEVEROCCLUDE;
 
 			// add a visedict for it
 			D3D_AddVisEdict (ent);

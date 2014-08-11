@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // cmd.c -- Quake script command processing module
 
@@ -58,6 +55,9 @@ void Cmd_Inc_f (void)
 
 
 cmd_t Cmd_Inc_Cmd ("inc", Cmd_Inc_f);
+
+// this dummy function exists so that no command will have a NULL function
+void Cmd_Compat (void) {}
 
 /*
 =============================================================================
@@ -133,6 +133,9 @@ void Cmd_BuildCompletionList (void)
 	// write in cmds
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next, complistcurrent++)
 	{
+		// replace NULL function commands with a dummy that does nothing
+		if (!cmd->function) cmd->function = Cmd_Compat;
+
 		complistcurrent->name = cmd->name;
 		complistcurrent->als = NULL;
 		complistcurrent->cmd = cmd;
@@ -176,6 +179,12 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 	{
 		// skip nehahra if we're not running nehahra
 		if (cl->var && !nehahra && (cl->var->usage & CVAR_NEHAHRA)) continue;
+
+		// skip compatibility cvars
+		if (cl->var && (cl->var->usage & CVAR_COMPAT)) continue;
+
+		// skip compatibility commands
+		if (cl->cmd && !(cl->cmd->function)) continue;
 
 		assert (cl->name);
 		assert ((cl->als || cl->cmd || cl->var));
@@ -319,7 +328,7 @@ Cmd_Wait_f
 
 Causes execution of the remainder of the command buffer to be delayed until
 next frame.  This allows commands like:
-bind g "impulse 5 ; +attack ; wait ; -attack ; impulse 2"
+bind g "impulse 5; +attack; wait; -attack; impulse 2"
 ============
 */
 void Cmd_Wait_f (void)
@@ -422,7 +431,7 @@ void Cbuf_Execute (void)
 
 	while (cmd_text.cursize)
 	{
-		// find a \n or ; line break
+		// find a \n or; line break
 		text = (char *) cmd_text.data;
 
 		quotes = 0;
@@ -608,7 +617,7 @@ void Cmd_Echo_f (void)
 ===============
 Cmd_Alias_f
 
-Creates a new command that executes a command string (possibly ; seperated)
+Creates a new command that executes a command string (possibly; seperated)
 ===============
 */
 
@@ -858,8 +867,25 @@ void Cmd_Add (cmd_t *newcmd)
 
 	// fail if the command already exists
 	for (cmd_t *cmd = cmd_functions; cmd; cmd = cmd->next)
+	{
 		if (!strcmp (newcmd->name, cmd->name))
+		{
+			// if the incoming command has the same name as a compatibility command
+			// we stomp the compatibility command
+			if (!cmd->function)
+			{
+				cmd->function = newcmd->function;
+				return;
+			}
+
+			// if the incoming command is a compatibility command we stomp it
+			if (!newcmd->function)
+				return;
+
+			// silent fail
 			return;
+		}
+	}
 
 	// link in
 	newcmd->next = cmd_functions;
@@ -923,6 +949,9 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 
 		if (cl->cmd)
 		{
+			// skip compatibility commands
+			if (!cl->cmd->function) return;
+
 			if (full_initialized)
 			{
 				// execute normally
@@ -953,6 +982,9 @@ void Cmd_ExecuteString (char *text, cmd_source_t src)
 				Con_Printf ("Unknown command \"%s\"\n", cl->var->name);
 				return;
 			}
+
+			// silently ignore compatibility cvars
+			if (cl->var->usage & CVAR_COMPAT) return;
 
 			// perform a variable print or set
 			if (Cmd_Argc () == 1)
@@ -1088,7 +1120,7 @@ void Cmd_ForwardToServer (void)
 
 						if (cl.stats[STAT_HEALTH] > 0)
 						{
-							for (item = IT_SUPER_SHOTGUN ; item <= IT_LIGHTNING ; item *= 2)
+							for (item = IT_SUPER_SHOTGUN; item <= IT_LIGHTNING; item *= 2)
 							{
 								if (*ch != ':' && (cl.items & item))
 								{

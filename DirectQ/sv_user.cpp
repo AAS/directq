@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // sv_user.c -- server code for moving users
 
@@ -68,7 +65,7 @@ void SV_SetIdealPitch (void)
 	sinval = sin(angleval);
 	cosval = cos(angleval);
 
-	for (i=0 ; i<MAX_FORWARD ; i++)
+	for (i=0; i<MAX_FORWARD; i++)
 	{
 		top[0] = sv_player->v.origin[0] + cosval*(i+3)*12;
 		top[1] = sv_player->v.origin[1] + sinval*(i+3)*12;
@@ -90,7 +87,7 @@ void SV_SetIdealPitch (void)
 	
 	dir = 0;
 	steps = 0;
-	for (j=1 ; j<i ; j++)
+	for (j=1; j<i; j++)
 	{
 		step = z[j] - z[j-1];
 		if (step > -ON_EPSILON && step < ON_EPSILON)
@@ -188,7 +185,7 @@ void SV_Accelerate (vec3_t wishvel)
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
 	
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		velocity[i] += accelspeed*pushvec[i];	
 }
 #endif
@@ -205,7 +202,7 @@ void SV_Accelerate (void)
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
 	
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		velocity[i] += accelspeed*wishdir[i];	
 }
 
@@ -226,7 +223,7 @@ void SV_AirAccelerate (vec3_t wishveloc)
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
 	
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		velocity[i] += accelspeed*wishveloc[i];	
 }
 
@@ -260,7 +257,7 @@ void SV_WaterMove (void)
 //
 	AngleVectors (sv_player->v.v_angle, forward, right, up);
 
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		wishvel[i] = forward[i]*cmd.forwardmove + right[i]*cmd.sidemove;
 
 	if (!cmd.forwardmove && !cmd.sidemove && !cmd.upmove)
@@ -305,7 +302,7 @@ void SV_WaterMove (void)
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
 
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		velocity[i] += accelspeed * wishvel[i];
 }
 
@@ -343,7 +340,7 @@ void SV_AirMove (void)
 	if (sv.dwTime < (sv_player->v.teleport_time * 1000) && fmove < 0)
 		fmove = 0;
 		
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 		wishvel[i] = forward[i]*fmove + right[i]*smove;
 
 	if ( (int)sv_player->v.movetype != MOVETYPE_WALK)
@@ -612,7 +609,7 @@ void SV_RunClients (void)
 {
 	int				i;
 	
-	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	for (i=0, host_client = svs.clients; i<svs.maxclients; i++, host_client++)
 	{
 		if (!host_client->active)
 			continue;

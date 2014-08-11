@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // common.c -- misc functions used in client and server
 
@@ -53,7 +50,7 @@ void COM_SortStringList (char **stringlist, bool ascending)
 	int listlen;
 
 	// find the length of the list
-	for (listlen = 0; ; listlen++)
+	for (listlen = 0;; listlen++)
 		if (!stringlist[listlen]) break;
 
 	listsortascorder = ascending;
@@ -169,23 +166,70 @@ bool IsTimeout (DWORD *PrevTime, DWORD WaitTime)
 	return true;
 }
 
+
 /*
+=============
+COM_ExecQuakeRC
 
-
-All of Quake's data access is through a hierchal file system, but the contents of the file system can be transparently merged from several sources.
-
-The "base directory" is the path to the directory holding the quake.exe and all game directories.  The sys_* files pass this to host_init in quakeparms_t->basedir.  This can be overridden with the "-basedir" command line parm to allow code debugging in a different directory.  The base directory is
-only used during filesystem initialization.
-
-The "game directory" is the first tree on the search path and directory that all generated files (savegames, screenshots, demos, config files) will be saved to.  This can be overridden with the "-game" command line parameter.  The game directory can never be changed while quake is executing.  This is a precacution against having a malicious server instruct clients to write files over areas they shouldn't.
-
-
-FIXME:
-The file "parms.txt" will be read out of the game directory and appended to the current command line arguments to allow different games to initialize startup parms differently.  This could be used to add a "-sspeed 22050" for the high quality sound edition.  Because they are added at the end, they will not override an explicit setting on the original command line.
-
+This is a HUGE hack to inject an "exec directq.cfg" command after the "exec config.cfg" in a quake.rc file
+and is provided for mods that use a custom quake.rc containing commands of their own.
+=============
 */
+void COM_ExecQuakeRC (void)
+{
+	char *rcfile = (char *) COM_LoadZoneFile ("quake.rc");
 
-//============================================================================
+	// didn't find it
+	if (!rcfile) return;
+
+	// alloc a new buffer to hold the new RC file.
+	// this should give sufficient space even if it only contains a single "exec config.cfg"
+	int len = strlen (rcfile) * 3;
+
+	// alloc a new buffer including space for "exec directq.cfg"
+	char *newrc = (char *) Zone_Alloc (len);
+	char *oldrc = rcfile;
+	char *rcnew = newrc;
+
+	newrc[0] = 0;
+
+	bool incomment = false;
+
+	// this breaks with quoth's quake.rc...
+	while (1)
+	{
+		// end of the file
+		if (!(*oldrc))
+		{
+			*rcnew = 0;
+			break;
+		}
+
+		// detect comments
+		if (!strncmp (oldrc, "//", 2)) incomment = true;
+		if (oldrc[0] == '\n') incomment = false;
+
+		// look for config.cfg - there might be 2 or more spaces between exec and the filename!!!
+		if (!strnicmp (oldrc, "config.cfg", 10) && !incomment)
+		{
+			// copy in the new exec statement, ensure that it's on the same line in
+			// case the config.cfg entry is in a comment
+			strcpy (&rcnew[0], "config.cfg;exec directq.cfg");
+
+			// skip over
+			rcnew += 27;
+			oldrc += 10;
+			continue;
+		}
+
+		// copy in text
+		*rcnew++ = *oldrc++;
+	}
+
+	Cbuf_InsertText (newrc);
+	Zone_Free (rcfile);
+	Zone_Free (newrc);
+}
 
 
 // ClearLink is used for new headnodes
@@ -668,7 +712,7 @@ char *COM_FileExtension (char *in)
 	if (!*in)
 		return "";
 	in++;
-	for (i=0 ; i<7 && *in ; i++,in++)
+	for (i=0; i<7 && *in; i++,in++)
 		exten[i] = *in;
 	exten[i] = 0;
 	return exten;
@@ -688,7 +732,7 @@ void COM_FileBase (char *in, char *out)
 	while (s != in && *s != '.')
 		s--;
 	
-	for (s2 = s ; *s2 && *s2 != '/' ; s2--)
+	for (s2 = s; *s2 && *s2 != '/'; s2--)
 	;
 	
 	if (s-s2 < 2)
@@ -809,7 +853,7 @@ int COM_CheckParm (char *parm)
 {
 	int             i;
 	
-	for (i=1 ; i<com_argc ; i++)
+	for (i=1; i<com_argc; i++)
 	{
 		if (!com_argv[i])
 			continue;               // NEXTSTEP sometimes clears appkit vars.
@@ -1012,7 +1056,7 @@ int memsearch (byte *start, int count, int search)
 {
 	int             i;
 	
-	for (i=0 ; i<count ; i++)
+	for (i=0; i<count; i++)
 		if (start[i] == search)
 			return i;
 	return -1;
@@ -1161,7 +1205,7 @@ bool SortCompare (char *left, char *right)
 
 bool CheckExists (char **fl, char *mapname)
 {
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		// end of list
 		if (!fl[i]) return false;
@@ -1196,7 +1240,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 	else
 	{
 		// appending to a list so find the current length and build from there
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (!fl[i]) break;
 			len++;
@@ -1255,7 +1299,7 @@ int COM_BuildContentList (char ***FileList, char *basedir, char *filetype)
 
 			_snprintf (find_filter, 260, "%s/%s*%s", search->filename, basedir, filetype);
 
-			for (int i = 0; ; i++)
+			for (int i = 0;; i++)
 			{
 				if (find_filter[i] == 0) break;
 				if (find_filter[i] == '/') find_filter[i] = '\\';
@@ -1318,7 +1362,7 @@ HANDLE COM_MakeTempFile (char *tmpfile)
 
 	// replace path delims with _ so that files are created directly under %USERPROFILE%\Local Settings\temp
 	// skip the first cos we wanna keep that one
-	for (int i = 1; ; i++)
+	for (int i = 1;; i++)
 	{
 		if (fpath2[i] == 0) break;
 		if (fpath2[i] == '/') fpath2[i] = '_';
@@ -1611,6 +1655,8 @@ static byte *COM_LoadFile (char *path, int usehunk)
 		buf = (byte *) Pool_Game->Alloc (len + 1);
 	else if (usehunk == 2)
 		buf = (byte *) Pool_FileLoad->Alloc (len + 1);
+	else if (usehunk == 3)
+		buf = (byte *) Zone_Alloc (len + 1);
 	else
 	{
 		Con_DPrintf ("COM_LoadFile: bad usehunk\n");
@@ -1643,6 +1689,11 @@ byte *COM_LoadHunkFile (char *path)
 byte *COM_LoadTempFile (char *path)
 {
 	return COM_LoadFile (path, 2);
+}
+
+byte *COM_LoadZoneFile (char *path)
+{
+	return COM_LoadFile (path, 3);
 }
 
 
@@ -1715,7 +1766,7 @@ bool COM_FindExtension (char *filename, char *ext)
 
 	if (el >= fl) return false;
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!filename[i]) break;
 		if (!stricmp (&filename[i], ext)) return true;
@@ -1933,7 +1984,7 @@ void Draw_Init (void);
 void HUD_Init (void);
 void SCR_Init (void);
 void R_InitResourceTextures (void);
-void D3D_InitUnderwaterTexture (void);
+void D3D_Init3DSceneTexture (void);
 void Draw_InvalidateMapshot (void);
 void Menu_SaveLoadInvalidate (void);
 void S_StopAllSounds (bool clear);
@@ -1955,7 +2006,7 @@ bool COM_StringContains (char *str1, char *str2)
 	if (!str2) return false;
 
 	// OK, perf-wise it sucks, but - hey! - it doesn't really matter for the circumstances it's used in.
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!str1[i]) break;
 		if (!strnicmp (&str1[i], str2, strlen (str2))) return true;
@@ -2010,7 +2061,7 @@ void COM_LoadAllStuff (void)
 	HUD_Init ();
 	SCR_Init ();
 	R_InitResourceTextures ();
-	D3D_InitUnderwaterTexture ();
+	D3D_Init3DSceneTexture ();
 	D3D_InitHLSL ();
 	Draw_InvalidateMapshot ();
 	Menu_SaveLoadInvalidate ();
@@ -2112,7 +2163,7 @@ void COM_LoadGame (char *gamename)
 		if (!thisgame[0]) break;
 
 		// find start pointer to next game
-		for (int i = 0; ; i++)
+		for (int i = 0;; i++)
 		{
 			if (thisgame[i] == 0)
 			{
@@ -2152,6 +2203,9 @@ void COM_LoadGame (char *gamename)
 		thisgame = nextgame;
 	}
 
+	// hack to get the hipnotic sbar in quoth
+	if (quoth) hipnotic = true;
+
 	// make directories we need
 	Sys_mkdir ("save");
 	Sys_mkdir ("screenshot");
@@ -2170,10 +2224,7 @@ void COM_LoadGame (char *gamename)
 
 	// reload the configs as they may have changed
 	Cbuf_InsertText ("togglemenu\n");
-	Cbuf_InsertText ("exec autoexec.cfg\n");
-	Cbuf_InsertText ("exec directq.cfg\n");
-	Cbuf_InsertText ("exec config.cfg\n");
-	Cbuf_InsertText ("exec default.cfg\n");
+	COM_ExecQuakeRC ();
 
 	Cbuf_Execute ();
 
@@ -2387,7 +2438,7 @@ void D3D_RegisterExternalTexture (char *texname)
 	strlwr (et->basename);
 
 	// make path seperators consistent
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (!et->basename[i]) break;
 		if (et->basename[i] == '/') et->basename[i] = '\\';
@@ -2434,7 +2485,7 @@ void D3D_ExternalTextureDirectoryRecurse (char *dirname)
 
 	_snprintf (find_filter, 260, "%s/*.*", dirname);
 
-	for (int i = 0; ; i++)
+	for (int i = 0;; i++)
 	{
 		if (find_filter[i] == 0) break;
 		if (find_filter[i] == '/') find_filter[i] = '\\';
@@ -2531,7 +2582,7 @@ void D3D_EnumExternalTextures (void)
 	{
 		d3d_externaltexture_t *et = &d3d_ExternalTextures[i];
 
-		for (int j = 0; ; j++)
+		for (int j = 0;; j++)
 		{
 			if (!et->texpath[j]) break;
 			if (et->texpath[j] == '\\') et->texpath[j] = '/';

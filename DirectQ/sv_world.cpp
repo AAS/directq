@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // world.c -- world query functions
 
@@ -79,7 +76,7 @@ void SV_InitBoxHull (void)
 	box_hull.firstclipnode = 0;
 	box_hull.lastclipnode = 5;
 
-	for (i=0 ; i<6 ; i++)
+	for (i=0; i<6; i++)
 	{
 		box_clipnodes[i].planenum = i;
 		
@@ -301,7 +298,7 @@ SV_TouchLinks
 
 ====================
 */
-void SV_TouchLinks ( edict_t *ent, areanode_t *node )
+void SV_TouchLinks (edict_t *ent, areanode_t *node)
 {
 	link_t	       *l, *next;
 	edict_t	       *touch;
@@ -823,7 +820,7 @@ loc0:;
 	i = 0;
 
 // touch linked edicts
-	for (l = node->solid_edicts.next ; l != &node->solid_edicts ; l = next)
+	for (l = node->solid_edicts.next; l != &node->solid_edicts; l = next)
 	{
 		next = l->next;
 		touch = EDICT_FROM_AREA(l);
@@ -919,7 +916,7 @@ boxmaxs[0] = boxmaxs[1] = boxmaxs[2] = 9999;
 #else
 	int		i;
 	
-	for (i=0 ; i<3 ; i++)
+	for (i=0; i<3; i++)
 	{
 		if (end[i] > start[i])
 		{
@@ -959,7 +956,7 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 
 	if (type == MOVE_MISSILE)
 	{
-		for (i=0 ; i<3 ; i++)
+		for (i=0; i<3; i++)
 		{
 			clip.mins2[i] = -15;
 			clip.maxs2[i] = 15;

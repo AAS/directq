@@ -1,0 +1,28 @@
+DIRECTQ 1.8.3 UPDATE
+--------------------
+
+- Added test and failure cases to web download code for several less likely scenarios.
+- Added more robust OS versioning.
+- Allowed a PS version that's downlevel from the VS version and enabled shader optimizations.
+- Optimized surface bbox culling by only checking on surfs where both the leaf and the node intersect the frustum.
+- Removed "hard-coding" of release version from the splash screen.
+- Removed all static linking dependencies from DirectX DLLs.
+- Added d3dx_version cvar to switch between different versions of the D3DX DLLs (default 42).
+- Resolved massive speed drain from drawing the console and strings on some platforms.
+- Tidied up interpolation somewhat and switched it to cubic interpolation.
+- Removed fixed pipeline fog (shader model 3 compatibility).
+- Added HLSL path for underwater warp and optimized by incorporating polyblend with the post-process.
+- Improved timer to only wrap if DirectQ itself is running for > ~49 days.
+- Reworked FPS counter more to my liking.
+- Optimized vertex buffers a little better.
+- Cleaned up render to texture interface a little.
+- Disabled Windows key and accessibility shortcuts while DirectQ is running.
+- Enabled better non-power-of-2 texture support.
+- Generalised Draw_PicTranslate better and made it more robust.
+- Tweaked lightmaps slightly for faster and smoother rendering.
+- Optimized vertex buffer usage for most critical object types.
+- Randomised base animation for skin and frame groups on alias models (consistency with software Quake).
+- Implemented better quake.rc handling that works with custom quake.rc files provided by those wacky modders!
+- Added cvar and command compatibility layer to prevent cvars and commands that I've removed from throwing a warning if invoked from QC.
+
+

@@ -76,6 +76,9 @@ interface from being ambiguous.
 // helps to prevent extra cvar scanning overhead from nehahra ugliness
 #define CVAR_NEHAHRA		64
 
+// compatibility cvars are registered for the purposes of soaking abuse from QC, but don't appear in the autocomplete lists
+#define CVAR_COMPAT			128
+
 class cvar_t
 {
 public:

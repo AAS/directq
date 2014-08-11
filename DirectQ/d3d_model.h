@@ -111,6 +111,7 @@ typedef struct texture_s
 
 	// chains for rendering
 	struct msurface_s *texturechain;
+	struct msurface_s *chaintail;
 
 	// registered texture used by this texture
 	d3d_registeredtexture_t *registration;
@@ -129,6 +130,8 @@ typedef struct texture_s
 #define SURF_DRAWWATER		1024
 #define SURF_DRAWSLIME		2048
 
+// set after verts have been allocated
+#define SURF_VERTCOMPLETE	65536
 
 typedef struct medge_s
 {
@@ -143,6 +146,21 @@ typedef struct
 	texture_t	*texture;
 	int			flags;
 } mtexinfo_t;
+
+typedef struct warpverts_s
+{
+	float v[3];
+	float st[2];
+} warpverts_t;
+
+
+typedef struct aliaspolyvert_s
+{
+	float xyz[3];
+	D3DCOLOR color;
+	float st[2];
+} aliaspolyvert_t;
+
 
 typedef struct brushpolyvert_s
 {
@@ -184,6 +202,7 @@ typedef struct msurface_s
 
 	int			firstedge;
 	int			numverts;
+	int			numindexes;
 
 	polyvert_t	*verts;
 
@@ -197,9 +216,10 @@ typedef struct msurface_s
 
 	// changed to ints for the new larger lightmap sizes
 	// note - even shorts are too small for the new max surface extents
-	int			light_l, light_t;	// lightmap coordinates (relative to LIGHTMAP_SIZE, not 0 to 1)
 	int			smax, tmax;			// lightmap extents (width and height) (relative to LIGHTMAP_SIZE, not 0 to 1)
-	int			light_r, light_b;	// lightmap rect right and bottom (light_s + smax, light_t + tmax)
+
+	// rectangle specifying the surface lightmap
+	RECT		LightRect;
 
 	mtexinfo_t	*texinfo;
 
@@ -218,6 +238,9 @@ typedef struct msurface_s
 	// extents of the surf in world space
 	float		mins[3];
 	float		maxs[3];
+
+	// true if the surf intersected the frustum
+	bool		intersect;
 
 	byte		styles[MAXLIGHTMAPS];
 	int			cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
@@ -240,10 +263,11 @@ typedef struct mnode_s
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
+	bool		intersect;
 
 	// node specific
 	mplane_t	*plane;
-	struct mnode_s	*children[2];	
+	struct mnode_s	*children[2];
 
 	unsigned short		firstsurface;
 	unsigned short		numsurfaces;
@@ -262,6 +286,7 @@ typedef struct mleaf_s
 	struct mnode_s	*parent;
 	int			num;
 	int			flags;
+	bool		intersect;
 
 	// leaf specific
 	byte		*compressed_vis;
@@ -304,6 +329,7 @@ typedef struct mspriteframe_s
 	int		width;
 	int		height;
 	float	up, down, left, right;
+	float	s, t;
 	struct image_s *texture;
 } mspriteframe_t;
 
@@ -393,7 +419,6 @@ typedef struct aliashdr_s
 	float		size;
 
 	bool		mfdelerp;
-	bool		nolerp;
 
 	int			nummeshframes;
 	int			numtris;
@@ -434,6 +459,7 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 
 // mh - special flags
 #define EF_PLAYER	(1 << 21)
+#define EF_NEVEROCCLUDE (1 << 22)
 
 // Quake uses 3 (count 'em!) different types of brush model and we need to distinguish between all of them
 #define MOD_BRUSH_WORLD		0
@@ -468,7 +494,6 @@ typedef struct brushheader_s
 
 	int			numsurfaces;
 	msurface_t	*surfaces;
-	msurface_t	*alphasurfaces;
 
 	int			numsurfedges;
 	int			*surfedges;

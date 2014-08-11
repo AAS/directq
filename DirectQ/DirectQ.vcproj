@@ -69,7 +69,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
+				AdditionalDependencies="dxguid.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
 				LinkIncremental="1"
 				EnableUAC="false"
@@ -159,7 +159,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
+				AdditionalDependencies="dxguid.lib comctl32.lib winmm.lib wsock32.lib odbc32.lib odbccp32.lib"
 				OutputFile="C:\Quake\DirectQ.exe"
 				LinkIncremental="1"
 				EnableUAC="false"
@@ -253,6 +253,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\compat.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\console.cpp"
 				>
 			</File>
@@ -314,6 +318,10 @@
 			</File>
 			<File
 				RelativePath=".\d3d_texture.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\d3d_vbo.cpp"
 				>
 			</File>
 			<File
@@ -414,6 +422,10 @@
 			</File>
 			<File
 				RelativePath=".\pr_edict.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\qunicode.cpp"
 				>
 			</File>
 			<File
@@ -647,6 +659,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\versions.h"
+				>
+			</File>
+			<File
 				RelativePath=".\vid.h"
 				>
 			</File>
@@ -701,6 +717,10 @@
 			</File>
 			<File
 				RelativePath=".\fxQ1Sky.fx"
+				>
+			</File>
+			<File
+				RelativePath=".\fxUnderwater.fx"
 				>
 			</File>
 		</Filter>

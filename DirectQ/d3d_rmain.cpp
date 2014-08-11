@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 // r_main.c
 
@@ -146,7 +143,7 @@ void V_CalcBlend (void);
 void D3D_BuildWorld (void);
 void D3D_AddWorldSurfacesToRender (void);
 
-void R_SetupParticles (void);
+void D3D_AddParticesToAlphaList (void);
 void R_UpdateParticles (void);
 void D3D_InitializeTurb (void);
 void D3D_DrawAlphaWaterSurfaces (void);
@@ -156,15 +153,13 @@ void R_DrawViewModel (void);
 void D3D_DrawAliasModel (entity_t *ent);
 void D3D_DrawAliasShadow (entity_t *e);
 
-void R_SetupAliasModels (void);
+void D3D_RenderAliasModels (void);
 
 void D3D_PrepareAliasModel (entity_t *e);
 
-void D3D_BeginUnderwaterWarp (void);
-void D3D_EndUnderwaterWarp (void);
+bool D3D_Begin3DScene (void);
+void D3D_End3DScene (void);
 void D3D_AutomapReset (void);
-
-void D3D_FinalizeSky (void);
 
 DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 float d3d_OverbrightModulate = 2.0f;
@@ -190,8 +185,6 @@ texture_t	*r_notexture_mip;
 
 int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
-
-void R_MarkLeaves (void);
 
 cvar_t	r_norefresh ("r_norefresh","0");
 cvar_t	r_drawentities ("r_drawentities","1");
@@ -247,10 +240,10 @@ bool R_AutomapCull (vec3_t emins, vec3_t emaxs)
 	if (emins[2] > (r_refdef.vieworg[2] + r_automap_nearclip.integer + r_automap_z)) return true;
 
 	// check against screen dimensions which have been scaled and translated to automap space
-	if (emaxs[0] < frustum[0].dist) return true;
-	if (emins[0] > frustum[1].dist) return true;
-	if (emaxs[1] < frustum[2].dist) return true;
-	if (emins[1] > frustum[3].dist) return true;
+	if (emaxs[0] < frustum[0].dist) return 1;
+	if (emins[0] > frustum[1].dist) return 1;
+	if (emaxs[1] < frustum[2].dist) return 1;
+	if (emins[1] > frustum[3].dist) return 1;
 
 	// not culled
 	automap_culls--;
@@ -289,67 +282,35 @@ void D3D_AddVisEdict (entity_t *ent)
 R_CullBox
 
 Returns true if the box is completely outside the frustum
-Only checks the sides; meaning that there is optimization scope (check behind)
 =================
 */
 bool R_CullBox (vec3_t emins, vec3_t emaxs)
 {
-	int i;
-	mplane_t *p;
-
 	// different culling for the automap
 	if (d3d_RenderDef.automap) return R_AutomapCull (emins, emaxs);
 
-	// test order is left/right/bottom/top
-	for (i = 0; i < 4; i++)
+	for (int i = 0; i < 4; i++)
+		if (BoxOnPlaneSide (emins, emaxs, frustum + i) == 2)
+			return true;
+
+	return false;
+}
+
+
+bool R_CullBox (mnode_t *node)
+{
+	// different culling for the automap
+	if (d3d_RenderDef.automap) return R_AutomapCull (node->minmaxs, node->minmaxs + 3);
+
+	// will be true if the node intersects the frustum
+	node->intersect = false;
+
+	for (int i = 0; i < 4; i++)
 	{
-		p = frustum + i;
+		int bops = BoxOnPlaneSide (node->minmaxs, node->minmaxs + 3, frustum + i);
 
-		switch (p->signbits)
-		{
-			// signbits signify which corner of the bbox is nearer the plane
-			// note - as only one point/dist test is done per bbox, there is NO advantage to using a bounding sphere
-		default:
-		case 0:
-			if (p->normal[0] * emaxs[0] + p->normal[1] * emaxs[1] + p->normal[2] * emaxs[2] < p->dist)
-				return true;
-			break;
-
-		case 1:
-			if (p->normal[0] * emins[0] + p->normal[1] * emaxs[1] + p->normal[2] * emaxs[2] < p->dist)
-				return true;
-			break;
-
-		case 2:
-			if (p->normal[0] * emaxs[0] + p->normal[1] * emins[1] + p->normal[2] * emaxs[2] < p->dist)
-				return true;
-			break;
-
-		case 3:
-			if (p->normal[0] * emins[0] + p->normal[1] * emins[1] + p->normal[2] * emaxs[2] < p->dist)
-				return true;
-			break;
-
-		case 4:
-			if (p->normal[0] * emaxs[0] + p->normal[1] * emaxs[1] + p->normal[2] * emins[2] < p->dist)
-				return true;
-			break;
-
-		case 5:
-			if (p->normal[0] * emins[0] + p->normal[1] * emaxs[1] + p->normal[2] * emins[2] < p->dist)
-				return true;
-			break;
-
-		case 6:
-			if (p->normal[0] * emaxs[0] + p->normal[1] * emins[1] + p->normal[2] * emins[2] < p->dist)
-				return true;
-			break;
-
-		case 7:
-			if (p->normal[0] * emins[0] + p->normal[1] * emins[1] + p->normal[2] * emins[2] < p->dist)
-				return true;
-			break;
-		}
+		if (bops == 2) return true;
+		if (bops == 3) node->intersect = true;
 	}
 
 	return false;
@@ -466,6 +427,12 @@ R_SetupFrame
 */
 void R_SetupFrame (void)
 {
+	// initialize r_speeds and flags
+	d3d_RenderDef.brush_polys = 0;
+	d3d_RenderDef.last_alias_polys = d3d_RenderDef.alias_polys;
+	d3d_RenderDef.alias_polys = 0;
+	d3d_RenderDef.numsss = 0;
+
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1) Cvar_Set ("r_fullbright", "0");
 
@@ -484,10 +451,10 @@ void R_SetupFrame (void)
 	if (d3d_RenderDef.viewleaf->contents != CONTENTS_EMPTY && d3d_RenderDef.viewleaf->contents != CONTENTS_SOLID)
 	{
 		extern cvar_t r_waterwarp;
-		extern bool UnderwaterValid;
+		extern bool SceneTextureValid;
 		extern cvar_t r_waterwarptime;
 
-		if (r_waterwarp.integer > 1 || (!UnderwaterValid && r_waterwarp.integer))
+		if (r_waterwarp.integer > 1 || (!SceneTextureValid && r_waterwarp.integer))
 		{
 			// derive an approx speed
 			float warpspeed = cl.time * (r_waterwarptime.value / 2.0f);
@@ -638,7 +605,7 @@ void R_SetupD3D (void)
 
 		// set a near clipping plane based on the refdef vieworg
 		// here we retain the same space as the world coords
-		D3DXMatrixOrthoOffCenterRH
+		QD3DXMatrixOrthoOffCenterRH
 		(
 			D3D_MakeD3DXMatrix (&d3d_ProjMatrix),
 			0,
@@ -676,7 +643,7 @@ void R_SetupD3D (void)
 		float xmax = 4.0f * tan ((d3d_RenderDef.fov_x * M_PI) / 360.0);
 		float ymax = 4.0f * tan ((d3d_RenderDef.fov_y * M_PI) / 360.0);
 
-		D3DXMatrixPerspectiveOffCenterRH
+		QD3DXMatrixPerspectiveOffCenterRH
 		(
 			D3D_MakeD3DXMatrix (&d3d_ProjMatrix),
 			-xmax, xmax, -ymax, ymax, 4.0f, 4096.0f
@@ -716,6 +683,8 @@ void R_SetupD3D (void)
 
 void D3D_PrepareFog (void)
 {
+	// fixed pipeline fog has been removed from sm3 so don't do it
+#if 0
 	// no fog
 	if (gl_fogenable.integer <= 0) return;
 	if (d3d_RenderDef.automap) return;
@@ -743,6 +712,8 @@ void D3D_PrepareFog (void)
 	);
 
 	D3D_SetRenderState (D3DRS_FOGCOLOR, fogcolor);
+
+	int xxx = (d3d_DeviceCaps.RasterCaps & D3DPRASTERCAPS_FOGTABLE);
 
 	// default fog is linear per-vertex
 	DWORD fvm = D3DFOG_LINEAR;
@@ -809,6 +780,73 @@ void D3D_PrepareFog (void)
 	D3D_SetRenderStatef (D3DRS_FOGDENSITY, gl_fogdensity.value);
 	D3D_SetRenderStatef (D3DRS_FOGSTART, gl_fogstart.value);
 	D3D_SetRenderStatef (D3DRS_FOGEND, gl_fogend.value);
+#endif
+}
+
+
+/*
+========================================================================================
+
+	BBB   L     OO    OO   DDD      AA   N  N  DDD     DDD   EEEE   AA  TTTTT  H  H
+	B  B  L    O  O  O  O  D  D    A  A  NN N  D  D    D  D  E     A  A   T    H  H
+	BBB   L    O  O  O  O  D  D    A  A  N NN  D  D    D  D  EEE   A  A   T    HHHH
+	B  B  L    O  O  O  O  D  D    AAAA  N  N  D  D    D  D  E     AAAA   T    H  H
+	BBB   LLLL  OO    OO   DDD     A  A  N  N  DDD     DDD   EEEE  A  A   T    H  H
+
+========================================================================================
+*/
+
+void D3D_DeathBlend (void)
+{
+	// no death blend initially
+	cl.cshifts[CSHIFT_DEATH].percent = 0;
+
+	// don't draw it if in the automap or not connected
+	if (d3d_RenderDef.automap) return;
+	if (cls.state != ca_connected) return;
+
+	// console is full screen
+	if (scr_con_current == vid.height) return;
+
+	// no death in intermission
+	if (cl.intermission) return;
+
+	// don't draw it in multiplayer as some people might like to take a good
+	// look around after they die, and god knows there's all sorts of folks in the world
+	if (cl.maxclients > 1) return;
+
+	static float deathred = 0;
+	static float deathalpha = 0;
+	static bool wasalive = true;
+
+	// see if we're still alive
+	if (cl.stats[STAT_HEALTH] > 0)
+	{
+		// we're still alive
+		wasalive = true;
+		return;
+	}
+
+	// ok, we're dead - see did we just die or have we been dead for a while?
+	if (wasalive)
+	{
+		// init the color and blend
+		deathalpha = 0;
+		deathred = 0.666;
+
+		// signal that we've been dead before
+		wasalive = false;
+	}
+
+	// set up the death shift
+	cl.cshifts[CSHIFT_DEATH].destcolor[0] = (deathred * 255.0f);
+	cl.cshifts[CSHIFT_DEATH].destcolor[1] = 0;
+	cl.cshifts[CSHIFT_DEATH].destcolor[2] = 0;
+	cl.cshifts[CSHIFT_DEATH].percent = (deathalpha * 255.0f);
+
+	// update blend
+	deathalpha += d3d_RenderDef.frametime / 3.0f;
+	deathred -= d3d_RenderDef.frametime / 5.0f;
 }
 
 
@@ -848,38 +886,11 @@ void D3D_UpdateContentsColor (void)
 		V_SetContentsColor (d3d_RenderDef.viewleaf->contents);
 	}
 
+	// add the death blend to the cshifts
+	D3D_DeathBlend ();
+
 	// now calc the blend
 	V_CalcBlend ();
-}
-
-
-/*
-================
-R_SetupBrushModels
-
-all brushmodels (including the world) need an initial setup pass to determine
-visibility, update lighting, build texture chains, and so on
-================
-*/
-void R_SetupBrushModels (void)
-{
-	// mark visible leafs
-	R_MarkLeaves ();
-
-	// add fog to the render
-	D3D_PrepareFog ();
-
-	// add visible surfaces to the render
-	D3D_BuildWorld ();
-
-	// upload any lightmaps that were modified
-	d3d_Lightmaps->UploadModified ();
-
-	// some sky modes require extra stuff to be added after the surfs so handle those now
-	D3D_FinalizeSky ();
-
-	// finish solid surfaces by adding any such to the solid buffer
-	D3D_AddWorldSurfacesToRender ();
 }
 
 
@@ -945,7 +956,7 @@ void R_ModParanoia (entity_t *ent)
 void R_SetupEntitiesOnList (void)
 {
 	// brush models include the world
-	R_SetupBrushModels ();
+	D3D_BuildWorld ();
 	R_SetupSpriteModels ();
 
 	// deferred until after the world so that we get statics on the list too
@@ -1012,34 +1023,29 @@ void R_RenderView (void)
 
 	if (r_speeds.value) time1 = Sys_DWORDTime ();
 
-	// initialize r_speeds and flags
-	d3d_RenderDef.brush_polys = 0;
-	d3d_RenderDef.last_alias_polys = d3d_RenderDef.alias_polys;
-	d3d_RenderDef.alias_polys = 0;
-	d3d_RenderDef.numsss = 0;
-
-	// begin the underwater warp
-	D3D_BeginUnderwaterWarp ();
-
 	// setup to render
 	R_SetupFrame ();
+	D3D_UpdateContentsColor ();
+
+	// begin the underwater warp
+	if (!D3D_Begin3DScene ())
+	{
+		d3d_Device->BeginScene ();
+		d3d_SceneBegun = true;
+	}
+
 	R_SetFrustum (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y);
 	R_SetupD3D ();
-	D3D_UpdateContentsColor ();
 	D3D_PrepareOverbright ();
 	D3D_AddExtraInlineModelsToListsForAutomap ();
 
 	// setup everything we're going to draw
 	R_SetupEntitiesOnList ();
-	R_SetupParticles ();
-
-	// upload all lightmaps that were modified (the alpha list might include modified lightmaps too)
-	//d3d_Lightmaps->UploadModified ();
-
-	R_SetupAliasModels ();
+	D3D_AddParticesToAlphaList ();
+	D3D_RenderAliasModels ();
 
 	// draw all items on the alpha list
-	D3D_SortAlphaList ();
+	D3D_RenderAlphaList ();
 
 	// the viewmodel comes last
 	R_DrawViewModel ();
@@ -1048,13 +1054,18 @@ void R_RenderView (void)
 	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
 
 	// finish up the underwater warp
-	D3D_EndUnderwaterWarp ();
+	D3D_End3DScene ();
 
 	// update particles
 	R_UpdateParticles ();
 
+	// fixed pipeline fog has been removed from sm3 so don't do it
+#if 0
 	// disable fog (always)
+	D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_NONE);
+	D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
 	D3D_SetRenderState (D3DRS_FOGENABLE, FALSE);
+#endif
 
 	if (r_speeds.value)
 	{

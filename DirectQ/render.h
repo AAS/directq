@@ -15,9 +15,6 @@ See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
- 
- 
 */
 
 // refresh.h -- public interface to refresh functions
@@ -32,8 +29,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 typedef struct aliascache_s
 {
 	// all the info we need to draw the model is here
-	float frontlerp;
-	float backlerp;
+	float lastlerp;
+	float currlerp;
 	float *shadedots;
 	struct image_s *teximage;
 	struct image_s *lumaimage;
@@ -68,6 +65,8 @@ typedef struct entity_s
 	struct efrag_s			*efrag;
 	int						frame;
 	float					syncbase;		// for client-side animations
+	float					skinbase;
+	float					posebase;
 	byte					*colormap;
 	int						effects;		// light, particals, etc
 	int						skinnum;		// for Alias models
@@ -79,14 +78,13 @@ typedef struct entity_s
 
 	// interpolation
 	float		frame_start_time;
-	float		frame_interval;
-	int			pose1, pose2;
+	int			lastpose, currpose;
 
 	float		translate_start_time;
-	vec3_t		origin1, origin2;
+	vec3_t		lastorigin, currorigin;
 
 	float		rotate_start_time;
-	vec3_t		angles1, angles2;
+	vec3_t		lastangles, currangles;
 
 	// allows an alpha value to be assigned to any entity
 	int			alphaval;
