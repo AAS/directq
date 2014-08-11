@@ -31,7 +31,6 @@ cvar_t r_monolight ("r_monolight", "1", CVAR_ARCHIVE);
 
 int r_numlightmaps = 0;
 
-
 typedef struct d3d_lightmap_s
 {
 	// the texture object
@@ -92,7 +91,7 @@ void D3D_ReleaseLightmaps (void)
 		if (lm->lm_Texture)
 		{
 			// unlock, release and NULL
-			lm->lm_Texture->UnlockRect (0);
+			//lm->lm_Texture->UnlockRect (0);
 			lm->data = NULL;
 			lm->lm_Texture->Release ();
 			lm->lm_Texture = NULL;
@@ -758,6 +757,8 @@ R_PushDlights
 */
 void R_PushDlights (mnode_t *headnode)
 {
+	if (!r_dynamic.integer) return;
+
 	int		i;
 	dlight_t	*l;
 

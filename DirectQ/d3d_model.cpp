@@ -863,6 +863,10 @@ void Mod_LoadFaces (lump_t *l)
 		// ensure that every surface loaded has a valid model set
 		out->model = loadmodel;
 
+		// initialindexes
+		out->numindexes = 0;
+		out->indexes = NULL;
+
 		// set the drawing flags flag
 		if (!Q_strncmp (out->texinfo->texture->name, "sky", 3))
 		{
@@ -1271,7 +1275,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	// set up a matrix for the model
 	mod->matrix = Heap_TagAlloc (TAG_BRUSHMODELS, sizeof (D3DXMATRIX));
 
-	// set to identity (this will change for brush models)
+	// set to identity (this will change for brush models but needs to be retained for the world)
 	D3DXMatrixIdentity ((D3DXMATRIX *) mod->matrix);
 
 	// load into heap
@@ -1399,7 +1403,7 @@ mtriangle_t	*triangles;
 
 // a pose is a single set of vertexes.  a frame may be
 // an animating sequence of poses
-std::vector<trivertx_t *> ThePoseverts;
+trivertx_t **ThePoseverts = NULL;
 
 int			posenum;
 
@@ -1409,12 +1413,13 @@ byte		*player_8bit_texels;
 // FIXME - store per frame rather than for the entire model???
 float aliasbboxmins[3], aliasbboxmaxs[3];
 
+
 /*
 =================
 Mod_LoadAliasFrame
 =================
 */
-void *Mod_LoadAliasFrame (void * pin, maliasframedesc_t *frame)
+void *Mod_LoadAliasFrame (void *pin, maliasframedesc_t *frame)
 {
 	trivertx_t		*pinframe;
 	int				i;
@@ -1437,7 +1442,7 @@ void *Mod_LoadAliasFrame (void * pin, maliasframedesc_t *frame)
 
 	pinframe = (trivertx_t *) (pdaliasframe + 1);
 
-	ThePoseverts.push_back (pinframe);
+	ThePoseverts[posenum] = pinframe;
 	posenum++;
 
 	pinframe += pheader->numverts;
@@ -1446,12 +1451,23 @@ void *Mod_LoadAliasFrame (void * pin, maliasframedesc_t *frame)
 }
 
 
+void *Mod_CountAliasFrame (void *pin)
+{
+	daliasframe_t *pdaliasframe = (daliasframe_t *) pin;
+	trivertx_t *pinframe = (trivertx_t *) (pdaliasframe + 1);
+
+	posenum++;
+
+	return (void *) (pinframe + pheader->numverts);
+}
+
+
 /*
 =================
 Mod_LoadAliasGroup
 =================
 */
-void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
+void *Mod_LoadAliasGroup (void *pin, maliasframedesc_t *frame)
 {
 	daliasgroup_t		*pingroup;
 	int					i, numframes;
@@ -1474,7 +1490,7 @@ void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
 		if (frame->bboxmax.v[i] > aliasbboxmaxs[i]) aliasbboxmaxs[i] = frame->bboxmax.v[i];
 	}
 
-	pin_intervals = (daliasinterval_t *)(pingroup + 1);
+	pin_intervals = (daliasinterval_t *) (pingroup + 1);
 
 	frame->interval = LittleFloat (pin_intervals->interval);
 
@@ -1484,9 +1500,29 @@ void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
 
 	for (i = 0; i < numframes; i++)
 	{
-		ThePoseverts.push_back ((trivertx_t *) ((daliasframe_t *) ptemp + 1));
+		ThePoseverts[posenum] = (trivertx_t *) ((daliasframe_t *) ptemp + 1);
 		posenum++;
 
+		ptemp = (trivertx_t *) ((daliasframe_t *) ptemp + 1) + pheader->numverts;
+	}
+
+	return ptemp;
+}
+
+
+void *Mod_CountAliasGroup (void *pin)
+{
+	daliasgroup_t *pingroup = (daliasgroup_t *) pin;
+	int numframes = LittleLong (pingroup->numframes);
+
+	daliasinterval_t *pin_intervals = (daliasinterval_t *) (pingroup + 1);
+	pin_intervals += numframes;
+
+	void *ptemp = (void *) pin_intervals;
+
+	for (int i = 0; i < numframes; i++)
+	{
+		posenum++;
 		ptemp = (trivertx_t *) ((daliasframe_t *) ptemp + 1) + pheader->numverts;
 	}
 
@@ -1796,18 +1832,32 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 		for (j = 0; j < 3; j++) triangles[i].vertindex[j] = LittleLong (pintriangles[i].vertindex[j]);
 	}
 
-	// load the frames
-	posenum = 0;
+	// count the frames
+	// we need to do this as a separate pass as group frames will mean that pheader->numframes will not
+	// always be valid here...
+	pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
+
+	for (i = 0, posenum = 0; i < numframes; i++)
+	{
+		aliasframetype_t frametype = (aliasframetype_t) LittleLong (pframetype->type);
+
+		if (frametype == ALIAS_SINGLE)
+			pframetype = (daliasframetype_t *) Mod_CountAliasFrame (pframetype + 1);
+		else pframetype = (daliasframetype_t *) Mod_CountAliasGroup (pframetype + 1);
+	}
+
+	// now that we know how many frames we need we can alloc verts for them
+	if (ThePoseverts) free (ThePoseverts);
+	ThePoseverts = (trivertx_t **) Heap_QMalloc (posenum * sizeof (trivertx_t *));
+
+	// now load the frames for real
 	pframetype = (daliasframetype_t *) &pintriangles[pheader->numtris];
 
 	// initial bbox
 	aliasbboxmins[0] = aliasbboxmins[1] = aliasbboxmins[2] = 9999999;
 	aliasbboxmaxs[0] = aliasbboxmaxs[1] = aliasbboxmaxs[2] = -9999999;
 
-	// removal of maxaliasframes limit
-	ThePoseverts.clear ();
-
-	for (i = 0; i < numframes; i++)
+	for (i = 0, posenum = 0; i < numframes; i++)
 	{
 		aliasframetype_t frametype = (aliasframetype_t) LittleLong (pframetype->type);
 
@@ -1817,7 +1867,6 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	}
 
 	pheader->numposes = posenum;
-
 	mod->type = mod_alias;
 
 	for (i = 0; i < 3; i++)
@@ -1847,9 +1896,9 @@ void Mod_LoadAliasModel (model_t *mod, void *buffer)
 	mod->ah = pheader;
 
 	// free our temp lists
-	ThePoseverts.clear ();
-	Heap_QFreeFast (stverts);
-	Heap_QFreeFast (triangles);
+	Heap_QFree (ThePoseverts);
+	Heap_QFree (stverts);
+	Heap_QFree (triangles);
 }
 
 

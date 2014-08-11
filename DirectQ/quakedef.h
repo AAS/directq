@@ -35,6 +35,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #pragma warning (disable: 4995)
 #pragma warning (disable: 4312)
 
+typedef char quakepath[260];
+
+// use to wrap any data type in a linked list
+template <class T> class qListWrapper
+{
+public:
+	~qListWrapper (void);
+	struct qListWrapper *next;
+	T data;
+};
+
 // savegame version for all savegames
 #define	SAVEGAME_VERSION	5
 

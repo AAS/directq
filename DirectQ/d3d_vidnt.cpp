@@ -33,9 +33,15 @@ D3DADAPTER_IDENTIFIER9 d3d_Adapter;
 D3DCAPS9 d3d_DeviceCaps;
 d3d_global_caps_t d3d_GlobalCaps;
 D3DPRESENT_PARAMETERS d3d_PresentParams;
+
 extern LPDIRECT3DVERTEXBUFFER9 d3d_SkySphereVerts;
 extern LPDIRECT3DINDEXBUFFER9 d3d_DPSkyIndexes;
 extern LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts;
+
+DWORD d3d_VertexBufferUsage = 0;
+
+// if true all per-frame state updates are forced
+bool d3d_ForceStateUpdates = true;
 
 // for various render-to-texture and render-to-surface stuff
 LPDIRECT3DSURFACE9 d3d_BackBuffer = NULL;
@@ -52,6 +58,11 @@ viddef_t	vid;
 
 // quake palette
 unsigned	d_8to24table[256];
+
+// sRGB transform
+float sRGBtransform[256];
+float lineartransform[256];
+float *r_activetransform = lineartransform;
 
 // window state management
 bool d3d_DeviceLost = false;
@@ -106,13 +117,14 @@ modestate_t	modestate = MS_UNINIT;
 void Splash_Destroy (void);
 
 // video cvars
-// some day we'll have cards that support this many modes and this will break...
-cvar_t		vid_mode ("vid_mode", "666", CVAR_ARCHIVE);
+// force an invalid mode on initial entry
+cvar_t		vid_mode ("vid_mode", "-666", CVAR_ARCHIVE);
 cvar_t		vid_wait ("vid_wait", "0");
 cvar_t		v_gamma ("gamma", "1", CVAR_ARCHIVE);
 cvar_t		r_gamma ("r_gamma", "1", CVAR_ARCHIVE);
 cvar_t		g_gamma ("g_gamma", "1", CVAR_ARCHIVE);
 cvar_t		b_gamma ("b_gamma", "1", CVAR_ARCHIVE);
+cvar_t		r_sRGBgamma ("r_sRGBgamma", "0", CVAR_ARCHIVE);
 cvar_t		r_64bitlightmaps ("r_64bitlightmaps", 1, CVAR_ARCHIVE);
 
 // consistency with DP and FQ
@@ -276,6 +288,21 @@ void D3D_ResetWindow (D3DDISPLAYMODE *mode)
 
 	// force a status update (i *think* this is all we need here)
 	VID_UpdateWindowStatus ();
+}
+
+
+void D3D_SetDefaultStates (void)
+{
+	// create a matrix stack for the world
+	SAFE_RELEASE (d3d_WorldMatrixStack);
+	D3DXCreateMatrixStack (0, &d3d_WorldMatrixStack);
+	d3d_WorldMatrixStack->LoadIdentity ();
+
+	// disable lighting
+	d3d_Device->SetRenderState (D3DRS_LIGHTING, FALSE);
+
+	// drop the world index buffer
+	SAFE_RELEASE (d3d_BrushModelIndexes);
 }
 
 
@@ -514,9 +541,9 @@ void D3D_DescribeMode_f (void)
 void D3D_VidRestart_f (void)
 {
 	// release anything that needs to be released
-	D3D_ReleaseStateBlocks ();
 	D3D_KillUnderwaterTexture ();
 	D3D_ShutdownHLSL ();
+	SAFE_RELEASE (d3d_BrushModelIndexes);
 
 	// ensure that present params are valid
 	D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
@@ -587,6 +614,18 @@ void D3D_EnumerateVideoModes (void)
 	{
 		// end of the list
 		if (AdapterModeDescs[m] == D3DFMT_UNKNOWN) break;
+
+		// see can we support a fullscreen format with this mode format
+		HRESULT hr = d3d_Object->CheckDeviceType (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, AdapterModeDescs[m], AdapterModeDescs[m], FALSE);
+		if (FAILED (hr)) continue;
+
+		// see can we create a standard texture on it
+		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
+		if (FAILED (hr)) continue;
+
+		// see can we create an alpha texture on it
+		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
+		if (FAILED (hr)) continue;
 
 		// get the count of modes for this format
 		int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, AdapterModeDescs[m]);
@@ -846,7 +885,6 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	LONG DesiredFlags[] =
 	{
 		// prefer hardware vertex processing
-		// to be honest, Q1 has such low polycount that it doesn't really matter...
 		D3DCREATE_HARDWARE_VERTEXPROCESSING,
 		D3DCREATE_SOFTWARE_VERTEXPROCESSING,
 		-1
@@ -896,10 +934,15 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 
 			// this is silly - if it supports mixed it will always support hardware!
 			if (DesiredFlags[i] & D3DCREATE_HARDWARE_VERTEXPROCESSING)
+			{
+				d3d_VertexBufferUsage = 0;
 				Con_Printf ("Using Hardware Vertex Processing\n\n");
-			else if (DesiredFlags[i] & D3DCREATE_MIXED_VERTEXPROCESSING)
-				Con_Printf ("Using Mixed Vertex Processing\n\n");
-			else Con_Printf ("Using Software Vertex Processing\n\n");
+			}
+			else
+			{
+				d3d_VertexBufferUsage = D3DUSAGE_SOFTWAREPROCESSING;
+				Con_Printf ("Using Software Vertex Processing\n\n");
+			}
 
 			break;
 		}
@@ -958,6 +1001,9 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 		d3d_GlobalCaps.AllowA16B16G16R16 = false;
 	}
 
+	// check sRGB support
+	d3d_GlobalCaps.supportSRGB = true;
+
 	D3D_InitHLSL ();
 	D3D_InitUnderwaterTexture ();
 
@@ -968,9 +1014,6 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 
 	// copy it to the active gamma ramp
 	memcpy (&d3d_ActiveGammaRamp, &d3d_DefaultGammaRamp, sizeof (D3DGAMMARAMP));
-
-	// recreate anything we need to recreate
-	D3D_CreateStateBlocks ();
 
 	// set default states
 	D3D_SetDefaultStates ();
@@ -1215,6 +1258,7 @@ int VID_PaletteHack (int in)
 	return BYTE_CLAMP (out);
 }
 
+
 void VID_SetPalette (unsigned char *palette)
 {
 	byte	*pal;
@@ -1237,6 +1281,28 @@ void VID_SetPalette (unsigned char *palette)
 		// BGRA format for D3D
 		v = (255 << 24) + (b << 0) + (g << 8) + (r << 16);
 		*table++ = v;
+	}
+
+	for (i = 0; i < 256; i++)
+	{
+		float cLinear = (float) i / 255.0f;
+		float csRGB = 0.0f;
+
+		// linear to sRGB transformation from http://en.wikipedia.org/wiki/SRGB
+		if (cLinear <= 0.04045)
+		{
+			csRGB = cLinear / 12.92f;
+		}
+		else
+		{
+			float a = 0.055f;
+
+			csRGB = pow (((cLinear + a) / (1.0f + a)), 2.4f);
+		}
+
+		// store out our transfroms
+		sRGBtransform[i] = csRGB;
+		lineartransform[i] = cLinear;
 	}
 
 	// set correct alpha colour to avoid pink fringes
@@ -1274,6 +1340,9 @@ void D3D_VidInit (byte *palette)
 	VID_SetPalette (palette);
 
 	vid_canalttab = true;
+
+	// dump the colormap out to file so that we can have a look-see at what's in it
+	// SCR_WriteDataToTGA ("colormap.tga", vid.colormap, 256, 64, 8, 24);
 
 	if (!(d3d_Object = Direct3DCreate9 (D3D_SDK_VERSION)))
 	{
@@ -1391,13 +1460,13 @@ void D3D_ShutdownDirect3D (void)
 	D3D_SetGamma (&d3d_DefaultGammaRamp);
 
 	// release anything that needs to be released
-	D3D_ReleaseStateBlocks ();
 	D3D_ReleaseTextures ();
 	D3D_ShutdownHLSL ();
 
 	// release everything else
 	SAFE_RELEASE (d3d_WorldMatrixStack);
 	SAFE_RELEASE (d3d_BrushModelVerts);
+	SAFE_RELEASE (d3d_BrushModelIndexes);
 	SAFE_RELEASE (d3d_SkySphereVerts);
 	SAFE_RELEASE (d3d_DPSkyIndexes);
 	SAFE_RELEASE (d3d_DPSkyVerts);
@@ -1437,12 +1506,14 @@ bool D3D_CheckRecoverDevice (void)
 		{
 		case D3D_OK:
 			// recreate anything that needs to be recreated
-			D3D_CreateStateBlocks ();
 			D3D_InitHLSL ();
 			D3D_InitUnderwaterTexture ();
 
 			// set default states
 			D3D_SetDefaultStates ();
+
+			// force an update of per-frame checked states
+			d3d_ForceStateUpdates = true;
 
 			// force a recalc of the refdef
 			vid.recalc_refdef = true;
@@ -1458,7 +1529,6 @@ bool D3D_CheckRecoverDevice (void)
 		case D3DERR_DEVICENOTRESET:
 			// the device is ready to be reset
 			// release anything that needs to be released
-			D3D_ReleaseStateBlocks ();
 			D3D_KillUnderwaterTexture ();
 			D3D_ShutdownHLSL ();
 
@@ -1487,33 +1557,26 @@ bool D3D_CheckRecoverDevice (void)
 }
 
 
-void D3D_CheckAF (bool force = false)
+void D3D_CheckTextureFiltering (void)
 {
 	static int old_aniso = -1;
 	int real_aniso;
 
-	// no anisotropic filtering available
-	if (d3d_DeviceCaps.MaxAnisotropy < 2) return;
+	// check the cvar first for an early-out
+	if (r_anisotropicfilter.integer == old_aniso && !d3d_ForceStateUpdates) return;
 
-	// these settings can be lost on a device reset so we need to give the ability to force a change
-	if (!force)
-	{
-		// check the cvar first for an early-out
-		if (r_anisotropicfilter.integer == old_aniso) return;
+	// get the real value from the cvar - users may enter any old crap manually!!!
+	for (real_aniso = 1; real_aniso < r_anisotropicfilter.value; real_aniso <<= 1);
 
-		// get the real value from the cvar - users may enter any old crap manually!!!
-		for (real_aniso = 1; real_aniso < r_anisotropicfilter.value; real_aniso <<= 1);
+	// clamp it
+	if (real_aniso < 1) real_aniso = 1;
+	if (real_aniso > d3d_DeviceCaps.MaxAnisotropy) real_aniso = d3d_DeviceCaps.MaxAnisotropy;
 
-		// clamp it
-		if (real_aniso < 1) real_aniso = 1;
-		if (real_aniso > d3d_DeviceCaps.MaxAnisotropy) real_aniso = d3d_DeviceCaps.MaxAnisotropy;
+	// store it back
+	Cvar_Set (&r_anisotropicfilter, real_aniso);
 
-		// store it back
-		Cvar_Set (&r_anisotropicfilter, real_aniso);
-
-		// no change
-		if (real_aniso == old_aniso) return;
-	}
+	// no change
+	if (real_aniso == old_aniso && !d3d_ForceStateUpdates) return;
 
 	// store out
 	old_aniso = real_aniso;
@@ -1633,12 +1696,31 @@ void D3D_CheckGamma (void)
 	static int oldrgamma = 0;
 	static int oldggamma = 0;
 	static int oldbgamma = 0;
+	static int old_sRGBgamma = -1;
+	extern bool crosshair_recache;
+
+	if (r_sRGBgamma.integer != old_sRGBgamma || d3d_ForceStateUpdates)
+	{
+		for (int i = 0; i < d3d_DeviceCaps.MaxTextureBlendStages; i++)
+			d3d_Device->SetSamplerState (i, D3DSAMP_SRGBTEXTURE, (!!r_sRGBgamma.integer) ? TRUE : FALSE);
+
+		d3d_Device->SetRenderState (D3DRS_SRGBWRITEENABLE, (!!r_sRGBgamma.integer) ? TRUE : FALSE);
+
+		old_sRGBgamma = r_sRGBgamma.integer;
+
+		// set the colour transform lookup to use
+		r_activetransform = (!!r_sRGBgamma.integer) ? sRGBtransform : lineartransform;
+
+		// if the colour space changes we also need to rebuild the crosshair texture
+		crosshair_recache = true;
+	}
 
 	// didn't change - call me paranoid about floats!!!
 	if ((int) (v_gamma.value * 100) == oldvgamma &&
 		(int) (r_gamma.value * 100) == oldrgamma &&
 		(int) (g_gamma.value * 100) == oldggamma &&
-		(int) (b_gamma.value * 100) == oldbgamma)
+		(int) (b_gamma.value * 100) == oldbgamma &&
+		!d3d_ForceStateUpdates)
 	{
 		// didn't change
 		return;
@@ -1677,13 +1759,13 @@ void D3D_CheckShaderPrecision (void)
 	static int old_warpprecision = 0;
 	bool reinithlsl = false;
 
-	if (r_defaultshaderprecision.integer != old_defaultprecision)
+	if (r_defaultshaderprecision.integer != old_defaultprecision || d3d_ForceStateUpdates)
 	{
 		reinithlsl = true;
 		old_defaultprecision = r_defaultshaderprecision.integer;
 	}
 
-	if (r_warpshaderprecision.integer != old_warpprecision)
+	if (r_warpshaderprecision.integer != old_warpprecision || d3d_ForceStateUpdates)
 	{
 		reinithlsl = true;
 		old_warpprecision = r_warpshaderprecision.integer;
@@ -1706,11 +1788,44 @@ void D3D_Check64BitLightmaps (void)
 		if (cls.state == ca_connected)
 		{
 			if (d3d_GlobalCaps.AllowA16B16G16R16)
+			{
 				Con_Printf ("You must reload this map for this setting to take effect\n");
+
+				if (r_sRGBgamma.integer) Con_Printf ("sRGB gamma with 64-bit lightmaps is not supported\n");
+			}
 			else Con_Printf ("64-Bit Lightmaps are not supported on this video driver\n");
 		}
 
 		old_r_64bitlightmaps = r_64bitlightmaps.integer;
+	}
+}
+
+
+cvar_t r_useindexbuffer ("r_useindexbuffer", "0", CVAR_ARCHIVE);
+void D3D_CreateWorldIndexBuffer (void);
+
+void D3D_CheckWorldIndexBuffer (void)
+{
+	static int old_useindexbuffer = -666;
+
+	// because we created the world index buffer in the default memory pool, and we allowed the
+	// ability to toggle it on or off, we need to check it every frame
+	if ((r_useindexbuffer.integer != old_useindexbuffer) || d3d_ForceStateUpdates)
+	{
+		if (r_useindexbuffer.integer)
+		{
+			D3D_CreateWorldIndexBuffer ();
+			if (old_useindexbuffer != -666) Con_Printf ("Using Index buffer\n");
+		}
+		else
+		{
+			// not using the index buffer
+			SAFE_RELEASE (d3d_BrushModelIndexes);
+			if (old_useindexbuffer != -666) Con_Printf ("Index buffer disabled\n");
+		}
+
+		// store back
+		old_useindexbuffer = r_useindexbuffer.integer;
 	}
 }
 
@@ -1723,9 +1838,13 @@ void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 	// check for any changes to any display properties
 	D3D_CheckGamma ();
 	D3D_CheckVidMode ();
-	D3D_CheckAF ();
+	D3D_CheckTextureFiltering ();
 	D3D_CheckShaderPrecision ();
 	D3D_Check64BitLightmaps ();
+	D3D_CheckWorldIndexBuffer ();
+
+	// flush any state update forcing
+	d3d_ForceStateUpdates = false;
 
 	*x = *y = 0;
 	*width = window_rect.right - window_rect.left;
@@ -1829,7 +1948,7 @@ LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	case WM_SYSKEYDOWN:
 		Key_Event (MapKey (lParam), true);
 		break;
-		
+
 	case WM_KEYUP:
 	case WM_SYSKEYUP:
 		Key_Event (MapKey (lParam), false);
@@ -1949,8 +2068,31 @@ void VID_ApplyModeChange (void)
 }
 
 
+#define TAG_64BIT	4
+#define TAG_SRGB	8
+
 int Menu_VideoCustomDraw (int y)
 {
+	if (d3d_GlobalCaps.AllowA16B16G16R16)
+	{
+		if (r_64bitlightmaps.integer)
+		{
+			menu_Video.DisableOptions (TAG_SRGB);
+			Cvar_Set (&r_sRGBgamma, "0");
+		}
+		else menu_Video.EnableOptions (TAG_SRGB);
+	}
+
+	if (d3d_GlobalCaps.supportSRGB)
+	{
+		if (r_sRGBgamma.integer)
+		{
+			menu_Video.DisableOptions (TAG_64BIT);
+			Cvar_Set (&r_64bitlightmaps, "0");
+		}
+		else menu_Video.EnableOptions (TAG_64BIT);
+	}
+
 	// shader precision
 	if (r_defaultshaderprecision.integer < 0)
 		Cvar_Set (&r_defaultshaderprecision, (float) 0);
@@ -2128,7 +2270,7 @@ void Menu_VideoBuild (void)
 	}
 
 	if (d3d_GlobalCaps.AllowA16B16G16R16)
-		menu_Video.AddOption (new CQMenuCvarToggle ("64-Bit Lightmaps", &r_64bitlightmaps, 0, 1));
+		menu_Video.AddOption (TAG_64BIT, new CQMenuCvarToggle ("64-Bit Lightmaps", &r_64bitlightmaps, 0, 1));
 
 	menu_Video.AddOption (new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
 	menu_Video.AddOption (new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
@@ -2136,10 +2278,11 @@ void Menu_VideoBuild (void)
 	menu_Video.AddOption (new CQMenuSpinControl ("Default Surfaces", &r_defaultshaderprecision.integer, shaderprecisions));
 	menu_Video.AddOption (new CQMenuSpinControl ("Liquid Surfaces", &r_warpshaderprecision.integer, shaderprecisions));
 	menu_Video.AddOption (new CQMenuTitle ("Brightness Controls"));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Master", &v_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Red", &r_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Green", &g_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (new CQMenuCvarSlider ("Blue", &b_gamma, 1.75, 0.25, 0.05));
+	if (d3d_GlobalCaps.supportSRGB) menu_Video.AddOption (TAG_SRGB, new CQMenuCvarToggle ("sRGB Color Space", &r_sRGBgamma, 0, 1));
+	menu_Video.AddOption (new CQMenuCvarSlider ("Master Gamma", &v_gamma, 1.75, 0.25, 0.05));
+	menu_Video.AddOption (new CQMenuCvarSlider ("Red Gamma", &r_gamma, 1.75, 0.25, 0.05));
+	menu_Video.AddOption (new CQMenuCvarSlider ("Green Gamma", &g_gamma, 1.75, 0.25, 0.05));
+	menu_Video.AddOption (new CQMenuCvarSlider ("Blue Gamma", &b_gamma, 1.75, 0.25, 0.05));
 }
 
 

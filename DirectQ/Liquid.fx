@@ -1,4 +1,5 @@
 float4x4 WorldProjMatrix;
+float4x4 ModelTransform;
 
 texture baseTexture;
 
@@ -34,8 +35,8 @@ float4 LiquidPS (VS_OUTPUT Input) : COLOR0
 
 	stwarp.x += sin (Input.Warpcoord.y + warptime);
 	stwarp.y += sin (Input.Warpcoord.x + warptime);
-
 	stwarp.xy = mul (stwarp.xy, 0.0625);
+
 	color.rgb = tex2D (baseMap, stwarp);
 	color.a = Alpha;
 
@@ -47,7 +48,7 @@ VS_OUTPUT LiquidVS (VS_INPUT Input)
 {
 	VS_OUTPUT Output;
 
-	Output.Position = mul (Input.Position, WorldProjMatrix);
+	Output.Position = mul (mul (Input.Position, ModelTransform), WorldProjMatrix);
 	Output.Texcoord = Input.Texcoord;
 	Output.Warpcoord = Input.Warpcoord;
 

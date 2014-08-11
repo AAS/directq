@@ -39,8 +39,10 @@ float	r_avertexnormals[NUMVERTEXNORMALS][3] =
 typedef struct aliasverts_s
 {
 	float x, y, z;
+	float x1, y1, z1;
 	DWORD color;
 	float s, t;
+	float fl, bl;
 } aliasverts_t;
 
 
@@ -63,7 +65,8 @@ ALIAS MODEL DISPLAY LIST GENERATION
 =================================================================
 */
 
-extern std::vector<trivertx_t *> ThePoseverts;
+
+extern trivertx_t **ThePoseverts;
 
 int	*used = NULL;
 
@@ -601,30 +604,36 @@ void D3D_DrawAliasFrame (aliashdr_t *hdr, int pose1, int pose2, float backlerp, 
 			// set light color
 			aliasverts[numverts].color = D3DCOLOR_ARGB
 			(
-				BYTE_CLAMP (alphaval),
-				BYTE_CLAMP (l * shadelight[0]),
-				BYTE_CLAMP (l * shadelight[1]),
-				BYTE_CLAMP (l * shadelight[2])
+				D3D_TransformColourSpaceByte (BYTE_CLAMP (alphaval)),
+				D3D_TransformColourSpaceByte (BYTE_CLAMP (l * shadelight[0])),
+				D3D_TransformColourSpaceByte (BYTE_CLAMP (l * shadelight[1])),
+				D3D_TransformColourSpaceByte (BYTE_CLAMP (l * shadelight[2]))
 			);
 
 			// fill in vertexes
+			// fill in vertexes
+			// note - we'll end up storing most of this in a vertex buffer and just passing user data to the shader!
+			aliasverts[numverts].x = verts1->v[0];
+			aliasverts[numverts].y = verts1->v[1];
+			aliasverts[numverts].z = verts1->v[2];
+			aliasverts[numverts].x1 = verts2->v[0];
+			aliasverts[numverts].y1 = verts2->v[1];
+			aliasverts[numverts].z1 = verts2->v[2];
+
 			if (verts1->lerpvert)
 			{
-				aliasverts[numverts].x = verts1->v[0] * frontlerp + verts2->v[0] * backlerp;
-				aliasverts[numverts].y = verts1->v[1] * frontlerp + verts2->v[1] * backlerp;
-				aliasverts[numverts].z = verts1->v[2] * frontlerp + verts2->v[2] * backlerp;
+				aliasverts[numverts].fl = frontlerp;
+				aliasverts[numverts].bl = backlerp;
 			}
 			else if (backlerp > frontlerp)
 			{
-				aliasverts[numverts].x = verts2->v[0];
-				aliasverts[numverts].y = verts2->v[1];
-				aliasverts[numverts].z = verts2->v[2];
+				aliasverts[numverts].fl = 0;
+				aliasverts[numverts].bl = 1;
 			}
 			else
 			{
-				aliasverts[numverts].x = verts1->v[0];
-				aliasverts[numverts].y = verts1->v[1];
-				aliasverts[numverts].z = verts1->v[2];
+				aliasverts[numverts].fl = 1;
+				aliasverts[numverts].bl = 0;
 			}
 
 			// increment pointers and counters
@@ -793,7 +802,13 @@ void R_DrawAliasModel (entity_t *e)
 		if (currententity->entnum >= 1 && currententity->entnum <= cl.maxclients)
 			tex = playertextures[currententity->entnum - 1];
 
-	if (currententity->alphaval < 255) d3d_EnableAlphaBlend->Apply ();
+	if (currententity->alphaval < 255)
+	{
+		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	}
 
 	// alias models should be affected by r_lightmap 1 too...
 	if (r_lightmap.integer)
@@ -812,7 +827,7 @@ void R_DrawAliasModel (entity_t *e)
 
 	D3D_SetupAliasFrame (currententity, hdr);
 
-	if (currententity->alphaval < 255) d3d_DisableAlphaBlend->Apply ();
+	if (currententity->alphaval < 255) d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
 
@@ -845,6 +860,7 @@ void D3D_DrawAliasModels (void)
 	d3d_Device->SetVertexDeclaration (d3d_AliasVertexDeclaration);
 
 	d3d_AliasFX.BeginRender ();
+	d3d_AliasFX.SetScale (r_sRGBgamma.integer ? 2.0f : 1.0f);
 	d3d_AliasFX.SwitchToPass (0);
 
 	if (gl_smoothmodels.value) d3d_Device->SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);

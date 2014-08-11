@@ -116,7 +116,7 @@ int Cmd_Match (char *partial, int matchcycle, bool conout)
 
 	for (cl = complist, nummatches = 0; cl->name[0] && cl->type[0]; cl++)
 	{
-		if (!strncmp (partial, cl->name, len))
+		if (!strnicmp (partial, cl->name, len))
 		{
 			if (conout) Con_Printf ("%s %s\n", cl->type, cl->name);
 
@@ -259,7 +259,7 @@ void Cbuf_InsertText (char *text)
 	if (templen)
 	{
 		SZ_Write (&cmd_text, temp, templen);
-		Heap_QFreeFull (temp);
+		Heap_QFree (temp);
 	}
 }
 
@@ -395,8 +395,8 @@ void Cmd_StuffCmds_f (void)
 
 	if (build[0]) Cbuf_InsertText (build);
 
-	Heap_QFreeFull (text);
-	Heap_QFreeFull (build);
+	Heap_QFree (text);
+	Heap_QFree (build);
 }
 
 
@@ -499,7 +499,7 @@ void Cmd_Alias_f (void)
 	{
 		if (!strcmp(s, a->name))
 		{
-			Heap_QFreeFast (a->value);
+			Heap_QFree (a->value);
 			break;
 		}
 	}

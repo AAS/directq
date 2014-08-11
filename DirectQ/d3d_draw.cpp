@@ -80,11 +80,13 @@ typedef struct cachepic_s
 	char		name[MAX_QPATH];
 	qpic_t		pic;
 	byte		padding[32];	// for appended glpic
+
+	struct cachepic_s *next;
 } cachepic_t;
 
 #define	MAX_CACHED_PICS		256
 
-std::vector<cachepic_t *> menu_cachepics;
+cachepic_t *menu_cachepics = NULL;
 
 byte		menuplyr_pixels[4096];
 
@@ -139,19 +141,27 @@ Draw_CachePic
 qpic_t *Draw_CachePic (char *path)
 {
 	cachepic_t	*pic;
+	cachepic_t	*freepic;
 	int			i;
 	qpic_t		*dat;
 	glpic_t		*gl;
 
-	int menu_numcachepics = menu_cachepics.size ();
+	for (pic = menu_cachepics, freepic = NULL; pic; pic = pic->next)
+	{
+		if (!pic->name[0]) freepic = pic;
+		if (!stricmp (path, pic->name)) return &pic->pic;
+	}
 
-	for (i = 0; i < menu_numcachepics; i++)
-		if (!strcmp (path, menu_cachepics[i]->name))
-			return &menu_cachepics[i]->pic;
-
-	// add a new pic
-	pic = (cachepic_t *) malloc (sizeof (cachepic_t));
-	menu_cachepics.push_back (pic);
+	// if a free slot is available we use that, otherwise we alloc a new one
+	if (freepic)
+		pic = freepic;
+	else
+	{
+		// add a new pic
+		pic = (cachepic_t *) malloc (sizeof (cachepic_t));
+		pic->next = menu_cachepics;
+		menu_cachepics = pic;
+	}
 
 	strcpy (pic->name, path);
 
@@ -292,7 +302,7 @@ void Draw_SpaceOutCharSet (byte *data, int w, int h)
 	char_texture = D3D_LoadTexture ("charset", 256, 256, newchars, false, true);
 
 	// free the working memory we used
-	Heap_QFreeFull (newchars);
+	Heap_QFree (newchars);
 }
 
 
@@ -315,19 +325,12 @@ void Draw_Init (void)
 	byte	*ncdata;
 
 	// free cache pics
-	int menu_numcachepics = menu_cachepics.size ();
-
-	if (menu_numcachepics)
-	{
-		for (int i = 0; i < menu_numcachepics; i++)
-			free (menu_cachepics[i]);
-
-		menu_cachepics.clear ();
-	}
+	for (cachepic_t *pic = menu_cachepics; pic; pic = pic->next)
+		pic->name[0] = 0;
 
 	// setup failsafe pic
 	// free previous allocation (on game change)
-	if (failsafedata) Heap_QFreeFast (failsafedata);
+	if (failsafedata) Heap_QFree (failsafedata);
 
 	// this is a qpic_t that's used in the event of any qpic_t failing to load!!!
 	// we alloc enough memory for the glpic_t that draw_failsafe->data is casted to.
@@ -382,6 +385,7 @@ void Draw_Init (void)
 	conback->height = vid.height;
 
 	// get the other pics we need
+	// draw_disc is also used on the sbar so we need to retain it
 	draw_disc = Draw_PicFromWad ("disc");
 	draw_backtile = Draw_PicFromWad ("backtile");
 }
@@ -570,7 +574,7 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	float AlphaColour[] = {1, 1, 1, alpha};
+	float AlphaColour[] = {1, 1, 1, D3D_TransformColourSpace (alpha)};
 
 	d3d_Flat2DFX.SwitchToPass (2);
 	d3d_Flat2DFX.SetColor4f (AlphaColour);
@@ -615,6 +619,8 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 
 void D3D_TranslateAlphaTexture (int r, int g, int b, LPDIRECT3DTEXTURE9 tex);
 
+bool crosshair_recache = false;
+
 void Draw_Crosshair (int x, int y, int size)
 {
 	// we don't know about these cvars
@@ -626,7 +632,8 @@ void Draw_Crosshair (int x, int y, int size)
 
 	static int savedcolor = 666;
 
-	if (scr_crosshaircolor.integer != savedcolor)
+	// if the colour space changes we also need to rebuild the crosshair texture
+	if (scr_crosshaircolor.integer != savedcolor || crosshair_recache)
 	{
 		// bound colour
 		if (scr_crosshaircolor.integer < 0) scr_crosshaircolor.integer = 0;
@@ -647,10 +654,18 @@ void Draw_Crosshair (int x, int y, int size)
 
 		// translate
 		Con_DPrintf ("Translating crosshair to %i [%i] [%i] [%i]\n", cindex, ((byte *) &d_8to24table[cindex])[2], ((byte *) &d_8to24table[cindex])[1], ((byte *) &d_8to24table[cindex])[0]);
-		D3D_TranslateAlphaTexture (((byte *) &d_8to24table[cindex])[2], ((byte *) &d_8to24table[cindex])[1], ((byte *) &d_8to24table[cindex])[0], crosshairtexture);
+
+		D3D_TranslateAlphaTexture
+		(
+			((byte *) &d_8to24table[cindex])[2],
+			((byte *) &d_8to24table[cindex])[1],
+			((byte *) &d_8to24table[cindex])[0],
+			crosshairtexture
+		);
 
 		// store back
 		savedcolor = scr_crosshaircolor.integer;
+		crosshair_recache = false;
 	}
 
 	// 1 and 2 are the regular '+' symbols
@@ -709,9 +724,6 @@ void Draw_TextBox (int x, int y, int width, int height)
 	qpic_t *box_bm = Draw_CachePic ("gfx/box_bm.lmp");
 	qpic_t *box_mm2 = Draw_CachePic ("gfx/box_mm2.lmp");
 
-	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-
 	// corners
 	Draw_Pic (x, y, Draw_CachePic ("gfx/box_tl.lmp"));
 	Draw_Pic (x + width + 8, y, Draw_CachePic ("gfx/box_tr.lmp"));
@@ -753,9 +765,6 @@ void Draw_TextBox (int x, int y, int width, int height)
 	}
 
 	Draw_Pic (x + width - 8, y + height, box_mm2);
-
-	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
-	d3d_Device->SetSamplerState (0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
 }
 
 
@@ -941,7 +950,13 @@ void Draw_Fill (int x, int y, int w, int h, int c, int alpha)
 {
 	byte *bgra = (byte *) &d_8to24table[c];
 
-	float FillColour[4] = {bgra[2] / 255.0f, bgra[1] / 255.0f, bgra[0] / 255.0f, alpha / 255.0f};
+	float FillColour[4] =
+	{
+		D3D_TransformColourSpace (bgra[2] / 255.0f), 
+		D3D_TransformColourSpace (bgra[1] / 255.0f), 
+		D3D_TransformColourSpace (bgra[0] / 255.0f), 
+		D3D_TransformColourSpace (alpha / 255.0f)
+	};
 
 	d3d_Flat2DFX.SwitchToPass (1);
 	d3d_Flat2DFX.SetColor4f (FillColour);
@@ -969,7 +984,7 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (void)
 {
-	float FadeColour[4] = {0, 0, 0, 0.8};
+	float FadeColour[4] = {0, 0, 0, r_sRGBgamma.integer ? 0.9f : 0.8f};
 
 	d3d_Flat2DFX.SwitchToPass (1);
 	d3d_Flat2DFX.SetColor4f (FadeColour);
@@ -990,52 +1005,6 @@ void Draw_FadeScreen (void)
 //=============================================================================
 
 /*
-================
-Draw_BeginDisc
-
-Draws the little blue disc in the corner of the screen.
-Call before beginning any disc IO.
-================
-*/
-cvar_t r_showdisc ("r_showdisc", 0.0f);
-
-void Draw_BeginDisc (void)
-{
-	// Spirit's right - this can limit your loading speed to 60 files per second, and you do not want that
-	if (!r_showdisc.integer) return;
-
-	extern bool scr_initialized;
-
-	// these prevent it from crashing if the disc is called at certain times during the game
-	if (!d3d_Device) return;
-	if (!draw_disc) return;
-	if (!scr_initialized) return;
-	if (!((glpic_t *) draw_disc->data)->tex) return;
-
-	// direct3d doesn't let us directly access the front buffer so instead
-	// we draw it in the current render and then finish that up to get it onscreen
-//	Draw_Pic (vid.width - 24, 0, draw_disc);
-//	d3d_Flat2DFX->EndPass ();
-//	d3d_Flat2DFX->End ();
-//	d3d_Device->EndScene ();
-//	d3d_Device->Present (NULL, NULL, NULL, NULL);
-}
-
-
-/*
-================
-Draw_EndDisc
-
-Erases the disc icon.
-Call after completing any disc IO
-================
-*/
-void Draw_EndDisc (void)
-{
-}
-
-
-/*
 ============
 Draw_PolyBlend
 ============
@@ -1045,7 +1014,13 @@ void Draw_PolyBlend (void)
 	if (!gl_polyblend.value) return;
 	if (!v_blend[3]) return;
 
-	float BlendColor[4] = {v_blend[0] / 255.0f, v_blend[1] / 255.0f, v_blend[2] / 255.0f, v_blend[3] / 255.0f};
+	float BlendColor[4] =
+	{
+		D3D_TransformColourSpace (v_blend[0] / 255.0f),
+		D3D_TransformColourSpace (v_blend[1] / 255.0f),
+		D3D_TransformColourSpace (v_blend[2] / 255.0f),
+		D3D_TransformColourSpace (v_blend[3] / 255.0f)
+	};
 
 	d3d_Flat2DFX.SwitchToPass (1);
 	d3d_Flat2DFX.SetColor4f (BlendColor);
@@ -1072,8 +1047,8 @@ void D3D_Set2DShade (float shadecolor)
 	}
 	else
 	{
-		// don't go below 0
-		if (shadecolor <= 0.0f) shadecolor = 0.0f;
+		// transform
+		shadecolor = D3D_TransformColourSpace (shadecolor);
 
 		// set color
 		float ShadeColor[4] = {shadecolor, shadecolor, shadecolor, shadecolor};
@@ -1126,7 +1101,10 @@ void D3D_Set2D (void)
 	d3d_Device->SetTransform (D3DTS_PROJECTION, &d3d_OrthoMatrix);
 
 	// enable alpha blending
-	d3d_EnableAlphaBlend->Apply ();
+	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
 	// note - texture clamping is done per element rather than globally as the Draw_TileClear requires wrapping
 	// set up our shader

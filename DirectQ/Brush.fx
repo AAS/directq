@@ -1,4 +1,5 @@
 float4x4 WorldProjMatrix;
+float4x4 ModelTransform;
 float LightScale;
 
 texture baseTexture;
@@ -73,7 +74,7 @@ VS_OUTPUT VSBrush (VS_INPUT Input)
 {
 	VS_OUTPUT Output;
 
-	Output.Position = mul (Input.Position, WorldProjMatrix);
+	Output.Position = mul (mul (Input.Position, ModelTransform), WorldProjMatrix);
 	Output.Texcoord0 = Input.Texcoord0;
 	Output.Texcoord1 = Input.Texcoord1;
 

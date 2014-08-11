@@ -84,6 +84,7 @@ typedef struct texture_s
 	int			visframe;
 
 	struct msurface_s	*texturechain;
+	struct msurface_s	*chaintail;
 
 	int			anim_total;				// total tenths in sequence ( 0 = no)
 	int			anim_min, anim_max;		// time for this frame min <=time< max
@@ -152,6 +153,10 @@ typedef struct msurface_s
 
 	// offset to first vert in the vertex buffer
 	int			vboffset;
+
+	// index buffer stuff
+	int			numindexes;
+	int			*indexes;
 
 	// the model to which this surf belongs
 	struct model_s *model;

@@ -351,7 +351,7 @@ void Menu_SaveLoadScanSaves (void)
 
 	if (SaveInfoArray)
 	{
-		Heap_QFreeFast (SaveInfoArray);
+		Heap_QFree (SaveInfoArray);
 		SaveInfoArray = NULL;
 		ActiveSaveInfoArray = NULL;
 	}

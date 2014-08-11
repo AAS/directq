@@ -23,6 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <vector>
 #include <algorithm>
 
+template <class T> qListWrapper<T>::~qListWrapper (void)
+{
+	// cascade destructors
+	if (this->next) delete this->next;
+}
+
 #define NUM_SAFE_ARGVS  7
 
 static char     *largv[MAX_NUM_ARGVS + NUM_SAFE_ARGVS + 1];
@@ -1643,10 +1649,8 @@ static byte *COM_LoadFile (char *path, int usehunk)
 
 	((byte *) buf)[len] = 0;
 
-	Draw_BeginDisc ();
 	Sys_FileRead (h, buf, len);
 	COM_CloseFile (h);
-	Draw_EndDisc ();
 
 	return buf;
 }

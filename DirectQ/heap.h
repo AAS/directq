@@ -20,11 +20,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 
-// global heap allocation (let's avoid malloc like the plague as it's behaviour differs between debug and release versions)
-#define Heap_QMalloc(size) HeapAlloc (QGlobalHeap, HEAP_ZERO_MEMORY, (size))
-#define Heap_QFreeFull(memptr) {HeapFree (QGlobalHeap, 0, (memptr)); HeapCompact (QGlobalHeap, 0);}
-#define Heap_QFreeFast(memptr) HeapFree (QGlobalHeap, 0, (memptr))
-
+// global heap allocation
+#define Heap_QFree(memptr) {free ((memptr)); memptr = NULL;}
+void *Heap_QMalloc (int size);
 void *Heap_TagAlloc (int tag, int size);
 void Heap_TagFree (int tag);
 void Heap_Free101Plus (void);

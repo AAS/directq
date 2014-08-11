@@ -113,6 +113,7 @@ int			clearnotify;
 
 vrect_t		scr_vrect;
 
+bool	scr_firsttime = true;
 bool	scr_disabled_for_loading;
 bool	scr_drawloading;
 bool	scr_drawmapshot;
@@ -124,6 +125,27 @@ bool	block_drawing;
 
 void SCR_ScreenShot_f (void);
 void HUD_DrawHUD (void);
+
+
+float D3D_TransformColourSpace (float in)
+{
+	if (in <= 0.0f)
+		return 0.0f;
+	else if (in >= 1.0f)
+		return 1.0f;
+	else return r_activetransform[(int) (in * 255.0f)];
+}
+
+
+byte D3D_TransformColourSpaceByte (byte in)
+{
+	if (in <= 0)
+		return 0;
+	else if (in >= 255)
+		return 255;
+	else return (byte) (r_activetransform[in] * 255.0f);
+}
+
 
 /*
 ===============================================================================
@@ -642,6 +664,60 @@ void SCR_DrawConsole (void)
 */ 
 
 
+void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int srcbpp, int dstbpp)
+{
+	if (!(srcbpp == 8 || srcbpp == 32))
+	{
+		Con_Printf ("SCR_WriteDataToTGA: unknown source bpp (%i) for file %s\n", srcbpp, filename);
+		return;
+	}
+
+	if (!(dstbpp == 24 || dstbpp == 32))
+	{
+		Con_Printf ("SCR_WriteDataToTGA: unknown dest bpp (%i) for file %s\n", dstbpp, filename);
+		return;
+	}
+
+	// try to open it
+	FILE *f = fopen (filename, "wb");
+
+	// didn't work
+	if (!f) return;
+
+	// allocate space for the header
+	byte buffer[18];
+	memset (buffer, 0, 18);
+
+	// compose the header
+	buffer[2] = 2;
+	buffer[12] = width & 255;
+	buffer[13] = width >> 8;
+	buffer[14] = height & 255;
+	buffer[15] = height >> 8;
+	buffer[16] = dstbpp;
+	buffer[17] = 0x20;
+
+	// write out the header
+	fwrite (buffer, 18, 1, f);
+
+	for (int i = 0; i < width * height; i++)
+	{
+		byte *outcolor = NULL;
+
+		if (srcbpp == 8)
+			outcolor = (byte *) &d_8to24table[data[i]];
+		else outcolor = (byte *) &((unsigned *) data)[i];
+
+		if (dstbpp == 24)
+			fwrite (outcolor, 3, 1, f);
+		else fwrite (outcolor, 4, 1, f);
+	}
+
+	// done
+	fclose (f);
+}
+
+
 // d3dx doesn't support tga writes (BASTARDS) so we made our own
 void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 {
@@ -1124,17 +1200,6 @@ int SCR_ModalMessage (char *text, char *caption, int flags)
 
 	scr_drawdialog = false;
 
-	/*
-	this needs the reworked renderer - it's too messy and unreliable without it...
-	D3D_Set2D ();
-	Draw_FadeScreen ();
-	SCR_DrawNotifyString (text, caption, flags);
-	d3d_Flat2DFX->EndPass ();
-	d3d_Flat2DFX->End ();
-	d3d_Device->EndScene ();
-	d3d_Device->Present (NULL, NULL, NULL, NULL);
-	*/
-
 	S_ClearBuffer ();		// so dma doesn't loop current sound
 
 	bool key_accept = false;
@@ -1285,6 +1350,7 @@ void SCR_SetupToDrawHUD (void)
 	if (undoclear) d3d_Flat2DFX.SwitchToPass (0);
 }
 
+
 /*
 ==================
 SCR_UpdateScreen
@@ -1319,6 +1385,17 @@ void SCR_UpdateScreen (void)
 
 	// not initialized yet
 	if (!scr_initialized || !con_initialized || !d3d_Device) return;
+
+	if (scr_firsttime && d3d_GlobalCaps.isNvidia)
+	{
+		// attempt to resolve black screen when going direct from 1.5 to 1.6 by forcing a vid_restart command
+		// the first time through here.  seems to be nvidia only...
+		Con_Printf ("Forcing video restart for first-time initialization on NVIDIA hardware.\n");
+		Cbuf_InsertText ("vid_restart\n");
+		Cbuf_Execute ();
+		scr_firsttime = false;
+		return;
+	}
 
 	// begin rendering; get the size of the refresh window and set up for the render
 	// this is also used for lost device recovery mode

@@ -104,8 +104,9 @@ typedef struct partverts_s
 	float s, t;
 } partverts_t;
 
-// size of the particle batch
-#define R_PARTICLE_RENDER_BATCH_SIZE	300
+// size of the particle batch - about 1000 verts per primitive call per d3d documentation
+// this ensures that we satisfy the "divide by 6" rule
+#define R_PARTICLE_RENDER_BATCH_SIZE	1020
 
 // draw in batches
 partverts_t partverts[R_PARTICLE_RENDER_BATCH_SIZE];
@@ -140,10 +141,11 @@ void R_ClearParticles (void)
 	free_particles = (particle_t *) Heap_TagAlloc (TAG_PARTICLES, PARTICLE_BATCH_SIZE * sizeof (particle_t));
 	active_particles = NULL;
 
-	for (i = 0; i < PARTICLE_BATCH_SIZE; i++)
-		free_particles[i].next = &free_particles[i + 1];
-
-	free_particles[PARTICLE_BATCH_SIZE - 1].next = NULL;
+	for (i = 1; i < PARTICLE_BATCH_SIZE; i++)
+	{
+		free_particles[i - 1].next = &free_particles[i];
+		free_particles[i].next = NULL;
+	}
 
 	// track the number of particles
 	r_numparticles = PARTICLE_BATCH_SIZE;
@@ -168,6 +170,8 @@ particle_t *R_NewParticle (void)
 
 		// set default parameters
 		// (these may be overwritten as required)
+		// we need to explicitly set these to 0 as memsetting to 0 doesn't
+		// actually equate to a value of 0 with floating point
 		p->tex = particledottexture;
 		p->scale = 0.5;
 		p->alpha = 255;
@@ -182,8 +186,9 @@ particle_t *R_NewParticle (void)
 		p->dvel[0] = p->dvel[1] = p->dvel[2] = 0;
 		p->grav = 0;
 
-		// colour ramps
+		// colour and ramps
 		p->colorramp = NULL;
+		p->color = 0;
 		p->ramp = 0;
 		p->ramptime = 0;
 
@@ -522,7 +527,7 @@ void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 	if (hipnotic && count <= 4)
 	{
 		// particle field
-		return;
+		//return;
 	}
 	else if (count == 255)
 	{
@@ -885,7 +890,10 @@ void R_RenderParticles (void)
 
 	// disable z buffer writing and enable blending
 	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
-	d3d_EnableAlphaBlend->Apply ();
+	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+	d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
 	// don't cull these as they should never backface
 	// might give a small speedup as the runtime doesn't have to check it...
@@ -899,7 +907,14 @@ void R_RenderParticles (void)
 	// walk the list starting at the first active particle
 	for (particle_t *p = active_particles; p; p = p->next)
 	{
+		// if the particle isn't in a visible leaf this frame there's no point in drawing it
+		// note however that we just skip drawing rather than killing it as it may be in a
+		// visible leaf later on in it's lifetime.  the exception (dealt with above) is if it
+		// hits a solid or sky leaf, at which point we stop drawing it.
 		if (p->leaf->visframe != r_visframecount) continue;
+
+		// final sanity check on colour to avoid array bounds errors
+		if (p->color < 0 || p->color > 255) continue;
 
 		// check for a texture change
 		// to do - sort by texture?
@@ -918,7 +933,14 @@ void R_RenderParticles (void)
 		}
 
 		byte *color = (byte *) &d_8to24table[(int) p->color];
-		DWORD pc = D3DCOLOR_ARGB (BYTE_CLAMP (p->alpha), color[2], color[1], color[0]);
+
+		DWORD pc = D3DCOLOR_ARGB
+		(
+			D3D_TransformColourSpaceByte (BYTE_CLAMP (p->alpha)),
+			D3D_TransformColourSpaceByte (color[2]),
+			D3D_TransformColourSpaceByte (color[1]),
+			D3D_TransformColourSpaceByte (color[0])
+		);
 
 		if (p->scalemod)
 		{
@@ -960,7 +982,7 @@ void R_RenderParticles (void)
 	d3d_ParticleFX.EndRender ();
 	D3D_BackfaceCull (D3DCULL_CCW);
 	d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
-	d3d_DisableAlphaBlend->Apply ();
+	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
 

@@ -536,7 +536,7 @@ void Key_Console (int key)
 						key_linepos += i;
 					}
 
-					Heap_QFreeFast (textCopied);
+					Heap_QFree (textCopied);
 				}
 
 				GlobalUnlock (th);
@@ -702,7 +702,7 @@ void Key_SetBinding (int keynum, char *binding)
 	// free old bindings
 	if (keybindings[keynum])
 	{
-		Heap_QFreeFull (keybindings[keynum]);
+		Heap_QFree (keybindings[keynum]);
 		keybindings[keynum] = NULL;
 	}
 

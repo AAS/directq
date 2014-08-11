@@ -306,7 +306,7 @@ bool D3D_LoadPCX (FILE *f, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 	HRESULT hr = D3D_CreateExternalTexture (tex, (pcx.xmax + 1) * (pcx.ymax + 1) * 4 + 18, pcx_rgb, flags);
 
 	// ensure that the buffer is released before checking for success, as otherwise we'll leak it
-	Heap_QFreeFull (pcx_rgb);
+	Heap_QFree (pcx_rgb);
 
 	if (FAILED (hr)) return false;
 
@@ -393,7 +393,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 		HRESULT hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
 
 		// ensure that the buffer is released before checking for success, as otherwise we'll leak it
-		Heap_QFreeFull (filebuf);
+		Heap_QFree (filebuf);
 
 		// failed to load
 		if (FAILED (hr)) continue;
@@ -471,6 +471,11 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 		tex,
 		NULL
 	);
+
+	if (image->flags & IMAGE_MIPMAP)
+	{
+		int xxxx = 32;
+	}
 
 	if (FAILED (hr))
 	{
@@ -581,13 +586,19 @@ void D3D_TranslateAlphaTexture (int r, int g, int b, LPDIRECT3DTEXTURE9 tex)
 	tex->GetLevelDesc (0, &Level0Desc);
 	tex->LockRect (0, &Level0Rect, NULL, 0);
 
+	extern cvar_t r_sRGBgamma;
+
 	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
 	{
 		byte *rgba = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
 
-		rgba[0] = BYTE_CLAMP (b);
-		rgba[1] = BYTE_CLAMP (g);
-		rgba[2] = BYTE_CLAMP (r);
+		// direct3d doesn't specify sRGB transforms for the alpha channel, but it turns out we need it anyway
+		// we can't write directly into rgba[3] as we might want to restore it if switching between colour spaces,
+		// so instead we hack it in a "good enough" fashion....
+		// strict correctness says we should divide by 255, but that makes it too dark, so instead we divide by 128
+		rgba[0] = BYTE_CLAMP (D3D_TransformColourSpaceByte (BYTE_CLAMP (b)) * D3D_TransformColourSpaceByte (rgba[3]) / 128);
+		rgba[1] = BYTE_CLAMP (D3D_TransformColourSpaceByte (BYTE_CLAMP (g)) * D3D_TransformColourSpaceByte (rgba[3]) / 128);
+		rgba[2] = BYTE_CLAMP (D3D_TransformColourSpaceByte (BYTE_CLAMP (r)) * D3D_TransformColourSpaceByte (rgba[3]) / 128);
 	}
 
 	tex->UnlockRect (0);

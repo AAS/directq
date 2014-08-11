@@ -337,8 +337,8 @@ void R_SetupD3D (void)
 	D3D_BackfaceCull (D3DCULL_CCW);
 
 	// disable all alpha ops
-	d3d_DisableAlphaTest->Apply ();
-	d3d_DisableAlphaBlend->Apply ();
+	d3d_Device->SetRenderState (D3DRS_ALPHATESTENABLE, FALSE);
+	d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
 
@@ -377,6 +377,7 @@ void R_SetupRenderState (void)
 
 		// null it
 		t->texturechain = NULL;
+		t->chaintail = NULL;
 		t->visframe = -1;
 	}
 
@@ -445,9 +446,7 @@ void R_RenderScene (void)
 
 	// draw everything else
 	R_DrawWaterSurfaces ();
-
 	D3D_DrawAliasModels ();
-
 	R_DrawParticles ();
 
 	// sprites deferred to same time as particles as they have similar properties & characteristics

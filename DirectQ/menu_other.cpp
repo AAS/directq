@@ -87,6 +87,7 @@ extern cvar_t r_waterwarpscale;
 extern cvar_t r_defaultshaderprecision;
 extern cvar_t r_warpshaderprecision;
 extern cvar_t menu_fillcolor;
+extern cvar_t r_skyalpha;
 
 CQMenu menu_Main (NULL, m_main);
 CQMenu menu_Singleplayer (&menu_Main, m_other);
@@ -854,6 +855,7 @@ void Menu_InitOptionsMenu (void)
 	menu_WarpSurf.AddOption (new CQMenuSpinControl ("Style", &r_skywarp.integer, skywarpstyles));
 	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Back Layer Scroll", &r_skybackscroll, 0, 32, 2));
 	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Front Layer Scroll", &r_skyfrontscroll, 0, 32, 2));
+	menu_WarpSurf.AddOption (new CQMenuCvarSlider ("Front Layer Alpha", &r_skyalpha, 0, 1, 0.1f));
 	menu_WarpSurf.AddOption (new CQMenuTitle ("Skyboxes"));
 	// note - char *** is intentional here...
 	menu_WarpSurf.AddOption (new CQMenuSpinControl ("Skybox Name", &skybox_menunumber, &skybox_menulist));

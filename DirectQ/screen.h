@@ -49,4 +49,4 @@ extern cvar_t scr_viewsize;
 
 extern bool		block_drawing;
 
-void SCR_UpdateWholeScreen (void);
+void SCR_WriteDataToTGA (char *filename, byte *data, int width, int height, int srcbpp, int dstbpp);

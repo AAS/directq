@@ -316,3 +316,19 @@ void Heap_Init (void)
 	if (!QGlobalHeap) Sys_Error ("Heap_Init: Failed to create global heap");
 }
 
+
+void *Heap_QMalloc (int size)
+{
+	byte *memptr = (byte *) malloc (size);
+
+	if (!memptr)
+	{
+		Sys_Error ("Heap_ZMalloc: failed to allocate %i bytes", size);
+		return NULL;
+	}
+
+	memset (memptr, size, 0);
+	return memptr;
+}
+
+

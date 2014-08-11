@@ -4,6 +4,7 @@ float warptime;
 
 texture baseTexture;
 texture lumaTexture;
+float colourscale;
 
 sampler baseMap = sampler_state
 {
@@ -71,7 +72,7 @@ float4 PSWithLuma (VS_OUTPUT Input) : COLOR0
 	color += (texColor.b * texColor.b);
 	color *= texColor;
 
-	return color;
+	return mul (color, colourscale);
 }
 
 
@@ -87,7 +88,7 @@ float4 PSWithoutLuma (VS_OUTPUT Input) : COLOR0
 	color += (texColor.b * texColor.b);
 	color *= texColor;
 
-	return color;
+	return mul (color, colourscale);
 }
 
 

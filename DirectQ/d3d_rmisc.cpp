@@ -162,7 +162,7 @@ void R_InitResourceTextures (void)
 	// (in case palette index 0 isn't black).  also load it really really small...
 	D3D_LoadTexture (&r_greytexture, 4, 4, paldata, NULL, true, false);
 
-	Heap_QFreeFull (paldata);
+	Heap_QFree (paldata);
 
 	// load the notexture properly
 	D3D_LoadTexture (&r_notexture, r_notexture_mip->width, r_notexture_mip->height, (byte *) (r_notexture_mip + 1), d_8to24table, true, false);
@@ -281,7 +281,7 @@ void R_TranslatePlayerSkin (int playernum)
 	// do mipmap these because it only happens when colour changes
 	D3D_LoadTexture (&playertextures[playernum], paliashdr->skinwidth, paliashdr->skinheight, translated, (unsigned int *) d_8to24table, true, false);
 
-	Heap_QFreeFull (translated);
+	Heap_QFree (translated);
 }
 
 

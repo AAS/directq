@@ -21,12 +21,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "d3d_quake.h"
+#include "d3d_hlsl.h"
 
 // number of verts
 int d3d_VertexBufferVerts = 0;
 
 // draw in 2 streams
 LPDIRECT3DVERTEXBUFFER9 d3d_BrushModelVerts = NULL;
+LPDIRECT3DINDEXBUFFER9 d3d_BrushModelIndexes = NULL;
+D3DFORMAT d3d_BrushIndexFormat = D3DFMT_INDEX16;
 
 int r_renderflags = 0;
 
@@ -180,7 +183,7 @@ void R_RecursiveWorldNode (mnode_t *node)
 		return;
 	}
 
-	// node is just a decision point, so go down the apropriate sides
+	// node is just a decision point, so go down the appropriate sides
 	// find which side of the node we are on
 	R_PlaneSide (node->plane, &dot, &side);
 
@@ -210,13 +213,13 @@ void R_RecursiveWorldNode (mnode_t *node)
 			// if sorting by texture, just store it out
 			if (surf->flags & SURF_DRAWSKY)
 			{
-				// link it in
+				// link it in (back to front)
 				surf->texturechain = skychain;
 				skychain = surf;
 			}
 			else if (surf->flags & SURF_DRAWTURB)
 			{
-				// link it in
+				// link it in (back to front)
 				surf->texturechain = tex->texturechain;
 				tex->texturechain = surf;
 
@@ -236,9 +239,13 @@ void R_RecursiveWorldNode (mnode_t *node)
 				// check for lightmap modifications
 				D3D_CheckLightmapModification (surf);
 
-				// link it in
-				surf->texturechain = tex->texturechain;
-				tex->texturechain = surf;
+				// link it in (front to back)
+				if (!tex->chaintail)
+					tex->texturechain = surf;
+				else tex->chaintail->texturechain = surf;
+
+				tex->chaintail = surf;
+				surf->texturechain = NULL;
 			}
 		}
 	}
@@ -415,7 +422,8 @@ void R_DrawWorld (void)
 	// unlock all lightmaps that were previously locked
 	D3D_UnlockLightmaps ();
 
-	// draw sky first (required by z-buffer mangling going on in there)
+	// draw sky first, otherwise the z-fail technique will flood the framebuffer with sky
+	// rather than just drawing it where skybrushes appear
 	R_DrawSkyChain (skychain);
 
 	D3D_DrawWorld ();
@@ -592,8 +600,8 @@ void D3D_PutSurfacesInVertexBuffer (void)
 	HRESULT hr = d3d_Device->CreateVertexBuffer
 	(
 		d3d_VertexBufferVerts * sizeof (worldvert_t),
-		D3DUSAGE_WRITEONLY,
-		(D3DFVF_XYZ | D3DFVF_TEX2),
+		D3DUSAGE_WRITEONLY | d3d_VertexBufferUsage,
+		0,
 		D3DPOOL_MANAGED,
 		&d3d_BrushModelVerts,
 		NULL
@@ -635,6 +643,22 @@ void D3D_PutSurfacesInVertexBuffer (void)
 			// set offset
 			surf->vboffset = vboffset;
 
+			// set up indexes - we'll store these as ints always even if using 16 bit indexes for simplicity sake
+			surf->numindexes = (surf->numedges - 2) * 3;
+			surf->indexes = (int *) Heap_TagAlloc (TAG_BRUSHMODELS, surf->numindexes * sizeof (int));
+
+			if (surf->indexes)
+			{
+				// if the alloc fails we can just draw directly using the non-indexed vb
+				// set up the indexes for this surf, trifan pattern always
+				for (int n = 2, ni = 0; n < surf->numedges; n++)
+				{
+					surf->indexes[ni++] = surf->vboffset;
+					surf->indexes[ni++] = surf->vboffset + n - 1;
+					surf->indexes[ni++] = surf->vboffset + n;
+				}
+			}
+
 			// advance pointers
 			verts += surf->numedges;
 
@@ -646,6 +670,48 @@ void D3D_PutSurfacesInVertexBuffer (void)
 	// unlock and preload, baby!
 	d3d_BrushModelVerts->Unlock ();
 	d3d_BrushModelVerts->PreLoad ();
+}
+
+
+void D3D_CreateWorldIndexBuffer (void)
+{
+	SAFE_RELEASE (d3d_BrushModelIndexes);
+
+	// see if need to use 32 bit indexes
+	if (d3d_VertexBufferVerts > d3d_DeviceCaps.MaxVertexIndex)
+	{
+		// no indexing allowed at all
+		return;
+	}
+
+	// assume 16 bit initially
+	d3d_BrushIndexFormat = D3DFMT_INDEX16;
+	int d3d_IndexSize = sizeof (unsigned short);
+
+	if (d3d_VertexBufferVerts > 65535)
+	{
+		// use 32 bit indexes
+		d3d_BrushIndexFormat = D3DFMT_INDEX32;
+		d3d_IndexSize = sizeof (unsigned int);
+	}
+
+	HRESULT hr = d3d_Device->CreateIndexBuffer
+	(
+		1024 * d3d_IndexSize,
+		D3DUSAGE_WRITEONLY | D3DUSAGE_DYNAMIC,
+		d3d_BrushIndexFormat,
+		D3DPOOL_DEFAULT,
+		&d3d_BrushModelIndexes,
+		NULL
+	);
+
+	if (FAILED (hr))
+	{
+		// no need to crash if we fail to create the index buffer; we can just fall back to rendering without it
+		Con_Printf ("D3D_PutSurfacesInVertexBuffer: d3d_Device->CreateIndexBuffer failed\n");
+		SAFE_RELEASE (d3d_BrushModelIndexes);
+		return;
+	}
 }
 
 
@@ -672,6 +738,7 @@ void GL_BuildLightmaps (void)
 
 	// this really has less connection with dlight cache than it does with general visibility
 	r_framecount = 1;
+	r_visframecount = 0;
 
 	// clear down any previous lightmaps
 	D3D_ReleaseLightmaps ();
@@ -689,6 +756,17 @@ void GL_BuildLightmaps (void)
 
 		msurface_t *surf = m->bh->surfaces;
 
+		// batch lightmaps by texture so that we can have more efficient index buffer usage
+		// first we need to init texture chains for the lightmaps
+		for (int i = 0; i < m->bh->numtextures; i++)
+		{
+			// e2m3 gets this
+			if (!m->bh->textures[i]) continue;
+
+			m->bh->textures[i]->texturechain = NULL;
+		}
+
+		// now we store the surfs in this model into the chains
 		for (int i = 0; i < m->bh->numsurfaces; i++, surf++)
 		{
 			// increment vertex count
@@ -698,11 +776,28 @@ void GL_BuildLightmaps (void)
 			if (surf->flags & SURF_DRAWTURB) continue;
 			if (surf->flags & SURF_DRAWSKY) continue;
 
-			// create the lightmap
-			D3D_CreateSurfaceLightmap (surf);
-	
-			// no polys on these surfs
-			surf->polys = NULL;
+			// link it in (back to front)
+			surf->texturechain = surf->texinfo->texture->texturechain;
+			surf->texinfo->texture->texturechain = surf;
+		}
+
+		// finally we create the lightmaps themselves
+		for (int i = 0; i < m->bh->numtextures; i++)
+		{
+			if (!m->bh->textures[i]) continue;
+			if (!m->bh->textures[i]->texturechain) continue;
+
+			for (surf = m->bh->textures[i]->texturechain; surf; surf = surf->texturechain)
+			{
+				// create the lightmap
+				D3D_CreateSurfaceLightmap (surf);
+		
+				// no polys on these surfs
+				surf->polys = NULL;
+			}
+
+			// clean up after ourselves
+			m->bh->textures[i]->texturechain = NULL;
 		}
 	}
 

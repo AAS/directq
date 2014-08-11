@@ -23,6 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "d3d_hlsl.h"
 
+// used in the surface refresh
+extern D3DXMATRIX *CachedMatrix;
+extern int NumMatrixSwaps;
+
 // r_lightmap 1 uses the grey texture on account of 2 x overbrighting
 extern LPDIRECT3DTEXTURE9 r_greytexture;
 extern cvar_t r_lightmap;
@@ -104,7 +108,7 @@ void D3D_InitUnderwaterTexture (void)
 	UnderwaterValid = true;
 
 	// note - change the buffer size if you ever change the tess factor!!!
-	d3d_Device->CreateVertexBuffer (2112 * sizeof (warpverts_t), 0, D3DFVF_XYZ | D3DFVF_TEX1, D3DPOOL_DEFAULT, &d3d_WarpVerts, NULL);
+	d3d_Device->CreateVertexBuffer (2112 * sizeof (warpverts_t), d3d_VertexBufferUsage, 0, D3DPOOL_DEFAULT, &d3d_WarpVerts, NULL);
 
 	warpverts_t *wv;
 
@@ -377,18 +381,18 @@ void R_DrawWaterSurfaces (void)
 		if (r_lockalpha.value)
 		{
 			// locked sliders
-			wateralpha = r_wateralpha.value;
-			lavaalpha = r_wateralpha.value;
-			slimealpha = r_wateralpha.value;
-			telealpha = r_wateralpha.value;
+			wateralpha = D3D_TransformColourSpace (r_wateralpha.value);
+			lavaalpha = D3D_TransformColourSpace (r_wateralpha.value);
+			slimealpha = D3D_TransformColourSpace (r_wateralpha.value);
+			telealpha = D3D_TransformColourSpace (r_wateralpha.value);
 		}
 		else
 		{
 			// independent sliders
-			wateralpha = r_wateralpha.value;
-			lavaalpha = r_lavaalpha.value;
-			slimealpha = r_slimealpha.value;
-			telealpha = r_telealpha.value;
+			wateralpha = D3D_TransformColourSpace (r_wateralpha.value);
+			lavaalpha = D3D_TransformColourSpace (r_lavaalpha.value);
+			slimealpha = D3D_TransformColourSpace (r_slimealpha.value);
+			telealpha = D3D_TransformColourSpace (r_telealpha.value);
 		}
 
 		// don't go < 0
@@ -398,7 +402,10 @@ void R_DrawWaterSurfaces (void)
 		if (telealpha < 0) telealpha = 0;
 
 		// enable translucency
-		d3d_EnableAlphaBlend->Apply ();
+		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 		d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
 
 		// flag we're going translucent
@@ -419,6 +426,8 @@ void R_DrawWaterSurfaces (void)
 	d3d_LiquidFX.SetWPMatrix (&(d3d_WorldMatrix * d3d_PerspectiveMatrix));
 	d3d_LiquidFX.SetTime ((cl.time * r_warpspeed.value) / 4);
 	d3d_LiquidFX.SwitchToPass (0);
+
+	CachedMatrix = NULL;
 
 	for (i = 0; i < cl.worldbrush->numtextures; i++)
 	{
@@ -451,6 +460,14 @@ void R_DrawWaterSurfaces (void)
 		for (; surf; surf = surf->texturechain)
 		{
 			c_brush_polys++;
+
+			if ((D3DXMATRIX *) surf->model->matrix != CachedMatrix)
+			{
+				d3d_LiquidFX.SetEntMatrix ((D3DXMATRIX *) surf->model->matrix);
+				CachedMatrix = (D3DXMATRIX *) surf->model->matrix;
+				NumMatrixSwaps++;
+			}
+
 			d3d_LiquidFX.Draw (D3DPT_TRIANGLEFAN, surf->vboffset, surf->numedges - 2);
 		}
 	}
@@ -461,7 +478,7 @@ void R_DrawWaterSurfaces (void)
 	// (save me having to do that if test again here...)
 	if (transon)
 	{
-		d3d_DisableAlphaBlend->Apply ();
+		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 		d3d_Device->SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
 	}
 }
@@ -501,6 +518,7 @@ void R_DrawWaterSurfaces (void)
 cvar_t r_skywarp ("r_skywarp", 1, CVAR_ARCHIVE);
 cvar_t r_skybackscroll ("r_skybackscroll", 8, CVAR_ARCHIVE);
 cvar_t r_skyfrontscroll ("r_skyfrontscroll", 16, CVAR_ARCHIVE);
+cvar_t r_skyalpha ("r_skyalpha", 1, CVAR_ARCHIVE);
 
 void R_ClipSky (msurface_t *skychain)
 {
@@ -526,7 +544,7 @@ void R_ClipSky (msurface_t *skychain)
 }
 
 
-void R_DrawSkySphere (float rotatefactor, float scale)
+void R_DrawSkySphere (float scale)
 {
 	// darkplaces warp
 	// for all that they say "you VILL use ein index buffer, heil Bill", NOWHERE in the SDK is it
@@ -695,6 +713,9 @@ void R_DrawSkyChain (msurface_t *skychain)
 	// no sky to draw!
 	if (!skychain) return;
 
+	if (r_skyalpha.value < 0.0f) Cvar_Set (&r_skyalpha, 0.0f);
+	if (r_skyalpha.value > 1.0f) Cvar_Set (&r_skyalpha, 1.0f);
+
 	// approximately replicate the speed of the old sky warp
 	float rotateBack = anglemod (cl.time / 4.0f * r_skybackscroll.value);
 	float rotateFore = anglemod (cl.time / 4.0f * r_skyfrontscroll.value);
@@ -721,8 +742,10 @@ void R_DrawSkyChain (msurface_t *skychain)
 		d3d_WorldMatrixStack->Push ();
 		d3d_WorldMatrixStack->TranslateLocal (r_origin[0], r_origin[1], r_origin[2]);
 
+		d3d_SkyFX.SetAlpha (r_skyalpha.value);
+
 		// draw back layer
-		R_DrawSkySphere (rotateBack, 1000000);
+		R_DrawSkySphere (100000);
 	}
 	else
 	{
@@ -735,12 +758,17 @@ void R_DrawSkyChain (msurface_t *skychain)
 		d3d_WorldMatrixStack->TranslateLocal (0, 0, -8000);
 
 		// draw back layer
+		d3d_SkyFX.SetAlpha (1.0f);
 		R_DrawSkySphere (rotateBack, 10, solidskytexture);
 
 		// draw front layer
-		d3d_EnableAlphaBlend->Apply ();
+		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+		d3d_Device->SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		d3d_Device->SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		d3d_Device->SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+		d3d_SkyFX.SetAlpha (r_skyalpha.value);
 		R_DrawSkySphere (rotateFore, 8, alphaskytexture);
-		d3d_DisableAlphaBlend->Apply ();
+		d3d_Device->SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
 	}
 
 	// restore the depth func
@@ -787,8 +815,8 @@ static void D3D_DPSkySphereCalc (void)
 	hr = d3d_Device->CreateVertexBuffer
 	(
 		DP_SKYSPHERE_NUMVERTS * sizeof (warpverts_t),
-		D3DUSAGE_WRITEONLY,
-		(D3DFVF_XYZ | D3DFVF_TEX1),
+		D3DUSAGE_WRITEONLY | d3d_VertexBufferUsage,
+		0,
 		D3DPOOL_MANAGED,
 		&d3d_DPSkyVerts,
 		NULL
@@ -841,7 +869,7 @@ static void D3D_DPSkySphereCalc (void)
 	hr = d3d_Device->CreateIndexBuffer
 	(
 		(DP_SKYGRID_SIZE * DP_SKYGRID_SIZE * 6) * sizeof (unsigned short),
-		D3DUSAGE_WRITEONLY,
+		D3DUSAGE_WRITEONLY | d3d_VertexBufferUsage,
 		D3DFMT_INDEX16,
 		D3DPOOL_MANAGED,
 		&d3d_DPSkyIndexes,
@@ -890,8 +918,8 @@ void D3D_InitSkySphere (void)
 	HRESULT hr = d3d_Device->CreateVertexBuffer
 	(
 		220 * sizeof (skysphere_t),
-		D3DUSAGE_WRITEONLY,
-		(D3DFVF_XYZ | D3DFVF_TEX1),
+		D3DUSAGE_WRITEONLY | d3d_VertexBufferUsage,
+		0,
 		D3DPOOL_MANAGED,
 		&d3d_SkySphereVerts,
 		NULL

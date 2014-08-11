@@ -1,5 +1,7 @@
 float4x4 WorldProjMatrix;
 
+float skyalpha;
+
 texture backTexture;
 
 sampler backlayer = sampler_state
@@ -54,7 +56,10 @@ VS_1ST VSDirectQWarp (VS_1ST Input)
 
 float4 PSDirectQWarp (VS_1ST Input) : COLOR0
 {
-	return tex2D (backlayer, Input.Texcoord0);
+	float4 color = tex2D (backlayer, Input.Texcoord0);
+	color.a *= skyalpha;
+
+	return color;
 }
 
 
@@ -79,6 +84,8 @@ float4 PSClassicWarp (VS_2ST Input) : COLOR0
 {
 	float4 BackColor = tex2D (backlayer, Input.Texcoord0);
 	float4 FrontColor = tex2D (frontlayer, Input.Texcoord1);
+
+	FrontColor.a *= skyalpha;
 
 	float4 color = (FrontColor * FrontColor.a) + (BackColor * (1.0 - FrontColor.a));
 

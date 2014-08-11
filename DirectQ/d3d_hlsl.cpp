@@ -303,7 +303,7 @@ void D3D_MakeVertexDeclaration (int stream, int numverts, int numcolor, int nums
 	d3d_Device->CreateVertexDeclaration (ve, d3d_VD);
 
 	// done
-	Heap_QFreeFull (ve);
+	Heap_QFree (ve);
 }
 
 
@@ -395,7 +395,7 @@ void D3D_LoadEffect (char *name, int resourceid, LPD3DXEFFECT *eff, bool iswarpe
 
 			// clean up
 			fclose (sf);
-			Heap_QFreeFast (EffectString);
+			Heap_QFree (EffectString);
 			EffectString = NULL;
 
 			if (SUCCEEDED (hr))
@@ -503,7 +503,7 @@ void D3D_InitHLSL (void)
 	SilentLoad = true;
 
 	// set up vertex declarations
-	D3D_MakeVertexDeclaration (0, 1, 1, 1, &d3d_AliasVertexDeclaration);
+	D3D_MakeVertexDeclaration (0, 2, 1, 2, &d3d_AliasVertexDeclaration);
 	D3D_MakeVertexDeclaration (0, 1, 1, 1, &d3d_ParticleVertexDeclaration);
 	D3D_MakeVertexDeclaration (0, 1, 0, 1, &d3d_V3ST2Declaration);
 	D3D_MakeVertexDeclaration (0, 1, 0, 2, &d3d_V3ST4Declaration);
@@ -515,11 +515,13 @@ void D3D_InitHLSL (void)
 	d3d_Flat2DFX.GetTextureHandle ("baseTexture");
 
 	d3d_LiquidFX.GetWPMatrixHandle ("WorldProjMatrix");
+	d3d_LiquidFX.GetEntMatrixHandle ("ModelTransform");
 	d3d_LiquidFX.GetTimeHandle ("warptime");
 	d3d_LiquidFX.GetAlphaHandle ("Alpha");
 	d3d_LiquidFX.GetTextureHandle ("baseTexture");
 
 	d3d_BrushFX.GetWPMatrixHandle ("WorldProjMatrix");
+	d3d_BrushFX.GetEntMatrixHandle ("ModelTransform");
 	d3d_BrushFX.GetScaleHandle ("LightScale");
 	d3d_BrushFX.GetTextureHandle (0, "baseTexture");
 	d3d_BrushFX.GetTextureHandle (1, "lightTexture");
@@ -531,6 +533,7 @@ void D3D_InitHLSL (void)
 	d3d_InstancedBrushFX.GetTimeHandle ("warptime");
 	d3d_InstancedBrushFX.GetTextureHandle (0, "baseTexture");
 	d3d_InstancedBrushFX.GetTextureHandle (1, "lumaTexture");
+	d3d_InstancedBrushFX.GetScaleHandle ("colourscale");
 
 	d3d_UnderwaterFX.GetWPMatrixHandle ("WorldProjMatrix");
 	d3d_UnderwaterFX.GetTimeHandle ("WarpTime");
@@ -544,10 +547,12 @@ void D3D_InitHLSL (void)
 	d3d_SkyFX.GetTimeHandle ("frontscroll");
 	d3d_SkyFX.GetTextureHandle (0, "backTexture");
 	d3d_SkyFX.GetTextureHandle (1, "frontTexture");
+	d3d_SkyFX.GetAlphaHandle ("skyalpha");
 
 	d3d_AliasFX.GetWPMatrixHandle ("WorldProjMatrix");
 	d3d_AliasFX.GetTextureHandle (0, "baseTexture");
 	d3d_AliasFX.GetTextureHandle (1, "lumaTexture");
+	d3d_AliasFX.GetScaleHandle ("colourscale");
 
 	d3d_ParticleFX.GetWPMatrixHandle ("WorldProjMatrix");
 	d3d_ParticleFX.GetTextureHandle ("particleTexture");

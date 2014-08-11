@@ -860,7 +860,6 @@ void CL_RelinkEntities (void)
 			cl_numvisedicts++;
 		}
 	}
-
 }
 
 

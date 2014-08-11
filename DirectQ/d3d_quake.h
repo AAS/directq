@@ -26,7 +26,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void D3D_SetFVFStateManaged (DWORD NewFVF);
 
 extern LPDIRECT3DVERTEXBUFFER9 d3d_BrushModelVerts;
+extern LPDIRECT3DINDEXBUFFER9 d3d_BrushModelIndexes;
 extern int d3d_VertexBufferVerts;
+extern DWORD d3d_VertexBufferUsage;
+extern D3DFORMAT d3d_BrushIndexFormat;
 
 // video
 void D3D_InitDirect3D (D3DDISPLAYMODE *mode);
@@ -125,16 +128,6 @@ extern D3DXMATRIX d3d_OrthoMatrix;
 
 // state changes
 void D3D_Set2D (void);
-void D3D_SetDefaultStates (void);
-void D3D_ReleaseStateBlocks (void);
-void D3D_CreateStateBlocks (void);
-
-extern IDirect3DStateBlock9 *d3d_SetAliasState;
-extern IDirect3DStateBlock9 *d3d_RevertAliasState;
-extern IDirect3DStateBlock9 *d3d_EnableAlphaTest;
-extern IDirect3DStateBlock9 *d3d_DisableAlphaTest;
-extern IDirect3DStateBlock9 *d3d_EnableAlphaBlend;
-extern IDirect3DStateBlock9 *d3d_DisableAlphaBlend;
 
 // x/y/z vector shortcuts
 extern D3DXVECTOR3 XVECTOR;
@@ -148,6 +141,7 @@ typedef struct d3d_global_caps_s
 	bool AllowA16B16G16R16;
 	D3DFORMAT DepthStencilFormat;
 	bool isNvidia;
+	bool supportSRGB;
 } d3d_global_caps_t;
 
 extern d3d_global_caps_t d3d_GlobalCaps;
@@ -178,7 +172,17 @@ typedef struct worldvert_s
 	float xyz[3];
 	float st[2];
 	float lm[2];
+
+	// force the vertex buffer to compile to a 32-byte size multiple
+	DWORD dummy;
 } worldvert_t;
+
+extern cvar_t r_64bitlightmaps;
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
+// colour space transform
+extern float *r_activetransform;
+float D3D_TransformColourSpace (float in);
+byte D3D_TransformColourSpaceByte (byte in);
+extern cvar_t r_sRGBgamma;
