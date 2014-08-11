@@ -23,6 +23,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "d3d_quake.h"
 #include "resource.h"
 
+
+float Lerp (float l1, float l2, float lerpfactor)
+{
+	return (l1 * lerpfactor) + (l2 * (1.0f - lerpfactor));
+}
+
+
 void R_InitParticles (void);
 void R_ClearParticles (void);
 void GL_BuildLightmaps (void);
@@ -170,10 +177,8 @@ cvar_t r_lerporient ("r_lerporient", "1", CVAR_ARCHIVE);
 cvar_t r_lerpframe ("r_lerpframe", "1", CVAR_ARCHIVE);
 
 // these cvars do nothing for now; they only exist to soak up abuse from nehahra maps which expect them to be there
-cvar_t r_oldsky ("r_oldsky", "1");
+cvar_t r_oldsky ("r_oldsky", "1", CVAR_NEHAHRA);
 
-extern cvar_t r_lerplightstyle;
-extern cvar_t r_lightupdatefrequency;
 void D3D_InitTextures (void);
 
 
@@ -181,8 +186,6 @@ cmd_t R_ReadPointFile_f_Cmd ("pointfile", R_ReadPointFile_f);
 
 void R_Init (void)
 {	
-	extern cvar_t gl_finish;
-
 	D3D_InitTextures ();
 
 	R_InitParticles ();
@@ -395,7 +398,7 @@ bool R_RecursiveLeafContents (mnode_t *node)
 	int			side;
 	mplane_t	*plane;
 	msurface_t	*surf;
-	double		dot;
+	float		dot;
 
 	if (node->contents == CONTENTS_SOLID) return true;
 	if (node->visframe != d3d_RenderDef.visframecount) return true;
@@ -466,12 +469,15 @@ void R_SetLeafContents (void)
 }
 
 
+void LOC_LoadLocations (void);
+
+extern byte *fatpvs;
+extern float r_clipdist;
+
 void R_NewMap (void)
 {
-	extern byte *fatpvs;
-
-	// normal light value (consistency with 'm' * 22)
-	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 264;
+	// normal light value
+	for (int i = 0; i < 256; i++) d_lightstylevalue[i] = 256;
 
 	// world entity baseline (this isn't even used any more)
 	memset (&d3d_RenderDef.worldentity, 0, sizeof (entity_t));
@@ -501,6 +507,7 @@ void R_NewMap (void)
 	// (this isn't the case any more but it does no harm)
 	CL_InitTEnts ();
 	S_InitAmbients ();
+	LOC_LoadLocations ();
 
 	// decommit any temp allocs which were made during loading
 	Pool_Free (POOL_TEMP);

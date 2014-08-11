@@ -466,36 +466,30 @@ void SV_ReadClientMove (usercmd_t *move)
 	int		i;
 	vec3_t	angle;
 	int		bits;
-	
-// read ping time
-	host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
-		= sv.time - MSG_ReadFloat ();
+
+	// read ping time
+	host_client->ping_times[host_client->num_pings % NUM_PING_TIMES] = sv.time - MSG_ReadFloat ();
 	host_client->num_pings++;
 
-// read current angles	
-	for (i=0 ; i<3 ; i++)
-		angle[i] = MSG_ReadServerAngle ();
+	// read current angles	
+	for (i = 0; i < 3; i++) angle[i] = MSG_ReadServerAngle (false);
 
 	VectorCopy (angle, host_client->edict->v.v_angle);
-		
-// read movement
+
+	// read movement
 	move->forwardmove = MSG_ReadShort ();
 	move->sidemove = MSG_ReadShort ();
 	move->upmove = MSG_ReadShort ();
-	
-// read buttons
+
+	// read buttons
 	bits = MSG_ReadByte ();
 	host_client->edict->v.button0 = bits & 1;
-	host_client->edict->v.button2 = (bits & 2)>>1;
+	host_client->edict->v.button2 = (bits & 2) >> 1;
 
+	// read impulse
 	i = MSG_ReadByte ();
-	if (i)
-		host_client->edict->v.impulse = i;
 
-#ifdef QUAKE2
-// read light level
-	host_client->edict->v.light_level = MSG_ReadByte ();
-#endif
+	if (i) host_client->edict->v.impulse = i;
 }
 
 /*
@@ -523,21 +517,20 @@ nextmsg:
 		
 		while (1)
 		{
-			if (!host_client->active)
-				return false;	// a command caused an error
-
+			if (!host_client->active) return false;	// a command caused an error
 			if (msg_badread) return false;
-	
+
 			cmd = MSG_ReadChar ();
-			
+
 			switch (cmd)
 			{
 			case -1:
 				goto nextmsg;		// end of message
 				
 			default:
+				Con_Printf ("SV_ReadClientMessage: unknown command %i\n", cmd);
 				return false;
-							
+
 			case clc_nop:
 				break;
 				
@@ -605,6 +598,7 @@ nextmsg:
 	
 	return true;
 }
+
 
 
 /*

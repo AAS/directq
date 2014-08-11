@@ -27,6 +27,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	DIRECTQ_VERSION		1.6.4
 
 PALETTEENTRY texturepal[256];
+PALETTEENTRY lumapal[256];
+extern unsigned int lumatable[];
 
 cvar_t		gl_nobind ("gl_nobind", "0");
 cvar_t		gl_conscale ("gl_conscale", "0", CVAR_ARCHIVE);
@@ -68,11 +70,18 @@ DWORD d3d_2DTextureColor = 0xffffffff;
 
 typedef struct vert_2d_s
 {
-	float xyz[3];
+	// switched to rhw to avoid matrix transforms and state updates
+	float x, y, z;
+	float rhw;
 	DWORD c;
 	float st[2];
 } vert_2d_t;
 
+float vert2dscale_x = 1;
+float vert2dscale_y = 1;
+
+#define SCALE_X(x) ((float) (x) * vert2dscale_x)
+#define SCALE_Y(y) ((float) (y) * vert2dscale_y)
 
 //=============================================================================
 /* Support Routines */
@@ -341,6 +350,13 @@ void Draw_Init (void)
 		texturepal[i].peGreen = bgra[1];
 		texturepal[i].peBlue = bgra[0];
 		texturepal[i].peFlags = bgra[3];
+
+		bgra = (byte *) &lumatable[i];
+
+		lumapal[i].peRed = bgra[2];
+		lumapal[i].peGreen = bgra[1];
+		lumapal[i].peBlue = bgra[0];
+		lumapal[i].peFlags = bgra[3];
 	}
 
 	// free cache pics
@@ -423,16 +439,16 @@ void Draw_Character (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
-		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
-		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax},
-		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
+		{SCALE_X (x + 8), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{SCALE_X (x + 8), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax},
+		{SCALE_X (x), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -452,16 +468,16 @@ void Draw_InvertCharacter (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
-		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax},
-		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
-		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
+		{SCALE_X (x + 8), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax},
+		{SCALE_X (x + 8), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{SCALE_X (x), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -481,16 +497,16 @@ void Draw_BackwardsCharacter (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
-		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
-		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
-		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{SCALE_X (x + 8), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
+		{SCALE_X (x + 8), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
+		{SCALE_X (x), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -510,16 +526,16 @@ void Draw_RotateCharacter (int x, int y, int num)
 	if (x <= -8) return;
 	if (x >= vid.width) return;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, char_texture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
-		{x + 8, y, 0, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
-		{x + 8, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
-		{x, y + 8, 0, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].tmax},
+		{SCALE_X (x + 8), SCALE_Y (y), 0, 1, d3d_2DTextureColor, quadcoords[num].s, quadcoords[num].t},
+		{SCALE_X (x + 8), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].t},
+		{SCALE_X (x), SCALE_Y (y + 8), 0, 1, d3d_2DTextureColor, quadcoords[num].smax, quadcoords[num].tmax}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -569,6 +585,16 @@ void Draw_String (int x, int y, char *str)
 	}
 }
 
+void Draw_StringOrange (int x, int y, char *str)
+{
+	while (*str)
+	{
+		Draw_Character (x, y, (*str) + 128);
+		str++;
+		x += 8;
+	}
+}
+
 /*
 ================
 Draw_DebugChar
@@ -580,7 +606,9 @@ of the code.
 */
 void Draw_DebugChar (char num)
 {
+	Draw_Character (vid.width - 20, 20, num);
 }
+
 
 /*
 =============
@@ -593,16 +621,16 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 
 	DWORD alphacolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha * 255), 255, 255, 255);
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, alphacolor, gl->sl, gl->tl},
-		{x + pic->width, y, 0, alphacolor, gl->sh, gl->tl},
-		{x + pic->width, y + pic->height, 0, alphacolor, gl->sh, gl->th},
-		{x, y + pic->height, 0, alphacolor, gl->sl, gl->th}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, alphacolor, gl->sl, gl->tl},
+		{SCALE_X (x + pic->width), SCALE_Y (y), 0, 1, alphacolor, gl->sh, gl->tl},
+		{SCALE_X (x + pic->width), SCALE_Y (y + pic->height), 0, 1, alphacolor, gl->sh, gl->th},
+		{SCALE_X (x), SCALE_Y (y + pic->height), 0, 1, alphacolor, gl->sl, gl->th}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -618,16 +646,16 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, gl->sl, gl->tl},
-		{x + pic->width, y, 0, d3d_2DTextureColor, gl->sh, gl->tl},
-		{x + pic->width, y + pic->height, 0, d3d_2DTextureColor, gl->sh, gl->th},
-		{x, y + pic->height, 0, d3d_2DTextureColor, gl->sl, gl->th}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, gl->sl, gl->tl},
+		{SCALE_X (x + pic->width), SCALE_Y (y), 0, 1, d3d_2DTextureColor, gl->sh, gl->tl},
+		{SCALE_X (x + pic->width), SCALE_Y (y + pic->height), 0, 1, d3d_2DTextureColor, gl->sh, gl->th},
+		{SCALE_X (x), SCALE_Y (y + pic->height), 0, 1, d3d_2DTextureColor, gl->sl, gl->th}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -636,16 +664,16 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 
 void D3D_DrawTexturedPic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic)
 {
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, texpic);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, 0, 0},
-		{x + w, y, 0, d3d_2DTextureColor, 1, 0},
-		{x + w, y + h, 0, d3d_2DTextureColor, 1, 1},
-		{x, y + h, 0, d3d_2DTextureColor, 0, 1}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, 0, 0},
+		{SCALE_X (x + w), SCALE_Y (y), 0, 1, d3d_2DTextureColor, 1, 0},
+		{SCALE_X (x + w), SCALE_Y (y + h), 0, 1, d3d_2DTextureColor, 1, 1},
+		{SCALE_X (x), SCALE_Y (y + h), 0, 1, d3d_2DTextureColor, 0, 1}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -718,16 +746,16 @@ void Draw_Crosshair (int x, int y, int size)
 	float t = xhairimage[xhairt];
 
 	// bind it
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, crosshairtexture);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, s, t},
-		{x + size, y, 0, d3d_2DTextureColor, s + 0.25, t},
-		{x + size, y + size, 0, d3d_2DTextureColor, s + 0.25, t + 0.25},
-		{x, y + size, 0, d3d_2DTextureColor, s, t + 0.25}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, s, t},
+		{SCALE_X (x + size), SCALE_Y (y), 0, 1, d3d_2DTextureColor, s + 0.25, t},
+		{SCALE_X (x + size), SCALE_Y (y + size), 0, 1, d3d_2DTextureColor, s + 0.25, t + 0.25},
+		{SCALE_X (x), SCALE_Y (y + size), 0, 1, d3d_2DTextureColor, s, t + 0.25}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -738,16 +766,16 @@ void Draw_HalfPic (int x, int y, qpic_t *pic)
 {
 	glpic_t *gl = (glpic_t *) pic->data;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, gl->sl, gl->tl},
-		{x + pic->width / 2, y, 0, d3d_2DTextureColor, gl->sh, gl->tl},
-		{x + pic->width / 2, y + pic->height / 2, 0, d3d_2DTextureColor, gl->sh, gl->th},
-		{x, y + pic->height / 2, 0, d3d_2DTextureColor, gl->sl, gl->th}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, gl->sl, gl->tl},
+		{SCALE_X (x + pic->width / 2), SCALE_Y (y), 0, 1, d3d_2DTextureColor, gl->sh, gl->tl},
+		{SCALE_X (x + pic->width / 2), SCALE_Y (y + pic->height / 2), 0, 1, d3d_2DTextureColor, gl->sh, gl->th},
+		{SCALE_X (x), SCALE_Y (y + pic->height / 2), 0, 1, d3d_2DTextureColor, gl->sl, gl->th}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -821,16 +849,34 @@ void Draw_MapshotTexture (LPDIRECT3DTEXTURE9 mstex, int x, int y)
 {
 	Draw_TextBox (x - 8, y - 8, 128, 128);
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, mstex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, 0, 0},
-		{x + 128, y, 0, d3d_2DTextureColor, 1, 0},
-		{x + 128, y + 128, 0, d3d_2DTextureColor, 1, 1},
-		{x, y + 128, 0, d3d_2DTextureColor, 0, 1}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, 0, 0},
+		{SCALE_X (x + 128), SCALE_Y (y), 0, 1, d3d_2DTextureColor, 1, 0},
+		{SCALE_X (x + 128), SCALE_Y (y + 128), 0, 1, d3d_2DTextureColor, 1, 1},
+		{SCALE_X (x), SCALE_Y (y + 128), 0, 1, d3d_2DTextureColor, 0, 1}
+	};
+
+	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
+}
+
+
+void Draw_GenericTexture (LPDIRECT3DTEXTURE9 mstex, int x, int y, int w, int h)
+{
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
+	D3D_SetTexture (0, mstex);
+
+	vert_2d_t verts[] =
+	{
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, 0, 0},
+		{SCALE_X (x + w), SCALE_Y (y), 0, 1, d3d_2DTextureColor, 1, 0},
+		{SCALE_X (x + w), SCALE_Y (y + h), 0, 1, d3d_2DTextureColor, 1, 1},
+		{SCALE_X (x), SCALE_Y (y + h), 0, 1, d3d_2DTextureColor, 0, 1}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -896,8 +942,8 @@ Only used for the player color selection menu
 */
 void Draw_PicTranslate (int x, int y, qpic_t *pic, byte *translation, int shirt, int pants)
 {
-	int				v, u, c;
-	unsigned		*dest;
+	int			v, u, c;
+	unsigned int			*dest;
 	byte			*src;
 	int				p;
 	static int old_shirt = -1;
@@ -972,8 +1018,11 @@ void Draw_ConsoleBackground (int lines)
 	conback->height = vid.height;
 
 	if (lines <= y)
-		Draw_AlphaPic (0, lines - vid.height, conback, (float) (1.2 * lines) / y);
+		Draw_AlphaPic (0, lines - vid.height, conback, (float) lines / y);
 	else Draw_Pic (0, lines - vid.height, conback);
+
+	Draw_StringOrange (vid.width - 84, (lines - vid.height) + vid.height - 30, "DirectQ");
+	Draw_StringOrange (vid.width - 84, (lines - vid.height) + vid.height - 22, "1.7.666");
 }
 
 
@@ -989,16 +1038,16 @@ void Draw_TileClear (int x, int y, int w, int h)
 {
 	glpic_t *gl = (glpic_t *) draw_backtile->data;
 
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
 	D3D_SetTexture (0, gl->tex);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, d3d_2DTextureColor, x / 64.0, y / 64.0},
-		{x + w, y, 0, d3d_2DTextureColor, (x + w) / 64.0, y / 64.0},
-		{x + w, y + h, 0, d3d_2DTextureColor, (x + w) / 64.0, (y + h) / 64.0},
-		{x, y + h, 0, d3d_2DTextureColor, x / 64.0, (y + h) / 64.0},
+		{SCALE_X (x), SCALE_Y (y), 0, 1, d3d_2DTextureColor, x / 64.0, y / 64.0},
+		{SCALE_X (x + w), SCALE_Y (y), 0, 1, d3d_2DTextureColor, (x + w) / 64.0, y / 64.0},
+		{SCALE_X (x + w), SCALE_Y (y + h), 0, 1, d3d_2DTextureColor, (x + w) / 64.0, (y + h) / 64.0},
+		{SCALE_X (x), SCALE_Y (y + h), 0, 1, d3d_2DTextureColor, x / 64.0, (y + h) / 64.0},
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
@@ -1025,20 +1074,20 @@ void Draw_Fill (int x, int y, int w, int h, int c, int alpha)
 	);
 
 	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, fillcolor},
-		{x + w, y, 0, fillcolor},
-		{x + w, y + h, 0, fillcolor},
-		{x, y + h, 0, fillcolor}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, fillcolor},
+		{SCALE_X (x + w), SCALE_Y (y), 0, 1, fillcolor},
+		{SCALE_X (x + w), SCALE_Y (y + h), 0, 1, fillcolor},
+		{SCALE_X (x), SCALE_Y (y + h), 0, 1, fillcolor}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 
@@ -1053,20 +1102,20 @@ void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alp
 	);
 
 	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 
 	vert_2d_t verts[] =
 	{
-		{x, y, 0, fillcolor},
-		{x + w, y, 0, fillcolor},
-		{x + w, y + h, 0, fillcolor},
-		{x, y + h, 0, fillcolor}
+		{SCALE_X (x), SCALE_Y (y), 0, 1, fillcolor},
+		{SCALE_X (x + w), SCALE_Y (y), 0, 1, fillcolor},
+		{SCALE_X (x + w), SCALE_Y (y + h), 0, 1, fillcolor},
+		{SCALE_X (x), SCALE_Y (y + h), 0, 1, fillcolor}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 
@@ -1083,20 +1132,20 @@ void Draw_FadeScreen (int alpha)
 	DWORD fadecolor = D3DCOLOR_ARGB (BYTE_CLAMP (alpha), 0, 0, 0);
 
 	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 
 	vert_2d_t verts[] =
 	{
-		{0, 0, 0, fadecolor},
-		{vid.width, 0, 0, fadecolor},
-		{vid.width, vid.height, 0, fadecolor},
-		{0, vid.height, 0, fadecolor}
+		{SCALE_X (0), SCALE_Y (0), 0, 1, fadecolor},
+		{SCALE_X (vid.width), SCALE_Y (0), 0, 1, fadecolor},
+		{SCALE_X (vid.width), SCALE_Y (vid.height), 0, 1, fadecolor},
+		{SCALE_X (0), SCALE_Y (vid.height), 0, 1, fadecolor}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 
@@ -1121,21 +1170,21 @@ void Draw_PolyBlend (void)
 	);
 
 	D3D_SetTextureColorMode (0, D3DTOP_DISABLE);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 
 	vert_2d_t verts[] =
 	{
 		// don't go down into the status bar area
-		{0, 0, 0, blendcolor},
-		{vid.width, 0, 0, blendcolor},
-		{vid.width, vid.height - sb_lines, 0, blendcolor},
-		{0, vid.height - sb_lines, 0, blendcolor}
+		{SCALE_X (0), SCALE_Y (0), 0, 1, blendcolor},
+		{SCALE_X (vid.width), SCALE_Y (0), 0, 1, blendcolor},
+		{SCALE_X (vid.width), SCALE_Y (vid.height - sb_lines), 0, 1, blendcolor},
+		{SCALE_X (0), SCALE_Y (vid.height - sb_lines), 0, 1, blendcolor}
 	};
 
 	D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, 2, verts, sizeof (vert_2d_t));
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1);
-	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	D3D_SetFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 
@@ -1182,7 +1231,6 @@ void D3D_Set2D (void)
 	d3d_2DViewport.MinZ = 0.0f;
 	d3d_2DViewport.MaxZ = 1.0f;
 
-	// because the underwater warp needs it's own beginscene/endscene pair, we need a beginscene here too...
 	d3d_Device->SetViewport (&d3d_2DViewport);
 
 	// disable depth testing and writing
@@ -1192,25 +1240,16 @@ void D3D_Set2D (void)
 	// no backface culling
 	D3D_BackfaceCull (D3DCULL_NONE);
 
-	// view matrix
-	d3d_ViewMatrixStack->Reset ();
-	d3d_ViewMatrixStack->LoadIdentity ();
-
-	// world matrix
-	d3d_WorldMatrixStack->Reset ();
-	d3d_WorldMatrixStack->LoadIdentity ();
+	// evaluate scaling factor for 2d rendering (uses D3DFVF_RHW instead of transforms)
+	vert2dscale_x = (float) d3d_CurrentMode.Width / (float) vid.width;
+	vert2dscale_y = (float) d3d_CurrentMode.Height / (float) vid.height;
 
 	// state
-	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
 	D3D_SetTexCoordIndexes (0);
 
 	// draw the underwater warp here - all the above state is common but it uses a different orthographic matrix
 	if (!d3d_RenderDef.automap) D3D_DrawUnderwaterWarp ();
-
-	// projection matrix
-	d3d_ProjMatrixStack->Reset ();
-	d3d_ProjMatrixStack->LoadIdentity ();
-	d3d_ProjMatrixStack->Ortho2D (0, vid.width, vid.height, 0, 0, 1);
 
 	// modulate alpha always here
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);

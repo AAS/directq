@@ -47,6 +47,9 @@ CD3D_MatrixStack::CD3D_MatrixStack (D3DTRANSFORMSTATETYPE trans)
 	// force to dirty on creation so that we can get an immediate SetTransform from the device if it's used
 	// without any transforms set on the matrix.  we can't do a SetTransform here as the device might not exist yet! 
 	this->dirty = true;
+
+	// no left to right conversion
+	this->RHtoLH = false;
 }
 
 
@@ -182,8 +185,9 @@ void CD3D_MatrixStack::SetMatrix (D3DXMATRIX *m)
 
 void CD3D_MatrixStack::Ortho2D (float left, float right, float bottom, float top, float znear, float zfar)
 {
-	// there's nowt to stop you putting an ortho or a perspective matrix on a world transform if you wish...
-	D3DXMatrixOrthoOffCenterRH (&this->theStack[this->currdepth], left, right, bottom, top, znear, zfar);
+	D3DXMATRIX tmp;
+	D3DXMatrixOrthoOffCenterRH (&tmp, left, right, bottom, top, znear, zfar);
+	this->theStack[this->currdepth] = tmp * this->theStack[this->currdepth];
 
 	// dirty the matrix
 	this->dirty = true;
@@ -192,14 +196,23 @@ void CD3D_MatrixStack::Ortho2D (float left, float right, float bottom, float top
 
 void CD3D_MatrixStack::Perspective3D (float fovy, float screenaspect, float znear, float zfar)
 {
-	// there's nowt to stop you putting an ortho or a perspective matrix on a world transform if you wish...
-	D3DXMatrixPerspectiveFovRH (&this->theStack[this->currdepth], D3DXToRadian (fovy), screenaspect, znear, zfar);
+	D3DXMATRIX tmp;
+	D3DXMatrixPerspectiveFovRH (&tmp, D3DXToRadian (fovy), screenaspect, znear, zfar);
+	this->theStack[this->currdepth] = tmp * this->theStack[this->currdepth];
 
-	// infinite projection
-	float e = 0.000001f;
+	// dirty the matrix
+	this->dirty = true;
+}
 
-	this->theStack[this->currdepth]._33 = -1 + e;
-	this->theStack[this->currdepth]._34 = -1;
+
+void CD3D_MatrixStack::Frustum3D (float fovx, float fovy, float znear, float zfar)
+{
+	float xmax = znear * tan ((fovx * M_PI) / 360.0);
+	float ymax = znear * tan ((fovy * M_PI) / 360.0);
+
+	D3DXMATRIX tmp;
+	D3DXMatrixPerspectiveOffCenterRH (&tmp, -xmax, xmax, -ymax, ymax, znear, zfar);
+	this->theStack[this->currdepth] = tmp * this->theStack[this->currdepth];
 
 	// dirty the matrix
 	this->dirty = true;

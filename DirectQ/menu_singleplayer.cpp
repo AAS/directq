@@ -112,14 +112,14 @@ typedef struct save_game_info_s
 	char time[64];
 	char secrets[64];
 	char savetime[64];
-	char filename[MAX_OSPATH];
+	char filename[MAX_PATH];
 } save_game_info_t;
 
 
 void GetSaveInfo (FILE *f, char *filename, save_game_info_t *si)
 {
 	int		j;
-	char	name[MAX_OSPATH];
+	char	name[MAX_PATH];
 	int		version;
 	float	dummy;
 	int		stuff_total;
@@ -312,11 +312,7 @@ public:
 	~CSaveInfo ()
 	{
 		// cascade destructors along the list
-		if (this->Next)
-		{
-			delete this->Next;
-			this->Next = NULL;
-		}
+		SAFE_DELETE (this->Next);
 	}
 
 	CSaveInfo *Next;

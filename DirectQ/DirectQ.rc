@@ -2,7 +2,8 @@
 #include "resource.h"
 
 // bitmaps and other image types
-IDB_SPLASH				BITMAP		"splash.bmp"
+IDR_SPLASH				RCDATA		"splash.png"
+
 IDR_PARTICLEDOT			RCDATA		"particledot.png"
 
 IDR_QMBBLOOD			RCDATA		"qmbblood.png"

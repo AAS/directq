@@ -26,15 +26,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <windows.h>
 #define WM_MOUSEWHEEL                   0x020A
 
-#ifndef SERVERONLY
+extern HRESULT hr;
+
 #include <ddraw.h>
 #include <dsound.h>
-#ifndef GLQUAKE
-#include <mgraph.h>
-#endif
-#endif
 
-extern	HINSTANCE	global_hInstance;
 extern	int			global_nCmdShow;
 
 #ifndef SERVERONLY
@@ -77,5 +73,9 @@ extern HANDLE	hinput, houtput;
 void IN_UpdateClipCursor (void);
 
 void VID_SetDefaultMode (void);
+
+// these are needed in vidnt and sys_win
+LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+#define D3D_WINDOW_CLASS_NAME "D3DQuake Window Class"
 
 #endif

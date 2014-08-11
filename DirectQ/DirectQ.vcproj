@@ -149,7 +149,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="dxguid.lib dsound.lib comctl32.lib winmm.lib wsock32.lib d3d9.lib d3dx9.lib odbc32.lib odbccp32.lib"
-				OutputFile="c:\quake\directq.exe"
+				OutputFile="C:\Quake\DirectQ.exe"
 				LinkIncremental="1"
 				EnableUAC="false"
 				UACExecutionLevel="2"
@@ -258,6 +258,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\d3d_enum.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\d3d_matrix.cpp"
 				>
 			</File>
@@ -338,6 +342,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\location.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\mathlib.cpp"
 				>
 			</File>
@@ -355,6 +363,10 @@
 			</File>
 			<File
 				RelativePath=".\menu_singleplayer.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\menu_video.cpp"
 				>
 			</File>
 			<File
@@ -468,6 +480,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\CGdiPlusBitmap.h"
+				>
+			</File>
+			<File
 				RelativePath=".\client.h"
 				>
 			</File>
@@ -493,10 +509,6 @@
 			</File>
 			<File
 				RelativePath=".\d3d_quake.h"
-				>
-			</File>
-			<File
-				RelativePath=".\dosisms.h"
 				>
 			</File>
 			<File
@@ -529,6 +541,10 @@
 			</File>
 			<File
 				RelativePath=".\keys.h"
+				>
+			</File>
+			<File
+				RelativePath=".\location.h"
 				>
 			</File>
 			<File

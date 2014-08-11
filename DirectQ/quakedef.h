@@ -20,7 +20,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // quakedef.h -- primary header for client
 
 // be a little kinder to the CRT in Quake by telling it to act like it's single-threaded
-#define _CRT_DISABLE_PERFCRIT_LOCKS
+// #define _CRT_DISABLE_PERFCRIT_LOCKS
+
+// here we define a windows version to ensure that we'll always compile OK
+#define WINVER 0x0500
+#define _WIN32_WINNT 0x0500
 
 // let's be able to do assertions everywhere
 #include <assert.h>
@@ -40,14 +44,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 typedef char quakepath[260];
 
-// use to wrap any data type in a linked list
-template <class T> class qListWrapper
-{
-public:
-	~qListWrapper (void);
-	struct qListWrapper *next;
-	T data;
-};
 
 // savegame version for all savegames
 #define	SAVEGAME_VERSION	5
@@ -77,27 +73,8 @@ public:
 #include <stdlib.h>
 #include <setjmp.h>
 
-#if defined(_WIN32) && !defined(WINDED)
-
-#if defined(_M_IX86)
-#define __i386__	1
-#endif
-
-#else
-
-#endif
-
-#if defined __i386__ // && !defined __sun__
-#define id386	1
-#else
-#define id386	0
-#endif
-
-#if id386
-#define UNALIGNED_OK	1	// set to 0 if unaligned accesses are not supported
-#else
+// was 1; does this actually DO anything?  Not mentioned in MSDN; must be WinQuake or DOSQuake legacy
 #define UNALIGNED_OK	0
-#endif
 
 // !!! if this is changed, it must be changed in d_ifacea.h too !!!
 #define CACHE_SIZE	32		// used to align key data structures
@@ -116,20 +93,23 @@ public:
 #define	ROLL	2
 
 
-#define	MAX_QPATH		64			// max length of a quake game pathname
-#define	MAX_OSPATH		128			// max length of a filesystem pathname
+// max length of a quake game pathname
+// this cannot be changed as struct members on disk use it
+#define	MAX_QPATH		64
+
 
 #define	ON_EPSILON		0.1			// point on plane side epsilon
 
-#define	MAX_MSGLEN	MAX_DATAGRAM //8000	// max length of a reliable message
-#define	MAX_DATAGRAM	(NETFLAG_DATA - 1 - NET_HEADERSIZE) //1024	// max length of unreliable message
+#define	MAX_MSGLEN		65536
+#define	MAX_DATAGRAM	65536
 #define	MAX_DATAGRAM2	sv_max_datagram
+
 extern int		sv_max_datagram;	// is default MAX_DATAGRAM
 
 //
 // per-level limits
 //
-#define	MAX_EDICTS		8192		// protocol limit
+#define	MAX_EDICTS		65536		// protocol limit
 #define	MAX_LIGHTSTYLES	64
 
 // protocol limit values - bumped from bjp
@@ -252,6 +232,7 @@ typedef struct
 	int		colormap;
 	int		skin;
 	int		effects;
+	byte	alpha;
 } entity_state_t;
 
 
@@ -319,11 +300,11 @@ extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
 
 extern	bool	host_initialized;		// true if into command execution
-extern	double		host_frametime;
+extern	float		host_frametime;
 extern	byte		*host_basepal;
 extern	byte		*host_colormap;
 extern	int			host_framecount;	// incremented every frame, never reset
-extern	double		realtime;			// not bounded in any way, changed at
+extern	float		realtime;			// not bounded in any way, changed at
 										// start of every frame, never reset
 
 void Host_ClearMemory (void);
@@ -370,6 +351,9 @@ void Chase_Update (void);
 
 // object release for all COM objects and interfaces
 #define SAFE_RELEASE(COM_Generic) {if ((COM_Generic)) {(COM_Generic)->Release (); (COM_Generic) = NULL;}}
+
+// and for C++ new stuffies
+#define SAFE_DELETE(p) {if (p) delete (p); (p) = NULL;}
 
 // can't put this in common.h as it doens't know what a cvar_t is
 // optionally creates the directory if it doesn't exist

@@ -37,16 +37,21 @@ void Menu_MainExitQuake (void);
 
 void Host_Quit_f (void)
 {
+	CL_Disconnect ();
+	Host_ShutdownServer (false);
+	Sys_Quit ();
+}
+
+
+void Host_QuitWithPrompt_f (void)
+{
 	if (key_dest != key_console)
 	{
 		Menu_MainExitQuake ();
 		return;
 	}
 
-	CL_Disconnect ();
-	Host_ShutdownServer(false);		
-
-	Sys_Quit ();
+	Host_Quit_f ();
 }
 
 
@@ -486,6 +491,9 @@ void Host_DoSavegame (char *savename)
 		Con_Printf ("ERROR: couldn't open %s.\n", name);
 		return;
 	}
+
+	// saving can cause sound to stall while disk IO is busy so clear the buffer first
+	S_ClearBuffer ();
 	
 	fprintf (f, "%i\n", SAVEGAME_VERSION);
 	Host_SavegameComment (comment);
@@ -581,7 +589,7 @@ Host_Loadgame_f
 */
 void Host_Loadgame_f (void)
 {
-	char	name[MAX_OSPATH];
+	char	name[MAX_PATH];
 	FILE	*f;
 	char	mapname[MAX_QPATH];
 	float	time, tfloat;
@@ -1105,7 +1113,7 @@ void Host_PreSpawn_f (void)
 		Con_Printf ("prespawn not valid -- allready spawned\n");
 		return;
 	}
-	
+
 	SZ_Write (&host_client->message, sv.signon.data, sv.signon.cursize);
 	MSG_WriteByte (&host_client->message, svc_signonnum);
 	MSG_WriteByte (&host_client->message, 2);
@@ -1219,8 +1227,8 @@ void Host_Spawn_f (void)
 	ent = EDICT_NUM( 1 + (host_client - svs.clients) );
 	MSG_WriteByte (&host_client->message, svc_setangle);
 	for (i=0 ; i < 2 ; i++)
-		MSG_WriteAngle (&host_client->message, ent->v.angles[i] );
-	MSG_WriteAngle (&host_client->message, 0 );
+		MSG_WriteAngle (&host_client->message, ent->v.angles[i], true);
+	MSG_WriteAngle (&host_client->message, 0, true);
 
 	SV_WriteClientdataToMessage (sv_player, &host_client->message);
 
@@ -1705,6 +1713,7 @@ Host_InitCommands
 ==================
 */
 cmd_t Host_Status_f_Cmd ("status", Host_Status_f);
+cmd_t Host_QuitWithPrompt_f_Cmd ("quit_with_prompt", Host_QuitWithPrompt_f);
 cmd_t Host_Quit_f_Cmd ("quit", Host_Quit_f);
 cmd_t Host_God_f_Cmd ("god", Host_God_f);
 cmd_t Host_Notarget_f_Cmd ("notarget", Host_Notarget_f);

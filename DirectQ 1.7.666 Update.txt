@@ -1,0 +1,89 @@
+BY WAY OF EXPLANATION
+=====================
+
+This release was originally intended to be 1.7.4, and was to have a limited subset of the features listed below;
+basically those towards the top of the list.  However, things got out of hand and I kept adding more and more,
+primarily as an excuse to have something to do other than finishing off the ProQuake messaging system.
+
+By the time I decided to leave the messaging in a semi-implemented state for this release I had added so much that
+I felt it was time to start bringing things together and get it out.  Unfortunately while I was going about this
+Metlslime went and documented the FitzQuake protocol, so I just had to put that in too.
+
+While all this was going on I had two other projects - one minor and one fairly substantial - on the go, both of
+which remain unfinished.  There was also the small matter of the usual Real Life.
+
+This was meant to be out AGES ago.  Sorry about that.
+
+The decision to bump the version number was made because of the large amount of significant changes and new
+features that went in.  I didn't want to call it 1.8 as I had, and still have, some very specific plans for that
+version.  Someone had mentioned that I had missed the boat by not having a 1.666, so here it is, a version number
+later.
+
+
+DIRECTQ 1.7.666 UPDATES
+=======================
+
+* Increased console buffer to 256k.
+* Removed dosisms.h (unused).
+* Added protocol selection to Multiplayer/New Game menu (included descriptive text for each protocol).
+* Improved texture resource management slightly.
+* Relaxed restriction on size of sky textures - can use 4x2 or upwards.
+* Added v_gunkick cvar (default 1 to replicate ID Quake) and moved all kick control cvars to archive.
+* Added bestweapon.
+* Removed baseline updating from PROTOCOL_VERSION_MH (any demos recorded with this version may become invalid).
+* Added +/-quick* commands to keybindings menu and removed ancient/rarely used stuff (keyboard look, look up, etc) from that menu.
+* Switched gamma handling from mixed to pure GDI.
+* Added say/team %l/%t/etc formatting (made it case-insensitive).
+* Added ProQuake message parsing (quite crude and incomplete ATM).
+* Added "vid_defaultmonitorgamma" command to revert monitor gamma to linear if it screws up.
+* Modified COM_Parse to enable parsing of full lines as well as tokens (for .loc files).
+* Added hud_centerhud cvar to control centering of entire HUD.
+* Added scr_viewsize, gl_conscale, scr_fov and scr_fovcompat to video menu even in simple mode.
+* Added comaptibility for DarkPlaces non-standard skin replacement locations.
+* Fixed dynamic lights were on models and objects even with r_dynamic 0.
+* Implemented dynamic far clipping plane depending on map size.
+* Adjusted dynamic far clipping to work off dimensions of current view.
+* Reworked sky and sky fog for compatibility with variable far clipping plane; same appearance at all values.
+* Switched 2D stuff to D3DFVF_XYZRHW for extra performance.
+* Adjusted r_dynamic so that values != 0 are now a scaling factor for dynamic lights.
+* Removed W Buffer.
+* Restored r_shadows mode.
+* Added d3d_infodump command to generate info about current state and driver for further analysis.
+* Fixed bug where an empty centerprint used to explicitly clear the previous one wasn't doing so.
+* Added "inc" command from FitzQuake.
+* Added "lastweapon" command to switch to last used weapon (added to keybindings menu).
+* Added ability to run DirectQ from any folder (not just your Quake folder) (limited in released version).
+* Restored original default gamma range.
+* Removed several stupid hacks that should not be needed any more.
+* Added r_overbright cvar to control overbrighting; default 1, valid values 0, 1, 2.  0 == default GLQuake.
+* Definitively fixed r_fullbright 1 mode.
+* Corrected oversaturation of lumas for different values of r_overbright.
+* Cleaned out lots of weird and horrible code in the menu system.
+* Bumped version number to 1.7.666.
+* Added vsync control via vid_vsync cvar; default 0 (vsync off).
+* Compiled for Windows 2000+ Compatibility.
+* Switched missing gfx.wad error message to something more friendly.
+* Standardised some startup calls with SDK examples.
+* Corrected handling of Ortho and Perspective matrixes so that they now multiply the previous value in the matrix.
+* Reworked fullbright handling to work correctly with custom colormaps that don't contain fullbright entries.
+* Reworked lighting ranges to be even more accurate to the Quake colormap.
+* Restored gl_texturemode command and options as in GLQuake.
+* Added cmdlist, cvarlist and cmdcvarlist to dump commands and/or cvars to console or file.
+* Relaxed restriction on external luma textures requiring to have luma texels in the native texture.
+* Rewrote lightmap handling and evicted a lot of horrible code.
+* Restored original software Quake and GLQuake 'm' lightstyle of 256 (was 264 for ('m' - 'a') * 22).
+* Removed gl_flashblend (again!)
+* Made r_fullbright consistent with different values of gl_overbright.
+* Disabled vid_restart at a disconnected console for release builds (graphical glitch city).
+* Fixed alias model cache bug (new for 1.7.666, was not in previous versions).
+* Resized initial memory allocations for peaks of a full run through all of ID1.
+* Fixed crash with -nosound.
+* Changed default underwater warp speed to more closely match software Quake.
+* Implemented FitzQuake protocol 666.
+* Implemented better fix for buffer overflow/memory access violation in PF_VarString.
+* Added r_filterrefresh cvar to prevent slow gfx cards from bottlenecking when everything else is fast (default 0).
+* Added r_waterwarp 2 mode for projection matrix waterwarps (also used if RTT warp is unavailable).
+* Switched game timer from QueryPerformance functions to multimedia timer (evil on x64 and multi-core).
+* Restored Draw_DebugChar.
+
+

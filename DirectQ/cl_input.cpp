@@ -52,7 +52,9 @@ kbutton_t	in_lookup, in_lookdown, in_moveleft, in_moveright;
 kbutton_t	in_strafe, in_speed, in_use, in_jump, in_attack;
 kbutton_t	in_up, in_down;
 
-int			in_impulse;
+// no impulse
+int	in_impulse = 0;
+int in_lastimpulse[2] = {0, 0};
 
 
 void KeyDown (kbutton_t *b)
@@ -155,8 +157,77 @@ void IN_UseDown (void) {KeyDown(&in_use);}
 void IN_UseUp (void) {KeyUp(&in_use);}
 void IN_JumpDown (void) {KeyDown(&in_jump);}
 void IN_JumpUp (void) {KeyUp(&in_jump);}
+void IN_Impulse (void) {in_impulse = atoi (Cmd_Argv(1));}
 
-void IN_Impulse (void) {in_impulse=atoi(Cmd_Argv(1));}
+// i'm a bit leery of this as it doesn't take mods/etc into account...
+int weaponstat[] = {STAT_SHELLS, STAT_SHELLS, STAT_NAILS, STAT_NAILS, STAT_ROCKETS, STAT_ROCKETS, STAT_CELLS};
+
+bool IsWeaponImpulse (int impulse)
+{
+	if (impulse > 0 && impulse < 9 && (impulse == 1 || ((cl.items & (IT_SHOTGUN << (impulse - 2))) && cl.stats[weaponstat[impulse - 2]])))
+		return true;
+
+	return false;
+}
+
+
+void CL_BestWeapon_f (void)
+{
+	int argc = Cmd_Argc ();
+
+	for (int i = 1; i < argc; i++)
+	{
+		int impulse = atoi (Cmd_Argv (i));
+
+		if (IsWeaponImpulse (impulse))
+		{
+			in_impulse = impulse;
+			break;
+		}
+	}
+}
+
+
+void CL_PlusQuickGrenade_f (void) {Cbuf_AddText ("-attack;wait;impulse 6;wait;+attack\n");}
+cmd_t CL_PlusQuickGrenade_Cmd ("+quickgrenade", CL_PlusQuickGrenade_f);
+
+void CL_MinusQuickGrenade_f (void) {Cbuf_AddText ("-attack;wait;bestweapon 7 8 5 3 4 2 1\n");}
+cmd_t CL_MinusQuickGrenade_Cmd ("-quickgrenade", CL_MinusQuickGrenade_f);
+
+void CL_PlusQuickRocket_f (void) {Cbuf_AddText ("-attack;wait;impulse 7;wait;+attack\n");}
+cmd_t CL_PlusQuickRocket_Cmd ("+quickrocket", CL_PlusQuickRocket_f);
+
+void CL_MinusQuickRocket_f (void) {Cbuf_AddText ("-attack;wait;bestweapon 8 5 3 4 2 7 1\n");}
+cmd_t CL_MinusQuickRocket_Cmd ("-quickrocket", CL_MinusQuickRocket_f);
+
+void CL_PlusQuickShaft_f (void) {Cbuf_AddText ("-attack;wait;impulse 8;wait;+attack\n");}
+cmd_t CL_PlusQuickShaft_Cmd ("+quickShaft", CL_PlusQuickShaft_f);
+
+void CL_MinusQuickShaft_f (void) {Cbuf_AddText ("-attack;wait;bestweapon 7 5 8 3 4 2 1\n");}
+cmd_t CL_MinusQuickShaft_Cmd ("-quickShaft", CL_MinusQuickShaft_f);
+
+void CL_PlusQuickShot_f (void) {Cbuf_AddText ("-attack;wait;impulse 2;wait;+attack\n");}
+cmd_t CL_PlusQuickShot_Cmd ("+quickShot", CL_PlusQuickShot_f);
+
+void CL_MinusQuickShot_f (void) {Cbuf_AddText ("-attack;wait;bestweapon 7 8 5 3 4 2 1\n");}
+cmd_t CL_MinusQuickShot_Cmd ("-quickShot", CL_MinusQuickShot_f);
+
+void CL_BestSafe_f (void) {Cbuf_AddText ("bestweapon 8 5 3 4 2 1\n");}
+cmd_t CL_BestSafe_Cmd ("bestsafe", CL_BestSafe_f);
+
+cmd_t CL_BestWeapon_Cmd ("bestweapon", CL_BestWeapon_f);
+
+void CL_LastWeapon_f (void)
+{
+	// ensure that the last impulse was a weapon
+	if (IsWeaponImpulse (in_lastimpulse[1]))
+	{
+		in_impulse = in_lastimpulse[1];
+	}
+}
+
+
+cmd_t CL_LastWeapon_Cmd ("lastweapon", CL_LastWeapon_f);
 
 /*
 ===============
@@ -315,10 +386,6 @@ void CL_BaseMove (usercmd_t *cmd)
 		cmd->sidemove *= cl_movespeedkey.value;
 		cmd->upmove *= cl_movespeedkey.value;
 	}
-
-#ifdef QUAKE2
-	cmd->lightlevel = cl.light_level;
-#endif
 }
 
 
@@ -333,72 +400,61 @@ void CL_SendMove (usercmd_t *cmd)
 	int		i;
 	int		bits;
 	sizebuf_t	buf;
-	byte	data[128];
-	
-	buf.maxsize = 128;
+	byte	data[256];
+
+	buf.maxsize = 256;
 	buf.cursize = 0;
 	buf.data = data;
-	
+	buf.allowoverflow = false;
+	buf.overflowed = false;
+
 	cl.cmd = *cmd;
 
-//
-// send the movement message
-//
+	// send the movement message
     MSG_WriteByte (&buf, clc_move);
-
 	MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
 
 	for (i = 0; i < 3; i++)
-		MSG_WriteClientAngle (&buf, cl.viewangles[i]);
-	
+		MSG_WriteClientAngle (&buf, cl.viewangles[i], false);
+
     MSG_WriteShort (&buf, cmd->forwardmove);
     MSG_WriteShort (&buf, cmd->sidemove);
     MSG_WriteShort (&buf, cmd->upmove);
 
-//
-// send button bits
-//
+	// send button bits
 	bits = 0;
-	
-	if ( in_attack.state & 3 )
-		bits |= 1;
-	in_attack.state &= ~2;
-	
-	if (in_jump.state & 3)
-		bits |= 2;
-	in_jump.state &= ~2;
-	
-    MSG_WriteByte (&buf, bits);
 
+	if (in_attack.state & 3) bits |= 1;
+	in_attack.state &= ~2;
+
+	if (in_jump.state & 3) bits |= 2;
+	in_jump.state &= ~2;
+
+    MSG_WriteByte (&buf, bits);
     MSG_WriteByte (&buf, in_impulse);
+
+	if (IsWeaponImpulse (in_impulse))
+	{
+		in_lastimpulse[1] = in_lastimpulse[0];
+		in_lastimpulse[0] = in_impulse;
+	}
+
 	in_impulse = 0;
 
-#ifdef QUAKE2
-//
-// light level
-//
-	MSG_WriteByte (&buf, cmd->lightlevel);
-#endif
+	// deliver the message (unless we're playing a demo in which case there is no server to deliver to)
+	if (cls.demoplayback) return;
 
-//
-// deliver the message
-//
-	if (cls.demoplayback)
-		return;
+	// allways dump the first two message, because it may contain leftover inputs
+	// from the last level
+	if (++cl.movemessages <= 2) return;
 
-//
-// allways dump the first two message, because it may contain leftover inputs
-// from the last level
-//
-	if (++cl.movemessages <= 2)
-		return;
-	
 	if (NET_SendUnreliableMessage (cls.netcon, &buf) == -1)
 	{
 		Con_Printf ("CL_SendMove: lost server connection\n");
 		CL_Disconnect ();
 	}
 }
+
 
 /*
 ============
@@ -440,7 +496,6 @@ cmd_t IN_KLookDown_Cmd ("+klook", IN_KLookDown);
 cmd_t IN_KLookUp_Cmd ("-klook", IN_KLookUp);
 cmd_t IN_MLookDown_Cmd ("+mlook", IN_MLookDown);
 cmd_t IN_MLookUp_Cmd ("-mlook", IN_MLookUp);
-
 
 void CL_InitInput (void)
 {

@@ -30,12 +30,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern int NumFilteredStates;
 void D3D_SetDefaultStates (void);
 
-DWORD d3d_3DFilterType = D3DTEXF_LINEAR;
-DWORD d3d_ZbufferEnableFunction = D3DZB_TRUE;
+D3DTEXTUREFILTERTYPE d3d_3DFilterMin = D3DTEXF_LINEAR;
+D3DTEXTUREFILTERTYPE d3d_3DFilterMag = D3DTEXF_LINEAR;
+D3DTEXTUREFILTERTYPE d3d_3DFilterMip = D3DTEXF_LINEAR;
 
 // declarations that don't really fit in anywhere else
 LPDIRECT3D9 d3d_Object = NULL;
 LPDIRECT3DDEVICE9 d3d_Device = NULL;
+
 D3DADAPTER_IDENTIFIER9 d3d_Adapter;
 D3DCAPS9 d3d_DeviceCaps;
 d3d_global_caps_t d3d_GlobalCaps;
@@ -65,10 +67,12 @@ viddef_t	vid;
 // quake palette
 unsigned	d_8to24table[256];
 
+// luma map palette
+unsigned	lumatable[256];
+
 // window state management
 bool d3d_DeviceLost = false;
 bool vid_canalttab = false;
-bool vid_wassuspended = false;
 bool vid_initialized = false;
 bool DDActive = true;
 bool scr_skipupdate;
@@ -85,29 +89,12 @@ D3DXVECTOR3 XVECTOR (1, 0, 0);
 D3DXVECTOR3 YVECTOR (0, 1, 0);
 D3DXVECTOR3 ZVECTOR (0, 0, 1);
 
-// message handlers
-LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
-LONG CDAudio_MessageHandler (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-
 // forward declarations of video menu functions
 void VID_MenuDraw (void);
 void VID_MenuKey (int key);
 
 // for building the menu after video comes up
 void Menu_VideoBuild (void);
-
-// input imports
-void IN_ActivateMouse (void);
-void IN_DeactivateMouse (void);
-void IN_HideMouse (void);
-void IN_ShowMouse (void);
-int MapKey (int key);
-
-void VID_UpdateWindowStatus (void);
-void ClearAllStates (void);
-void AppActivate (BOOL fActive, BOOL minimize);
-
-#define D3D_WINDOW_CLASS_NAME "D3DQuake Window Class"
 
 // fixme - merge these two
 HWND d3d_Window;
@@ -125,78 +112,57 @@ cvar_t		v_gamma ("gamma", "1", CVAR_ARCHIVE);
 cvar_t		r_gamma ("r_gamma", "1", CVAR_ARCHIVE);
 cvar_t		g_gamma ("g_gamma", "1", CVAR_ARCHIVE);
 cvar_t		b_gamma ("b_gamma", "1", CVAR_ARCHIVE);
+cvar_t		vid_vsync ("vid_vsync", "0", CVAR_ARCHIVE);
 
 // consistency with DP and FQ
 cvar_t r_anisotropicfilter ("gl_texture_anisotropy", "1", CVAR_ARCHIVE);
-
-
-typedef struct d3d_ModeDesc_s
-{
-	D3DDISPLAYMODE d3d_Mode;
-	bool AllowWindowed;
-	int BPP;
-	int ModeNum;
-
-	char ModeDesc[64];
-
-	struct d3d_ModeDesc_s *Next;
-} d3d_ModeDesc_t;
 
 d3d_ModeDesc_t *d3d_ModeList = NULL;
 
 D3DDISPLAYMODE d3d_DesktopMode;
 D3DDISPLAYMODE d3d_CurrentMode;
 
-
-D3DDISPLAYMODE d3d_BadDisplayMode =
-{
-	666,
-	666,
-	666,
-	D3DFMT_UNKNOWN
-};
-
-d3d_ModeDesc_t d3d_BadMode =
-{
-	d3d_BadDisplayMode,
-	false,
-	0,
-	-1,
-	"Bad Mode",
-	NULL
-};
+d3d_ModeDesc_t d3d_BadMode = {{666, 666, 666, D3DFMT_UNKNOWN}, false, 0, -1, "Bad Mode", NULL};
 
 
 // list of mode formats we wish to test
-D3DFORMAT AdapterModeDescs[] =
+D3DFORMAT d3d_AdapterModeDescs[] =
 {
 	// enumerate in this order
 	D3DFMT_R5G6B5,
 	D3DFMT_X1R5G5B5,
 	D3DFMT_A1R5G5B5,
 	D3DFMT_X8R8G8B8,
-	D3DFMT_A8R8G8B8,
-	D3DFMT_A2R10G10B10,
 	D3DFMT_UNKNOWN
-};
-
-char *FormatStrings[] =
-{
-	"R5G6B5",
-	"X1R5G5B5",
-	"A1R5G5B5",
-	"X8R8G8B8",
-	"A8R8G8B8",
-	"A2R10G10B10",
-	"Unknown (Windowed)"
 };
 
 
 // rather than having lots and lots and lots of globals all holding multiple instances of the same data, let's do
 // something radical, scary and potentially downright dangerous, and clean things up a bit.
 DWORD		WindowStyle, ExWindowStyle;
-int			window_center_x, window_center_y, window_x, window_y, window_width, window_height;
+int			window_center_x, window_center_y, window_x, window_y;
 RECT		window_rect;
+
+void ClearAllStates (void);
+void AppActivate (BOOL fActive, BOOL minimize);
+
+
+/*
+================
+VID_UpdateWindowStatus
+================
+*/
+void VID_UpdateWindowStatus (void)
+{
+	window_rect.left = window_x;
+	window_rect.top = window_y;
+	window_rect.right = window_x + d3d_CurrentMode.Width;
+	window_rect.bottom = window_y + d3d_CurrentMode.Height;
+	window_center_x = (window_rect.left + window_rect.right) / 2;
+	window_center_y = (window_rect.top + window_rect.bottom) / 2;
+
+	IN_UpdateClipCursor ();
+}
 
 
 void D3D_SetConSize (int modewidth, int modeheight);
@@ -276,10 +242,6 @@ void D3D_ResetWindow (D3DDISPLAYMODE *mode)
 	glwidth = mode->Width;
 	glheight = mode->Height;
 
-	// more craziness, loads of different variables storing the same thing... yuck yuck yuck - somebody shoot Carmack.
-	window_width = glwidth;
-	window_height = glheight;
-
 	// reset console size
 	D3D_SetConSize (mode->Width, mode->Height);
 
@@ -308,28 +270,9 @@ void D3D_SetGamma (D3DGAMMARAMP *ramp)
 	}
 
 	// set using GDI, NOT direct3d
-	// the D3DGAMMARAMP is already in the exact layout GDI needs, ao we're good...
 	SetDeviceGammaRamp (hDC, ramp);
 
 	ReleaseDC (d3d_Window, hDC);
-}
-
-
-/*
-================
-VID_UpdateWindowStatus
-================
-*/
-void VID_UpdateWindowStatus (void)
-{
-	window_rect.left = window_x;
-	window_rect.top = window_y;
-	window_rect.right = window_x + window_width;
-	window_rect.bottom = window_y + window_height;
-	window_center_x = (window_rect.left + window_rect.right) / 2;
-	window_center_y = (window_rect.top + window_rect.bottom) / 2;
-
-	IN_UpdateClipCursor ();
 }
 
 
@@ -339,8 +282,8 @@ D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 
 	if (ModeFormat == D3DFMT_UNKNOWN) ModeFormat = d3d_DesktopMode.Format;
 
-	// prefer faster formats
-	D3DFORMAT DepthStencilFormats[] = {D3DFMT_D24X8, D3DFMT_D16, D3DFMT_D24S8, D3DFMT_UNKNOWN};
+	// prefer faster formats (but prefer to get a stencil buffer)
+	D3DFORMAT DepthStencilFormats[] = {D3DFMT_D24S8, D3DFMT_D24X8, D3DFMT_D16, D3DFMT_UNKNOWN};
 
 	for (int i = 0; ; i++)
 	{
@@ -348,7 +291,7 @@ D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
 		if (DepthStencilFormats[i] == D3DFMT_UNKNOWN) break;
 
 		// check that the format exists
-		HRESULT hr = d3d_Object->CheckDeviceFormat
+		hr = d3d_Object->CheckDeviceFormat
 		(
 			D3DADAPTER_DEFAULT,
 			D3DDEVTYPE_HAL,
@@ -409,7 +352,7 @@ void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 	pp->Flags = D3DPRESENTFLAG_DISCARD_DEPTHSTENCIL;
 
 	pp->SwapEffect = D3DSWAPEFFECT_DISCARD;
-	pp->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+	pp->PresentationInterval = vid_vsync.integer ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
 	pp->BackBufferCount = 1;
 	pp->BackBufferWidth = mode->Width;
 	pp->BackBufferHeight = mode->Height;
@@ -517,29 +460,128 @@ void D3D_DescribeMode_f (void)
 }
 
 
-void D3D_VidRestart_f (void)
+void D3D_PreloadTextures (void);
+
+void D3D_RecoverDeviceResources (void)
+{
+	// recreate anything that needs to be recreated
+	D3D_InitUnderwaterTexture ();
+
+	// set default states
+	D3D_SetDefaultStates ();
+
+	// pull textures back to vram
+	D3D_PreloadTextures ();
+
+	// force an update of per-frame checked states
+	d3d_ForceStateUpdates = true;
+
+	// force a recalc of the refdef
+	vid.recalc_refdef = true;
+}
+
+
+void D3D_LoseDeviceResources (void)
 {
 	// release anything that needs to be released
 	D3D_KillUnderwaterTexture ();
 
+	// shove out all managed resources back to system memory
+	d3d_Device->EvictManagedResources ();
+
 	// ensure that present params are valid
 	D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
+}
+
+
+void Host_GetConsoleCommands (void);
+
+void D3D_VidRestart_f (void)
+{
+	// ok, this is evil but it's better than the alternative right now.
+#ifndef _DEBUG
+	if (!sv.active)
+	{
+		if (key_dest == key_console)
+		{
+			Con_Printf ("vid_restart from a disconnected console is currently broken\n");
+			Con_Printf ("either do it while connected or use the video menu instead\n");
+			return;
+		}
+	}
+#endif
+
+	// make sure that we're ready to reset
+	while (true)
+	{
+		Sleep (10);
+		hr = d3d_Device->TestCooperativeLevel ();
+
+		if (hr == D3D_OK)
+			break;
+		else if (hr == D3DERR_DEVICELOST)
+		{
+			d3d_DeviceLost = true;
+			return;
+		}
+		else if (hr == D3DERR_DEVICENOTRESET)
+			break;
+		else Sys_Error ("");
+	}
+
+	// clear out stuff that needs to be cleared out before we can reset it
+	D3D_LoseDeviceResources ();
 
 	// reset the device
-	HRESULT hr = d3d_Device->Reset (&d3d_PresentParams);
+	hr = d3d_Device->Reset (&d3d_PresentParams);
 
 	if (FAILED (hr))
 	{
+		// a failed reset causes a lost device
+		d3d_DeviceLost = true;
 		Con_Printf ("D3D_VidRestart_f: Unable to Reset Device.\n");
 		return;
 	}
 
-	// tell the main renderer that the device has been "lost"
-	// (it hasn't really, this is just a trick to send it into normal recovery move)
-	d3d_DeviceLost = true;
+	// now we wait for the reset to complete
+	while (true)
+	{
+		Sleep (10);
+		hr = d3d_Device->TestCooperativeLevel ();
 
-	// this won't actually be displayed until after the reset completes as SCR_UpdateScreen is blocked
-	Con_Printf ("vid_restart OK\n");
+		switch (hr)
+		{
+		case D3D_OK:
+			// recover stuff
+			D3D_RecoverDeviceResources ();
+
+			// this won't actually be displayed until after the reset completes as SCR_UpdateScreen is blocked
+			Con_Printf ("vid_restart OK\n");
+
+			if (!sv.active)
+			{
+				if (key_dest == key_console)
+				{
+					SCR_BlackScreen ();
+					Cbuf_InsertText ("togglemenu\n");
+					Cbuf_Execute ();
+					SCR_UpdateScreen ();
+				}
+			}
+			return;
+
+		case D3DERR_DEVICELOST:
+			d3d_DeviceLost = true;
+			return;
+
+		case D3DERR_DEVICENOTRESET:
+			break;
+
+		case D3DERR_DRIVERINTERNALERROR:
+		default:
+			Sys_Error ("");
+		}
+	}
 }
 
 
@@ -590,22 +632,22 @@ void D3D_EnumerateVideoModes (void)
 	for (int m = 0; ; m++)
 	{
 		// end of the list
-		if (AdapterModeDescs[m] == D3DFMT_UNKNOWN) break;
+		if (d3d_AdapterModeDescs[m] == D3DFMT_UNKNOWN) break;
 
 		// see can we support a fullscreen format with this mode format
-		HRESULT hr = d3d_Object->CheckDeviceType (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, AdapterModeDescs[m], AdapterModeDescs[m], FALSE);
+		hr = d3d_Object->CheckDeviceType (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], d3d_AdapterModeDescs[m], FALSE);
 		if (FAILED (hr)) continue;
 
 		// see can we create a standard texture on it
-		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
+		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
 		if (FAILED (hr)) continue;
 
 		// see can we create an alpha texture on it
-		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
+		hr = d3d_Object->CheckDeviceFormat (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_AdapterModeDescs[m], 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
 		if (FAILED (hr)) continue;
 
 		// get the count of modes for this format
-		int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, AdapterModeDescs[m]);
+		int ModeCount = d3d_Object->GetAdapterModeCount (D3DADAPTER_DEFAULT, d3d_AdapterModeDescs[m]);
 
 		// no modes available for this format
 		if (!ModeCount) continue;
@@ -616,7 +658,7 @@ void D3D_EnumerateVideoModes (void)
 			D3DDISPLAYMODE mode;
 
 			// get the mode description
-			d3d_Object->EnumAdapterModes (D3DADAPTER_DEFAULT, AdapterModeDescs[m], i, &mode);
+			d3d_Object->EnumAdapterModes (D3DADAPTER_DEFAULT, d3d_AdapterModeDescs[m], i, &mode);
 
 			// we're only interested in modes that match the desktop refresh rate
 			if (mode.RefreshRate != d3d_DesktopMode.RefreshRate) continue;
@@ -670,7 +712,7 @@ void D3D_EnumerateVideoModes (void)
 			}
 
 			// store the description
-			strcpy (newmode->ModeDesc, FormatStrings[m]);
+			strcpy (newmode->ModeDesc, D3DTypeToString (d3d_AdapterModeDescs[m]));
 
 			// store the number
 			newmode->ModeNum = NumModes++;
@@ -854,98 +896,83 @@ void D3D_FindBestFullscreenMode (D3DDISPLAYMODE *mode)
 }
 
 
+void D3D_InfoDump_f (void)
+{
+	Con_Printf ("Getting driver info... ");
+	FILE *f = fopen ("driver.bin", "wb");
+
+	if (f)
+	{
+		// dump out info about the card and the currently running state so that we can analyze it later
+		D3DADAPTER_IDENTIFIER9 adinfo;
+		d3d_Object->GetAdapterIdentifier (D3DADAPTER_DEFAULT, 0, &adinfo);
+		fwrite (&adinfo, sizeof (D3DADAPTER_IDENTIFIER9), 1, f);
+
+		D3DCAPS9 dcaps;
+		d3d_Device->GetDeviceCaps (&dcaps);
+		fwrite (&dcaps, sizeof (D3DCAPS9), 1, f);
+
+		fwrite (&d3d_PresentParams, sizeof (D3DPRESENT_PARAMETERS), 1, f);
+
+		Con_Printf ("Done\n");
+		return;
+	}
+
+	Con_Printf ("Failed to get driver info\n");
+}
+
+
+cmd_t d3d_InfoDump_Cmd ("d3d_infodump", D3D_InfoDump_f);
+
+void D3D_ReportCreation (D3DDISPLAYMODE *mode, int flags)
+{
+	Con_Printf ("Video mode %i (%ix%i) Initialized\n", d3d_mode.integer, mode->Width, mode->Height);
+	Con_Printf ("Back Buffer Format: %s (created %i %s)\n", D3DTypeToString (mode->Format), d3d_PresentParams.BackBufferCount, d3d_PresentParams.BackBufferCount > 1 ? "backbuffers" : "backbuffer");
+	Con_Printf ("Depth/Stencil format: %s\n", D3DTypeToString (d3d_PresentParams.AutoDepthStencilFormat));
+	Con_Printf ("Refresh Rate: %i Hz (%s)\n", mode->RefreshRate, mode->RefreshRate ? "Fullscreen" : "Windowed");
+	Con_Printf ("\n");
+
+	if (flags & D3DCREATE_HARDWARE_VERTEXPROCESSING)
+	{
+		d3d_VertexBufferUsage = 0;
+		Con_Printf ("Using Hardware Vertex Processing\n\n");
+	}
+	else
+	{
+		d3d_VertexBufferUsage = D3DUSAGE_SOFTWAREPROCESSING;
+		Con_Printf ("Using Software Vertex Processing\n\n");
+	}
+}
+
+
 void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 {
 	D3D_SetPresentParams (&d3d_PresentParams, mode);
 
-	// create flags - try 'em all until we run out of options!
-	LONG DesiredFlags[] =
-	{
-		// prefer hardware vertex processing
-		// we can't use a pure device as we want to do some gets on renderstates
-		D3DCREATE_HARDWARE_VERTEXPROCESSING,
-		D3DCREATE_SOFTWARE_VERTEXPROCESSING,
-		-1
-	};
+	// prefer hardware vertex processing
+	// we can't use a pure device as we want to do some gets on renderstates
+	LONG DesiredFlags[] = {D3DCREATE_HARDWARE_VERTEXPROCESSING, D3DCREATE_SOFTWARE_VERTEXPROCESSING, -1};
 
 	for (int i = 0; ; i++)
 	{
-		if (DesiredFlags[i] == -1)
-		{
-			// failed
-			Sys_Error ("D3D_InitDirect3D: d3d_Object->CreateDevice failed");
-			return;
-		}
+		// failed
+		if (DesiredFlags[i] == -1) Sys_Error ("D3D_InitDirect3D: d3d_Object->CreateDevice failed");
 
-		// attempt to create the device
-		// Quake requires D3DCREATE_FPU_PRESERVE or it's internal timers go totally out of whack.
-		// D3DCREATE_DISABLE_DRIVER_MANAGEMENT seems recommended; per the SDK:
-		// Direct3D drivers are free to implement the 'driver managed textures' capability, indicated by D3DCAPS2_CANMANAGERESOURCE, which
-		// allows the driver to handle the resource management instead of the runtime. For the (rare) driver that implements this feature,
-		// the exact behavior of the driver's resource manager can vary widely and you should contact the driver vendor for details on how
-		// this works for their implementation. Alternatively, you can ensure that the runtime manager is always used instead by specifying 
-		// D3DCREATE_DISABLE_DRIVER_MANAGEMENT when creating the device.
-		HRESULT hr = d3d_Object->CreateDevice
-		(
-			D3DADAPTER_DEFAULT,
-			D3DDEVTYPE_HAL,
-			d3d_Window,
-			DesiredFlags[i] | D3DCREATE_FPU_PRESERVE | D3DCREATE_DISABLE_DRIVER_MANAGEMENT,
-			&d3d_PresentParams,
-			&d3d_Device
-		);
+		// attempt to create the device - we can ditch all of the extra flags now :)
+		hr = d3d_Object->CreateDevice (D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3d_Window, DesiredFlags[i], &d3d_PresentParams, &d3d_Device);
 
 		if (SUCCEEDED (hr))
 		{
-			Con_Printf ("Video mode %i (%ix%i) Initialized\n", (int) d3d_mode.value, mode->Width, mode->Height);
-
-			for (int j = 0; ; j++)
-			{
-				// we ensured that the bb will be one of these formats at startup time
-				if (mode->Format == AdapterModeDescs[j])
-				{
-					Con_Printf ("Back Buffer Format: %s\n", FormatStrings[j]);
-					break;
-				}
-			}
-
-			Con_Printf ("Refresh Rate: %i Hz (%s)\n", mode->RefreshRate, mode->RefreshRate ? "Fullscreen" : "Windowed");
-			Con_Printf ("\n");
-
-			if (DesiredFlags[i] & D3DCREATE_PUREDEVICE)
-				Con_Printf ("Created Direct3D Pure Device\n");
-			else Con_Printf ("Created Direct3D Device\n");
-
-			// this is silly - if it supports mixed it will always support hardware!
-			if (DesiredFlags[i] & D3DCREATE_HARDWARE_VERTEXPROCESSING)
-			{
-				d3d_VertexBufferUsage = 0;
-				Con_Printf ("Using Hardware Vertex Processing\n\n");
-			}
-			else
-			{
-				d3d_VertexBufferUsage = D3DUSAGE_SOFTWAREPROCESSING;
-				Con_Printf ("Using Software Vertex Processing\n\n");
-			}
-
+			D3D_ReportCreation (mode, DesiredFlags[i]);
 			break;
 		}
 	}
 
-	if (d3d_PresentParams.AutoDepthStencilFormat == D3DFMT_D24S8)
-		Con_Printf ("Depth/Stencil format: D24S8\n");
-	else if (d3d_PresentParams.AutoDepthStencilFormat == D3DFMT_D24X8)
-		Con_Printf ("Depth/Stencil format: D24X8 (stencil buffer unavailable)\n");
-	else if (d3d_PresentParams.AutoDepthStencilFormat == D3DFMT_D16)
-		Con_Printf ("Depth/Stencil format: D16 (stencil buffer unavailable)\n");
-	else
-	{
-		Sys_Error ("D3D_InitDirect3D: Unknown Depth/Stencil format");
-		return;
-	}
+	// clear to black immediately
+	SCR_BlackScreen ();
 
 	// get capabilities on the device
-	HRESULT hr = d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
+	hr = d3d_Device->GetDeviceCaps (&d3d_DeviceCaps);
 
 	if (FAILED (hr))
 	{
@@ -959,90 +986,35 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 	Con_Printf ("Maximum Simultaneous Textures: %i\n", d3d_DeviceCaps.MaxSimultaneousTextures);
 	Con_Printf ("Maximum Texture Size: %i x %i\n", d3d_DeviceCaps.MaxTextureWidth, d3d_DeviceCaps.MaxTextureHeight);
 	Con_Printf ("Maximum Anisotropic Filter: %i\n", d3d_DeviceCaps.MaxAnisotropy);
+	Con_Printf ("\n");
 
-	// check for the availability of w buffering
-	if (d3d_DeviceCaps.RasterCaps & D3DPRASTERCAPS_WBUFFER)
-	{
-		d3d_ZbufferEnableFunction = D3DZB_USEW;
-		Con_Printf ("Using W-Buffer\n");
-	}
-	else d3d_ZbufferEnableFunction = D3DZB_TRUE;
+	// check for availability of mandatory texture formats
+	D3D_CheckTextureFormat (D3DFMT_A8R8G8B8, TRUE);
+	D3D_CheckTextureFormat (D3DFMT_X8R8G8B8, TRUE);
+	D3D_CheckTextureFormat (D3DFMT_L8, TRUE);
+	D3D_CheckTextureFormat (D3DFMT_A8L8, TRUE);
 
-	// test texture
-	LPDIRECT3DTEXTURE9 tex;
-
-	// check for compressed texture formats
-	hr = d3d_Device->CreateTexture
-	(
-		128,
-		128,
-		1,
-		0,
-		D3DFMT_DXT1,
-		D3DPOOL_DEFAULT,
-		&tex,
-		NULL
-	);
-
-	if (SUCCEEDED (hr))
-	{
-		// done with the texture
-		tex->Release ();
-		d3d_GlobalCaps.supportDXT1 = true;
-		Con_Printf ("Allowing DXT1 Compressed Texture Format\n");
-	}
-	else d3d_GlobalCaps.supportDXT1 = false;
-
-	// check for compressed texture formats
-	hr = d3d_Device->CreateTexture
-	(
-		128,
-		128,
-		1,
-		0,
-		D3DFMT_DXT3,
-		D3DPOOL_DEFAULT,
-		&tex,
-		NULL
-	);
-
-	if (SUCCEEDED (hr))
-	{
-		// done with the texture
-		tex->Release ();
-		d3d_GlobalCaps.supportDXT3 = true;
-		Con_Printf ("Allowing DXT3 Compressed Texture Format\n");
-	}
-	else d3d_GlobalCaps.supportDXT3 = false;
-
-	// check for compressed texture formats
-	hr = d3d_Device->CreateTexture
-	(
-		128,
-		128,
-		1,
-		0,
-		D3DFMT_DXT5,
-		D3DPOOL_DEFAULT,
-		&tex,
-		NULL
-	);
-
-	if (SUCCEEDED (hr))
-	{
-		// done with the texture
-		tex->Release ();
-		d3d_GlobalCaps.supportDXT5 = true;
-		Con_Printf ("Allowing DXT5 Compressed Texture Format\n");
-	}
-	else d3d_GlobalCaps.supportDXT5 = false;
+	// check for availability of compressed texture formats
+	d3d_GlobalCaps.supportDXT1 = D3D_CheckTextureFormat (D3DFMT_DXT1, FALSE);
+	d3d_GlobalCaps.supportDXT3 = D3D_CheckTextureFormat (D3DFMT_DXT3, FALSE);
+	d3d_GlobalCaps.supportDXT5 = D3D_CheckTextureFormat (D3DFMT_DXT5, FALSE);
 
 	D3D_InitUnderwaterTexture ();
 
 	Con_Printf ("\n");
 
-	// get the default gamma ramp for the device
-	d3d_Device->GetGammaRamp (0, &d3d_DefaultGammaRamp);
+	// switch gamma ramp handling to pure GDI
+	HDC hDC = GetDC (NULL);
+	GetDeviceGammaRamp (hDC, &d3d_DefaultGammaRamp);
+	ReleaseDC (NULL, hDC);
+
+	for (int i = 0; i < 256; i++)
+	{
+		// scale to expected range
+		d3d_DefaultGammaRamp.red[i] >>= 8;
+		d3d_DefaultGammaRamp.green[i] >>= 8;
+		d3d_DefaultGammaRamp.blue[i] >>= 8;
+	}
 
 	// copy it to the active gamma ramp
 	memcpy (&d3d_ActiveGammaRamp, &d3d_DefaultGammaRamp, sizeof (D3DGAMMARAMP));
@@ -1055,31 +1027,6 @@ void D3D_InitDirect3D (D3DDISPLAYMODE *mode)
 
 	// build the rest of the video menu (deferred to here as it's dependent on video being up)
 	Menu_VideoBuild ();
-}
-
-
-void D3D_CreateWindowClass (void)
-{
-	HINSTANCE hInstance = GetModuleHandle (NULL);
-	WNDCLASS wc;
-
-	// set up and register the window class (d3d doesn't need CS_OWNDC)
-    wc.style = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc = (WNDPROC) MainWndProc;
-    wc.cbClsExtra = 0;
-    wc.cbWndExtra = 0;
-    wc.hInstance = hInstance;
-    wc.hIcon = 0;
-    wc.hCursor = LoadCursor (NULL,IDC_ARROW);
-	wc.hbrBackground = NULL;
-    wc.lpszMenuName = 0;
-    wc.lpszClassName = D3D_WINDOW_CLASS_NAME;
-
-	if (!RegisterClass (&wc))
-	{
-		Sys_Error ("D3D_CreateWindowClass: Failed to register Window Class");
-		return;
-	}
 }
 
 
@@ -1105,14 +1052,11 @@ void D3D_SetConSize (int modewidth, int modeheight)
 
 void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 {
-	// externs from the messy stuff in vidnt.c
-	extern HINSTANCE global_hInstance;
-
 	window_rect.top = window_rect.left = 0;
 
 	// store these out so that they will remain valid after everything is set up
-	int DIBWidth = window_rect.right = mode->Width;
-	int DIBHeight = window_rect.bottom = mode->Height;
+	window_rect.right = mode->Width;
+	window_rect.bottom = mode->Height;
 
 	if (mode->RefreshRate == 0)
 	{
@@ -1127,7 +1071,8 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 		ExWindowStyle = 0;
 	}
 
-	RECT rect = window_rect;
+	RECT rect;
+	memcpy (&rect, &window_rect, sizeof (RECT));
 	AdjustWindowRectEx (&rect, WindowStyle, FALSE, 0);
 
 	int width = rect.right - rect.left;
@@ -1137,14 +1082,14 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	(
 		ExWindowStyle,
 		D3D_WINDOW_CLASS_NAME,
-		"DirectQ Version 1.7.3",
+		"DirectQ Release 1.7.666",
 		WindowStyle,
 		rect.left, rect.top,
 		width,
 		height,
+		GetDesktopWindow (),
 		NULL,
-		NULL,
-		global_hInstance,
+		GetModuleHandle (NULL),
 		NULL
 	);
 
@@ -1184,24 +1129,11 @@ void D3D_CreateWindow (D3DDISPLAYMODE *mode)
 	ShowWindow (d3d_Window, SW_SHOWDEFAULT);
 	UpdateWindow (d3d_Window);
 
-	// because we have set the background brush for the window to NULL
-	// (to avoid flickering when re-sizing the window on the desktop),
-	// we clear the window to black when created, otherwise it will be
-	// empty while Quake starts up.  use rect here as window_rect isn't valid yet
-	// (is this actually NEEDED in d3d?)
-	HDC hdc = GetDC (d3d_Window);
-	PatBlt (hdc, 0, 0, rect.right, rect.bottom, BLACKNESS);
-	ReleaseDC (d3d_Window, hdc);
-
 	D3D_SetConSize (mode->Width, mode->Height);
 
-	HICON hIcon = LoadIcon (global_hInstance, MAKEINTRESOURCE (IDI_APPICON));
-
+	HICON hIcon = LoadIcon (GetModuleHandle (NULL), MAKEINTRESOURCE (IDI_APPICON));
 	SendMessage (d3d_Window, WM_SETICON, (WPARAM) TRUE, (LPARAM) hIcon);
 	SendMessage (d3d_Window, WM_SETICON, (WPARAM) FALSE, (LPARAM) hIcon);
-
-	window_width = DIBWidth;
-	window_height = DIBHeight;
 
 	VID_UpdateWindowStatus ();
 }
@@ -1275,59 +1207,152 @@ void D3D_SetVideoMode (D3DDISPLAYMODE *mode)
 }
 
 
-int VID_PaletteHack (int in)
+static void PaletteFromColormap (byte *pal, byte *map)
 {
-	// bilinear filtering can result in a LOT of lost detail and brightness, so
-	// here we hack the palette to *kinda* restore it.  it feels wrong to do this,
-	// but it does bring back the old "WinQuake-ey" look a bit better.
-	int out = in;
-
-	int temp = in * in;
-	temp /= 512;
-
-	out += temp;
-
-	return BYTE_CLAMP (out);
-}
-
-
-void VID_SetPalette (unsigned char *palette)
-{
-	byte	*pal;
-	unsigned r,g,b;
-	unsigned v;
-	unsigned short i;
-	unsigned	*table;
-
-	// 8 8 8 encoding
-	pal = palette;
-	table = d_8to24table;
-
-	for (i = 0; i < 256; i++)
+	// set fullbright colour indexes
+	for (int x = 0; x < 256; x++)
 	{
-		r = VID_PaletteHack (pal[0]);
-		g = VID_PaletteHack (pal[1]);
-		b = VID_PaletteHack (pal[2]);
-		pal += 3;
+		vid.fullbright[x] = true;
 
-		// BGRA format for D3D
-		v = (255 << 24) + (b << 0) + (g << 8) + (r << 16);
-		*table++ = v;
+		for (int y = 1; y < VID_GRADES; y++)
+		{
+			int y1 = y - 1;
+
+			if (map[y * 256 + x] != map[y1 * 256 + x])
+			{
+				vid.fullbright[x] = false;
+				break;
+			}
+		}
 	}
 
-	// set correct alpha colour to avoid pink fringes
-	d_8to24table[255] = 0;
+	// colour 255 (alpha) is never fullbright
+	vid.fullbright[255] = false;
+
+	float lmgrades[256];
+	float maxgrade = 0;
+
+	// average the colormap intensities to obtain a lightmap table
+	// also do a reversed order (see below)
+	for (int y = 0, rev = VID_GRADES - 1; y < VID_GRADES; y++, rev--)
+	{
+		int numcolors = 0;
+		int avgr = 0;
+		int avgg = 0;
+		int avgb = 0;
+
+		for (int x = 0; x < 256; x++)
+		{
+			// exclude columns with the same intensity all the way down
+			if (vid.fullbright[x]) continue;
+
+			// accumulate a new colour
+			numcolors++;
+
+			int thispal = map[y * 256 + x] * 3;
+			int avgpal = map[31 * 256 + x] * 3;
+
+#if 1
+			// the colormap is premultiplied colour * intensity, so recover the original intensity used
+			if (pal[avgpal + 0] > 0) avgr += (pal[thispal + 0] * 255) / pal[avgpal + 0];
+			if (pal[avgpal + 1] > 0) avgg += (pal[thispal + 1] * 255) / pal[avgpal + 1];
+			if (pal[avgpal + 2] > 0) avgb += (pal[thispal + 2] * 255) / pal[avgpal + 2];
+#else
+			avgr += pal[thispal + 0];
+			avgg += pal[thispal + 1];
+			avgb += pal[thispal + 2];
+#endif
+		}
+
+		if (!numcolors) continue;
+
+		// store this grade; right now we're just storing temp data so we don't need to worry
+		// about doing it right just yet.
+		// the colormap goes from light to dark so reverse the order
+		lmgrades[rev * 4] = (float) (avgr * 30 + avgg * 59 + avgb * 11) / (float) (10 * numcolors);
+	}
+
+	// interpolate into vid.lightmap
+	for (int i = 2; i < 255; i += 4) lmgrades[i] = (lmgrades[i - 2] + lmgrades[i + 2]) / 2.0f;
+	for (int i = 1; i < 255; i += 2) lmgrades[i] = (lmgrades[i - 1] + lmgrades[i + 1]) / 2.0f;
+	for (int i = 253; i < 256; i++) lmgrades[i] = (lmgrades[i - 1] * lmgrades[i - 2]) / lmgrades[i - 3];
+
+	for (int i = 0; i < 256; i++)
+	{
+		int grade = (lmgrades[i] / lmgrades[255]) * 255.0f;
+		vid.lightmap[i] = BYTE_CLAMP (grade);
+	}
+
+	// now reset the palette
+	byte basepal[768];
+	memcpy (basepal, pal, 768);
+
+	// take the midline of the colormap for the palette; we *could* average the
+	// entire column for each colour, but we lose some palette colours that way
+	for (int i = 0; i < 256; i++)
+	{
+		int cmap1 = map[31 * 256 + i];
+		int cmap2 = map[32 * 256 + i];
+
+		for (int c = 0; c < 3; c++)
+		{
+			float f = ((float) basepal[cmap1 * 3 + c] + (float) basepal[cmap2 * 3 + c]) / 2.0f;
+			pal[i * 3 + c] = BYTE_CLAMP ((int) f);
+		}
+	}
 }
 
 
 static void Check_Gamma (unsigned char *pal)
 {
-	int i;
+	int		i;
+	unsigned char	palette[768];
+	float vid_gamma;
 
-	// set this properly...
+	// default to 0.7 on non-3dfx hardware
+	// (nobody has a 3dfx any more...)
 	if ((i = COM_CheckParm ("-gamma")) == 0)
-		;
-	else Cvar_Set (&v_gamma, atof (com_argv[i + 1]));
+		vid_gamma = 0.7f;
+	else vid_gamma = atof (com_argv[i + 1]);
+
+	for (i = 0; i < 768; i++)
+	{
+		// this gives the same result as the MGL gamma in software Quake
+		float f = pow ((float) ((pal[i] + 1) / 256.0), (float) vid_gamma);
+		int inf = (f * 255.0f + 0.5f);
+
+		palette[i] = BYTE_CLAMP (inf);
+	}
+
+	memcpy (pal, palette, sizeof (palette));
+}
+
+
+void VID_SetPalette (unsigned char *palette)
+{
+	for (int i = 0; i < 256; i++)
+	{
+		int r = palette[i * 3 + 0];
+		int g = palette[i * 3 + 1];
+		int b = palette[i * 3 + 2];
+
+		// BGRA format for D3D
+		d_8to24table[i] = (255 << 24) + (b << 0) + (g << 8) + (r << 16);
+
+		// don't set dark colours to fullbright
+		if ((r + g + b) < 21) vid.fullbright[i] = false;
+
+		// set correct luma table
+		if (vid.fullbright[i])
+			lumatable[i] = 0x80808080;
+		else lumatable[i] = 0;
+	}
+
+	// set correct alpha colour to avoid pink fringes
+	d_8to24table[255] = 0;
+
+	// entry 255 is also not a luma
+	lumatable[255] = 0;
 }
 
 
@@ -1347,8 +1372,7 @@ void D3D_VidInit (byte *palette)
 	vid_initialized = true;
 
 	vid.colormap = host_colormap;
-	vid.fullbright = 256 - LittleLong (*((int *) vid.colormap + 2048));
-
+	PaletteFromColormap (palette, vid.colormap);
 	Check_Gamma (palette);
 	VID_SetPalette (palette);
 
@@ -1369,23 +1393,19 @@ void D3D_VidInit (byte *palette)
 	d3d_Object->GetAdapterIdentifier (D3DADAPTER_DEFAULT, 0, &d3d_Adapter);
 
 	Con_Printf ("\nInitialized Direct 3D on %s\n", d3d_Adapter.DeviceName);
-	Con_Printf ("With %s (%s)\n", d3d_Adapter.Description, d3d_Adapter.Driver);
+	Con_Printf ("%s\nDriver: %s\n", d3d_Adapter.Description, d3d_Adapter.Driver);
+
+	// print extended info
+	Con_Printf
+	(
+		"Vendor %x Device %x SubSys %x Revision %x\n",
+		d3d_Adapter.VendorId,
+		d3d_Adapter.DeviceId,
+		d3d_Adapter.SubSysId,
+		d3d_Adapter.Revision
+	);
+
 	Con_Printf ("\n");
-
-	// detect nvidia
-	d3d_GlobalCaps.isNvidia = false;
-
-	// sigh... i thought we would have left this kinda crap behind with the last century...
-	for (int i = 0; ; i++)
-	{
-		if (!d3d_Adapter.Description[i]) break;
-
-		if (!strnicmp (&d3d_Adapter.Description[i], "nvidia", 6))
-		{
-			d3d_GlobalCaps.isNvidia = true;
-			break;
-		}
-	}
 
 	// check command-line args for resolution specifiers
 	if (COM_CheckParm ("-window"))
@@ -1454,16 +1474,10 @@ void D3D_VidInit (byte *palette)
 		d3d_CurrentMode.Height = 0;
 	}
 
-	// set up the window class
-	D3D_CreateWindowClass ();
-
 	Splash_Destroy ();
 
 	// set the selected video mode
 	D3D_SetVideoMode (&d3d_CurrentMode);
-
-	// finally set the palette
-	VID_SetPalette (palette);
 }
 
 
@@ -1484,6 +1498,25 @@ void D3D_ShutdownDirect3D (void)
 	SAFE_RELEASE (d3d_Object);
 }
 
+
+void D3D_SetActiveGamma (void);
+
+void VID_DefaultMonitorGamma_f (void)
+{
+	// if gamma fucks up, this will restore it to something approaching OK
+	for (int i = 0; i < 256; i++)
+	{
+		d3d_DefaultGammaRamp.red[i] = i;
+		d3d_DefaultGammaRamp.green[i] = i;
+		d3d_DefaultGammaRamp.blue[i] = i;
+	}
+
+	D3D_SetGamma (&d3d_DefaultGammaRamp);
+
+	D3D_SetActiveGamma ();
+}
+
+cmd_t VID_DefaultMonitorGamma_Cmd ("vid_defaultmonitorgamma", VID_DefaultMonitorGamma_f);
 
 void VID_Shutdown (void)
 {
@@ -1508,25 +1541,18 @@ bool D3D_CheckRecoverDevice (void)
 		Sleep (100);
 
 		// see if the device can be recovered
-		HRESULT hr = d3d_Device->TestCooperativeLevel ();
+		hr = d3d_Device->TestCooperativeLevel ();
 
 		switch (hr)
 		{
 		case D3D_OK:
-			// recreate anything that needs to be recreated
-			D3D_InitUnderwaterTexture ();
-
-			// set default states
-			D3D_SetDefaultStates ();
-
-			// force an update of per-frame checked states
-			d3d_ForceStateUpdates = true;
-
-			// force a recalc of the refdef
-			vid.recalc_refdef = true;
+			// recover device resources and bring states back to defaults
+			D3D_RecoverDeviceResources ();
 
 			// the device is no longer lost
 			d3d_DeviceLost = false;
+
+			// return to normal rendering
 			return true;
 
 		case D3DERR_DEVICELOST:
@@ -1535,11 +1561,7 @@ bool D3D_CheckRecoverDevice (void)
 
 		case D3DERR_DEVICENOTRESET:
 			// the device is ready to be reset
-			// release anything that needs to be released
-			D3D_KillUnderwaterTexture ();
-
-			// ensure that present params are valid
-			D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
+			D3D_LoseDeviceResources ();
 
 			// reset the device
 			d3d_Device->Reset (&d3d_PresentParams);
@@ -1562,6 +1584,79 @@ bool D3D_CheckRecoverDevice (void)
 	return true;
 }
 
+
+typedef struct d3d_filtermode_s
+{
+	char *name;
+	D3DTEXTUREFILTERTYPE minfilter;
+	D3DTEXTUREFILTERTYPE magfilter;
+	D3DTEXTUREFILTERTYPE mipfilter;
+} d3d_filtermode_t;
+
+d3d_filtermode_t d3d_filtermodes[] =
+{
+	{"GL_NEAREST", D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE},
+	{"GL_LINEAR", D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE},
+	{"GL_NEAREST_MIPMAP_NEAREST", D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_POINT},
+	{"GL_LINEAR_MIPMAP_NEAREST", D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_POINT},
+	{"GL_NEAREST_MIPMAP_LINEAR", D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_LINEAR},
+	{"GL_LINEAR_MIPMAP_LINEAR", D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_LINEAR},
+};
+
+void D3D_TextureMode_f (void)
+{
+	if (Cmd_Argc () == 1)
+	{
+		D3DTEXTUREFILTERTYPE minfilter = d3d_3DFilterMin;
+		D3DTEXTUREFILTERTYPE magfilter = d3d_3DFilterMag;
+		D3DTEXTUREFILTERTYPE mipfilter = d3d_3DFilterMip;
+
+		if (minfilter == D3DTEXF_ANISOTROPIC) minfilter = D3DTEXF_LINEAR;
+		if (magfilter == D3DTEXF_ANISOTROPIC) magfilter = D3DTEXF_LINEAR;
+
+		for (int i = 0; i < 6; i++)
+		{
+			if (magfilter == d3d_filtermodes[i].magfilter && minfilter == d3d_filtermodes[i].minfilter && mipfilter == d3d_filtermodes[i].mipfilter)
+			{
+				Con_Printf ("%s\n", d3d_filtermodes[i].name);
+				return;
+			}
+		}
+
+		Con_Printf ("current filter is unknown???\n");
+		return;
+	}
+
+	for (int i = 0; i < 6; i++)
+	{
+		if (!stricmp (d3d_filtermodes[i].name, Cmd_Argv (1)))
+		{
+			// reset filter
+			d3d_3DFilterMin = d3d_filtermodes[i].minfilter;
+			d3d_3DFilterMag = d3d_filtermodes[i].magfilter;
+			d3d_3DFilterMip = d3d_filtermodes[i].mipfilter;
+
+			if (r_anisotropicfilter.integer > 1)
+			{
+				if (d3d_3DFilterMin == D3DTEXF_LINEAR) d3d_3DFilterMin = D3DTEXF_ANISOTROPIC;
+				if (d3d_3DFilterMag == D3DTEXF_LINEAR) d3d_3DFilterMag = D3DTEXF_ANISOTROPIC;
+			}
+
+			for (int s = 0; s < d3d_DeviceCaps.MaxTextureBlendStages; s++)
+				D3D_SetTextureMipmap (s, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+
+			Con_Printf ("Minification:  %s\n", D3DTypeToString (d3d_3DFilterMin));
+			Con_Printf ("Magnification: %s\n", D3DTypeToString (d3d_3DFilterMag));
+			Con_Printf ("Mipmap filter: %s\n", D3DTypeToString (d3d_3DFilterMip));
+			return;
+		}
+	}
+
+	Con_Printf ("bad filter name\n");
+}
+
+
+cmd_t D3D_TextureMode_Cmd ("gl_texturemode", D3D_TextureMode_f);
 
 void D3D_CheckTextureFiltering (void)
 {
@@ -1590,14 +1685,18 @@ void D3D_CheckTextureFiltering (void)
 	if (real_aniso == 1)
 	{
 		// regular linear filtering
-		d3d_3DFilterType = D3DTEXF_LINEAR;
+		d3d_3DFilterMag = D3DTEXF_LINEAR;
+		d3d_3DFilterMin = D3DTEXF_LINEAR;
+		d3d_3DFilterMip = D3DTEXF_LINEAR;
 
 		if (key_dest == key_console) Con_Printf ("Set Linear Filtering\n");
 	}
 	else
 	{
-		// anisotropic filtering
-		d3d_3DFilterType = D3DTEXF_ANISOTROPIC;
+		// anisotropic filtering (not enabled on the mip filter)
+		d3d_3DFilterMag = D3DTEXF_ANISOTROPIC;
+		d3d_3DFilterMin = D3DTEXF_ANISOTROPIC;
+		d3d_3DFilterMip = D3DTEXF_LINEAR;
 
 		if (key_dest == key_console) Con_Printf ("Set %i x Anisotropic Filtering\n", real_aniso);
 	}
@@ -1605,9 +1704,7 @@ void D3D_CheckTextureFiltering (void)
 	for (int i = 0; i < d3d_DeviceCaps.MaxTextureBlendStages; i++)
 	{
 		D3D_SetSamplerState (i, D3DSAMP_MAXANISOTROPY, real_aniso);
-		D3D_SetSamplerState (i, D3DSAMP_MINFILTER, d3d_3DFilterType);
-		D3D_SetSamplerState (i, D3DSAMP_MIPFILTER, d3d_3DFilterType);
-		D3D_SetSamplerState (i, D3DSAMP_MAGFILTER, d3d_3DFilterType);
+		D3D_SetTextureMipmap (i, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 	}
 }
 
@@ -1689,39 +1786,17 @@ void D3D_CheckVidMode (void)
 
 int D3D_AdjustGamma (float gammaval, int baseval)
 {
-	// calculate ramp for given gamma value
-	int inf = 255 * pow ((float) ((baseval + 0.5) / 255.5), (float) gammaval) + 0.5;
+	// same gamma calc as GLQuake
+	float f = pow ((float) ((baseval + 1) / 256.0), (float) gammaval);
+	float inf = f * 255 + 0.5;
 
 	// return what we got
-	return BYTE_CLAMP (inf);
+	return BYTE_CLAMP ((int) inf);
 }
 
 
-void D3D_CheckGamma (void)
+void D3D_SetActiveGamma (void)
 {
-	static int oldvgamma = 0;
-	static int oldrgamma = 0;
-	static int oldggamma = 0;
-	static int oldbgamma = 0;
-	extern bool crosshair_recache;
-
-	// didn't change - call me paranoid about floats!!!
-	if ((int) (v_gamma.value * 100) == oldvgamma &&
-		(int) (r_gamma.value * 100) == oldrgamma &&
-		(int) (g_gamma.value * 100) == oldggamma &&
-		(int) (b_gamma.value * 100) == oldbgamma &&
-		!d3d_ForceStateUpdates)
-	{
-		// didn't change
-		return;
-	}
-
-	// store back
-	oldvgamma = (int) (v_gamma.value * 100);
-	oldrgamma = (int) (r_gamma.value * 100);
-	oldggamma = (int) (g_gamma.value * 100);
-	oldbgamma = (int) (b_gamma.value * 100);
-
 	// to do - make this independent for r/g/b - done.
 	for (int i = 0; i < 256; i++)
 	{
@@ -1743,10 +1818,37 @@ void D3D_CheckGamma (void)
 }
 
 
+void D3D_CheckGamma (void)
+{
+	static int oldvgamma = 0;
+	static int oldrgamma = 0;
+	static int oldggamma = 0;
+	static int oldbgamma = 0;
+
+	// didn't change - call me paranoid about floats!!!
+	if ((int) (v_gamma.value * 100) == oldvgamma &&
+		(int) (r_gamma.value * 100) == oldrgamma &&
+		(int) (g_gamma.value * 100) == oldggamma &&
+		(int) (b_gamma.value * 100) == oldbgamma &&
+		!d3d_ForceStateUpdates)
+	{
+		// didn't change
+		return;
+	}
+
+	// store back
+	oldvgamma = (int) (v_gamma.value * 100);
+	oldrgamma = (int) (r_gamma.value * 100);
+	oldggamma = (int) (g_gamma.value * 100);
+	oldbgamma = (int) (b_gamma.value * 100);
+
+	D3D_SetActiveGamma ();
+}
+
+
 void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 {
 	// if (NumFilteredStates) Con_Printf ("Filtered %i redundant state changes\n", NumFilteredStates);
-
 	NumFilteredStates = 0;
 
 	// check for device recovery and recover it if needed
@@ -1763,397 +1865,22 @@ void D3D_BeginRendering (int *x, int *y, int *width, int *height)
 	*x = *y = 0;
 	*width = window_rect.right - window_rect.left;
 	*height = window_rect.bottom - window_rect.top;
-
-	// moved begin scene to here
-	d3d_Device->BeginScene ();
 }
 
 
 void D3D_EndRendering (void)
 {
-	d3d_Device->EndScene ();
+	// if nothing was drawn there is no need for a screen refresh
+	if (!d3d_SceneBegun) return;
 
-	HRESULT hr = d3d_Device->Present (NULL, NULL, NULL, NULL);
+	d3d_Device->EndScene ();
+	d3d_SceneBegun = FALSE;
+
+	// it's recommended to call EndScene as far ahead of calling Present as possible,
+	// but in practice with Quake it doesn't really make any difference
+	hr = d3d_Device->Present (NULL, NULL, NULL, NULL);
 
 	// check for a lost device
 	if (hr == D3DERR_DEVICELOST) d3d_DeviceLost = true;
 }
-
-
-void AppActivate (BOOL fActive, BOOL minimize)
-{
-	static BOOL	sound_active;
-
-	ActiveApp = fActive;
-	Minimized = minimize;
-
-	// enable/disable sound on focus gain/loss
-	if (!ActiveApp && sound_active)
-		sound_active = false;
-	else if (ActiveApp && !sound_active)
-		sound_active = true;
-
-	if (fActive)
-	{
-		IN_ActivateMouse ();
-		IN_HideMouse ();
-
-		if (modestate == MS_FULLDIB)
-		{
-			if (vid_canalttab && vid_wassuspended)
-			{
-				vid_wassuspended = false;
-
-				// ensure that the window is shown at at the top of the z order
-				ShowWindow (d3d_Window, SW_SHOWNORMAL);
-				SetForegroundWindow (d3d_Window);
-			}
-		}
-
-		// needed to reestablish the correct viewports
-		vid.recalc_refdef = 1;
-	}
-	else
-	{
-		IN_DeactivateMouse ();
-		IN_ShowMouse ();
-
-		if (modestate == MS_FULLDIB)
-		{
-			if (vid_canalttab)
-			{ 
-				vid_wassuspended = true;
-			}
-		}
-	}
-}
-
-
-/* main window procedure */
-LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
-{
-    LONG    lRet = 1;
-	int		fActive, fMinimized, temp;
-	extern unsigned int uiWheelMessage;
-
-	if (Msg == uiWheelMessage) Msg = WM_MOUSEWHEEL;
-
-    switch (Msg)
-    {
-	case WM_GRAPHEVENT:
-		DS_Event ();
-		break;
-
-	case WM_ERASEBKGND:
-		// don't let windows handle background erasures
-		break;
-
-	case WM_KILLFOCUS:
-		if (modestate == MS_FULLDIB)
-			ShowWindow (d3d_Window, SW_SHOWMINNOACTIVE);
-		break;
-
-	case WM_CREATE:
-		break;
-
-	case WM_MOVE:
-		window_x = (int) LOWORD (lParam);
-		window_y = (int) HIWORD (lParam);
-		VID_UpdateWindowStatus ();
-		break;
-
-	case WM_KEYDOWN:
-	case WM_SYSKEYDOWN:
-		Key_Event (MapKey (lParam), true);
-		break;
-
-	case WM_KEYUP:
-	case WM_SYSKEYUP:
-		Key_Event (MapKey (lParam), false);
-		break;
-
-	case WM_SYSCHAR:
-		// keep Alt-Space from happening
-		break;
-
-	// this is complicated because Win32 seems to pack multiple mouse events into
-	// one update sometimes, so we always check all states and look for events
-	case WM_LBUTTONDOWN:
-	case WM_LBUTTONUP:
-	case WM_RBUTTONDOWN:
-	case WM_RBUTTONUP:
-	case WM_MBUTTONDOWN:
-	case WM_MBUTTONUP:
-	case WM_MOUSEMOVE:
-		temp = 0;
-
-		if (wParam & MK_LBUTTON)
-			temp |= 1;
-
-		if (wParam & MK_RBUTTON)
-			temp |= 2;
-
-		if (wParam & MK_MBUTTON)
-			temp |= 4;
-
-		IN_MouseEvent (temp);
-
-		break;
-
-	// JACK: This is the mouse wheel with the Intellimouse
-	// Its delta is either positive or neg, and we generate the proper
-	// Event.
-	case WM_MOUSEWHEEL:
-		if ((short) HIWORD (wParam) > 0)
-		{
-			Key_Event (K_MWHEELUP, true);
-			Key_Event (K_MWHEELUP, false);
-		}
-		else
-		{
-			Key_Event (K_MWHEELDOWN, true);
-			Key_Event (K_MWHEELDOWN, false);
-		}
-
-		break;
-
-    case WM_SIZE:
-        break;
-
-   	case WM_CLOSE:
-		if (MessageBox (d3d_Window, "Are you sure you want to quit?", "Confirm Exit", MB_YESNO | MB_SETFOREGROUND | MB_ICONQUESTION) == IDYES)
-			Sys_Quit ();
-	    break;
-
-	case WM_ACTIVATE:
-		fActive = LOWORD (wParam);
-		fMinimized = (BOOL) HIWORD (wParam);
-		AppActivate (!(fActive == WA_INACTIVE), fMinimized);
-
-		// fix the leftover Alt from any Alt-Tab or the like that switched us away
-		ClearAllStates ();
-
-		break;
-
-   	case WM_DESTROY:
-		if (d3d_Window)
-			DestroyWindow (d3d_Window);
-
-        PostQuitMessage (0);
-	    break;
-
-	case MM_MCINOTIFY:
-        lRet = CDAudio_MessageHandler (hWnd, Msg, wParam, lParam);
-		break;
-
-    default:
-        // pass all unhandled messages to DefWindowProc
-        lRet = DefWindowProc (hWnd, Msg, wParam, lParam);
-	    break;
-    }
-
-    /* return 1 if handled message, 0 if not */
-    return lRet;
-}
-
-
-//========================================================
-// Video menu stuff
-//========================================================
-
-
-#include "menu_common.h"
-
-char **menu_videomodes = NULL;
-int menu_videomodenum = 0;
-
-char **menu_anisotropicmodes = NULL;
-int menu_anisonum = 0;
-
-extern cvar_t gl_conscale;
-extern cvar_t scr_fov;
-extern cvar_t scr_fovcompat;
-
-#define TAG_VIDMODEAPPLY	1
-
-// if these are changed they need to be changed in menu_other.cpp as well
-#define MENU_TAG_SIMPLE		666
-#define MENU_TAG_FULL		1313
-
-void VID_ApplyModeChange (void)
-{
-	// the value here has already been forced to correct in the draw func so we just set it
-	Cvar_Set (&d3d_mode, menu_videomodenum);
-
-	// position the selection back at the video mode option
-	menu_Video.Key (K_UPARROW);
-}
-
-
-int Menu_VideoCustomDraw (int y)
-{
-	// check for "Apply" on d3d_mode change
-	if (menu_videomodenum == d3d_mode.integer)
-		menu_Video.DisableOptions (TAG_VIDMODEAPPLY);
-	else menu_Video.EnableOptions (TAG_VIDMODEAPPLY);
-
-	d3d_ModeDesc_t *mode;
-	int nummodes;
-
-	// ensure videomode num is valid
-	// (no longer forces an instant change)
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
-	{
-		if (menu_videomodenum == nummodes)
-		{
-			// store to d3d_mode cvar
-			//d3d_mode.value = nummodes;
-			//Cvar_Set (&d3d_mode, d3d_mode.value);
-			goto do_aniso;
-		}
-	}
-
-	// invalid mode in d3d_mode so force it to the current mode
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
-	{
-		if (D3D_ModeIsCurrent (mode))
-		{
-			menu_videomodenum = /*d3d_mode.value =*/ nummodes;
-			//Cvar_Set (&d3d_mode, d3d_mode.value);
-			break;
-		}
-	}
-
-do_aniso:
-	// no anisotropic filtering available
-	if (d3d_DeviceCaps.MaxAnisotropy < 2) return y;
-
-	// store the selected anisotropic filter into the r_aniso cvar
-	for (int af = 1, i = 0; ; i++, af <<= 1)
-	{
-		if (i == menu_anisonum)
-		{
-			Con_DPrintf ("Setting r_anisotropicfilter to %i\n", af);
-			Cvar_Set (&r_anisotropicfilter, af);
-			break;
-		}
-	}
-
-	return y;
-}
-
-
-void Menu_VideoCustomEnter (void)
-{
-	// take it from the d3d_mode cvar
-	menu_videomodenum = (int) d3d_mode.value;
-
-	int real_aniso;
-
-	// no anisotropic filtering available
-	if (d3d_DeviceCaps.MaxAnisotropy < 2) return;
-
-	// get the real value from the cvar - users may enter any old crap manually!!!
-	for (real_aniso = 1; real_aniso < r_anisotropicfilter.value; real_aniso <<= 1);
-
-	// clamp it
-	if (real_aniso < 1) real_aniso = 1;
-	if (real_aniso > d3d_DeviceCaps.MaxAnisotropy) real_aniso = d3d_DeviceCaps.MaxAnisotropy;
-
-	// store it back
-	Cvar_Set (&r_anisotropicfilter, real_aniso);
-
-	// now derive the menu entry from it
-	for (int i = 0, af = 1; ; i++, af <<= 1)
-	{
-		if (af == real_aniso)
-		{
-			menu_anisonum = i;
-			break;
-		}
-	}
-}
-
-
-void Menu_VideoBuild (void)
-{
-	d3d_ModeDesc_t *mode;
-	int nummodes;
-
-	// get the number of modes
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++);
-
-	// add 1 for terminating NULL
-	menu_videomodes = (char **) Pool_Alloc (POOL_PERMANENT, (nummodes + 1) * sizeof (char *));
-
-	// now write them in
-	for (mode = d3d_ModeList, nummodes = 0; mode; mode = mode->Next, nummodes++)
-	{
-		menu_videomodes[nummodes] = (char *) Pool_Alloc (POOL_PERMANENT, 128);
-
-		_snprintf
-		(
-			menu_videomodes[nummodes],
-			128,
-			"%i x %i x %i (%s)",
-			mode->d3d_Mode.Width,
-			mode->d3d_Mode.Height,
-			mode->BPP,
-			mode->ModeDesc
-		);
-
-		// select current mode
-		if (D3D_ModeIsCurrent (mode)) menu_videomodenum = nummodes;
-	}
-
-	// terminate with NULL
-	menu_videomodes[nummodes] = NULL;
-
-	menu_Video.AddOption (new CQMenuCustomDraw (Menu_VideoCustomDraw));
-	menu_Video.AddOption (new CQMenuSpacer ("Select a Video Mode"));
-	menu_Video.AddOption (new CQMenuSpinControl (NULL, &menu_videomodenum, menu_videomodes));
-	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuSpacer (DIVIDER_LINE));
-	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuCommand ("Apply Video Mode Change", VID_ApplyModeChange));
-
-	// add the rest of the options to ensure that they;re kept in order
-	menu_Video.AddOption (new CQMenuSpacer ());
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configure Video Options"));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Screen Size", &scr_viewsize, 30, 120, 10));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Console Size", &gl_conscale, 1, 0, 0.1));
-
-	if (d3d_DeviceCaps.MaxAnisotropy > 1)
-	{
-		// count the number of modes available
-		for (int i = 1, mode = 1; ; i++, mode *= 2)
-		{
-			if (mode == d3d_DeviceCaps.MaxAnisotropy)
-			{
-				menu_anisotropicmodes = (char **) Pool_Alloc (POOL_PERMANENT, (i + 1) * sizeof (char *));
-
-				for (int m = 0, f = 1; m < i; m++, f *= 2)
-				{
-					menu_anisotropicmodes[m] = (char *) Pool_Alloc (POOL_PERMANENT, 32);
-
-					if (f == 1)
-						strncpy (menu_anisotropicmodes[m], "Off", 32);
-					else _snprintf (menu_anisotropicmodes[m], 32, "%i x Filtering", f);
-				}
-
-				menu_anisotropicmodes[i] = NULL;
-				break;
-			}
-		}
-
-		menu_Video.AddOption (new CQMenuSpinControl ("Anisotropic Filter", &menu_anisonum, menu_anisotropicmodes));
-	}
-
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Field of View", &scr_fov, 10, 170, 5));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarToggle ("Compatible FOV", &scr_fovcompat, 0, 1));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Brightness Controls"));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Master Gamma", &v_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Red Gamma", &r_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Green Gamma", &g_gamma, 1.75, 0.25, 0.05));
-	menu_Video.AddOption (MENU_TAG_FULL, new CQMenuCvarSlider ("Blue Gamma", &b_gamma, 1.75, 0.25, 0.05));
-}
-
 

@@ -925,7 +925,7 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 
 		strcpy (keyname, com_token);
 
-		// another hack to fix heynames with trailing spaces
+		// another hack to fix keynames with trailing spaces
 		n = strlen(keyname);
 		while (n && keyname[n-1] == ' ')
 		{
@@ -935,19 +935,20 @@ char *ED_ParseEdict (char *data, edict_t *ent)
 
 		// parse value	
 		data = COM_Parse (data);
-		if (!data)
-			Sys_Error ("ED_ParseEntity: EOF without closing brace");
 
-		if (com_token[0] == '}')
-			Sys_Error ("ED_ParseEntity: closing brace without data");
+		if (!data) Sys_Error ("ED_ParseEntity: EOF without closing brace");
+		if (com_token[0] == '}') Sys_Error ("ED_ParseEntity: closing brace without data");
 
-		init = true;	
+		init = true;
 
 		// keynames with a leading underscore are used for utility comments,
 		// and are immediately discarded by quake
 		if (keyname[0] == '_')
 			continue;
-		
+
+		// hack to support alpha even when progs doesn't know about it
+		if (!strcmp (keyname, "alpha")) ent->alpha = ENTALPHA_ENCODE (atof (com_token));
+
 		key = ED_FindField (keyname);
 
 		if (!key)

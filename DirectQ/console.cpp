@@ -32,7 +32,7 @@ int 		con_linewidth;
 
 float		con_cursorspeed = 4;
 
-#define		CON_TEXTSIZE	16384
+#define		CON_TEXTSIZE	0x40000
 
 bool 	con_forcedup;		// because no entities to refresh
 
@@ -156,7 +156,6 @@ If the line width has changed, reformat the buffer.
 void Con_CheckResize (void)
 {
 	int		i, j, width, oldwidth, oldtotallines, numlines, numchars;
-	char	tbuf[CON_TEXTSIZE];
 
 	width = (vid.width >> 3) - 2;
 
@@ -165,7 +164,7 @@ void Con_CheckResize (void)
 
 	if (width < 1)			// video hasn't been initialized yet
 	{
-		width = 78;
+		width = 78;	// 640 width
 		con_linewidth = width;
 		con_totallines = CON_TEXTSIZE / con_linewidth;
 		memset (con_text, ' ', CON_TEXTSIZE);
@@ -186,6 +185,8 @@ void Con_CheckResize (void)
 		if (con_linewidth < numchars)
 			numchars = con_linewidth;
 
+		char *tbuf = (char *) Zone_Alloc (CON_TEXTSIZE);
+
 		memcpy (tbuf, con_text, CON_TEXTSIZE);
 		memset (con_text, ' ', CON_TEXTSIZE);
 
@@ -199,6 +200,7 @@ void Con_CheckResize (void)
 			}
 		}
 
+		Zone_Free (tbuf);
 		Con_ClearNotify ();
 	}
 
@@ -634,7 +636,7 @@ Con_NotifyBox
 */
 void Con_NotifyBox (char *text)
 {
-	double		t1, t2;
+	float		t1, t2;
 
 // during startup for sound / cd warnings
 	Con_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n");

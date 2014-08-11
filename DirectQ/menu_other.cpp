@@ -85,31 +85,30 @@ extern cvar_t menu_fillcolor;
 extern cvar_t r_skyalpha;
 extern cvar_t v_gamma;
 
-CQMenu menu_Main (NULL, m_main);
-CQMenu menu_Singleplayer (&menu_Main, m_other);
-CQMenu menu_Save (&menu_Singleplayer, m_save);
-CQMenu menu_Load (&menu_Singleplayer, m_load);
-CQMenu menu_Multiplayer (&menu_Main, m_multiplayer);
-CQMenu menu_TCPIPNewGame (&menu_Multiplayer, m_lanconfig_newgame);
-CQMenu menu_TCPIPJoinGame (&menu_Multiplayer, m_lanconfig_joingame);
-CQMenu menu_GameConfig (&menu_TCPIPNewGame, m_gameoptions);
-CQMenu menu_Setup (&menu_Multiplayer, m_setup);
-CQMenu menu_Options (&menu_Main, m_options);
-CQMenu menu_Video (&menu_Options, m_video);
-CQMenu menu_Sound (&menu_Options, m_other);
-CQMenu menu_Help (&menu_Main, m_help);
-CQMenu menu_Input (&menu_Options, m_other);
-CQMenu menu_Controls (&menu_Options, m_keys);
-CQMenu menu_Keybindings (&menu_Input, m_keys);
-CQMenu menu_Effects (&menu_Options, m_other);
-CQMenu menu_WarpSurf (&menu_Options, m_other);
-CQMenu menu_Fog (&menu_Options, m_other);
-CQMenu menu_ContentDir (&menu_Options, m_other);
-CQMenu menu_Chase (&menu_Options, m_other);
-CQMenu menu_Game (&menu_Main, m_other);
-CQMenu menu_Controller (&menu_Input, m_other);
-CQMenu menu_Maps (&menu_Main, m_other);
-CQMenu menu_Demo (&menu_Main, m_other);
+CQMenu menu_Main (m_main);
+CQMenu menu_Singleplayer (m_other);
+CQMenu menu_Save (m_save);
+CQMenu menu_Load (m_load);
+CQMenu menu_Multiplayer (m_multiplayer);
+CQMenu menu_TCPIPNewGame (m_lanconfig_newgame);
+CQMenu menu_TCPIPJoinGame (m_lanconfig_joingame);
+CQMenu menu_GameConfig (m_gameoptions);
+CQMenu menu_Setup (m_setup);
+CQMenu menu_Options (m_options);
+CQMenu menu_Video (m_video);
+CQMenu menu_Sound (m_other);
+CQMenu menu_Help (m_help);
+CQMenu menu_Input (m_other);
+CQMenu menu_Keybindings (m_keys);
+CQMenu menu_Effects (m_other);
+CQMenu menu_WarpSurf (m_other);
+CQMenu menu_Fog (m_other);
+CQMenu menu_ContentDir (m_other);
+CQMenu menu_Chase (m_other);
+CQMenu menu_Game (m_other);
+CQMenu menu_Controller (m_other);
+CQMenu menu_Maps (m_other);
+CQMenu menu_Demo (m_other);
 extern CQMenu menu_HUD;
 
 // for use in various menus
@@ -282,13 +281,14 @@ char *key_bindnames[][2] =
 	{"+moveleft", 		"Step Left"},
 	{"+moveright", 		"Step Right"},
 	{"+strafe", 		"Sidestep"},
-	{"+lookup", 		"Look Up"},
-	{"+lookdown", 		"Look Down"},
 	{"centerview", 		"Center View"},
 	{"+mlook", 			"Mouse Look"},
-	{"+klook", 			"Keyboard Look"},
-	{"+moveup",			"Swim Up"},
-	{"+movedown",		"Swim Down"},
+	{"+quickshot",		"Quick Shot"},
+	{"+quickgrenade",	"Quick Grenade"},
+	{"+quickrocket",	"Quick Rocket"},
+	{"+quickshaft",		"Quick Shaft"},
+	{"bestsafe",		"Best Safe Weapon"},
+	{"lastweapon",		"Last Weapon"},
 	{"toggleautomap",	"Automap On/Off"}
 };
 
@@ -419,7 +419,7 @@ void Menu_KeybindingsCustomKey (int key)
 	switch (key)
 	{
 	case K_ESCAPE:
-		menu_Options.EnterMenu ();
+		Menu_StackPop ();
 		break;
 
 	case K_UPARROW:
@@ -467,20 +467,6 @@ void Menu_KeybindingsCustomKey (int key)
 
 void Menu_VideoCustomEnter (void);
 
-bool CheckKnownFile (char *path)
-{
-	FILE *f = fopen (path, "rb");
-
-	if (f)
-	{
-		fclose (f);
-		return true;
-	}
-
-	return false;
-}
-
-
 bool CheckKnownContent (char *mask)
 {
 	WIN32_FIND_DATA FindFileData;
@@ -506,13 +492,13 @@ bool IsGameDir (char *path)
 	char *basedir = host_parms.basedir;
 
 	// check for known files that indicate a gamedir
-	if (CheckKnownFile (va ("%s/pak0.pak", path))) return true;
-	if (CheckKnownFile (va ("%s/config.cfg", path))) return true;
-	if (CheckKnownFile (va ("%s/autoexec.cfg", path))) return true;
-	if (CheckKnownFile (va ("%s/progs.dat", path))) return true;
-	if (CheckKnownFile (va ("%s/gfx.wad", path))) return true;
+	if (CheckKnownContent (va ("%s/pak0.pak", path))) return true;
+	if (CheckKnownContent (va ("%s/config.cfg", path))) return true;
+	if (CheckKnownContent (va ("%s/autoexec.cfg", path))) return true;
+	if (CheckKnownContent (va ("%s/progs.dat", path))) return true;
+	if (CheckKnownContent (va ("%s/gfx.wad", path))) return true;
 
-	// some gamedirs just have maps or models, of may have weirdly named paks
+	// some gamedirs just have maps or models, or may have weirdly named paks
 	if (CheckKnownContent (va ("%s/%s/maps/*.bsp", basedir, path))) return true;
 	if (CheckKnownContent (va ("%s/%s/progs/*.mdl", basedir, path))) return true;
 	if (CheckKnownContent (va ("%s/%s/*.pak", basedir, path))) return true;
@@ -1037,7 +1023,7 @@ void Menu_InitOptionsMenu (void)
 	menu_Options.AddOption (new CQMenuBanner ("gfx/p_option.lmp"));
 	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuTitle ("Configure Game Options"));
 	menu_Options.AddOption (MENU_TAG_FULL, new CQMenuTitle ("Configuration Management"));
-	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Customize Controls", &menu_Controls));
+	menu_Options.AddOption (MENU_TAG_SIMPLE, new CQMenuSubMenu ("Customize Controls", &menu_Keybindings));
 	menu_Options.AddOption (new CQMenuCommand ("Go to Console", Menu_OptionsGoToConsole));
 	menu_Options.AddOption (new CQMenuCommand ("Reset to Defaults", Menu_OptionsResetToDefaults));
 	menu_Options.AddOption (new CQMenuCommand ("Save Current Configuration", Host_WriteConfiguration));
@@ -1198,13 +1184,6 @@ void Menu_InitOptionsMenu (void)
 	// grab every key for these actions
 	for (int i = 0; i < 256; i++)
 		menu_Keybindings.AddOption (new CQMenuCustomKey (i, Menu_KeybindingsCustomKey));
-
-	menu_Controls.AddOption (new CQMenuBanner ("gfx/ttl_cstm.lmp"));
-	menu_Controls.AddOption (new CQMenuCustomDraw (Menu_KeybindingsCustomDraw));
-
-	// grab every key for these actions
-	for (int i = 0; i < 256; i++)
-		menu_Controls.AddOption (new CQMenuCustomKey (i, Menu_KeybindingsCustomKey));
 
 	// video menu - the rest of the options are deferred until the menu is up!
 	// note - the new char *** spinbox style means this isn't actually required any more,
@@ -1579,6 +1558,8 @@ bool ValidateMap (char *mapname, int itemnum)
 
 	for (int i = 0; i < (bsphead.lumps[LUMP_ENTITIES].filelen - 11); i++)
 	{
+		// this check is potentially suspect as the entity could be called anything;
+		// info_player_* is just an informal convention...!
 		if (!strnicmp (&entlump[i], "info_player", 11))
 		{
 			// map is valid

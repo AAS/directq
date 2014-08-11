@@ -49,9 +49,7 @@ void D3D_AutomapReset (void);
 void D3D_DrawTranslucentAliasModel (entity_t *ent);
 void D3D_DrawSpriteModel (entity_t *e);
 
-void D3D_RenderFlashDlights (void);
-
-extern DWORD d3d_ZbufferEnableFunction;
+DWORD D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
 
 // render definition for this frame
 d3d_renderdef_t d3d_RenderDef;
@@ -86,12 +84,11 @@ cvar_t	r_drawviewmodel ("r_drawviewmodel","1");
 cvar_t	r_speeds ("r_speeds","0");
 cvar_t	r_fullbright ("r_fullbright","0");
 cvar_t	r_lightmap ("r_lightmap","0");
-cvar_t	r_shadows ("r_shadows","0");
+cvar_t	r_shadows ("r_shadows", "0", CVAR_ARCHIVE);
 cvar_t	r_wateralpha ("r_wateralpha", 1.0f, CVAR_ARCHIVE);
 cvar_t	r_dynamic ("r_dynamic","1");
 cvar_t	r_novis ("r_novis","0");
 
-cvar_t	gl_finish ("gl_finish","0");
 cvar_t	gl_clear ("gl_clear","1", CVAR_ARCHIVE);
 cvar_t	gl_cull ("gl_cull","1");
 cvar_t	gl_smoothmodels ("gl_smoothmodels","1");
@@ -109,10 +106,17 @@ cvar_t gl_fogblue ("gl_fogblue", 0.3f, CVAR_ARCHIVE);
 cvar_t gl_fogstart ("gl_fogstart", 10.0f, CVAR_ARCHIVE);
 cvar_t gl_fogend ("gl_fogend", 2048.0f, CVAR_ARCHIVE);
 cvar_t gl_fogdensity ("gl_fogdensity", 0.001f, CVAR_ARCHIVE);
+
+// hmmm- this does nothing yet...
 cvar_t gl_underwaterfog ("gl_underwaterfog", 1, CVAR_ARCHIVE);
+
 cvar_t r_lockfrustum ("r_lockfrustum", 0.0f);
 cvar_t r_normqrain ("r_normqrain", 0.0f, CVAR_ARCHIVE);
 cvar_t r_wireframe ("r_wireframe", 0.0f);
+
+// dynamic far clipping plane depending on map size
+// see R_NewMap for calculation, D3D_CheckSurfMinMaxs for evaluation
+float r_clipdist;
 
 extern float r_automap_x;
 extern float r_automap_y;
@@ -120,6 +124,8 @@ extern float r_automap_z;
 extern float r_automap_scale;
 int automap_culls = 0;
 cvar_t r_automap_nearclip ("r_automap_nearclip", "48", CVAR_ARCHIVE);
+
+BOOL d3d_SceneBegun = FALSE;
 
 bool R_AutomapCull (vec3_t emins, vec3_t emaxs)
 {
@@ -141,9 +147,28 @@ bool R_AutomapCull (vec3_t emins, vec3_t emaxs)
 }
 
 
+/*
+===================
+D3D_CheckBeginScene
+
+Used to prevent potential perf penalties by deferring IDirect3DDevice9::BeginScene until
+such a time as we actually come to draw some polys
+===================
+*/
+void D3D_CheckBeginScene (void)
+{
+	if (!d3d_SceneBegun)
+	{
+		d3d_Device->BeginScene ();
+		d3d_SceneBegun = TRUE;
+	}
+}
+
+
 // fixed func drawing
 void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void *pVertexStreamZeroData, UINT VertexStreamZeroStride)
 {
+	D3D_CheckBeginScene ();
 	D3D_CheckDirtyMatrixes ();
 	d3d_Device->DrawPrimitiveUP (PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
 }
@@ -151,6 +176,7 @@ void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CON
 
 void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
 {
+	D3D_CheckBeginScene ();
 	D3D_CheckDirtyMatrixes ();
 	d3d_Device->DrawPrimitive (PrimitiveType, StartVertex, PrimitiveCount);
 }
@@ -158,6 +184,7 @@ void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT P
 
 void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount)
 {
+	D3D_CheckBeginScene ();
 	D3D_CheckDirtyMatrixes ();
 	d3d_Device->DrawIndexedPrimitive (PrimitiveType, BaseVertexIndex, MinIndex, NumVertices, StartIndex, PrimitiveCount);
 }
@@ -165,6 +192,7 @@ void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UIN
 
 void D3D_DrawPrimitive (D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, const void *pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
 {
+	D3D_CheckBeginScene ();
 	D3D_CheckDirtyMatrixes ();
 
 	d3d_Device->DrawIndexedPrimitiveUP
@@ -354,7 +382,7 @@ void TurnVector (vec3_t out, const vec3_t forward, const vec3_t side, float angl
 }
 
 
-void R_SetFrustum (void)
+void R_SetFrustum (float fovx, float fovy)
 {
 	int		i;
 
@@ -373,10 +401,10 @@ void R_SetFrustum (void)
 	}
 
 	// frustum cull check order is left/right/front/bottom/top
-	TurnVector (frustum[0].normal, vpn, vright, r_refdef.fov_x / 2 - 90);  // left plane
-	TurnVector (frustum[1].normal, vpn, vright, 90 - r_refdef.fov_x / 2);  // right plane
-	TurnVector (frustum[3].normal, vpn, vup, 90 - r_refdef.fov_y / 2);  // bottom plane
-	TurnVector (frustum[4].normal, vpn, vup, r_refdef.fov_y / 2 - 90);  // top plane
+	TurnVector (frustum[0].normal, vpn, vright, fovx / 2 - 90);  // left plane
+	TurnVector (frustum[1].normal, vpn, vright, 90 - fovx / 2);  // right plane
+	TurnVector (frustum[3].normal, vpn, vup, 90 - fovy / 2);  // bottom plane
+	TurnVector (frustum[4].normal, vpn, vup, fovy / 2 - 90);  // top plane
 
 	// also build a front clipping plane to cull objects behind the view
 	// this won't be much as the other 4 planes will intersect a little bit behind, but it is effective in some
@@ -415,8 +443,49 @@ void R_SetupFrame (void)
 	d3d_RenderDef.oldviewleaf = d3d_RenderDef.viewleaf;
 	d3d_RenderDef.viewleaf = Mod_PointInLeaf (r_refdef.vieworg, cl.worldmodel);
 
+	d3d_RenderDef.fov_x = r_refdef.fov_x;
+	d3d_RenderDef.fov_y = r_refdef.fov_y;
+
+	// this should be moved to d3d_warp
+	if (d3d_RenderDef.viewleaf->contents != CONTENTS_EMPTY && d3d_RenderDef.viewleaf->contents != CONTENTS_SOLID)
+	{
+		extern cvar_t r_waterwarp;
+		extern bool UnderwaterValid;
+		extern cvar_t r_waterwarptime;
+
+		if (r_waterwarp.integer > 1 || (!UnderwaterValid && r_waterwarp.integer))
+		{
+			// derive an approx speed
+			float warpspeed = cl.time * (r_waterwarptime.value / 2.0f);
+
+			// warp the fov
+			d3d_RenderDef.fov_x = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (warpspeed) * 0.03)) * 2 / (M_PI / 180.0);
+			d3d_RenderDef.fov_y = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (warpspeed) * 0.03)) * 2 / (M_PI / 180.0);
+		}
+	}
+
 	VectorCopy (r_refdef.vieworg, r_origin);
 	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
+}
+
+
+void D3D_RescaleLumas (void);
+
+void D3D_PrepareOverbright (void)
+{
+	extern cvar_t r_overbright;
+
+	// bound 0 to 2 - (float) 0 is required for overload
+	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
+	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
+
+	if (r_overbright.integer < 1)
+		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE;
+	else if (r_overbright.integer > 1)
+		D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE4X;
+	else D3D_OVERBRIGHT_MODULATE = D3DTOP_MODULATE2X;
+
+	D3D_RescaleLumas ();
 }
 
 
@@ -430,10 +499,6 @@ void D3D_PrepareRender (void)
 	// always clear the zbuffer
 	DWORD d3d_ClearFlags = D3DCLEAR_ZBUFFER;
 	D3DVIEWPORT9 d3d_3DViewport;
-
-	// accumulate everything else we want to clear
-	// fixme - don't clear if we're doing a viewleaf contents transition
-	if (gl_clear.value) d3d_ClearFlags |= D3DCLEAR_TARGET;
 
 	// if we have a stencil buffer make sure we clear that too otherwise perf will SUFFER
 	if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8) d3d_ClearFlags |= D3DCLEAR_STENCIL;
@@ -470,19 +535,26 @@ void D3D_PrepareRender (void)
 
 	DWORD clearcolor = 0xff000000;
 
-	// match winquake's grey if we're noclipping
-	if (d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID) clearcolor = 0xff242424;
-
-	if (r_wireframe.integer)
+	// select correct color clearing mode
+	if (d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID)
+	{
+		// match winquake's grey if we're noclipping
+		clearcolor = 0xff1f1f1f;
+		d3d_ClearFlags |= D3DCLEAR_TARGET;
+	}
+	else if (r_wireframe.integer)
 	{
 		d3d_ClearFlags |= D3DCLEAR_TARGET;
-		clearcolor = 0xff242424;
+		clearcolor = 0xff1f1f1f;
 	}
 	else if (d3d_RenderDef.oldviewleaf)
 	{
-		if (d3d_RenderDef.viewleaf->contents != d3d_RenderDef.oldviewleaf->contents)
-			d3d_ClearFlags &= ~D3DCLEAR_TARGET;
+		// explicitly don't clear the color buffer if we have a contents change
+		if (d3d_RenderDef.viewleaf->contents == d3d_RenderDef.oldviewleaf->contents && gl_clear.value)
+			d3d_ClearFlags |= D3DCLEAR_TARGET;
 	}
+	else if (gl_clear.value)
+		d3d_ClearFlags |= D3DCLEAR_TARGET;
 
 	// projection matrix depends on drawmode
 	if (d3d_RenderDef.automap)
@@ -512,9 +584,6 @@ void D3D_PrepareRender (void)
 	}
 	else
 	{
-		// standard perspective; this is converted to infinite in the member function
-		d3d_ProjMatrixStack->Perspective3D (r_refdef.fov_y, (float) r_refdef.vrect.width / (float) r_refdef.vrect.height, 4, 4096);
-
 		// put z going up
 		d3d_ViewMatrixStack->Rotate (1, 0, 0, -90);
 		d3d_ViewMatrixStack->Rotate (0, 0, 1, 90);
@@ -529,11 +598,11 @@ void D3D_PrepareRender (void)
 	}
 
 	// we only need to clear if we're rendering 3D
-	d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 0);
+	d3d_Device->Clear (0, NULL, d3d_ClearFlags, clearcolor, 1.0f, 1);
 
 	// depth testing and writing
 	D3D_SetRenderState (D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	D3D_SetRenderState (D3DRS_ZENABLE, d3d_ZbufferEnableFunction);
+	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_TRUE);
 
 	// turn off smooth shading
 	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
@@ -924,6 +993,19 @@ void D3D_AddExtraInlineModelsToListsForAutomap (void)
 }
 
 
+void D3D_CheckVSync (void)
+{
+	extern cvar_t vid_vsync;
+	static int old_vsync = vid_vsync.integer;
+
+	if (old_vsync != vid_vsync.integer)
+	{
+		old_vsync = vid_vsync.integer;
+		Cbuf_AddText ("vid_restart\n");
+	}
+}
+
+
 /*
 ================
 R_RenderScene
@@ -936,8 +1018,9 @@ FIXMEEEEEEEEEE - bring all entity drawing into the new framework
 void R_RenderScene (void)
 {
 	// set up to draw
+	D3D_CheckVSync ();
 	R_SetupFrame ();
-	R_SetFrustum ();
+	R_SetFrustum (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y);
 
 	// done here so we know if we're in water
 	R_MarkLeaves ();
@@ -946,6 +1029,7 @@ void R_RenderScene (void)
 	if (!d3d_RenderDef.automap) D3D_BeginUnderwaterWarp ();
 
 	// setup to draw
+	D3D_PrepareOverbright ();
 	D3D_PrepareRender ();
 
 	if (r_wireframe.integer)
@@ -963,7 +1047,7 @@ void R_RenderScene (void)
 	D3D_AddExtraInlineModelsToListsForAutomap ();
 
 	// upload all lightmaps that were modified
-	D3D_UploadModifiedLightmaps ();
+	d3d_Lightmaps->UploadModified ();
 
 	// setup the visedicts for drawing; done after the world so that it will include static entities
 	D3D_PrepareVisedicts ();
@@ -1021,9 +1105,6 @@ void R_RenderScene (void)
 	// draw alpha entities (sprites always have alpha)
 	D3D_DrawTranslucentEntities ();
 
-	// dynamic lights flash rendering
-	D3D_RenderFlashDlights ();
-
 	// draw particle batch for contents same as the viewleaf contents
 	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY)
 		D3D_DrawParticles (R_RENDEREMPTYPARTICLE);
@@ -1054,7 +1135,7 @@ r_refdef must be set before the first call
 */
 void R_RenderView (void)
 {
-	double	time1, time2;
+	float time1, time2;
 
 	if (r_norefresh.value) return;
 	if (!d3d_RenderDef.worldentity.model || !cl.worldmodel || !cl.worldbrush) return;
@@ -1068,8 +1149,7 @@ void R_RenderView (void)
 	d3d_RenderDef.frametime = cl.time - old_frametime;
 	old_frametime = cl.time;
 
-	if (r_speeds.value)
-		time1 = Sys_FloatTime ();
+	if (r_speeds.value) time1 = Sys_FloatTime ();
 
 	// render normal view
 	R_RenderScene ();

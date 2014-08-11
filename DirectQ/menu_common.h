@@ -349,14 +349,12 @@ private:
 class CQMenu
 {
 public:
-	CQMenu (CQMenu *previous, m_state_t menustate);
+	CQMenu (m_state_t menustate);
 	void Draw (void);
 	void Key (int k);
-	void AddOption (CQMenuOption *opt, bool setinsertposafter = false);
-	void AddOption (int OptionTag, CQMenuOption *opt, bool setinsertposafter = false);
+	void AddOption (CQMenuOption *opt);
+	void AddOption (int OptionTag, CQMenuOption *opt);
 	void EnterMenu (void);
-	void InsertNewItems (CQMenuOption *optlist);
-	void RemoveLastInsert (void);
 	CQMenuOption *MenuOptions;
 	void EnableOptions (int Tag);
 	void DisableOptions (int Tag);
@@ -367,10 +365,6 @@ public:
 private:
 	int NumOptions;
 	CQMenuOption *CurrentOption;
-	CQMenuOption *InsertPosition;
-	CQMenuOption *AfterInsert;
-	CQMenuOption *InsertedItems;
-	CQMenu *PreviousMenu;
 	m_state_t MenuState;
 };
 
@@ -467,4 +461,6 @@ void Menu_DrawOption (int x, int y, char *option, bool leftflash, bool rightflas
 void Menu_DrawCharacter (int cx, int line, int num);
 void Menu_DrawBackwardsCharacter (int cx, int line, int num);
 
-
+// menu stack
+void Menu_StackPush (CQMenu *menu);
+void Menu_StackPop (void);

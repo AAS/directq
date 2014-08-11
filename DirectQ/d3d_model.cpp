@@ -340,7 +340,7 @@ model_t *Mod_LoadModel (model_t *mod, bool crash)
 	// load the file
 	if (!(buf = (unsigned *) COM_LoadTempFile (mod->name)))
 	{
-		if (crash) Host_Error ("Mod_NumForName: %s not found", mod->name);
+		if (crash) Host_Error ("Mod_LoadModel: %s not found", mod->name);
 		return NULL;
 	}
 
@@ -433,8 +433,8 @@ void Mod_LoadTextures (lump_t *l)
 	m->nummiptex = LittleLong (m->nummiptex);
 
 	brushmodel->numtextures = m->nummiptex;
-	brushmodel->textures = (texture_t **) Pool_Alloc (POOL_MAP, m->nummiptex * sizeof (texture_t *));
-	texture_t *texes = (texture_t *) Pool_Alloc (POOL_MAP, sizeof (texture_t) * m->nummiptex);
+	brushmodel->textures = (texture_t **) Pool_Alloc (POOL_MAP, brushmodel->numtextures * sizeof (texture_t *));
+	texture_t *texes = (texture_t *) Pool_Alloc (POOL_MAP, sizeof (texture_t) * brushmodel->numtextures);
 
 	for (i = 0; i < m->nummiptex; i++)
 	{
@@ -1443,15 +1443,6 @@ void Mod_LoadPlanes (lump_t *l)
 }
 
 
-void *CopyLump (lump_t *l)
-{
-	byte *data = (byte *) Pool_Alloc (POOL_MAP, l->filelen);
-	memcpy (data, mod_base + l->fileofs, l->filelen);
-
-	return data;
-}
-
-
 /*
 =================
 Mod_LoadBrushModel
@@ -1459,15 +1450,11 @@ Mod_LoadBrushModel
 */
 void Mod_LoadBrushModel (model_t *mod, void *buffer)
 {
-	int			i, j;
-	dheader_t	*header;
-	dmodel_t 	*bm;
-
 	loadmodel->type = mod_brush;
 
-	header = (dheader_t *) buffer;
+	dheader_t *header = (dheader_t *) buffer;
 
-	i = LittleLong (header->version);
+	int i = LittleLong (header->version);
 
 	// drop to console
 	if (i != BSPVERSION)
@@ -1504,6 +1491,7 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	mod->numframes = 2;
 
 	// set up the submodels (FIXME: this is confusing)
+	// (this should never happen as each model will normally be it's own first submodel)
 	if (!mod->bh->numsubmodels) return;
 
 	// first pass fills in for the world (which is it's own first submodel), then grabs a submodel slot off the list.
@@ -1515,12 +1503,12 @@ void Mod_LoadBrushModel (model_t *mod, void *buffer)
 	for (i = 0; i < mod->bh->numsubmodels; i++)
 	{
 		// retrieve the submodel
-		bm = &mod->bh->submodels[i];
+		dmodel_t *bm = &mod->bh->submodels[i];
 
 		// fill in submodel specific stuff
 		mod->bh->hulls[0].firstclipnode = bm->headnode[0];
 
-		for (j = 1; j < MAX_MAP_HULLS; j++)
+		for (int j = 1; j < MAX_MAP_HULLS; j++)
 		{
 			// clipnodes
 			mod->bh->hulls[j].firstclipnode = bm->headnode[j];
@@ -1734,7 +1722,7 @@ extern unsigned d_8to24table[];
 #define FLOODFILL_FIFO_SIZE 0x1000
 #define FLOODFILL_FIFO_MASK (FLOODFILL_FIFO_SIZE - 1)
 
-#define FLOODFILL_STEP( off, dx, dy ) \
+#define FLOODFILL_STEP(off, dx, dy) \
 { \
 	if (pos[off] == fillcolor) \
 	{ \
@@ -1747,28 +1735,33 @@ extern unsigned d_8to24table[];
 
 void Mod_FloodFillSkin (byte *skin, int skinwidth, int skinheight)
 {
-	byte				fillcolor = *skin; // assume this is the pixel to fill
+	byte				fillcolor = skin[0]; // assume this is the pixel to fill
 	floodfill_t			fifo[FLOODFILL_FIFO_SIZE];
 	int					inpt = 0, outpt = 0;
 	int					filledcolor = -1;
 	int					i;
 
+	// this will always be true
 	if (filledcolor == -1)
 	{
 		filledcolor = 0;
+
 		// attempt to find opaque black
-		for (i = 0; i < 256; ++i)
+		for (i = 0; i < 256; i++)
+		{
 			if (d_8to24table[i] == (255 << 0)) // alpha 1.0
 			{
 				filledcolor = i;
 				break;
 			}
+		}
 	}
 
 	// can't fill to filled color or to transparent color (used as visited marker)
 	if ((fillcolor == filledcolor) || (fillcolor == 255))
 	{
-		//printf( "not filling skin from %d to %d\n", fillcolor, filledcolor );
+		// hmm - this happens more often than one would like...
+		// Con_DPrintf ("not filling skin from %d to %d\n", fillcolor, filledcolor);
 		return;
 	}
 
@@ -1813,16 +1806,7 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 
 	s = pheader->skinwidth * pheader->skinheight;
 
-	// remove the extension so that textures load properly
-	for (i = strlen (loadmodel->name); i; i--)
-	{
-		if (loadmodel->name[i] == '.')
-		{
-			loadmodel->name[i] = 0;
-			break;
-		}
-	}
-
+	// don't remove the extension here as Q1 has s_light.mdl and s_light.spr, so we need to differentiate them
 	for (i = 0; i < numskins; i++)
 	{
 		// no saved texels
@@ -1830,11 +1814,11 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 
 		if (pskintype->type == ALIAS_SKIN_SINGLE)
 		{
-			Mod_FloodFillSkin( skin, pheader->skinwidth, pheader->skinheight );
+			Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
 
 			// save 8 bit texels for the player model to remap
 			// progs/player.mdl is already hardcoded in sv_main so it's ok here too
-			if (!strcmp (loadmodel->name, "progs/player"))
+			if (!stricmp (loadmodel->name, "progs/player.mdl"))
 			{
 				pheader->texels[i] = (byte *) Pool_Alloc (POOL_CACHE, s);
 				memcpy (pheader->texels[i], (byte *) (pskintype + 1), s);
@@ -1881,9 +1865,9 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 
 			for (j = 0; j < groupskins; j++)
 			{
-				Mod_FloodFillSkin( skin, pheader->skinwidth, pheader->skinheight );
+				Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
 
-				if (j == 0 && !strcmp (loadmodel->name, "progs/player"))
+				if (j == 0 && !stricmp (loadmodel->name, "progs/player.mdl"))
 				{
 					pheader->texels[i] = (byte *) Pool_Alloc (POOL_CACHE, s);
 					memcpy (pheader->texels[i], (byte *) (pskintype), s);
@@ -1922,9 +1906,6 @@ void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 			}
 		}
 	}
-
-	// restore the extension so that model reuse works
-	strcat (loadmodel->name, ".mdl");
 
 	return (void *) pskintype;
 }

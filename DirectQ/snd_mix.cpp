@@ -75,7 +75,6 @@ void S_TransferStereo16 (int endtime)
 	int		reps;
 	DWORD	dwSize,dwSize2;
 	DWORD	*pbuf2;
-	HRESULT	hresult;
 	
 	snd_vol = volume.value*256;
 
@@ -85,10 +84,10 @@ void S_TransferStereo16 (int endtime)
 	reps = 0;
 
 	// if plan A fails try plan A
-	while ((hresult = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, 
+	while ((hr = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, 
 									(LPVOID *) &pbuf2, &dwSize2, 0)) != DS_OK)
 	{
-		if (hresult != DSERR_BUFFERLOST)
+		if (hr != DSERR_BUFFERLOST)
 		{
 			Con_Printf ("S_TransferStereo16: DS::Lock Sound Buffer Failed\n");
 			S_Shutdown ();
@@ -143,7 +142,6 @@ void S_TransferPaintBuffer(int endtime)
 	int		reps;
 	DWORD	dwSize,dwSize2;
 	DWORD	*pbuf2;
-	HRESULT	hresult;
 
 	if (shm->samplebits == 16 && shm->channels == 2)
 	{
@@ -160,10 +158,10 @@ void S_TransferPaintBuffer(int endtime)
 
 	reps = 0;
 
-	while ((hresult = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, 
+	while ((hr = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pbuf, &dwSize, 
 									(LPVOID *) &pbuf2,&dwSize2, 0)) != DS_OK)
 	{
-		if (hresult != DSERR_BUFFERLOST)
+		if (hr != DSERR_BUFFERLOST)
 		{
 			Con_Printf ("S_TransferPaintBuffer: DS::Lock Sound Buffer Failed\n");
 			S_Shutdown ();

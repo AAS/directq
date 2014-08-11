@@ -70,11 +70,11 @@ char *svc_strings[] =
 	"svc_skybox", // [string] skyname
 	"?", // 38
 	"?", // 39
-	"?", // 40
-	"?", // 41
-	"?", // 42
-	"?", // 43
-	"?", // 44
+	"svc_bf", // 40						// no data
+	"svc_fog", // 41					// [byte] density [byte] red [byte] green [byte] blue [float] time
+	"svc_spawnbaseline2", //42			// support for large modelindex, large framenum, alpha, using flags
+	"svc_spawnstatic2", // 43			// support for large modelindex, large framenum, alpha, using flags
+	"svc_spawnstaticsound2", //	44		// [coord3] [short] samp [byte] vol [byte] aten
 	"?", // 45
 	"?", // 46
 	"?", // 47
@@ -86,6 +86,11 @@ char *svc_strings[] =
 
 //=============================================================================
 
+/*
+==================
+CL_ReadByteShort2
+==================
+*/
 /*
 ==================
 CL_ReadByteShort2
@@ -170,11 +175,21 @@ void CL_ParseStartSoundPacket(void)
 	else
 		attenuation = DEFAULT_SOUND_PACKET_ATTENUATION;
 	
-	channel = MSG_ReadShort ();
-	sound_num = CL_ReadByteShort2 (false);
+	if (field_mask & SND_LARGEENTITY)
+	{
+		ent = (unsigned short) MSG_ReadShort ();
+		channel = MSG_ReadByte ();
+	}
+	else
+	{
+		channel = (unsigned short) MSG_ReadShort ();
+		ent = channel >> 3;
+		channel &= 7;
+	}
 
-	ent = channel >> 3;
-	channel &= 7;
+	if (field_mask & SND_LARGESOUND)
+		sound_num = (unsigned short) MSG_ReadShort ();
+	else sound_num = (unsigned short) CL_ReadByteShort2 (false);
 
 	if (ent > MAX_EDICTS)
 		Host_Error ("CL_ParseStartSoundPacket: ent = %i", ent);
@@ -291,8 +306,18 @@ void CL_ParseServerInfo (void)
 	// parse protocol version number
 	i = MSG_ReadLong ();
 
-	if (i != PROTOCOL_VERSION && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
-		Host_Error ("Server returned unknown protocol version %i, (not %i or %i-%i)", i, PROTOCOL_VERSION, PROTOCOL_VERSION_BJP, PROTOCOL_VERSION_MH);
+	if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+	{
+		Host_Error
+		(
+			"Server returned unknown protocol version %i, (not %i, %i or %i-%i)",
+			i,
+			PROTOCOL_VERSION,
+			PROTOCOL_VERSION_FITZ,
+			PROTOCOL_VERSION_BJP,
+			PROTOCOL_VERSION_MH
+		);
+	}
 
 	cl.Protocol = i;
 
@@ -439,7 +464,13 @@ void CL_ParseUpdate (int bits)
 	if (bits & U_MOREBITS)
 	{
 		i = MSG_ReadByte ();
-		bits |= (i<<8);
+		bits |= (i << 8);
+	}
+
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+	{
+		if (bits & U_EXTEND1) bits |= MSG_ReadByte () << 16;
+		if (bits & U_EXTEND2) bits |= MSG_ReadByte () << 24;
 	}
 
 	if (bits & U_LONGENTITY)	
@@ -460,54 +491,19 @@ void CL_ParseUpdate (int bits)
 
 	if (bits & U_MODEL)
 	{
-		modnum = CL_ReadByteShort ();
-		if (modnum >= MAX_MODELS)
-			Host_Error ("CL_ParseModel: bad modnum");
+		if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+			modnum = MSG_ReadByte ();
+		else modnum = CL_ReadByteShort ();
+
+		if (modnum >= MAX_MODELS) Host_Error ("CL_ParseModel: bad modnum");
 	}
 	else modnum = ent->baseline.modelindex;
-
-	model = cl.model_precache[modnum];
 
 	// moved before model change check as a change in model could make the baseline frame invalid
 	// (e.g. if the ent was originally spawned on a frame other than 0)
 	if (bits & U_FRAME)
 		ent->frame = MSG_ReadByte ();
 	else ent->frame = ent->baseline.frame;
-
-	if (model != ent->model)
-	{
-		// test - check for entity model changes at runtime, as it fucks up interpolation.
-		// this happens more often than you might think.
-		// if (model && ent->model) Con_Printf ("Change from %s to %s\n", ent->model->name, model->name);
-		ent->model = model;
-
-		// automatic animation (torches, etc) can be either all together
-		// or randomized
-		if (model)
-		{
-			if (model->synctype == ST_RAND)
-				ent->syncbase = (float)(rand () &0x7fff) / 0x7fff;
-			else ent->syncbase = 0.0;
-		}
-		else forcelink = true;	// hack to make null model players work
-
-		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
-
-		// if the model has changed we must also reset the interpolation data
-		// pose1 and pose2 are critical as they might be pointing to invalid frames in the new model!!!
-		ent->frame_start_time = 0;
-		ent->frame_interval = 0;
-		ent->pose1 = ent->pose2 = 0;
-		ent->translate_start_time = 0;
-		ent->origin1[0] = ent->origin1[1] = ent->origin1[2] = 0;
-		ent->origin2[0] = ent->origin2[1] = ent->origin2[2] = 0;
-		ent->rotate_start_time = 0;
-		ent->angles1[0] = ent->angles1[1] = ent->angles1[2] = 0;
-		ent->angles2[0] = ent->angles2[1] = ent->angles2[2] = 0;
-
-		// reset frame too...!
-		ent->frame = 0;
-	}
 
 	if (bits & U_COLORMAP)
 		i = MSG_ReadByte();
@@ -523,7 +519,7 @@ void CL_ParseUpdate (int bits)
 	}
 
 	if (bits & U_SKIN)
-		skin = MSG_ReadByte();
+		skin = MSG_ReadByte ();
 	else skin = ent->baseline.skin;
 
 	if (skin != ent->skinnum)
@@ -546,7 +542,7 @@ void CL_ParseUpdate (int bits)
 	else ent->msg_origins[0][0] = ent->baseline.origin[0];
 
 	if (bits & U_ANGLE1)
-		ent->msg_angles[0][0] = MSG_ReadAngle();
+		ent->msg_angles[0][0] = MSG_ReadAngle (true);
 	else ent->msg_angles[0][0] = ent->baseline.angles[0];
 
 	if (bits & U_ORIGIN2)
@@ -554,7 +550,7 @@ void CL_ParseUpdate (int bits)
 	else ent->msg_origins[0][1] = ent->baseline.origin[1];
 
 	if (bits & U_ANGLE2)
-		ent->msg_angles[0][1] = MSG_ReadAngle ();
+		ent->msg_angles[0][1] = MSG_ReadAngle (true);
 	else ent->msg_angles[0][1] = ent->baseline.angles[1];
 
 	if (bits & U_ORIGIN3)
@@ -562,21 +558,29 @@ void CL_ParseUpdate (int bits)
 	else ent->msg_origins[0][2] = ent->baseline.origin[2];
 
 	if (bits & U_ANGLE3)
-		ent->msg_angles[0][2] = MSG_ReadAngle ();
+		ent->msg_angles[0][2] = MSG_ReadAngle (true);
 	else ent->msg_angles[0][2] = ent->baseline.angles[2];
 
-	// the server controls the protocol so this is safe to do.
-	// required as some engines add U_TRANS but don't change PROTOCOL_VERSION
-	if (bits & U_TRANS) // && (cl.Protocol != PROTOCOL_VERSION || nehahra))
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ)
 	{
+		if (bits & U_ALPHA)
+			ent->alphaval = MSG_ReadByte ();
+		else ent->alphaval = ent->baseline.alpha;
+
+		if (bits & U_FRAME2) ent->frame = (ent->frame & 0x00FF) | (MSG_ReadByte () << 8);
+		if (bits & U_MODEL2) modnum = (modnum & 0x00FF) | (MSG_ReadByte () << 8);
+
+		// directq doesn't do no fitzquake-style lerping so just silently read the byte
+		if (bits & U_LERPFINISH) MSG_ReadByte ();
+	}
+	else if (bits & U_TRANS) // && (cl.Protocol != PROTOCOL_VERSION || nehahra))
+	{
+		// the server controls the protocol so this is safe to do.
+		// required as some engines add U_TRANS but don't change PROTOCOL_VERSION
 		// retain neharha protocol compatibility; the 1st and 3rd do nothing yet...
 		int transbits = MSG_ReadFloat ();
 		ent->alphaval = MSG_ReadFloat () * 256;
 		if (transbits == 2) MSG_ReadFloat ();
-
-		// hack - nehahra sends alpha of 0 in some (many?) cases
-		// bjp nehahra engine does this too
-		if (ent->alphaval < 1 && nehahra) ent->alphaval = 255;
 	}
 	else if (ent != cl_entities[cl.viewentity])
 	{
@@ -584,7 +588,48 @@ void CL_ParseUpdate (int bits)
 		ent->alphaval = 255;
 	}
 
+	// an alpha of 0 is equivalent to 255 (so that memset 0 will work correctly)
+	if (ent->alphaval < 1) ent->alphaval = 255;
+
 	if (bits & U_NOLERP) ent->forcelink = true;
+
+	// this was moved down for protocol fitz messaqe ordering because the model num could be changed by extend bits
+	model = cl.model_precache[modnum];
+
+	if (model != ent->model)
+	{
+		// test - check for entity model changes at runtime, as it fucks up interpolation.
+		// this happens more often than you might think.
+		// if (model && ent->model) Con_Printf ("Change from %s to %s\n", ent->model->name, model->name);
+		ent->model = model;
+
+		// automatic animation (torches, etc) can be either all together
+		// or randomized
+		if (model)
+		{
+			if (model->synctype == ST_RAND)
+				ent->syncbase = (float) (rand () &0x7fff) / 0x7fff;
+			else ent->syncbase = 0.0;
+		}
+		else forcelink = true;	// hack to make null model players work
+
+		if (num > 0 && num <= cl.maxclients) D3D_TranslatePlayerSkin (num - 1);
+
+		// if the model has changed we must also reset the interpolation data
+		// pose1 and pose2 are critical as they might be pointing to invalid frames in the new model!!!
+		ent->frame_start_time = 0;
+		ent->frame_interval = 0;
+		ent->pose1 = ent->pose2 = 0;
+		ent->translate_start_time = 0;
+		ent->origin1[0] = ent->origin1[1] = ent->origin1[2] = 0;
+		ent->origin2[0] = ent->origin2[1] = ent->origin2[2] = 0;
+		ent->rotate_start_time = 0;
+		ent->angles1[0] = ent->angles1[1] = ent->angles1[2] = 0;
+		ent->angles2[0] = ent->angles2[1] = ent->angles2[2] = 0;
+
+		// reset frame too...!
+		if (!(bits & U_FRAME)) ent->frame = 0;
+	}
 
 	if (forcelink)
 	{
@@ -607,13 +652,6 @@ void CL_ParseUpdate (int bits)
 		ent->angles1[0] = ent->angles1[1] = ent->angles1[2] = 0;
 		ent->angles2[0] = ent->angles2[1] = ent->angles2[2] = 0;
 	}
-
-	if (cl.Protocol >= PROTOCOL_VERSION_MH)
-	{
-		// update the baseline
-		VectorCopy (ent->msg_angles[0], ent->baseline.angles);
-		VectorCopy (ent->msg_origins[0], ent->baseline.origin);
-	}
 }
 
 
@@ -622,19 +660,28 @@ void CL_ParseUpdate (int bits)
 CL_ParseBaseline
 ==================
 */
-void CL_ParseBaseline (entity_t *ent)
+void CL_ParseBaseline (entity_t *ent, int version)
 {
-	int			i;
-	
-	ent->baseline.modelindex = CL_ReadByteShort ();
-	ent->baseline.frame = MSG_ReadByte ();
-	ent->baseline.colormap = MSG_ReadByte();
-	ent->baseline.skin = MSG_ReadByte();
-	for (i=0 ; i<3 ; i++)
+	int i;
+	int bits = (version == 2) ? MSG_ReadByte () : 0;
+
+	if (bits & B_LARGEMODEL)
+		ent->baseline.modelindex = MSG_ReadShort ();
+	else if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+		ent->baseline.modelindex = MSG_ReadByte ();
+	else ent->baseline.modelindex = CL_ReadByteShort ();
+
+	ent->baseline.frame = (bits & B_LARGEFRAME) ? MSG_ReadShort () : MSG_ReadByte ();
+	ent->baseline.colormap = MSG_ReadByte ();
+	ent->baseline.skin = MSG_ReadByte ();
+
+	for (i = 0; i < 3; i++)
 	{
 		ent->baseline.origin[i] = MSG_ReadCoord ();
-		ent->baseline.angles[i] = MSG_ReadAngle ();
+		ent->baseline.angles[i] = MSG_ReadAngle (true);
 	}
+
+	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte () : ENTALPHA_DEFAULT;
 }
 
 
@@ -645,20 +692,24 @@ CL_ParseClientdata
 Server information pertaining to this client only
 ==================
 */
-void CL_ParseClientdata (int bits)
+void CL_ParseClientdata (void)
 {
 	int		i, j;
-	
+	int		bits;
+
+	bits = (unsigned short) MSG_ReadShort ();
+
+	if (bits & SU_EXTEND1) bits |= (MSG_ReadByte () << 16);
+	if (bits & SU_EXTEND2) bits |= (MSG_ReadByte () << 24);
+
 	if (bits & SU_VIEWHEIGHT)
 		cl.viewheight = MSG_ReadChar ();
-	else
-		cl.viewheight = DEFAULT_VIEWHEIGHT;
+	else cl.viewheight = DEFAULT_VIEWHEIGHT;
 
 	if (bits & SU_IDEALPITCH)
 		cl.idealpitch = MSG_ReadChar ();
-	else
-		cl.idealpitch = 0;
-	
+	else cl.idealpitch = 0;
+
 	VectorCopy (cl.mvelocity[0], cl.mvelocity[1]);
 	for (i=0 ; i<3 ; i++)
 	{
@@ -702,9 +753,13 @@ void CL_ParseClientdata (int bits)
 	}
 
 	if (bits & SU_WEAPON)
-		i = CL_ReadByteShort ();
-	else
-		i = 0;
+	{
+		if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+			i = MSG_ReadByte ();
+		else i = CL_ReadByteShort ();
+	}
+	else i = 0;
+
 	if (cl.stats[STAT_WEAPON] != i)
 	{
 		cl.stats[STAT_WEAPON] = i;
@@ -747,6 +802,19 @@ void CL_ParseClientdata (int bits)
 			cl.stats[STAT_ACTIVEWEAPON] = (1<<i);
 		}
 	}
+
+	if (bits & SU_WEAPON2) cl.stats[STAT_WEAPON] |= (MSG_ReadByte () << 8);
+	if (bits & SU_ARMOR2) cl.stats[STAT_ARMOR] |= (MSG_ReadByte () << 8);
+	if (bits & SU_AMMO2) cl.stats[STAT_AMMO] |= (MSG_ReadByte () << 8);
+	if (bits & SU_SHELLS2) cl.stats[STAT_SHELLS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_NAILS2) cl.stats[STAT_NAILS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_ROCKETS2) cl.stats[STAT_ROCKETS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_CELLS2) cl.stats[STAT_CELLS] |= (MSG_ReadByte () << 8);
+	if (bits & SU_WEAPONFRAME2) cl.stats[STAT_WEAPONFRAME] |= (MSG_ReadByte () << 8);
+
+	if (bits & SU_WEAPONALPHA)
+		cl.viewent.alphaval = MSG_ReadByte ();
+	else cl.viewent.alphaval = 255;
 }
 
 /*
@@ -818,7 +886,6 @@ loc1:;
 	sides = BOX_ON_PLANE_SIDE (absmins, absmaxs, splitplane);
 
 	// recurse down the contacted sides
-#if 1
 	if ((sides & 1) && node->children[0]->contents != CONTENTS_SOLID)
 	{
 		if (!(sides & 2) && node->children[0]->contents < 0)
@@ -843,26 +910,6 @@ loc1:;
 			goto loc1;
 		else goto loc0;	// CL_FindTouchedLeafs (ent, node);
 	}
-#else
-	switch (sides)
-	{
-	case 1:
-		node = node->children[0];
-		goto loc0;
-
-	case 2:
-		node = node->children[1];
-		goto loc0;
-
-	default:
-		// (sides & 1) && (sides & 2)
-		if (node->children[0]->contents != CONTENTS_SOLID)
-			CL_FindTouchedLeafs (ent, node->children[0]);
-
-		node = node->children[1];
-		goto loc0;
-	}
-#endif
 }
 
 
@@ -871,7 +918,7 @@ loc1:;
 CL_ParseStatic
 =====================
 */
-void CL_ParseStatic (void)
+void CL_ParseStatic (int version)
 {
 	if (!cl.worldbrush)
 	{
@@ -882,7 +929,7 @@ void CL_ParseStatic (void)
 	entity_t *ent;
 
 	ent = (entity_t *) Pool_Alloc (POOL_MAP, sizeof (entity_t));
-	CL_ParseBaseline (ent);
+	CL_ParseBaseline (ent, version);
 
 	// copy it to the current state
 	ent->model = cl.model_precache[ent->baseline.modelindex];
@@ -916,7 +963,7 @@ void CL_ParseStatic (void)
 CL_ParseStaticSound
 ===================
 */
-void CL_ParseStaticSound (void)
+void CL_ParseStaticSound (int version)
 {
 	vec3_t		org;
 	int			sound_num, vol, atten;
@@ -924,7 +971,11 @@ void CL_ParseStaticSound (void)
 	
 	for (i=0 ; i<3 ; i++)
 		org[i] = MSG_ReadCoord ();
-	sound_num = CL_ReadByteShort2 (true);
+
+	if (version == 2)
+		sound_num = MSG_ReadShort ();
+	else sound_num = CL_ReadByteShort2 (true);
+
 	vol = MSG_ReadByte ();
 	atten = MSG_ReadByte ();
 	
@@ -936,6 +987,10 @@ void CL_ParseStaticSound (void)
 
 void SHOWLMP_decodehide (void);
 void SHOWLMP_decodeshow (void);
+
+int MSG_PeekByte (void);
+//void CL_ParseProQuakeMessage (void);
+//void CL_ParseProQuakeString (char *string);
 
 /*
 =====================
@@ -1003,24 +1058,40 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_clientdata:
-			i = MSG_ReadShort ();
-			CL_ParseClientdata (i);
+			CL_ParseClientdata ();
 			break;
 
 		case svc_version:
 			i = MSG_ReadLong ();
-			if (i != PROTOCOL_VERSION && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
-				Host_Error ("CL_ParseServerMessage: Server is protocol %i instead of %i or %i-%i", i, PROTOCOL_VERSION, PROTOCOL_VERSION_BJP, PROTOCOL_VERSION_MH);
+
+			if (i != PROTOCOL_VERSION && i != PROTOCOL_VERSION_FITZ && (i < PROTOCOL_VERSION_BJP || i > PROTOCOL_VERSION_MH))
+			{
+				Host_Error
+				(
+					"CL_ParseServerMessage: Server is protocol %i instead of %i, %i or %i-%i",
+					i,
+					PROTOCOL_VERSION,
+					PROTOCOL_VERSION_FITZ,
+					PROTOCOL_VERSION_BJP,
+					PROTOCOL_VERSION_MH
+				);
+			}
 
 			cl.Protocol = i;
+			Con_DPrintf ("Using protocol %i\n", i);
 
 			break;
 
 		case svc_disconnect:
+			Con_Printf ("Disconnect\n");
 			Host_EndGame ("Server disconnected\n");
 
 		case svc_print:
-			Con_Printf ("%s", MSG_ReadString ());
+			{
+				char *str = MSG_ReadString ();
+				// CL_ParseProQuakeString (str);
+				Con_Printf ("%s", str);
+			}
 			break;
 
 		case svc_centerprint:
@@ -1029,8 +1100,12 @@ void CL_ParseServerMessage (void)
 
 		case svc_stufftext:
 			{
+				// check for proquake messages
+				// if (MSG_PeekByte () == MOD_PROQUAKE) CL_ParseProQuakeMessage ();
 				char *stufftxt = MSG_ReadString ();
 
+				// Still want to add text, even on ProQuake messages.  This guarantees compatibility;
+				// unrecognized messages will essentially be ignored but there will be no parse errors
 				if (!strnicmp (stufftxt, "crosshair", 9) && nehahra)
 				{
 					// gotcha FUCKING nehahra
@@ -1053,7 +1128,7 @@ void CL_ParseServerMessage (void)
 
 		case svc_setangle:
 			for (i=0 ; i<3 ; i++)
-				cl.viewangles[i] = MSG_ReadAngle ();
+				cl.viewangles[i] = MSG_ReadAngle (true);
 			break;
 
 		case svc_setview:
@@ -1131,11 +1206,13 @@ void CL_ParseServerMessage (void)
 		case svc_spawnbaseline:
 			i = MSG_ReadShort ();
 			// must use CL_EntityNum() to force cl.num_entities up
-			CL_ParseBaseline (CL_EntityNum(i));
+			CL_ParseBaseline (CL_EntityNum (i), 1);
 			break;
+
 		case svc_spawnstatic:
-			CL_ParseStatic ();
-			break;			
+			CL_ParseStatic (1);
+			break;
+
 		case svc_temp_entity:
 			CL_ParseTEnt ();
 			break;
@@ -1186,7 +1263,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_spawnstaticsound:
-			CL_ParseStaticSound ();
+			CL_ParseStaticSound (1);
 			break;
 
 		case svc_cdtrack:
@@ -1231,6 +1308,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_skybox:
+		// case svc_skyboxfitz: (this is 37 too...)
 			{
 				// cheesy skybox loading
 				char *skyname = MSG_ReadString ();
@@ -1242,8 +1320,17 @@ void CL_ParseServerMessage (void)
 			MSG_ReadCoord ();
 			break;
 
+		case svc_fogfitz:
+			// protocol compatibility; does nothing for now
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			MSG_ReadShort ();
+			break;
+
 		case svc_fog:
-			if (MSG_ReadByte())
+			if (MSG_ReadByte ())
 			{
 				Cvar_Set ("gl_fogdensity", MSG_ReadFloat ());
 				Cvar_Set ("gl_fogred", MSG_ReadByte () / 255.0);
@@ -1258,9 +1345,314 @@ void CL_ParseServerMessage (void)
 			}
 
 			break;
+
+		case svc_spawnbaseline2:
+			i = MSG_ReadShort ();
+			// must use CL_EntityNum() to force cl.num_entities up
+			CL_ParseBaseline (CL_EntityNum (i), 2);
+			break;
+
+		case svc_spawnstatic2:
+			CL_ParseStatic (2);
+			break;
+
+		case svc_spawnstaticsound2:
+			CL_ParseStaticSound (2);
+			break;
+
+		case svc_bf:
+			Cmd_ExecuteString ("bf", src_command);
+			break;
 		}
 
 		lastcmd = cmd;
 	}
 }
 
+
+// JPG - added this
+int MSG_ReadBytePQ (void)
+{
+	return MSG_ReadByte () * 16 + MSG_ReadByte () - 272;
+}
+
+// JPG - added this
+int MSG_ReadShortPQ (void)
+{
+	return MSG_ReadBytePQ () * 256 + MSG_ReadBytePQ ();
+}
+
+/* JPG - added this function for ProQuake messages
+=======================
+CL_ParseProQuakeMessage
+=======================
+*/
+void CL_ParseProQuakeMessage (void)
+{
+#if 0
+	int cmd, i;
+	int team, frags, shirt, ping;
+
+	MSG_ReadByte ();
+	cmd = MSG_ReadByte ();
+
+	switch (cmd)
+	{
+	case pqc_new_team:
+		team = MSG_ReadByte () - 16;
+		if (team < 0 || team > 13)
+			Host_Error ("CL_ParseProQuakeMessage: pqc_new_team invalid team");
+
+		shirt = MSG_ReadByte() - 16;
+		cl.teamgame = true;
+
+		// cl.teamscores[team].frags = 0;	// JPG 3.20 - removed this
+		cl.teamscores[team].colors = 16 * shirt + team;
+		break;
+
+	case pqc_erase_team:
+		team = MSG_ReadByte() - 16;
+		if (team < 0 || team > 13)
+			Host_Error ("CL_ParseProQuakeMessage: pqc_erase_team invalid team");
+
+		cl.teamscores[team].colors = 0;
+		cl.teamscores[team].frags = 0;		// JPG 3.20 - added this
+		break;
+
+	case pqc_team_frags:
+		team = MSG_ReadByte() - 16;
+
+		if (team < 0 || team > 13) Host_Error ("CL_ParseProQuakeMessage: pqc_team_frags invalid team");
+
+		frags = MSG_ReadShortPQ();
+
+		if (frags & 32768) frags = frags - 65536;
+
+		cl.teamscores[team].frags = frags;
+		break;
+
+	case pqc_match_time:
+		cl.minutes = MSG_ReadBytePQ ();
+		cl.seconds = MSG_ReadBytePQ ();
+		cl.last_match_time = cl.time;
+		break;
+
+	case pqc_match_reset:
+		for (i = 0; i < 14; i++)
+		{
+			cl.teamscores[i].colors = 0;
+			cl.teamscores[i].frags = 0;		// JPG 3.20 - added this
+		}
+
+		break;
+
+	case pqc_ping_times:
+		while (ping = MSG_ReadShortPQ ())
+		{
+			if ((ping / 4096) >= cl.maxclients)
+				Host_Error ("CL_ParseProQuakeMessage: pqc_ping_times > MAX_SCOREBOARD");
+
+			cl.scores[ping / 4096].ping = ping & 4095;
+		}
+
+		cl.last_ping_time = cl.time;
+		break;
+	}
+#endif
+}
+
+
+void Q_Version (char *s)
+{
+	static float q_version_reply_time = -20.0; // Baker: so it can be instantly used
+	char *t;
+	int l = 0, n = 0;
+
+	// Baker: do not allow spamming of it, 20 second interval max
+	if (realtime - q_version_reply_time < 20)
+		return;
+
+	t = s;
+	t += 1;  // Baker: lazy, to avoid name "q_version" triggering this; later do it "right"
+	l = strlen (t);
+
+	while (n < l)
+	{
+		if (!strncmp (t, ": q_version", 9))
+		{
+			Cbuf_AddText (va ("say ProQuake version (DirectQ emulated)\n"));
+			Cbuf_Execute ();
+			q_version_reply_time = realtime;
+			break; // Baker: only do once per string
+		}
+
+		n += 1;
+		t += 1;
+	}
+}
+
+/* JPG - on a svc_print, check to see if the string contains useful information
+======================
+CL_ParseProQuakeString
+======================
+*/
+void CL_ParseProQuakeString (char *string)
+{
+#if 0
+	static int checkping = -1;
+	int ping, i;
+	char *s, *s2, *s3;
+	static int checkip = -1;	// player whose IP address we're expecting
+
+	// JPG 1.05 - for ip logging
+	static int remove_status = 0;
+	static int begin_status = 0;
+	static int playercount = 0;
+
+	// JPG 3.02 - made this more robust.. try to eliminate screwups due to "unconnected" and '\n'
+	s = string;
+
+	if (!strcmp (string, "Client ping times:\n") && pq_scoreboard_pings.value)
+	{
+		cl.last_ping_time = cl.time;
+		checkping = 0;
+		if (!cl.console_ping) *string = 0;
+	}
+	else if (checkping >= 0)
+	{
+		while (*s == ' ') s++;
+		ping = 0;
+
+		if (*s >= '0' && *s <= '9')
+		{
+			while (*s >= '0' && *s <= '9')
+				ping = 10 * ping + *s++ - '0';
+
+			if ((*s++ == ' ') && *s && (s2 = strchr (s, '\n')))
+			{
+				s3 = cl.scores[checkping].name;
+
+				while ((s3 = strchr (s3, '\n')) && s2)
+				{
+					s3++;
+					s2 = strchr (s2 + 1, '\n');
+				}
+
+				if (s2)
+				{
+					*s2 = 0;
+
+					if (!strncmp (cl.scores[checkping].name, s, 15))
+					{
+						cl.scores[checkping].ping = ping > 9999 ? 9999 : ping;
+						for (checkping++; !*cl.scores[checkping].name && checkping < cl.maxclients; checkping++);
+					}
+
+					*s2 = '\n';
+				}
+
+				if (!cl.console_ping) *string = 0;
+				if (checkping == cl.maxclients) checkping = -1;
+			}
+			else checkping = -1;
+		}
+		else checkping = -1;
+
+		cl.console_ping = cl.console_ping && (checkping >= 0);	// JPG 1.05 cl.sbar_ping -> cl.console_ping
+	}
+
+	// check for match time
+	if (!strncmp (string, "Match ends in ", 14))
+	{
+		s = string + 14;
+
+		if ((*s != 'T') && strchr(s, 'm'))
+		{
+			sscanf(s, "%d", &cl.minutes);
+			cl.seconds = 0;
+			cl.last_match_time = cl.time;
+		}
+	}
+	else if (!strcmp (string, "Match paused\n"))
+		cl.match_pause_time = cl.time;
+	else if (!strcmp (string, "Match unpaused\n"))
+	{
+		cl.last_match_time += (cl.time - cl.match_pause_time);
+		cl.match_pause_time = 0;
+	}
+	else if (!strcmp (string, "The match is over\n") || !strncmp (string, "Match begins in", 15))
+		cl.minutes = 255;
+	else if (checkping < 0)
+	{
+		s = string;
+		i = 0;
+
+		while (*s >= '0' && *s <= '9')
+			i = 10 * i + *s++ - '0';
+
+		if (!strcmp (s, " minutes remaining\n"))
+		{
+			cl.minutes = i;
+			cl.seconds = 0;
+			cl.last_match_time = cl.time;
+		}
+	}
+
+	// JPG 1.05 check for IP information
+	if (iplog_size)
+	{
+		if (!strncmp (string, "host:    ", 9))
+		{
+			begin_status = 1;
+			if (!cl.console_status)
+				remove_status = 1;
+		}
+
+		if (begin_status && !strncmp (string, "players: ", 9))
+		{
+			begin_status = 0;
+			remove_status = 0;
+
+			if (sscanf (string + 9, "%d", &playercount))
+			{
+				if (!cl.console_status)
+					*string = 0;
+			}
+			else playercount = 0;
+		}
+		else if (playercount && string[0] == '#')
+		{
+			if (!sscanf (string, "#%d", &checkip) || --checkip < 0 || checkip >= cl.maxclients) checkip = -1;
+			if (!cl.console_status) *string = 0;
+
+			remove_status = 0;
+		}
+		else if (checkip != -1)
+		{
+			int a, b, c;
+
+			if (sscanf (string, "   %d.%d.%d", &a, &b, &c) == 3)
+			{
+				cl.scores[checkip].addr = (a << 16) | (b << 8) | c;
+				IPLog_Add (cl.scores[checkip].addr, cl.scores[checkip].name);
+			}
+
+			checkip = -1;
+
+			if (!cl.console_status) *string = 0;
+
+			remove_status = 0;
+
+			if (!--playercount) cl.console_status = 0;
+		}
+		else
+		{
+			playercount = 0;
+
+			if (remove_status) *string = 0;
+		}
+	}
+
+	Q_Version (string); //R00k: look for "q_version" requests
+#endif
+}

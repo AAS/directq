@@ -329,8 +329,8 @@ void R_ReadPointFile_f (void)
 	int		r;
 	int		c;
 	particle_t	*p;
-	char	name[MAX_OSPATH];
-	
+	char	name[MAX_PATH];
+
 	_snprintf (name, 128, "%s/maps/%s.pts", com_gamedir, sv.name);
 
 	// we don't expect that these will ever be in PAKs
@@ -1043,7 +1043,7 @@ void D3D_DrawParticles (int flag)
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 
-	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
 
 	// disable z buffer writing and enable blending
 	D3D_EnableAlphaBlend (D3DBLENDOP_ADD, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);

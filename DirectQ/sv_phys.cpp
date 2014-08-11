@@ -134,22 +134,34 @@ Returns false if the entity removed itself.
 */
 bool SV_RunThink (edict_t *ent)
 {
-	float	thinktime;
+	float thinktime = ent->v.nextthink;
 
-	thinktime = ent->v.nextthink;
-	if (thinktime <= 0 || thinktime > sv.time + host_frametime)
-		return true;
+	if (thinktime <= 0 || thinktime > sv.time + host_frametime) return true;
 
-	if (thinktime < sv.time)
-		thinktime = sv.time;	// don't let things stay in the past.
-								// it is possible to start that way
-								// by a trigger with a local time.
+	// don't let things stay in the past.  it is possible to start that way by a trigger with a local time.
+	if (thinktime < sv.time) thinktime = sv.time;
+
+	// cache the frame from before the think function was run
+	float oldframe = ent->v.frame;
+
 	ent->v.nextthink = 0;
 	pr_global_struct->time = thinktime;
 	pr_global_struct->self = EDICT_TO_PROG(ent);
 	pr_global_struct->other = EDICT_TO_PROG(sv.edicts);
 
+	// now run the think function
 	PR_ExecuteProgram (ent->v.think);
+
+	// default is not to do it
+	ent->sendinterval = false;
+
+	// check if we need to send the interval
+	if (!ent->free && ent->v.nextthink && (ent->v.movetype == MOVETYPE_STEP || ent->v.frame != oldframe))
+	{
+		int i = Q_rint ((ent->v.nextthink - thinktime) * 255);
+		if (i >= 0 && i < 256 && i != 25 && i != 26) ent->sendinterval = true;
+	}
+
 	return !ent->free;
 }
 
@@ -435,6 +447,17 @@ trace_t SV_PushEntity (edict_t *ent, vec3_t push)
 }					
 
 
+edict_t **moved_edict = NULL;
+vec3_t *moved_from = NULL;
+
+void SV_MakePushBuffers (void)
+{
+	// keep these off the stack - 1 MB (OUCH!)
+	if (!moved_edict) moved_edict = (edict_t **) Pool_Alloc (POOL_PERMANENT, MAX_EDICTS * sizeof (edict_t *));
+	if (!moved_from) moved_from = (vec3_t *) Pool_Alloc (POOL_PERMANENT, MAX_EDICTS * sizeof (vec3_t));
+}
+
+
 /*
 ============
 SV_PushMove
@@ -448,8 +471,8 @@ void SV_PushMove (edict_t *pusher, float movetime)
 	vec3_t		mins, maxs, move;
 	vec3_t		entorig, pushorig;
 	int			num_moved;
-	edict_t		*moved_edict[MAX_EDICTS];
-	vec3_t		moved_from[MAX_EDICTS];
+
+	SV_MakePushBuffers ();
 
 	if (!pusher->v.velocity[0] && !pusher->v.velocity[1] && !pusher->v.velocity[2])
 	{
@@ -581,10 +604,10 @@ void SV_PushRotate (edict_t *pusher, float movetime)
 	vec3_t		move, a, amove;
 	vec3_t		entorig, pushorig;
 	int			num_moved;
-	edict_t		*moved_edict[MAX_EDICTS];
-	vec3_t		moved_from[MAX_EDICTS];
 	vec3_t		org, org2;
 	vec3_t		forward, right, up;
+
+	SV_MakePushBuffers ();
 
 	if (!pusher->v.avelocity[0] && !pusher->v.avelocity[1] && !pusher->v.avelocity[2])
 	{
@@ -1600,7 +1623,7 @@ trace_t SV_Trace_Toss (edict_t *ent, edict_t *ignore)
 	trace_t	trace;
 	vec3_t	move;
 	vec3_t	end;
-	double	save_frametime;
+	float	save_frametime;
 //	extern particle_t	*active_particles, *free_particles;
 //	particle_t	*p;
 

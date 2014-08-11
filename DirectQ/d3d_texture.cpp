@@ -26,8 +26,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // leave this at 1 cos texture caching will resolve loading time issues
 cvar_t gl_compressedtextures ("gl_texture_compression", 1, CVAR_ARCHIVE);
-
 cvar_t gl_maxtextureretention ("gl_maxtextureretention", 3, CVAR_ARCHIVE);
+cvar_t r_lumatextures ("r_lumaintensity", "1", CVAR_ARCHIVE);
+extern cvar_t r_overbright;
 
 LPDIRECT3DTEXTURE9 d3d_CurrentTexture[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 d3d_texture_t *d3d_FreeTextures = NULL;
@@ -35,7 +36,6 @@ int d3d_NumFreeTextures = 0;
 #define D3D_MAX_FREE_TEXTURES 128
 d3d_texture_t *d3d_Textures = NULL;
 
-void D3D_ReleaseLightmaps (void);
 void D3D_KillUnderwaterTexture (void);
 
 // other textures we use
@@ -48,6 +48,7 @@ LPDIRECT3DTEXTURE9 yahtexture;
 
 // for palette hackery
 extern PALETTEENTRY texturepal[];
+extern PALETTEENTRY lumapal[];
 
 // external textures directory - note - this should be registered before any textures are loaded, otherwise we will attempt to load
 // them from /textures
@@ -85,6 +86,10 @@ void D3D_HashTexture (image_t *image)
 
 D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 {
+	// cut down on storage for luma textures.  we could just use L8 but we need the extra 8
+	// bits for storing the original value in so that we can refresh it properly if the overbright mode changes.
+	if (flags & IMAGE_LUMA) return D3DFMT_A8L8;
+
 	D3DFORMAT TextureFormat = D3DFMT_X8R8G8B8;
 
 	// disable compression
@@ -138,7 +143,7 @@ D3DFORMAT D3D_GetTextureFormatForFlags (int flags)
 HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data, int flags)
 {
 	// wrap this monster so that we can more easily modify it if required
-	HRESULT hr = D3DXCreateTextureFromFileInMemoryEx
+	hr = D3DXCreateTextureFromFileInMemoryEx
 	(
 		d3d_Device,
 		data,
@@ -150,7 +155,7 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		D3D_GetTextureFormatForFlags (flags | IMAGE_ALPHA | IMAGE_32BIT),
 		D3DPOOL_MANAGED,
 		D3DX_FILTER_LINEAR,
-		D3DX_FILTER_BOX,
+		D3DX_FILTER_BOX | D3DX_FILTER_SRGB,
 		0,
 		NULL,
 		NULL,
@@ -255,7 +260,7 @@ bool D3D_LoadPCX (HANDLE fh, LPDIRECT3DTEXTURE9 *tex, int flags, int len)
 	if (((pcx.xmax + 1) % 4) || ((pcx.ymax + 1) % 4)) flags |= IMAGE_NOCOMPRESS;
 
 	// attempt to load it (this will generate miplevels for us too)
-	HRESULT hr = D3D_CreateExternalTexture (tex, (pcx.xmax + 1) * (pcx.ymax + 1) * 4 + 18, pcx_rgb, flags);
+	hr = D3D_CreateExternalTexture (tex, (pcx.xmax + 1) * (pcx.ymax + 1) * 4 + 18, pcx_rgb, flags);
 
 	// close before checking
 	COM_FCloseFile (&fh);
@@ -274,11 +279,19 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 	// add 3 for handling links.
 	char workingname[259];
 
-	// copy the name out so that we can safely modify it
-	strncpy (workingname, filename, 255);
+	if (flags & IMAGE_ALIAS)
+	{
+		// DP non-standard bullshit
+		_snprintf (workingname, 255, "%s.blah", filename);
+	}
+	else
+	{
+		// copy the name out so that we can safely modify it
+		strncpy (workingname, filename, 255);
 
-	// ensure that we have some kind of extension on it - anything will do
-	COM_DefaultExtension (workingname, ".blah");
+		// ensure that we have some kind of extension on it - anything will do
+		COM_DefaultExtension (workingname, ".blah");
+	}
 
 	// change * to #
 	for (int c = 0; ; c++)
@@ -359,7 +372,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 		COM_FCloseFile (&fh);
 
 		// attempt to load it (this will generate miplevels for us too)
-		HRESULT hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
+		hr = D3D_CreateExternalTexture (tex, filelen, filebuf, flags);
 
 		if (FAILED (hr))
 		{
@@ -381,7 +394,7 @@ bool D3D_LoadExternalTexture (LPDIRECT3DTEXTURE9 *tex, char *filename, int flags
 
 void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags)
 {
-	HRESULT hr = D3DXCreateTextureFromResourceEx
+	hr = D3DXCreateTextureFromResourceEx
 	(
 		d3d_Device,
 		NULL,
@@ -390,10 +403,10 @@ void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags
 		D3DX_DEFAULT,
 		(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
 		0,
-		D3D_GetTextureFormatForFlags (flags | IMAGE_ALPHA | IMAGE_32BIT),
+		D3D_GetTextureFormatForFlags (flags | IMAGE_ALPHA | IMAGE_32BIT | IMAGE_NOCOMPRESS),
 		D3DPOOL_MANAGED,
 		D3DX_FILTER_LINEAR,
-		D3DX_FILTER_BOX,
+		D3DX_FILTER_BOX | D3DX_FILTER_SRGB,
 		0,
 		NULL,
 		NULL,
@@ -402,32 +415,9 @@ void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags
 
 	if (FAILED (hr))
 	{
-		// the first failure might happen if we're compressing a texture that we can't compress
-		hr = D3DXCreateTextureFromResourceEx
-		(
-			d3d_Device,
-			NULL,
-			MAKEINTRESOURCE (ResourceID),
-			D3DX_DEFAULT,
-			D3DX_DEFAULT,
-			(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
-			0,
-			D3D_GetTextureFormatForFlags (flags | IMAGE_ALPHA | IMAGE_32BIT | IMAGE_NOCOMPRESS),
-			D3DPOOL_MANAGED,
-			D3DX_FILTER_LINEAR,
-			D3DX_FILTER_BOX,
-			0,
-			NULL,
-			NULL,
-			tex
-		);
-
-		if (FAILED (hr))
-		{
-			// a resource texture failing is a program crash bug
-			Sys_Error ("D3D_LoadResourceTexture: Failed to create texture");
-			return;
-		}
+		// a resource texture failing is a program crash bug
+		Sys_Error ("D3D_LoadResourceTexture: Failed to create texture");
+		return;
 	}
 
 	// not much more we need to do here...
@@ -449,13 +439,14 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 
 	// d3d specifies that compressed formats should be a multiple of 4
 	// would you believe marcher has a 1x1 texture in it?
+	// because we're doing powers of 2, every power of 2 above 4 is going to be a multiple of 4 also
 	if ((scaled.width < 4) || (scaled.height < 4)) image->flags |= IMAGE_NOCOMPRESS;
 
 	// sky can have large flat spaces of the same colour, meaning it doesn't compress so good
 	if (!strnicmp (image->identifier, "sky", 3)) image->flags |= IMAGE_NOCOMPRESS;
 
 	// create the texture at the scaled size
-	HRESULT hr = d3d_Device->CreateTexture
+	hr = d3d_Device->CreateTexture
 	(
 		scaled.width,
 		scaled.height,
@@ -498,6 +489,10 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 		if (image->flags & IMAGE_MIPMAP) FilterFlags |= (D3DX_FILTER_MIRROR_U | D3DX_FILTER_MIRROR_V);
 	}
 
+	PALETTEENTRY *activepal = texturepal;
+
+	if (image->flags & IMAGE_LUMA) activepal = lumapal;
+
 	hr = D3DXLoadSurfaceFromMemory
 	(
 		texsurf,
@@ -506,7 +501,7 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 		image->data,
 		(image->flags & IMAGE_32BIT) ? D3DFMT_A8R8G8B8 : D3DFMT_P8,
 		(image->flags & IMAGE_32BIT) ? image->width * 4 : image->width,
-		(image->flags & IMAGE_32BIT) ? NULL : texturepal,
+		(image->flags & IMAGE_32BIT) ? NULL : activepal,
 		&SrcRect,
 		FilterFlags,
 		0
@@ -521,7 +516,7 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, image_t *image)
 	texsurf->Release ();
 
 	// good old box filter - triangle is way too slow, linear doesn't work well for mipmapping
-	if (image->flags & IMAGE_MIPMAP) D3DXFilterTexture (*tex, NULL, 0, D3DX_FILTER_BOX);
+	if (image->flags & IMAGE_MIPMAP) D3DXFilterTexture (*tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
 
 	// tell Direct 3D that we're going to be needing to use this managed resource shortly
 	(*tex)->PreLoad ();
@@ -548,42 +543,48 @@ void D3D_LoadTexture (LPDIRECT3DTEXTURE9 *tex, int width, int height, byte *data
 }
 
 
-void D3D_MakeLumaTexture (LPDIRECT3DTEXTURE9 tex)
+byte D3D_ScaleLumaTexel (int lumain)
 {
+	return BYTE_CLAMP (((int) ((float) lumain * r_lumatextures.value)) >> r_overbright.integer);
+}
+
+
+bool D3D_MakeLumaTexture (LPDIRECT3DTEXTURE9 tex)
+{
+	// bound 0 to 2 - (float) 0 is required for overload
+	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
+	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
+
 	D3DSURFACE_DESC Level0Desc;
 	D3DLOCKED_RECT Level0Rect;
 
-	LPDIRECT3DSURFACE9 LumaSurf;
-
+	// because we're using A8L8 for lumas we can now lock the rect directly instead of having to go through an intermediate surface
 	tex->GetLevelDesc (0, &Level0Desc);
-	tex->GetSurfaceLevel (0, &LumaSurf);
+	tex->LockRect (0, &Level0Rect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
 
-	// copy it out to an ARGB surface
-	LPDIRECT3DSURFACE9 CopySurf;
-
-	d3d_Device->CreateOffscreenPlainSurface (Level0Desc.Width, Level0Desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &CopySurf, NULL);
-	D3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, LumaSurf, NULL, NULL, D3DX_FILTER_NONE, 0);
-	CopySurf->LockRect (&Level0Rect, NULL, 0);
+	bool isrealluma = false;
 
 	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
 	{
-		byte *rgba = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
+		// A8L8 maps to unsigned short
+		byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
 
-		// external texture packs come with lumas intended to be used in an additive blend over (texture * lightmap).
-		// restoring the correct (lightmap + luma) * texture means that we have to increase the intensity of their
-		// components.  we also do this for native textures as it makes no difference to them.
-		rgba[0] = BYTE_CLAMP ((((int) rgba[0] + (int) rgba[1] + (int) rgba[2]) * 2));
-		rgba[1] = rgba[2] = rgba[3] = rgba[0];
+		// store the original value in the alpha channel
+		a8l8[1] = a8l8[0];
+
+		// check for if it's really a luma
+		if (a8l8[1]) isrealluma = true;
+
+		// scale for overbrights
+		a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
 	}
 
-	CopySurf->UnlockRect ();
-	D3DXLoadSurfaceFromSurface (LumaSurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+	// unlock and rebuild the mipmap chain
+	tex->UnlockRect (0);
+	D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
+	tex->AddDirtyRect (NULL);
 
-	CopySurf->Release ();
-	LumaSurf->Release ();
-
-	// re-filter the mipmaps
-	D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX);
+	return isrealluma;
 }
 
 
@@ -592,33 +593,19 @@ void D3D_TranslateAlphaTexture (int r, int g, int b, LPDIRECT3DTEXTURE9 tex)
 	D3DSURFACE_DESC Level0Desc;
 	D3DLOCKED_RECT Level0Rect;
 
-	LPDIRECT3DSURFACE9 LumaSurf;
-
 	tex->GetLevelDesc (0, &Level0Desc);
-	tex->GetSurfaceLevel (0, &LumaSurf);
-
-	// copy it out to an ARGB surface
-	LPDIRECT3DSURFACE9 CopySurf;
-
-	d3d_Device->CreateOffscreenPlainSurface (Level0Desc.Width, Level0Desc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &CopySurf, NULL);
-	D3DXLoadSurfaceFromSurface (CopySurf, NULL, NULL, LumaSurf, NULL, NULL, D3DX_FILTER_NONE, 0);
-	CopySurf->LockRect (&Level0Rect, NULL, 0);
+	tex->LockRect (0, &Level0Rect, NULL, 0);
 
 	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
 	{
 		byte *rgba = (byte *) (&((unsigned int *) Level0Rect.pBits)[i]);
 
-		// strict correctness says we should divide by 255, but that makes it too dark, so instead we divide by 128
-		rgba[0] = BYTE_CLAMP (BYTE_CLAMP (b) * rgba[3] / 128);
-		rgba[1] = BYTE_CLAMP (BYTE_CLAMP (g) * rgba[3] / 128);
-		rgba[2] = BYTE_CLAMP (BYTE_CLAMP (r) * rgba[3] / 128);
+		rgba[0] = BYTE_CLAMP (BYTE_CLAMP (b) * rgba[3] / 255);
+		rgba[1] = BYTE_CLAMP (BYTE_CLAMP (g) * rgba[3] / 255);
+		rgba[2] = BYTE_CLAMP (BYTE_CLAMP (r) * rgba[3] / 255);
 	}
 
-	CopySurf->UnlockRect ();
-	D3DXLoadSurfaceFromSurface (LumaSurf, NULL, NULL, CopySurf, NULL, NULL, D3DX_FILTER_NONE, 0);
-
-	CopySurf->Release ();
-	LumaSurf->Release ();
+	tex->UnlockRect (0);
 }
 
 
@@ -644,20 +631,33 @@ byte no_match_hash[] = {0x40, 0xB4, 0x54, 0x7D, 0x9D, 0xDA, 0x9D, 0x0B, 0xCF, 0x
 
 LPDIRECT3DTEXTURE9 D3D_LoadTexture (image_t *image)
 {
+	// detect water textures
+	if (image->identifier[0] == '*')
+	{
+		// don't load lumas for liquid textures
+		if (image->flags & IMAGE_LUMA) return NULL;
+
+		// flag it early so that it gets stored in the struct
+		image->flags |= IMAGE_LIQUID;
+	}
+
+	bool hasluma = false;
+
+	// check native texture for a luma
 	if ((image->flags & IMAGE_LUMA) && !(image->flags & IMAGE_32BIT))
 	{
-		// lumas only come from native data
-		bool hasluma = false;
-
 		for (int i = 0; i < image->width * image->height; i++)
 		{
-			if (image->data[i] > 223)
+			if (vid.fullbright[image->data[i]])
+			{
 				hasluma = true;
-			else image->data[i] = 0;
+				break;
+			}
 		}
+	}
 
-		if (!hasluma) return NULL;
-
+	if (image->flags & IMAGE_LUMA)
+	{
 		// change the identifier so that we can load an external texture properly
 		strcat (image->identifier, "_luma");
 	}
@@ -680,7 +680,8 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (image_t *image)
 		}
 
 		// it's not beyond the bounds of possibility that we might have 2 textures with the same
-		// data but different usage, so here we check for it and accomodate it
+		// data but different usage, so here we check for it and accomodate it (this will happen with lumas
+		// where the hash will match, so it remains a valid check)
 		if (image->flags != t->TexImage.flags) continue;
 
 		// compare the hash and reuse if it matches
@@ -722,12 +723,6 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (image_t *image)
 	// copy the image
 	memcpy (&tex->TexImage, image, sizeof (image_t));
 
-	// detect water textures
-	if (image->identifier[0] == '*')
-	{
-		image->flags |= IMAGE_LIQUID;
-	}
-
 	// check for textures that have the same name but different data, and amend the name by the QRP standard
 	if (COM_CheckHash (image->hash, plat_top1_cable))
 		strcat (image->identifier, "_cable");
@@ -761,14 +756,44 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (image_t *image)
 
 	COM_CheckContentDirectory (&gl_texturedir, false);
 
-	if (!D3D_LoadExternalTexture (&tex->d3d_Texture, va ("%s/%s", gl_texturedir.string, image->identifier), image->flags))
+	// try to load an external texture
+	bool externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, va ("%s/%s", gl_texturedir.string, image->identifier), image->flags);
+
+	// DP alias skin texture dir non-standard bullshit support
+	if ((image->flags & IMAGE_ALIAS) && !externalloaded)
+		externalloaded = D3D_LoadExternalTexture (&tex->d3d_Texture, image->identifier, image->flags);
+
+	if (!externalloaded)
 	{
+		// test for a native luma texture
+		if ((image->flags & IMAGE_LUMA) && !hasluma)
+		{
+			// if we got neither a native nor an external luma we must cancel it and return NULL
+			tex->LastUsage = 666;
+			SAFE_RELEASE (tex->d3d_Texture);
+			memcpy (tex->TexImage.hash, no_match_hash, 16);
+			return NULL;
+		}
+
 		// upload through direct 3d
 		D3D_LoadTexture (&tex->d3d_Texture, image);
 	}
 
 	// make the luma representation of the texture
-	if (image->flags & IMAGE_LUMA) D3D_MakeLumaTexture (tex->d3d_Texture);
+	if (image->flags & IMAGE_LUMA)
+	{
+		// if it's not really a luma (should never happen...) clear it and return NULL
+		if (!D3D_MakeLumaTexture (tex->d3d_Texture))
+		{
+			tex->LastUsage = 666;
+			SAFE_RELEASE (tex->d3d_Texture);
+			memcpy (tex->TexImage.hash, no_match_hash, 16);
+			return NULL;
+		}
+
+		// SCR_WriteTextureToTGA (va ("%s.tga", tex->TexImage.identifier), tex->d3d_Texture);
+		//Con_Printf ("Uploaded luma for %s\n", tex->TexImage.identifier);
+	}
 
 	// return the texture we got
 	return tex->d3d_Texture;
@@ -825,29 +850,6 @@ LPDIRECT3DTEXTURE9 D3D_LoadTexture (miptex_t *mt, int flags)
 
 	strcpy (image.identifier, mt->name);
 
-	if (image.flags & IMAGE_LUMA)
-	{
-		// check the *second* miplevel for luma pixels, but the actual luma that is uploaded will be based on the first
-		// there are still some mods that have crap textures even after this, but at least this catches some of them.
-		int size = (mt->width / 2) * (mt->height / 2);
-		byte *data = ((byte *) mt) + mt->offsets[1];
-
-		for (int i = 0; i < size; i++)
-		{
-			// alpha is not luma
-			if (data[i] == 255) continue;
-
-			// see do we get a luma
-			// note - we still check for luma texels in D3D_LoadTexture as it's fully
-			// possible for the second to have them but the first not to, e.g. if bad colour matching
-			// was done on the texture when it was originally created.
-			if (data[i] > 223) return D3D_LoadTexture (&image);
-		}
-
-		// no luma
-		return NULL;
-	}
-
 	return D3D_LoadTexture (&image);
 }
 
@@ -892,7 +894,8 @@ void D3D_ReleaseTextures (void)
 		SAFE_RELEASE (playertextures[i]);
 
 	// release lightmaps too
-	D3D_ReleaseLightmaps ();
+	SAFE_DELETE (d3d_Lightmaps);
+
 	D3D_KillUnderwaterTexture ();
 
 	// resource textures
@@ -916,6 +919,21 @@ void D3D_ReleaseTextures (void)
 }
 
 
+void D3D_PreloadTextures (void)
+{
+	for (d3d_texture_t *tex = d3d_Textures; tex; tex = tex->next)
+	{
+		// pull it back to vram
+		if (tex->d3d_Texture)
+		{
+			// keep the texture hot
+			tex->d3d_Texture->SetPriority (512);
+			tex->d3d_Texture->PreLoad ();
+		}
+	}
+}
+
+
 void D3D_FlushTextures (void)
 {
 	int numflush = 0;
@@ -933,6 +951,17 @@ void D3D_FlushTextures (void)
 		// always preserve these types irrespective
 		if (tex->TexImage.flags & IMAGE_PRESERVE) tex->LastUsage = 0;
 
+		if (tex->LastUsage < 2 && tex->d3d_Texture)
+		{
+			// assign a higher priority to the texture
+			tex->d3d_Texture->SetPriority (256);
+		}
+		else if (tex->d3d_Texture)
+		{
+			// assign a lower priority so that recently loaded textures can be preferred to be kept in vram
+			tex->d3d_Texture->SetPriority (0);
+		}
+
 		if (tex->LastUsage > gl_maxtextureretention.value && tex->d3d_Texture)
 		{
 			// if the texture hasn't been used in 4 maps, we flush it
@@ -947,9 +976,124 @@ void D3D_FlushTextures (void)
 			// increment number flushed
 			numflush++;
 		}
+		else
+		{
+			// pull it back to vram
+			if (tex->d3d_Texture)
+			{
+				// keep the texture hot
+				tex->d3d_Texture->SetPriority (512);
+				tex->d3d_Texture->PreLoad ();
+			}
+		}
 	}
 
 	Con_DPrintf ("Flushed %i textures\n", numflush);
+	Con_DPrintf ("Available texture memory: %0.3f MB\n", ((float) d3d_Device->GetAvailableTextureMem () / 1024.0f) / 1024.0f);
 }
 
+
+void D3D_EvictTextures (void)
+{
+	// just because host.cpp doesn't know what a LPDIRECT3DDEVICE9 is...
+	d3d_Device->EvictManagedResources ();
+}
+
+
+bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory)
+{
+	// test texture
+	LPDIRECT3DTEXTURE9 tex;
+
+	// check for compressed texture formats
+	// rather than using CheckDeviceFormat we actually try to create one and see what happens
+	hr = d3d_Device->CreateTexture
+	(
+		128,
+		128,
+		1,
+		0,
+		textureformat,
+		D3DPOOL_DEFAULT,
+		&tex,
+		NULL
+	);
+
+	if (SUCCEEDED (hr))
+	{
+		// done with the texture
+		tex->Release ();
+
+		if (!mandatory)
+			Con_Printf ("Allowing %s Texture Format\n", D3DTypeToString (textureformat));
+
+		return true;
+	}
+
+	if (mandatory)
+		Sys_Error ("Texture format %s is not supported", D3DTypeToString (textureformat));
+
+	return false;
+}
+
+
+void D3D_RescaleIndividualLuma (LPDIRECT3DTEXTURE9 tex)
+{
+	// bound 0 to 2 - (float) 0 is required for overload
+	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
+	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
+
+	D3DSURFACE_DESC Level0Desc;
+	D3DLOCKED_RECT Level0Rect;
+
+	// because we're using A8L8 for lumas we can now lock the rect directly instead of having to go through an intermediate surface
+	tex->GetLevelDesc (0, &Level0Desc);
+	tex->LockRect (0, &Level0Rect, NULL, D3DLOCK_NO_DIRTY_UPDATE);
+
+	for (int i = 0; i < Level0Desc.Width * Level0Desc.Height; i++)
+	{
+		// A8L8 maps to unsigned short
+		byte *a8l8 = (byte *) (&((unsigned short *) Level0Rect.pBits)[i]);
+
+		// scale for overbrights
+		a8l8[0] = D3D_ScaleLumaTexel (a8l8[1]);
+	}
+
+	// unlock and rebuild the mipmap chain
+	tex->UnlockRect (0);
+	D3DXFilterTexture (tex, NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
+	tex->AddDirtyRect (NULL);
+}
+
+
+void D3D_RescaleLumas (void)
+{
+	static int r_oldoverbright = r_overbright.integer;
+	static int r_oldlumatextures = (int) (r_lumatextures.value * 10);
+
+	// restrict cvar values to supported modes
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_MODULATE4X) && r_overbright.integer > 1) Cvar_Set (&r_overbright, 1);
+	if (!(d3d_DeviceCaps.TextureOpCaps & D3DTEXOPCAPS_MODULATE2X) && r_overbright.integer > 0) Cvar_Set (&r_overbright, (float) 0);
+
+	// forbid use of the 3 TMU path if we only have 2 TMUs
+	if (d3d_DeviceCaps.MaxTextureBlendStages < 3) Cvar_Set (&r_lumatextures, (float) 0);
+
+	// bound 0 to 2 - (float) 0 is required for overload
+	if (r_overbright.integer < 0) Cvar_Set (&r_overbright, (float) 0);
+	if (r_overbright.integer > 2) Cvar_Set (&r_overbright, 2);
+
+	if (r_oldoverbright != r_overbright.integer || r_oldlumatextures != (int) (r_lumatextures.value * 10))
+	{
+		r_oldoverbright = r_overbright.integer;
+		r_oldlumatextures = (int) (r_lumatextures.value * 10);
+
+		for (d3d_texture_t *t = d3d_Textures; t; t = t->next)
+		{
+			if (!t->d3d_Texture) continue;
+			if (!(t->TexImage.flags & IMAGE_LUMA)) continue;
+
+			D3D_RescaleIndividualLuma (t->d3d_Texture);
+		}
+	}
+}
 

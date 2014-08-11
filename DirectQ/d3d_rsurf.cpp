@@ -25,7 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void R_PushDlights (mnode_t *headnode);
 void EmitSkyPolys (msurface_t *surf);
-void D3D_MakeLightmapTexCoords (msurface_t *surf, float *v, float *st);
 void D3D_DrawWorld (void);
 __inline void R_AddStaticEntitiesForLeaf (mleaf_t *leaf);
 void D3D_AutomapRecursiveNode (mnode_t *node);
@@ -78,7 +77,7 @@ texture_t *R_TextureAnimation (texture_t *base)
 	if (!tex) tex = base;
 
 	// update renderflags
-	if (tex->d3d_Fullbright)
+	if (tex->d3d_Fullbright && d3d_DeviceCaps.MaxTextureBlendStages > 2)
 	{
 		d3d_RenderDef.renderflags |= R_RENDERLUMA;
 		d3d_RenderDef.brushrenderflags |= R_RENDERLUMA;
@@ -102,6 +101,7 @@ texture_t *R_TextureAnimation (texture_t *base)
 =============================================================
 */
 
+extern float r_clipdist;
 
 __inline void R_MarkLeafSurfs (mleaf_t *leaf, int visframe)
 {
@@ -119,7 +119,7 @@ __inline void R_MarkLeafSurfs (mleaf_t *leaf, int visframe)
 }
 
 
-__inline void R_PlaneSide (mplane_t *plane, double *dot, int *side)
+__inline void R_PlaneSide (mplane_t *plane, float *dot, int *side)
 {
 	// find which side of the node we are on
 	switch (plane->type)
@@ -176,7 +176,7 @@ __inline void R_AddSurfToDrawLists (msurface_t *surf)
 		else d3d_RenderDef.renderflags |= R_RENDERABOVEWATER;
 
 		// check for lightmap modifications
-		D3D_CheckLightmapModification (surf);
+		if (surf->d3d_Lightmap) surf->d3d_Lightmap->CheckSurfaceForModification (surf);
 
 		// link it in (front to back)
 		if (!tex->chaintail)
@@ -198,7 +198,7 @@ void R_RecursiveWorldNode (mnode_t *node)
 {
 	int			side;
 	msurface_t	*surf;
-	double		dot;
+	float		dot;
 
 loc0:;
 	if (node->contents == CONTENTS_SOLID) return;
@@ -222,6 +222,10 @@ loc0:;
 	// node is just a decision point, so go down the appropriate sides
 	// find which side of the node we are on
 	R_PlaneSide (node->plane, &dot, &side);
+
+	// check max dot
+	if (dot > r_clipdist) r_clipdist = dot;
+	if (-dot > r_clipdist) r_clipdist = -dot;
 
 	// recurse down the children, front side first (but only if we *have* to
 	// note: i'm sure that there's a condition here we can goto on
@@ -278,7 +282,7 @@ void R_AutomapSurfaces (void)
 	}
 
 	int side;
-	double dot;
+	float dot;
 
 	// setup modelorg to a point so far above the viewpoint that it may as well be infinite
 	modelorg[0] = (cl.worldmodel->mins[0] + cl.worldmodel->maxs[0]) / 2;
@@ -299,6 +303,10 @@ void R_AutomapSurfaces (void)
 
 		// find which side of the node we are on
 		R_PlaneSide (node->plane, &dot, &side);
+
+		// check max dot
+		if (dot > r_clipdist) r_clipdist = dot;
+		if (-dot > r_clipdist) r_clipdist = -dot;
 
 		for (int j = 0; j < node->numsurfaces; j++)
 		{
@@ -344,6 +352,9 @@ void D3D_PrepareWorld (void)
 	// build the world
 	VectorCopy (r_origin, modelorg);
 
+	// never go < 2048
+	r_clipdist = 2048;
+
 	if (d3d_RenderDef.automap)
 		R_AutomapSurfaces ();
 	else R_RecursiveWorldNode (cl.worldbrush->nodes);
@@ -383,55 +394,21 @@ void R_LeafVisibility (byte *vis)
 }
 
 
-int numrecurs = 0;
-int nearwaterbit = 0;
-
-void R_RecursiveNearWaterTest (mnode_t *node)
-{
-	numrecurs++;
-
-	// note: this tactic can reduce recursions by a factor of 10!!!
-loc0:;
-	if (node->contents < 0)
-	{
-		// node is a leaf
-		if (node->contents == CONTENTS_EMPTY) nearwaterbit |= 1;
-		if (node->contents == CONTENTS_WATER) nearwaterbit |= 2;
-		if (node->contents == CONTENTS_LAVA) nearwaterbit |= 2;
-		if (node->contents == CONTENTS_SLIME) nearwaterbit |= 2;
-		return;
-	}
-
-	mplane_t *splitplane = node->plane;
-	float dist = DotProduct (r_refdef.vieworg, splitplane->normal) - splitplane->dist;
-
-	if (dist > 64) {node = node->children[0]; goto loc0;}
-	if (dist < -64) {node = node->children[1]; goto loc0;}
-
-	R_RecursiveNearWaterTest (node->children[0]);
-
-	node = node->children[1];
-	goto loc0;
-}
-
-
 bool R_NearWaterTest (void)
 {
-	numrecurs = 0;
-	nearwaterbit = 0;
+	msurface_t **mark = d3d_RenderDef.viewleaf->firstmarksurface;
+	int c = d3d_RenderDef.viewleaf->nummarksurfaces;
 
-	R_RecursiveNearWaterTest (cl.worldbrush->nodes);
+	if (c)
+	{
+		do
+		{
+			if (mark[0]->flags & SURF_DRAWTURB) return true;
+			mark++;
+		} while (--c);
+	}
 
-#if 0
-	// just for making sure that things work
-	if (nearwaterbit == 3)
-		Con_Printf ("near water\n");
-	else Con_Printf ("not near water (%i)\n", nearwaterbit);
-
-	Con_Printf ("Recursed %i times\n", numrecurs);
-#endif
-
-	return (nearwaterbit & 3);
+	return false;
 }
 
 
@@ -533,8 +510,7 @@ void D3D_BuildSurfaceVertexBuffer (msurface_t *surf, model_t *mod, glpoly_t *pol
 		v->st[1] = DotProduct (vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
 		v->st[1] /= surf->texinfo->texture->height;
 
-		// make lightmap coords
-		D3D_MakeLightmapTexCoords (surf, vec, v->lm);
+		if (surf->d3d_Lightmap) surf->d3d_Lightmap->CalcLightmapTexCoords (surf, vec, v->lm);
 	}
 
 	// average out midpoint
@@ -624,8 +600,11 @@ with all the surfaces from all brush models
 */
 void D3D_CreateBlockLights (void);
 
+
 void GL_BuildLightmaps (void)
 {
+	Con_DPrintf ("Loading lightmaps... ");
+
 	int		i, j;
 	model_t	*m;
 	extern int MaxExtents[];
@@ -640,7 +619,7 @@ void GL_BuildLightmaps (void)
 	d3d_RenderDef.visframecount = 0;
 
 	// clear down any previous lightmaps
-	D3D_ReleaseLightmaps ();
+	SAFE_DELETE (d3d_Lightmaps);
 
 	// note - the world (model 0) doesn't actually have a model set in the precache list so we need to start at 1
 	for (j = 1; j < MAX_MODELS; j++)
@@ -699,8 +678,29 @@ void GL_BuildLightmaps (void)
 
 			for (surf = m->bh->textures[i]->texturechain; surf; surf = surf->texturechain)
 			{
+				// ensure
+				surf->d3d_Lightmap = NULL;
+
+				if (surf->flags & SURF_DRAWSKY) continue;
+				if (surf->flags & SURF_DRAWTURB) continue;
+
+				// fill in lightmap extents
+				surf->smax = (surf->extents[0] >> 4) + 1;
+				surf->tmax = (surf->extents[1] >> 4) + 1;
+
+				// max of smax and tmax
+				if (surf->tmax > surf->smax)
+					surf->maxextent = surf->tmax;
+				else surf->maxextent = surf->smax;
+
 				// create the lightmap
-				D3D_CreateSurfaceLightmap (surf);
+				if (d3d_Lightmaps && d3d_Lightmaps->AllocBlock (surf))
+					continue;
+
+				// didn't find a lightmap so allocate a new one
+				// this will always work as a new block that's big enough will just have become free
+				surf->d3d_Lightmap = new CD3DLightmap (surf);
+				d3d_Lightmaps->AllocBlock (surf);
 			}
 
 			// clean up after ourselves
@@ -709,9 +709,11 @@ void GL_BuildLightmaps (void)
 	}
 
 	// upload all lightmaps
-	D3D_UploadLightmaps ();
+	d3d_Lightmaps->Upload ();
 
 	// put all the surfaces into vertex buffers
 	D3D_PutSurfacesInVertexBuffer ();
+
+	Con_DPrintf ("Done");
 }
 

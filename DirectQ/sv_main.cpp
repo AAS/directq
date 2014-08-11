@@ -22,7 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 // switched default to 1 cos of optimized tracing; name is for consistency with other engines
-cvar_t sv_antiwallhack ("sv_cullentities", "1", CVAR_ARCHIVE | CVAR_SERVER);
+// switched back to 0 as it's not quite right yet
+cvar_t sv_antiwallhack ("sv_cullentities", "0", CVAR_ARCHIVE | CVAR_SERVER);
 
 int		sv_max_datagram = MAX_DATAGRAM; // Must be set so client will work without server
 
@@ -67,12 +68,13 @@ void SV_WriteByteShort (sizebuf_t *sb, int c)
 {
 	int PrevSize = sv.signon.cursize;
 
-	if (sv.Protocol == PROTOCOL_VERSION)
+	if (sv.Protocol == PROTOCOL_VERSION || sv.Protocol == PROTOCOL_VERSION_FITZ)
 		MSG_WriteByte (sb, c);
 	else
+	{
 		MSG_WriteShort (sb, c); // PROTOCOL_VERSION_BJP-PROTOCOL_VERSION_MH
-
-	if (sb == &sv.signon) sv.signondiff += sv.signon.cursize - (PrevSize + 1); // Track extra bytes due to >256 model support, kludge
+		if (sb == &sv.signon) sv.signondiff += sv.signon.cursize - (PrevSize + 1); // Track extra bytes due to >256 model support, kludge
+	}
 }
 
 
@@ -83,7 +85,12 @@ void SV_WriteByteShort (sizebuf_t *sb, int c)
 SV_SetProtocol_f
 ===============
 */
+#ifdef _DEBUG
+static int sv_protocol = PROTOCOL_VERSION_FITZ;
+#else
 static int sv_protocol = PROTOCOL_VERSION_MH;
+#endif
+
 extern char *protolist[];
 
 static void SV_SetProtocol_f (void)
@@ -105,7 +112,9 @@ static void SV_SetProtocol_f (void)
 			// note - this assumes that new protocols are numbered sequentially from 10000
 			if (!i)
 				sv_protocol = 15;
-			else sv_protocol = 9999 + i;
+			else if (i == 1)
+				sv_protocol = 666;
+			else sv_protocol = 9998 + i;
 
 			return;
 		}
@@ -232,41 +241,51 @@ void SV_StartSound (edict_t *entity, int channel, char *sample, int volume, floa
 		channel = 7;
 	}
 
-	if (sv.datagram.cursize > MAX_DATAGRAM2-16)
+	if (sv.datagram.cursize > MAX_DATAGRAM2 - 16)
 		return;
 
 	// find precache number for sound
-    for (sound_num=1 ; sound_num < MAX_SOUNDS && sv.sound_precache[sound_num] ; sound_num++)
-        if (!strcmp(sample, sv.sound_precache[sound_num]))
+    for (sound_num = 1; sound_num < MAX_SOUNDS && sv.sound_precache[sound_num]; sound_num++)
+        if (!strcmp (sample, sv.sound_precache[sound_num]))
             break;
 
-    if ( sound_num == MAX_SOUNDS || !sv.sound_precache[sound_num] )
-    {
-        Con_Printf ("SV_StartSound: %s not precached\n", sample);
-        return;
-    }
-    
-	ent = NUM_FOR_EDICT(entity);
+	if (sound_num == MAX_SOUNDS || !sv.sound_precache[sound_num] )
+	{
+		Con_Printf ("SV_StartSound: %s not precached\n", sample);
+		return;
+	}
 
-	channel = (ent<<3) | channel;
+	ent = NUM_FOR_EDICT (entity);
 
+	// note - DirectQ is limited to 8192 entities so don't check for SND_LARGEENTITY
+	// we must be able to read it client-side however
 	field_mask = 0;
-	if (volume != DEFAULT_SOUND_PACKET_VOLUME)
-		field_mask |= SND_VOLUME;
-	if (attenuation != DEFAULT_SOUND_PACKET_ATTENUATION)
-		field_mask |= SND_ATTENUATION;
+
+	if (volume != DEFAULT_SOUND_PACKET_VOLUME) field_mask |= SND_VOLUME;
+	if (attenuation != DEFAULT_SOUND_PACKET_ATTENUATION) field_mask |= SND_ATTENUATION;
+
+	if (ent >= 8192 && sv.Protocol == PROTOCOL_VERSION_FITZ) field_mask |= SND_LARGEENTITY;
+	if ((sound_num >= 256 || channel >= 8) && sv.Protocol == PROTOCOL_VERSION_FITZ) field_mask |= SND_LARGESOUND;
 
 	// directed messages go only to the entity the are targeted on
 	MSG_WriteByte (&sv.datagram, svc_sound);
 	MSG_WriteByte (&sv.datagram, field_mask);
-	if (field_mask & SND_VOLUME)
-		MSG_WriteByte (&sv.datagram, volume);
-	if (field_mask & SND_ATTENUATION)
-		MSG_WriteByte (&sv.datagram, attenuation*64);
-	MSG_WriteShort (&sv.datagram, channel);
-	SV_WriteByteShort2 (&sv.datagram, sound_num, false);
-	for (i=0 ; i<3 ; i++)
-		MSG_WriteCoord (&sv.datagram, entity->v.origin[i]+0.5*(entity->v.mins[i]+entity->v.maxs[i]));
+
+	if (field_mask & SND_VOLUME) MSG_WriteByte (&sv.datagram, volume);
+	if (field_mask & SND_ATTENUATION) MSG_WriteByte (&sv.datagram, attenuation*64);
+
+	if (field_mask & SND_LARGEENTITY)
+	{
+		MSG_WriteShort (&sv.datagram, ent);
+		MSG_WriteByte (&sv.datagram, channel);
+	}
+	else MSG_WriteShort (&sv.datagram, (ent << 3) | channel);
+
+	if (field_mask & SND_LARGESOUND)
+		MSG_WriteShort (&sv.datagram, sound_num);
+	else SV_WriteByteShort2 (&sv.datagram, sound_num, false);
+
+	for (i = 0; i < 3; i++) MSG_WriteCoord (&sv.datagram, entity->v.origin[i] + 0.5 * (entity->v.mins[i] + entity->v.maxs[i]));
 }
 
 
@@ -310,8 +329,9 @@ void SV_SendServerinfo (client_t *client)
 
 	MSG_WriteString (&client->message, message);
 
-	for (s = sv.model_precache+1 ; *s ; s++)
+	for (s = sv.model_precache + 1; *s; s++)
 		MSG_WriteString (&client->message, *s);
+
 	MSG_WriteByte (&client->message, 0);
 
 	// this is a hack for the "items/damage2.wav is not precached" bug;
@@ -328,18 +348,19 @@ void SV_SendServerinfo (client_t *client)
 		if (!stricmp (sv.sound_precache[i], Damage2Hack)) break;
 	}
 
-	for (s = sv.sound_precache+1 ; *s ; s++)
+	for (s = sv.sound_precache + 1; *s; s++)
 		MSG_WriteString (&client->message, *s);
+
 	MSG_WriteByte (&client->message, 0);
 
-// send music
+	// send music
 	MSG_WriteByte (&client->message, svc_cdtrack);
 	MSG_WriteByte (&client->message, sv.edicts->v.sounds);
 	MSG_WriteByte (&client->message, sv.edicts->v.sounds);
 
-// set view	
+	// set view	
 	MSG_WriteByte (&client->message, svc_setview);
-	MSG_WriteShort (&client->message, NUM_FOR_EDICT(client->edict));
+	MSG_WriteShort (&client->message, NUM_FOR_EDICT (client->edict));
 
 	MSG_WriteByte (&client->message, svc_signonnum);
 	MSG_WriteByte (&client->message, 1);
@@ -755,7 +776,20 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		else fullbright = 0;
 
 		// only send if not protocol 15 - note - FUCKING nehahra uses protocol 15 but sends non-standard messages - FUCK FUCK FUCK
-		if (((alpha < 1) && (alpha > 0) || fullbright) && (sv.Protocol != PROTOCOL_VERSION || nehahra)) bits |= U_TRANS;
+		if ((((alpha < 1) && (alpha > 0)) || fullbright) && (sv.Protocol != PROTOCOL_VERSION || nehahra)) bits |= U_TRANS;
+
+		if (sv.Protocol == PROTOCOL_VERSION_FITZ)
+		{
+			ent->alpha = ENTALPHA_ENCODE (alpha);
+
+			// certain FQ protocol messages are not yet implemented
+			if (ent->baseline.alpha != ent->alpha) bits |= U_ALPHA;
+			if (bits & U_FRAME && (int) ent->v.frame & 0xFF00) bits |= U_FRAME2;
+			if (bits & U_MODEL && (int) ent->v.modelindex & 0xFF00) bits |= U_MODEL2;
+			if (ent->sendinterval) bits |= U_LERPFINISH;
+			if (bits >= 65536) bits |= U_EXTEND1;
+			if (bits >= 16777216) bits |= U_EXTEND2;
+		}
 
 		if (e >= 256) bits |= U_LONGENTITY;
 		if (bits >= 256) bits |= U_MOREBITS;
@@ -778,6 +812,9 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 
 		if (bits & U_MOREBITS) MSG_WriteByte (msg, bits >> 8);
 
+		if (bits & U_EXTEND1) MSG_WriteByte (msg, bits >> 16);
+		if (bits & U_EXTEND2) MSG_WriteByte (msg, bits >> 24);
+
 		if (bits & U_LONGENTITY)
 			MSG_WriteShort (msg, e);
 		else MSG_WriteByte (msg, e);
@@ -788,26 +825,23 @@ void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg)
 		if (bits & U_SKIN) MSG_WriteByte (msg, ent->v.skin);
 		if (bits & U_EFFECTS) MSG_WriteByte (msg, ent->v.effects);
 		if (bits & U_ORIGIN1) MSG_WriteCoord (msg, ent->v.origin[0]);	
-		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0]);
+		if (bits & U_ANGLE1) MSG_WriteAngle (msg, ent->v.angles[0], true);
 		if (bits & U_ORIGIN2) MSG_WriteCoord (msg, ent->v.origin[1]);
-		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1]);
+		if (bits & U_ANGLE2) MSG_WriteAngle (msg, ent->v.angles[1], true);
 		if (bits & U_ORIGIN3) MSG_WriteCoord (msg, ent->v.origin[2]);
-		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2]);
+		if (bits & U_ANGLE3) MSG_WriteAngle (msg, ent->v.angles[2], true);
 
-		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION))
+		if (bits & U_ALPHA) MSG_WriteByte (msg, ent->alpha);
+		if (bits & U_FRAME2) MSG_WriteByte (msg, (int) ent->v.frame >> 8);
+		if (bits & U_MODEL2) MSG_WriteByte (msg, (int) ent->v.modelindex >> 8);
+		if (bits & U_LERPFINISH) MSG_WriteByte (msg, (byte) (Q_rint ((ent->v.nextthink - sv.time) * 255)));
+
+		if ((bits & U_TRANS) && (sv.Protocol != PROTOCOL_VERSION) && (sv.Protocol != PROTOCOL_VERSION_FITZ))
 		{
 			// Nehahra/.alpha
 			MSG_WriteFloat (msg, 2);
 			MSG_WriteFloat (msg, alpha);
 			MSG_WriteFloat (msg, fullbright);
-		}
-
-		// copy origin and angles back to baseline
-		if (sv.Protocol >= PROTOCOL_VERSION_MH)
-		{
-			// update baseline
-			VectorCopy (ent->v.origin, ent->baseline.origin);
-			VectorCopy (ent->v.angles, ent->baseline.angles);
 		}
 	}
 
@@ -846,111 +880,105 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	int		i;
 	edict_t	*other;
 	int		items;
-#ifndef QUAKE2
 	eval_t	*val;
-#endif
 
-//
-// send a damage message
-//
+	// send a damage message
 	if (ent->v.dmg_take || ent->v.dmg_save)
 	{
-		other = PROG_TO_EDICT(ent->v.dmg_inflictor);
+		other = PROG_TO_EDICT (ent->v.dmg_inflictor);
 		MSG_WriteByte (msg, svc_damage);
 		MSG_WriteByte (msg, ent->v.dmg_save);
 		MSG_WriteByte (msg, ent->v.dmg_take);
-		for (i=0 ; i<3 ; i++)
-			MSG_WriteCoord (msg, other->v.origin[i] + 0.5*(other->v.mins[i] + other->v.maxs[i]));
-	
+
+		for (i = 0; i < 3; i++) MSG_WriteCoord (msg, other->v.origin[i] + 0.5 * (other->v.mins[i] + other->v.maxs[i]));
+
 		ent->v.dmg_take = 0;
 		ent->v.dmg_save = 0;
 	}
 
-//
-// send the current viewpos offset from the view entity
-//
-	SV_SetIdealPitch ();		// how much to look up / down ideally
+	// send the current viewpos offset from the view entity
+	SV_SetIdealPitch ();
 
-// a fixangle might get lost in a dropped packet.  Oh well.
-	if ( ent->v.fixangle )
+	// a fixangle might get lost in a dropped packet.  Oh well.
+	if (ent->v.fixangle)
 	{
 		MSG_WriteByte (msg, svc_setangle);
-		for (i=0 ; i < 3 ; i++)
-			MSG_WriteAngle (msg, ent->v.angles[i] );
+
+		for (i = 0; i < 3; i++) MSG_WriteAngle (msg, ent->v.angles[i], true);
 		ent->v.fixangle = 0;
 	}
 
 	bits = 0;
-	
-	if (ent->v.view_ofs[2] != DEFAULT_VIEWHEIGHT)
-		bits |= SU_VIEWHEIGHT;
-		
-	if (ent->v.idealpitch)
-		bits |= SU_IDEALPITCH;
 
-// stuff the sigil bits into the high bits of items for sbar, or else
-// mix in items2
+	if (ent->v.view_ofs[2] != DEFAULT_VIEWHEIGHT) bits |= SU_VIEWHEIGHT;
+	if (ent->v.idealpitch) bits |= SU_IDEALPITCH;
+
+	// stuff the sigil bits into the high bits of items for sbar, or else
+	// mix in items2
 	val = GETEDICTFIELDVALUEFAST (ent, ed_items2);
 
 	if (val)
-		items = (int)ent->v.items | ((int)val->_float << 23);
-	else
-		items = (int)ent->v.items | ((int)pr_global_struct->serverflags << 28);
+		items = (int) ent->v.items | ((int) val->_float << 23);
+	else items = (int) ent->v.items | ((int) pr_global_struct->serverflags << 28);
 
+	// always sent
 	bits |= SU_ITEMS;
-	
-	if ( (int)ent->v.flags & FL_ONGROUND)
-		bits |= SU_ONGROUND;
 
-	if ( ent->v.waterlevel >= 2)
-		bits |= SU_INWATER;
-	
-	for (i=0 ; i<3 ; i++)
+	if ((int) ent->v.flags & FL_ONGROUND) bits |= SU_ONGROUND;
+	if (ent->v.waterlevel >= 2) bits |= SU_INWATER;
+
+	for (i = 0; i < 3; i++)
 	{
-		if (ent->v.punchangle[i])
-			bits |= (SU_PUNCH1<<i);
-		if (ent->v.velocity[i])
-			bits |= (SU_VELOCITY1<<i);
+		if (ent->v.punchangle[i]) bits |= (SU_PUNCH1 << i);
+		if (ent->v.velocity[i]) bits |= (SU_VELOCITY1 << i);
 	}
 	
-	if (ent->v.weaponframe)
-		bits |= SU_WEAPONFRAME;
+	if (ent->v.weaponframe) bits |= SU_WEAPONFRAME;
+	if (ent->v.armorvalue) bits |= SU_ARMOR;
 
-	if (ent->v.armorvalue)
-		bits |= SU_ARMOR;
+	// always sent
+	bits |= SU_WEAPON;
 
-//	if (ent->v.weapon)
-		bits |= SU_WEAPON;
+	if (sv.Protocol == PROTOCOL_VERSION_FITZ)
+	{
+		if ((bits & SU_WEAPON) && (SV_ModelIndex (pr_strings + ent->v.weaponmodel) & 0xFF00)) bits |= SU_WEAPON2;
+		if ((int) ent->v.armorvalue & 0xFF00) bits |= SU_ARMOR2;
+		if ((int) ent->v.currentammo & 0xFF00) bits |= SU_AMMO2;
+		if ((int) ent->v.ammo_shells & 0xFF00) bits |= SU_SHELLS2;
+		if ((int) ent->v.ammo_nails & 0xFF00) bits |= SU_NAILS2;
+		if ((int) ent->v.ammo_rockets & 0xFF00) bits |= SU_ROCKETS2;
+		if ((int) ent->v.ammo_cells & 0xFF00) bits |= SU_CELLS2;
+		if ((bits & SU_WEAPONFRAME) && ((int) ent->v.weaponframe & 0xFF00)) bits |= SU_WEAPONFRAME2;
+		if (bits & SU_WEAPON && ent->alpha != ENTALPHA_DEFAULT) bits |= SU_WEAPONALPHA;
+		if (bits >= 65536) bits |= SU_EXTEND1;
+		if (bits >= 16777216) bits |= SU_EXTEND2;
+	}
 
-// send the data
-
+	// send the data
 	MSG_WriteByte (msg, svc_clientdata);
 	MSG_WriteShort (msg, bits);
 
-	if (bits & SU_VIEWHEIGHT)
-		MSG_WriteChar (msg, ent->v.view_ofs[2]);
+	if (bits & SU_EXTEND1) MSG_WriteByte (msg, bits >> 16);
+	if (bits & SU_EXTEND2) MSG_WriteByte (msg, bits >> 24);
 
-	if (bits & SU_IDEALPITCH)
-		MSG_WriteChar (msg, ent->v.idealpitch);
+	if (bits & SU_VIEWHEIGHT) MSG_WriteChar (msg, ent->v.view_ofs[2]);
+	if (bits & SU_IDEALPITCH) MSG_WriteChar (msg, ent->v.idealpitch);
 
-	for (i=0 ; i<3 ; i++)
+	for (i = 0; i < 3; i++)
 	{
-		if (bits & (SU_PUNCH1<<i))
-			MSG_WriteChar (msg, ent->v.punchangle[i]);
-		if (bits & (SU_VELOCITY1<<i))
-			MSG_WriteChar (msg, ent->v.velocity[i]/16);
+		if (bits & (SU_PUNCH1 << i)) MSG_WriteChar (msg, ent->v.punchangle[i]);
+		if (bits & (SU_VELOCITY1 << i)) MSG_WriteChar (msg, ent->v.velocity[i] / 16);
 	}
 
-// [always sent]	if (bits & SU_ITEMS)
+	// always sent
 	MSG_WriteLong (msg, items);
 
-	if (bits & SU_WEAPONFRAME)
-		MSG_WriteByte (msg, ent->v.weaponframe);
-	if (bits & SU_ARMOR)
-		MSG_WriteByte (msg, ent->v.armorvalue);
-	if (bits & SU_WEAPON)
-		SV_WriteByteShort (msg, SV_ModelIndex(pr_strings+ent->v.weaponmodel));
-	
+	if (bits & SU_WEAPONFRAME) MSG_WriteByte (msg, ent->v.weaponframe);
+	if (bits & SU_ARMOR) MSG_WriteByte (msg, ent->v.armorvalue);
+
+	// always sent
+	SV_WriteByteShort (msg, SV_ModelIndex (pr_strings + ent->v.weaponmodel));
+
 	MSG_WriteShort (msg, ent->v.health);
 	MSG_WriteByte (msg, ent->v.currentammo);
 	MSG_WriteByte (msg, ent->v.ammo_shells);
@@ -959,21 +987,30 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	MSG_WriteByte (msg, ent->v.ammo_cells);
 
 	if (standard_quake)
-	{
 		MSG_WriteByte (msg, ent->v.weapon);
-	}
 	else
 	{
-		for(i=0;i<32;i++)
+		for(i = 0; i < 32; i++)
 		{
-			if ( ((int)ent->v.weapon) & (1<<i) )
+			if (((int) ent->v.weapon) & (1 << i))
 			{
 				MSG_WriteByte (msg, i);
 				break;
 			}
 		}
 	}
+
+	if (bits & SU_WEAPON2) MSG_WriteByte (msg, SV_ModelIndex (pr_strings + ent->v.weaponmodel) >> 8);
+	if (bits & SU_ARMOR2) MSG_WriteByte (msg, (int) ent->v.armorvalue >> 8);
+	if (bits & SU_AMMO2) MSG_WriteByte (msg, (int) ent->v.currentammo >> 8);
+	if (bits & SU_SHELLS2) MSG_WriteByte (msg, (int) ent->v.ammo_shells >> 8);
+	if (bits & SU_NAILS2) MSG_WriteByte (msg, (int) ent->v.ammo_nails >> 8);
+	if (bits & SU_ROCKETS2) MSG_WriteByte (msg, (int) ent->v.ammo_rockets >> 8);
+	if (bits & SU_CELLS2) MSG_WriteByte (msg, (int) ent->v.ammo_cells >> 8);
+	if (bits & SU_WEAPONFRAME2) MSG_WriteByte (msg, (int) ent->v.weaponframe >> 8);
+	if (bits & SU_WEAPONALPHA) MSG_WriteByte (msg, ent->alpha);
 }
+
 
 /*
 =======================
@@ -1190,8 +1227,9 @@ SV_CreateBaseline
 void SV_CreateBaseline (void)
 {
 	int			i;
-	edict_t			*svent;
-	int				entnum;	
+	edict_t		*svent;
+	int			entnum;
+	int			bits;
 
 	for (entnum = 0; entnum < sv.num_edicts; entnum++)
 	{
@@ -1211,28 +1249,61 @@ void SV_CreateBaseline (void)
 		{
 			svent->baseline.colormap = entnum;
 			svent->baseline.modelindex = SV_ModelIndex ("progs/player.mdl");
+			svent->baseline.alpha = ENTALPHA_DEFAULT;
 		}
 		else
 		{
 			svent->baseline.colormap = 0;
 			svent->baseline.modelindex = SV_ModelIndex (pr_strings + svent->v.model);
+			svent->baseline.alpha = svent->alpha;
+		}
+
+		bits = 0;
+
+		if (sv.Protocol == PROTOCOL_VERSION_FITZ)
+		{
+			if (svent->baseline.modelindex & 0xFF00) bits |= B_LARGEMODEL;
+			if (svent->baseline.frame & 0xFF00) bits |= B_LARGEFRAME;
+			if (svent->baseline.alpha != ENTALPHA_DEFAULT) bits |= B_ALPHA;
+		}
+		else svent->baseline.alpha = ENTALPHA_DEFAULT;
+
+		if (sv.Protocol == PROTOCOL_VERSION)
+		{
+			// still want to send a baseline here so just trunc the stuff
+			if (svent->baseline.modelindex & 0xFF00) svent->baseline.modelindex = 0;
+			if (svent->baseline.frame & 0xFF00) svent->baseline.frame = 0;
 		}
 
 		// add to the message
-		MSG_WriteByte (&sv.signon,svc_spawnbaseline);		
-		MSG_WriteShort (&sv.signon,entnum);
+		if (bits)
+			MSG_WriteByte (&sv.signon, svc_spawnbaseline2);
+		else MSG_WriteByte (&sv.signon, svc_spawnbaseline);
 
-		SV_WriteByteShort (&sv.signon, svent->baseline.modelindex);
-		MSG_WriteByte (&sv.signon, svent->baseline.frame);
+		MSG_WriteShort (&sv.signon, entnum);
+
+		if (bits) MSG_WriteByte (&sv.signon, bits);
+
+		if (bits & B_LARGEMODEL)
+			MSG_WriteShort (&sv.signon, svent->baseline.modelindex);
+		else SV_WriteByteShort (&sv.signon, svent->baseline.modelindex);
+
+		if (bits & B_LARGEFRAME)
+			MSG_WriteShort (&sv.signon, svent->baseline.frame);
+		else MSG_WriteByte (&sv.signon, svent->baseline.frame);
+
 		MSG_WriteByte (&sv.signon, svent->baseline.colormap);
 		MSG_WriteByte (&sv.signon, svent->baseline.skin);
 
-		for (i=0 ; i<3 ; i++)
+		for (i = 0; i < 3; i++)
 		{
-			MSG_WriteCoord(&sv.signon, svent->baseline.origin[i]);
-			MSG_WriteAngle(&sv.signon, svent->baseline.angles[i]);
+			MSG_WriteCoord (&sv.signon, svent->baseline.origin[i]);
+			MSG_WriteAngle (&sv.signon, svent->baseline.angles[i], true);
 		}
+
+		if (bits & B_ALPHA) MSG_WriteByte (&sv.signon, svent->baseline.alpha);
 	}
+
 	// Check normal signon size (8192) and normal MAX_MSGLEN-2 (8000-2),
 	// the latter limit being lower and occurring in Host_PreSpawn_f
 	if (sv.signon.cursize - sv.signondiff > 8000 - 2)
@@ -1353,7 +1424,7 @@ void SV_SpawnServer (char *server)
 	fatpvs = NULL;
 
 	// reserve memory for edicts but don't commit it yet
-	// reset the memory pool for edicts
+	// reset the memory pool for edicts (56 MB!!!)
 	Pool_Reset (POOL_EDICTS, MAX_EDICTS * pr_edict_size);
 	sv.num_edicts = 0;
 	sv.max_edicts = 0;
@@ -1447,12 +1518,11 @@ void SV_SpawnServer (char *server)
 	SV_CreateBaseline ();
 
 	// send serverinfo to all connected clients
-	for (i=0,host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
 		if (host_client->active)
 			SV_SendServerinfo (host_client);
 
 	Con_DPrintf ("Allocated %i edicts\n", sv.num_edicts);
-
 	Con_DPrintf ("Server spawned.\n");
 }
 

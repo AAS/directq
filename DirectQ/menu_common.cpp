@@ -25,6 +25,30 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // our current menu
 CQMenu *menu_Current = NULL;
 
+// our menu stack
+CQMenu *menu_Stack[256] = {NULL};
+int menu_StackDepth = 0;
+
+
+void Menu_StackPush (CQMenu *menu)
+{
+	menu_StackDepth++;
+	Con_DPrintf ("Stack level %i\n", menu_StackDepth);
+	menu_Stack[menu_StackDepth] = menu;
+	menu->EnterMenu ();
+}
+
+
+void Menu_StackPop (void)
+{
+	menu_StackDepth--;
+	Con_DPrintf ("Stack level %i\n", menu_StackDepth);
+
+	if (menu_StackDepth < 0) menu_StackDepth = 0;
+	if (menu_Stack[menu_StackDepth]) menu_Stack[menu_StackDepth]->EnterMenu ();
+}
+
+
 // sounds to play in menus
 menu_soundlevel_t menu_soundlevel = m_sound_none;
 
@@ -33,16 +57,16 @@ m_state_t m_state;
 
 // EnterMenu wrappers for old functions; required for command support
 // and for any other external calls
-void M_Menu_Main_f (void) {menu_Main.EnterMenu ();}
-void M_Menu_SinglePlayer_f (void) {menu_Singleplayer.EnterMenu ();}
-void M_Menu_Load_f (void) {menu_Load.EnterMenu ();}
-void M_Menu_Save_f (void) {menu_Save.EnterMenu ();}
-void M_Menu_Options_f (void) {menu_Options.EnterMenu ();}
-void M_Menu_Keys_f (void) {menu_Keybindings.EnterMenu ();}
-void M_Menu_Video_f (void) {menu_Video.EnterMenu ();}
-void M_Menu_Help_f (void) {menu_Help.EnterMenu ();}
-void M_Menu_MultiPlayer_f (void) {menu_Multiplayer.EnterMenu ();}
-void M_Menu_Setup_f (void) {menu_Setup.EnterMenu ();}
+void M_Menu_Main_f (void) {Menu_StackPush (&menu_Main);}
+void M_Menu_SinglePlayer_f (void) {Menu_StackPush (&menu_Singleplayer);}
+void M_Menu_Load_f (void) {Menu_StackPush (&menu_Load);}
+void M_Menu_Save_f (void) {Menu_StackPush (&menu_Save);}
+void M_Menu_Options_f (void) {Menu_StackPush (&menu_Options);}
+void M_Menu_Keys_f (void) {Menu_StackPush (&menu_Keybindings);}
+void M_Menu_Video_f (void) {Menu_StackPush (&menu_Video);}
+void M_Menu_Help_f (void) {Menu_StackPush (&menu_Help);}
+void M_Menu_MultiPlayer_f (void) {Menu_StackPush (&menu_Multiplayer);}
+void M_Menu_Setup_f (void) {Menu_StackPush (&menu_Setup);}
 
 cvar_t menu_fillcolor ("menu_fillcolor", 4, CVAR_ARCHIVE);
 
@@ -836,7 +860,7 @@ void CQMenuSubMenu::Draw (int y)
 
 void CQMenuSubMenu::Key (int k)
 {
-	if (k == K_ENTER) this->SubMenu->EnterMenu ();
+	if (k == K_ENTER) Menu_StackPush (this->SubMenu);
 }
 
 
@@ -877,7 +901,7 @@ void CQMenuCursorSubMenu::Key (int k)
 {
 	if (k == K_ENTER)
 	{
-		if (this->SubMenu) this->SubMenu->EnterMenu ();
+		if (this->SubMenu) Menu_StackPush (this->SubMenu);
 		if (this->Command) this->Command ();
 	}
 }
@@ -1557,18 +1581,14 @@ void CQMenuOption::CheckVisible (int Tag, bool shown) {if (this->OptionTag == Ta
 =====================================================================================================================================
 */
 
-CQMenu::CQMenu (CQMenu *previous, m_state_t menustate)
+CQMenu::CQMenu (m_state_t menustate)
 {
 	// defaults
-	this->PreviousMenu = previous;
 	this->MenuOptions = NULL;
 	this->CurrentOption = NULL;
 	this->NumOptions = 0;
 	this->NumCursorOptions = 0;
 	this->MenuState = menustate;
-	this->InsertedItems = NULL;
-	this->InsertPosition = NULL;
-	this->AfterInsert = NULL;
 }
 
 
@@ -1608,82 +1628,13 @@ void CQMenu::HideOptions (int Tag)
 }
 
 
-// option insertion - note - this is not as robust as it should be.  i haven't bothered to add validation for inserting
-// at the start or the end of the list, so don't do it.
-void CQMenu::InsertNewItems (CQMenuOption *optlist)
+void CQMenu::AddOption (CQMenuOption *opt)
 {
-	// validate the positions
-	if (!this->InsertPosition) return;
-	if (!this->AfterInsert) return;
-	if (this->InsertedItems) return;
-	if (!optlist) return;
-
-	// recalc the number of options
-	this->NumOptions = 0;
-
-	// link the new options in to the before position
-	this->InsertPosition->NextOption = optlist;
-	optlist->PrevOption = this->InsertPosition;
-
-	// find the last item in the optlist
-	for (CQMenuOption *opt = optlist; opt; opt = opt->NextOption)
-	{
-		// check it
-		if (!opt->NextOption)
-		{
-			// got it
-			opt->NextOption = this->AfterInsert;
-			this->AfterInsert->PrevOption = opt;
-
-			// done
-			break;
-		}
-	}
-
-	// also reset the option number for each option
-	for (CQMenuOption *opt = this->MenuOptions; opt; opt = opt->NextOption)
-		opt->SetOptionNumber (this->NumOptions++);
-
-	// store the inserted items
-	this->InsertedItems = optlist;
+	this->AddOption (0, opt);
 }
 
 
-void CQMenu::RemoveLastInsert (void)
-{
-	// nothing to remove
-	if (!this->InsertedItems) return;
-
-	// validate the positions
-	if (!this->InsertPosition) return;
-	if (!this->AfterInsert) return;
-
-	// terminate the removed list
-	this->AfterInsert->PrevOption->NextOption = NULL;
-
-	// relink the before and after positions
-	this->InsertPosition->NextOption = this->AfterInsert;
-	this->AfterInsert->PrevOption = this->InsertPosition;
-
-	// recalc the number of options
-	this->NumOptions = 0;
-
-	// also reset the option number for each option
-	for (CQMenuOption *opt = this->MenuOptions; opt; opt = opt->NextOption)
-		opt->SetOptionNumber (this->NumOptions++);
-
-	// clear the inserted items
-	this->InsertedItems = NULL;
-}
-
-
-void CQMenu::AddOption (CQMenuOption *opt, bool setinsertposafter)
-{
-	this->AddOption (0, opt, setinsertposafter);
-}
-
-
-void CQMenu::AddOption (int OptionTag, CQMenuOption *opt, bool setinsertposafter)
+void CQMenu::AddOption (int OptionTag, CQMenuOption *opt)
 {
 	// next points to NULL always so that we can identify the end of the list
 	opt->NextOption = NULL;
@@ -1698,13 +1649,6 @@ void CQMenu::AddOption (int OptionTag, CQMenuOption *opt, bool setinsertposafter
 
 	// set parent menu
 	opt->SetParentMenu (this);
-
-	// check insert positions - if we had an insert position just set, this option
-	// is the after insert position
-	if (this->InsertPosition && !this->AfterInsert)
-		this->AfterInsert = opt;
-	else if (!this->InsertPosition && setinsertposafter)
-		this->InsertPosition = opt;
 
 	// the first option that can accept input is the initial current option
 	if (!this->CurrentOption && opt->CanAcceptInput ())
@@ -1821,13 +1765,8 @@ void CQMenu::Key (int k)
 		switch (k)
 		{
 		case K_ESCAPE:
-			// to do - back out to previous menu or quit menus if no previous defined
-			if (this->PreviousMenu)
-				this->PreviousMenu->EnterMenu ();
-			else
-			{
-				// exit the menus
-			}
+			// back out to previous menu or quit menus if no previous defined
+			Menu_StackPop ();
 			break;
 
 		default:
@@ -1853,13 +1792,8 @@ void CQMenu::Key (int k)
 	switch (k)
 	{
 	case K_ESCAPE:
-		// to do - back out to previous menu or quit menus if no previous defined
-		if (this->PreviousMenu)
-			this->PreviousMenu->EnterMenu ();
-		else
-		{
-			// exit the menus
-		}
+		// back out to previous menu or quit menus if no previous defined
+		Menu_StackPop ();
 		break;
 
 	case K_UPARROW:
@@ -2180,11 +2114,14 @@ Menu_ToggleMenu
 */
 void Menu_ToggleMenu (void)
 {
+	// begin a new stack
+	menu_StackDepth = 0;
+
 	if (key_dest == key_menu)
 	{
 		if (m_state != m_main)
 		{
-			menu_Main.EnterMenu ();
+			Menu_StackPush (&menu_Main);
 			return;
 		}
 
@@ -2195,7 +2132,7 @@ void Menu_ToggleMenu (void)
 
 	if (key_dest == key_console)
 		Con_ToggleConsole_f ();
-	else menu_Main.EnterMenu ();
+	else Menu_StackPush (&menu_Main);
 }
 
 
@@ -2218,7 +2155,12 @@ cmd_t Menu_MainExitQuake_Cmd ("menu_quit", Menu_MainExitQuake);
 void M_Draw (void)
 {
 	// don't run a draw func if not in the menus or if we don't have a current menu set
-	if (m_state == m_none || key_dest != key_menu || !menu_Current) return;
+	if (m_state == m_none || key_dest != key_menu || !menu_Current)
+	{
+		// reset the stack depth
+		menu_StackDepth = 0;
+		return;
+	}
 
 	// draw the appropriate background
 	if (scr_con_current)

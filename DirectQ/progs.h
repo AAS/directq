@@ -51,21 +51,15 @@ extern int ed_gravity;
 
 typedef struct edict_s
 {
-	bool	free;
-	link_t		area;				// linked to a division node or leaf
-
-	// true if the ent touches a leaf in the pvs
-	bool		touchleaf;
-
+	bool			free;
+	link_t			area;			// linked to a division node or leaf
+	bool			touchleaf;		// true if the ent touches a leaf in the pvs
 	entity_state_t	baseline;
-
-	float		freetime;			// sv.time when the object was freed
-
-	// timer for cullentities tracing
-	float		tracetimer;
-
-	// C exported fields from progs
-	entvars_t	v;
+	float			freetime;		// sv.time when the object was freed
+	float			tracetimer;		// timer for cullentities tracing
+	int				alpha;
+	bool			sendinterval;
+	entvars_t		v;				// C exported fields from progs
 
 	// other fields from progs come immediately after
 } edict_t;

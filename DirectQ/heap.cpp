@@ -87,6 +87,21 @@ void *Cache_Check (char *name)
 }
 
 
+void Cache_Report_f (void)
+{
+	for (cacheobject_t *cache = cachehead; cache; cache = cache->next)
+	{
+		// these should never happen
+		if (!cache->name) continue;
+		if (!cache->data) continue;
+
+		Con_Printf ("%s\n", cache->name);
+	}
+}
+
+
+cmd_t Cache_Report_Cmd ("cache_report", Cache_Report_f);
+
 void *Cache_Alloc (char *name, void *data, int size)
 {
 	cacheobject_t *cache = (cacheobject_t *) Pool_Alloc (POOL_CACHE, sizeof (cacheobject_t));
@@ -149,6 +164,9 @@ typedef struct vpool_s
 	// currently allocated and committed memory
 	int highmark;
 
+	// initial allocation (sized for peaks of ID1)
+	int initialkb;
+
 	// memory is allocated in chunks of this amount of bytes
 	int chunksizekb;
 
@@ -163,27 +181,27 @@ typedef struct vpool_s
 vpool_t virtualpools[NUM_VIRTUAL_POOLS] =
 {
 	// stuff in this pool is never freed while DirectQ is running
-	{"Permanent", 32, 0, 0, 512, 0, NULL},
+	{"Permanent", 32, 0, 0, 10240, 512, 0, NULL},
 
 	// stuff in these pools persists for the duration of the game
-	{"This Game", 32, 0, 0, 256, 0, NULL},
-	{"Cache", 256, 0, 0, 1024, 0, NULL},
+	{"This Game", 32, 0, 0, 512, 256, 0, NULL},
+	{"Cache", 256, 0, 0, 10240, 1024, 0, NULL},
 
 	// stuff in these pools persists for the duration of the map
 	// warpc only uses ~48 MB
-	{"This Map", 128, 0, 0, 2048, 0, NULL},
-	{"Edicts", 10, 0, 0, 256, 0, NULL},
+	{"This Map", 128, 0, 0, 10240, 2048, 0, NULL},
+	{"Edicts", 128, 0, 0, 512, 256, 0, NULL},
 
 	// used for temp allocs where we don't want to worry about freeing them
-	{"Temp Allocs", 256, 0, 0, 1024, 0, NULL},
+	{"Temp Allocs", 128, 0, 0, 3072, 1024, 0, NULL},
 
 	// for COM_LoadTempFile Loading
-	{"File Loads", 256, 0, 0, 2048, 0, NULL},
+	{"File Loads", 128, 0, 0, 2048, 2048, 0, NULL},
 
 	// spare slots
-	{"Unused", 1, 0, 0, 64, 0, NULL},
-	{"Unused", 1, 0, 0, 64, 0, NULL},
-	{"Unused", 1, 0, 0, 64, 0, NULL}
+	{"Unused", 1, 0, 0, 64, 64, 0, NULL},
+	{"Unused", 1, 0, 0, 64, 64, 0, NULL},
+	{"Unused", 1, 0, 0, 64, 64, 0, NULL}
 };
 
 
@@ -265,7 +283,7 @@ void Pool_Reset (int pool, int newsizebytes)
 	vp->membase = (byte *) VirtualAlloc (NULL, vp->maxmem, MEM_RESERVE, PAGE_NOACCESS);
 
 	// commit an initial chunk
-	Pool_Alloc (pool, vp->chunksizekb * 1024);
+	Pool_Alloc (pool, vp->initialkb * 1024);
 	vp->lowmark = 0;
 }
 
@@ -283,14 +301,14 @@ void Pool_Free (int pool)
 	if (!vp->membase) return;
 
 	// decommit all of the allocated pool aside from the first chunk in it
-	VirtualFree (vp->membase + (vp->chunksizekb * 1024), vp->highmark - (vp->chunksizekb * 1024), MEM_DECOMMIT);
+	VirtualFree (vp->membase + (vp->initialkb * 1024), vp->highmark - (vp->initialkb * 1024), MEM_DECOMMIT);
 
 	// wipe the retained chunk
-	memset (vp->membase, 0, (vp->chunksizekb * 1024));
+	memset (vp->membase, 0, (vp->initialkb * 1024));
 
 	// reset lowmark and highmark
 	vp->lowmark = 0;
-	vp->highmark = vp->chunksizekb * 1024;
+	vp->highmark = vp->initialkb * 1024;
 
 	if (pool == POOL_MAP)
 	{
@@ -322,7 +340,7 @@ void Pool_Init (void)
 		if (!virtualpools[i].membase) Sys_Error ("Pool_Init: VirtualAlloc failed");
 
 		// commit one initial chunk
-		Pool_Alloc (i, virtualpools[i].chunksizekb * 1024);
+		Pool_Alloc (i, virtualpools[i].initialkb * 1024);
 		virtualpools[i].lowmark = 0;
 	}
 
@@ -442,7 +460,7 @@ void Virtual_Report_f (void)
 	int addrspace = 0;
 
 	Con_Printf ("\n-----------------------------------------------\n");
-	Con_Printf ("Pool           Highmark     Lowmark        Peak\n");
+	Con_Printf ("Pool           Highmark     Lowmark  Peak Usage\n");
 	Con_Printf ("-----------------------------------------------\n");
 
 	for (int i = 0; i < NUM_VIRTUAL_POOLS; i++)

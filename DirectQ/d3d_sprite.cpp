@@ -114,7 +114,7 @@ void D3D_DrawSpriteModel (entity_t *e)
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
-	D3D_SetTextureMipmap (0, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 	D3D_SetTextureAlphaMode (0, D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);

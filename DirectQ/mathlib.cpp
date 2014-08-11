@@ -358,7 +358,7 @@ void CrossProduct (vec3_t v1, vec3_t v2, vec3_t cross)
 	cross[2] = v1[0]*v2[1] - v1[1]*v2[0];
 }
 
-double sqrt(double x);
+float sqrt(float x);
 
 vec_t Length(vec3_t v)
 {
@@ -490,10 +490,10 @@ quotient must fit in 32 bits.
 ====================
 */
 
-void FloorDivMod (double numer, double denom, int *quotient, int *rem)
+void FloorDivMod (float numer, float denom, int *quotient, int *rem)
 {
 	int		q, r;
-	double	x;
+	float	x;
 
 	// this was #ifndef PARANOID - should it have been #ifdef?
 	if (denom <= 0.0)
@@ -562,5 +562,5 @@ fixed16_t Invert24To16(fixed16_t val)
 		return (0xFFFFFFFF);
 
 	return (fixed16_t)
-			(((double)0x10000 * (double)0x1000000 / (double)val) + 0.5);
+			(((float)0x10000 * (float)0x1000000 / (float)val) + 0.5);
 }

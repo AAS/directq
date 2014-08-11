@@ -50,7 +50,6 @@ required update regions
 
 syncronous draw mode or async
 One off screen buffer, with updates either copied or xblited
-Need to double buffer?
 
 
 async draw will require the refresh area to be cleared, because it will be
@@ -120,7 +119,6 @@ int			clearnotify;
 
 vrect_t		scr_vrect;
 
-bool	scr_firsttime = true;
 bool	scr_disabled_for_loading;
 bool	scr_drawloading;
 bool	scr_drawmapshot;
@@ -163,7 +161,12 @@ void SCR_CenterPrint (char *str)
 	// the server sends a blank centerstring in some places.  this must be el-obscuro bug number 666, as i have
 	// no recollection of any references to it anywhere else, whatsoever.  i only noticed it while experimenting
 	// with putting a textbox around the center string!
-	if (!str[0]) return;
+	if (!str[0])
+	{
+		// an empty print is sometimes used to explicitly clear the previous centerprint
+		scr_centertime_off = -1;
+		return;
+	}
 
 	// only log if the previous centerprint has already been cleared
 	if (scr_centerlog.integer && !cl.intermission && scr_centertime_off < 0.01)
@@ -261,16 +264,29 @@ void SCR_CheckDrawCenterString (void)
 	scr_centertime_off -= host_frametime;
 
 	// bug - this will potentially print the last seen centerprint during the end intermission!!!
-	if (scr_centertime_off <= 0 && !cl.intermission) return;
+	if (scr_centertime_off <= 0 && !cl.intermission)
+	{
+		scr_centerstring[0] = 0;
+		return;
+	}
 
 	if (key_dest != key_game)
 	{
 		// ensure it's off
+		scr_centerstring[0] = 0;
+		scr_centertime_off = -1;
+		return;
+	}
+
+	// should never happen
+	if (!scr_centerstring[0])
+	{
 		scr_centertime_off = -1;
 		return;
 	}
 
 	// intermission prints an extended message which we don't want to fade
+	// note - this is buggy with mods that use centerprints for persistent messages
 //	if (scr_centertime_off < 1.0f && !cl.intermission)
 //		D3D_Set2DShade (scr_centertime_off);
 	// else D3D_Set2DShade (1.0f);
@@ -703,7 +719,7 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 	LPDIRECT3DSURFACE9 surf;
 
 	// get the surface description
-	HRESULT hr = rts->GetDesc (&surfdesc);
+	hr = rts->GetDesc (&surfdesc);
 
 	if (FAILED (hr))
 	{
@@ -790,6 +806,16 @@ void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts)
 }
 
 
+void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts)
+{
+	LPDIRECT3DSURFACE9 texsurf;
+	rts->GetSurfaceLevel (0, &texsurf);
+
+	SCR_WriteSurfaceToTGA (filename, texsurf);
+	texsurf->Release ();
+}
+
+
 /* 
 ================== 
 SCR_ScreenShot_f
@@ -797,8 +823,11 @@ SCR_ScreenShot_f
 */
 void SCR_ScreenShot_f (void) 
 {
+	// clear the sound buffer as this can take some time
+	S_ClearBuffer ();
+
 	byte		*buffer;
-	char		checkname[MAX_OSPATH];
+	char		checkname[MAX_PATH];
 	int			i, c, temp;
 
 	// check the screenshot directory
@@ -854,7 +883,7 @@ void SCR_ScreenShot_f (void)
 			scr_screenshotformat.string
 		);
 
-		// file doesn't exist
+		// file doesn't exist (fixme - replace this with our fs table checker)
 		if (!Sys_FileExists (checkname)) break;
 	}
 
@@ -893,6 +922,9 @@ void Draw_InvalidateMapshot (void);
 
 void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 {
+	// clear the sound buffer as this can take some time
+	S_ClearBuffer ();
+
 	char workingname[256];
 
 	// copy the name out so that we can safely modify it
@@ -947,7 +979,7 @@ void SCR_Mapshot_f (char *shotname, bool report, bool overwrite)
 	d3d_Device->CreateRenderTarget (128, 128, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &d3d_MapshotFinalSurf, NULL);
 
 	// set the render target for the mapshot
-	HRESULT hr = d3d_Device->SetRenderTarget (0, d3d_MapshotRenderSurf);
+	hr = d3d_Device->SetRenderTarget (0, d3d_MapshotRenderSurf);
 
 	// go into mapshot mode
 	scr_drawmapshot = true;
@@ -1419,8 +1451,20 @@ void HUD_IntermissionOverlay (void);
 void HUD_FinaleOverlay (void);
 void SHOWLMP_drawall (void);
 
+void Host_SetRefreshRate (int rate);
+
 void SCR_UpdateScreen (void)
 {
+	extern D3DDISPLAYMODE d3d_DesktopMode;
+	extern D3DDISPLAYMODE d3d_CurrentMode;
+
+	// bcause this can potentially change we must check and set it each frame
+	if (d3d_CurrentMode.RefreshRate > 0)
+		Host_SetRefreshRate (d3d_CurrentMode.RefreshRate);
+	else if (d3d_DesktopMode.RefreshRate > 0)
+		Host_SetRefreshRate (d3d_DesktopMode.RefreshRate);
+	else Host_SetRefreshRate (666);
+
 	extern bool d3d_DeviceLost;
 
 	if (block_drawing) return;
@@ -1438,17 +1482,6 @@ void SCR_UpdateScreen (void)
 
 	// not initialized yet
 	if (!scr_initialized || !con_initialized || !d3d_Device) return;
-
-	if (scr_firsttime && d3d_GlobalCaps.isNvidia)
-	{
-		// attempt to resolve black screen when going direct from 1.5 to 1.6 by forcing a vid_restart command
-		// the first time through here.  seems to be nvidia only...
-		Con_Printf ("Forcing video restart for first-time initialization on NVIDIA hardware.\n");
-		Cbuf_InsertText ("vid_restart\n");
-		Cbuf_Execute ();
-		scr_firsttime = false;
-		return;
-	}
 
 	// begin rendering; get the size of the refresh window and set up for the render
 	// this is also used for lost device recovery mode
@@ -1539,5 +1572,16 @@ void SCR_UpdateScreen (void)
 	}
 
 	V_UpdatePalette ();
+}
+
+
+void SCR_BlackScreen (void)
+{
+	// this is called during startup when we don't have a device (or even a window!) yet
+	if (!d3d_Device) return;
+
+	// clears the screen to black immediately
+	d3d_Device->Clear (0, NULL, D3DCLEAR_TARGET, 0x00000000, 1.0f, 1);
+	d3d_Device->Present (NULL, NULL, NULL, NULL);
 }
 

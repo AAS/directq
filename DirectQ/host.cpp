@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "winquake.h"
+#include "d3d_quake.h"
 
 /*
 
@@ -35,10 +36,10 @@ quakeparms_t host_parms;
 
 bool	host_initialized;		// true if into command execution
 
-double		host_frametime;
-double		host_time;
-double		realtime;				// without any filtering or bounding
-double		oldrealtime;			// last frame run
+float		host_frametime;
+float		host_time;
+float		realtime;				// without any filtering or bounding
+float		oldrealtime;			// last frame run
 int			host_framecount;
 
 client_t	*host_client;			// current client
@@ -392,7 +393,7 @@ void Host_ShutdownServer(bool crash)
 	int		count;
 	sizebuf_t	buf;
 	char		message[4];
-	double	start;
+	float	start;
 
 	if (!sv.active)
 		return;
@@ -475,11 +476,14 @@ void Cmd_SignalCacheClear_f (void)
 
 cmd_t Cmd_SignalCacheClear ("cacheclear", Cmd_SignalCacheClear_f);
 
+void D3D_EvictTextures (void);
+
 void Host_ClearMemory (void)
 {
 	// clear anything that needs to be cleared specifically
 	S_StopAllSounds (true);
 	Mod_ClearAll ();
+	D3D_EvictTextures ();
 	S_ClearSounds ();
 
 	cls.signon = 0;
@@ -519,20 +523,19 @@ Host_FilterTime
 Returns false if the time is too short to run a frame
 ===================
 */
-// this really *should* be sv_maxfps, but it's cl_maxfps for compatibility reasons :p
-// changed to host_maxfps for compatibility reasons.  really need to find a way to have 2 names refer to the same variable here...
-cvar_t cl_maxfps ("host_maxfps", 72, CVAR_ARCHIVE);
+// changed to host_maxfps for compatibility reasons.
+// really need to find a way to have 2 names refer to the same variable here...
+cvar_t host_maxfps ("host_maxfps", 72, CVAR_ARCHIVE | CVAR_SERVER);
 
 bool Host_FilterTime (float time)
 {
 	realtime += time;
 
 	// bound sensibly
-	if (cl_maxfps.value < 30) Cvar_Set (&cl_maxfps, 30);
-	if (cl_maxfps.value > 666) Cvar_Set (&cl_maxfps, 666);
+	if (host_maxfps.value < 30) Cvar_Set (&host_maxfps, 30);
+	if (host_maxfps.value > 666) Cvar_Set (&host_maxfps, 666);
 
-	// fixme - lock this to refresh rate? - can't really do that as this is server-side stuff and refresh rate is on the client
-	if (!cls.timedemo && (realtime - oldrealtime < (1.0f / cl_maxfps.value)))
+	if (!cls.timedemo && (realtime - oldrealtime < (1.0f / host_maxfps.value)))
 		return false;		// framerate is too high
 
 	host_frametime = realtime - oldrealtime;
@@ -550,26 +553,6 @@ bool Host_FilterTime (float time)
 	return true;
 }
 
-
-/*
-===================
-Host_GetConsoleCommands
-
-Add them exactly as if they had been typed at the console
-===================
-*/
-void Host_GetConsoleCommands (void)
-{
-	char	*cmd;
-
-	while (1)
-	{
-		cmd = Sys_ConsoleInput ();
-		if (!cmd)
-			break;
-		Cbuf_AddText (cmd);
-	}
-}
 
 /*
 ==================
@@ -607,105 +590,118 @@ Host_Frame
 Runs all active servers
 ==================
 */
+float host_refreshrate = 0;
+cvar_t r_filterrefresh ("r_filterrefresh", 0.0f, CVAR_ARCHIVE);
+
+void Host_SetRefreshRate (int rate)
+{
+	// 5 is an arbitrary upper limit here
+	if (r_filterrefresh.value < 0) Cvar_Set (&r_filterrefresh, 0.0f);
+	if (r_filterrefresh.value > 5) Cvar_Set (&r_filterrefresh, 5.0f);
+
+	// sanity check
+	if (rate < 1) rate = 666;
+
+	if (!r_filterrefresh.value)
+		host_refreshrate = 0;
+	else host_refreshrate = (1.0 / (float) (rate * r_filterrefresh.value));
+}
+
+
 void _Host_Frame (float time)
 {
-	static double		time1 = 0;
-	static double		time2 = 0;
-	static double		time3 = 0;
-	int			pass1, pass2, pass3;
+	static float time1 = 0;
+	static float time2 = 0;
+	static float time3 = 0;
+	int pass1, pass2, pass3;
+	static float host_refreshtime = 666;
 
+	// something bad happened, or the server disconnected
 	if (setjmp (host_abortserver))
-		return;			// something bad happened, or the server disconnected
+		return;
 
-// keep the random time dependent
+	// keep the random time dependent
 	rand ();
 
-// decide the simulation time
-	if (!Host_FilterTime (time))
-		return;			// don't run too fast, or packets will flood out
+	// decide the simulation time - don't run too fast, or packets will flood out
+	if (!Host_FilterTime (time)) return;
 
-// get new key events
+	// get new key events
 	Sys_SendKeyEvents ();
 
-// allow mice or other external controllers to add commands
+	// allow mice or other external controllers to add commands
 	IN_Commands ();
 
-// process console commands
+	// process console commands
 	Cbuf_Execute ();
 
-	NET_Poll();
+	NET_Poll ();
 
-// if running the server locally, make intentions now
-	if (sv.active)
-		CL_SendCmd ();
+	// if running the server locally, make intentions now
+	if (sv.active) CL_SendCmd ();
 
-//-------------------
-//
-// server operations
-//
-//-------------------
+	// run the server
+	if (sv.active) Host_ServerFrame ();
 
-// check for commands typed to the host
-	Host_GetConsoleCommands ();
-	
-	if (sv.active)
-		Host_ServerFrame ();
-
-//-------------------
-//
-// client operations
-//
-//-------------------
-
-// if running the server remotely, send intentions now after
-// the incoming messages have been read
-	if (!sv.active)
-		CL_SendCmd ();
+	// if running the server remotely, send intentions now after
+	// the incoming messages have been read
+	if (!sv.active) CL_SendCmd ();
 
 	host_time += host_frametime;
+	host_refreshtime += host_frametime;
 
-// fetch results from server
-	if (cls.state == ca_connected)
-		CL_ReadFromServer ();
+	// fetch results from server
+	if (cls.state == ca_connected) CL_ReadFromServer ();
 
-// update video
-	if (host_speeds.value)
-		time1 = Sys_FloatTime ();
+	// update video
+	if (host_speeds.value) time1 = Sys_FloatTime ();
 
-	SCR_UpdateScreen ();
+	// never refresh at > the r_filterrefresh.value x screen's refresh rate, no matter how fast everything else is running.
+	// this prevents gfx cards with limited resources from bottlenecking when everything else is
+	// running too fast (to do: is this the primary cause of lockups with OpenGL?)
+	if (host_refreshtime >= host_refreshrate)
+	{
+		SCR_UpdateScreen ();
+		host_refreshtime = 0;
+	}
 
-	if (host_speeds.value)
-		time2 = Sys_FloatTime ();
+	if (host_speeds.value) time2 = Sys_FloatTime ();
 
-// update audio
+	// update audio
 	if (cls.signon == SIGNONS)
 	{
 		S_Update (r_origin, vpn, vright, vup);
-
 		CL_DecayLights ();
 	}
-	else
-		S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
-	
-	CDAudio_Update();
+	else S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
+
+	CDAudio_Update ();
 
 	if (host_speeds.value)
 	{
-		pass1 = (time1 - time3)*1000;
+		pass1 = (time1 - time3) * 1000;
 		time3 = Sys_FloatTime ();
-		pass2 = (time2 - time1)*1000;
-		pass3 = (time3 - time2)*1000;
-		Con_Printf ("%3i tot %3i server %3i gfx %3i snd\n",
-					pass1+pass2+pass3, pass1, pass2, pass3);
+		pass2 = (time2 - time1) * 1000;
+		pass3 = (time3 - time2) * 1000;
+
+		Con_Printf
+		(
+			"Total: %3i  Server: %3i  Refresh: %3i  Sound: %3i\n",
+			pass1 + pass2 + pass3,
+			pass1,
+			pass2,
+			pass3
+		);
 	}
-	
+
 	host_framecount++;
 }
 
+
 void Host_Frame (float time)
 {
-	double	time1, time2;
-	static double	timetotal;
+	float	time1, time2;
+	static float	timetotal;
 	static int		timecount;
 	int		i, c, m;
 
@@ -786,7 +782,7 @@ void Host_Init (quakeparms_t *parms)
 	Cbuf_Execute ();
 
 	Host_InitLocal ();
-	W_LoadWadFile ("gfx.wad");
+	if (!W_LoadWadFile ("gfx.wad")) Sys_Error ("Could not locate Quake on your computer");
 	Key_Init ();
 	Con_Init ();
 	Menu_CommonInit ();

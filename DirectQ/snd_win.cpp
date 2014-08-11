@@ -95,7 +95,7 @@ BOOL CALLBACK DSEnumCallback (LPGUID lpGuid, LPCSTR lpcstrDescription, LPCSTR lp
 	LPDIRECTSOUND8 ds_FakeDevice;
 
 	// create a fake device to test for caps
-	HRESULT hr = DirectSoundCreate8 (lpGuid, &ds_FakeDevice, NULL);
+	hr = DirectSoundCreate8 (lpGuid, &ds_FakeDevice, NULL);
 
 	// couldn't create so continue enumerating
 	if (FAILED (hr)) return TRUE;
@@ -145,8 +145,7 @@ sndinitstat SNDDMA_InitDirect (void)
 	DSBUFFERDESC	ds_BufferDesc;
 	DSBCAPS			ds_BufferCaps;
 	DWORD			dwSize, dwWrite;
-	WAVEFORMATEX	format, pformat; 
-	HRESULT			hr;
+	WAVEFORMATEX	format, pformat;
 	int				reps;
 
 	CoInitialize (NULL);

@@ -46,16 +46,26 @@ LPDIRECT3DVERTEXBUFFER9 d3d_DPSkyVerts = NULL;
 char CachedSkyBoxName[MAX_PATH] = {0};
 bool SkyboxValid = false;
 
+/*
+==============================================================================================================================
+
+		UNDERWATER WARP
+
+==============================================================================================================================
+*/
+
 bool UnderwaterValid = false;
 cvar_t r_waterwarp ("r_waterwarp", 1, CVAR_ARCHIVE);
 bool d3d_UpdateWarp = false;
-float *underwaterverts = NULL;
 
-typedef struct warpverts_s
+typedef struct uwvert_s
 {
 	float x, y, z;
-	float s, t;
-} warpverts_t;
+	float s1, t1;
+	float s2, t2;
+} uwvert_t;
+
+uwvert_t *underwaterverts = NULL;
 
 float CompressST (float in)
 {
@@ -83,7 +93,7 @@ void D3D_InitUnderwaterTexture (void)
 {
 	// alloc underwater verts one time only
 	// store 2 extra s/t so we can cache the original values for updates
-	if (!underwaterverts) underwaterverts = (float *) Pool_Alloc (POOL_PERMANENT, 2112 * 7 * sizeof (float));
+	if (!underwaterverts) underwaterverts = (uwvert_t *) Pool_Alloc (POOL_PERMANENT, 2112 * sizeof (uwvert_t));
 
 	// ensure that it's gone before creating
 	SAFE_RELEASE (underwatersurface);
@@ -94,7 +104,7 @@ void D3D_InitUnderwaterTexture (void)
 
 	// create the update texture as a rendertarget at half screen resolution
 	// rendertargets seem to relax power of 2 requirements, best of luck finding THAT in the documentation
-	HRESULT hr = d3d_Device->CreateTexture
+	hr = d3d_Device->CreateTexture
 	(
 		d3d_CurrentMode.Width,
 		d3d_CurrentMode.Height,
@@ -112,7 +122,8 @@ void D3D_InitUnderwaterTexture (void)
 	// we're good now
 	UnderwaterValid = true;
 
-	float *wv = underwaterverts;
+	// tesselation for warps
+	uwvert_t *wv = underwaterverts;
 	float tessw = (float) d3d_CurrentMode.Width / 32.0f;
 	float tessh = (float) d3d_CurrentMode.Height / 32.0f;
 
@@ -121,23 +132,23 @@ void D3D_InitUnderwaterTexture (void)
 	{
 		for (float y = 0, t = 0; y <= d3d_CurrentMode.Height; y += tessh, t++)
 		{
-			wv[0] = x;
-			wv[1] = y;
-			wv[2] = 0;
-			wv[3] = CompressST (s);
-			wv[4] = CompressST (t);
-			wv[5] = wv[3];
-			wv[6] = wv[4];
-			wv += VERTEXSIZE;
+			wv->x = x;
+			wv->y = y;
+			wv->z = 0;
+			wv->s1 = CompressST (s);
+			wv->t1 = CompressST (t);
+			wv->s2 = wv->s1;
+			wv->t2 = wv->t1;
+			wv++;
 
-			wv[0] = (x + tessw);
-			wv[1] = y;
-			wv[2] = 0;
-			wv[3] = CompressST (s + 1);
-			wv[4] = CompressST (t);
-			wv[5] = wv[3];
-			wv[6] = wv[4];
-			wv += VERTEXSIZE;
+			wv->x = (x + tessw);
+			wv->y = y;
+			wv->z = 0;
+			wv->s1 = CompressST (s + 1);
+			wv->t1 = CompressST (t);
+			wv->s2 = wv->s1;
+			wv->t2 = wv->t1;
+			wv++;
 		}
 	}
 }
@@ -154,13 +165,10 @@ void D3D_KillUnderwaterTexture (void)
 void D3D_BeginUnderwaterWarp (void)
 {
 	// couldn't create the underwater texture or we don't want to warp
-	if (!UnderwaterValid || !r_waterwarp.value) return;
+	if (!UnderwaterValid || (r_waterwarp.integer != 1)) return;
 
-	// no warps present on these leafs (unless we run the extra special super dooper always warp secret mode)
-	if ((d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY || 
-		d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID) && 
-		r_waterwarp.integer != 666)
-		return;
+	// no warps present on these leafs
+	if (d3d_RenderDef.viewleaf->contents == CONTENTS_EMPTY || d3d_RenderDef.viewleaf->contents == CONTENTS_SOLID) return;
 
 	extern LPDIRECT3DSURFACE9 d3d_BackBuffer;
 
@@ -185,9 +193,6 @@ void D3D_EndUnderwaterWarp (void)
 	// no warps
 	if (!d3d_UpdateWarp) return;
 
-	d3d_Device->EndScene ();
-	d3d_Device->BeginScene ();
-
 	SAFE_RELEASE (underwatersurface);
 
 	extern LPDIRECT3DSURFACE9 d3d_BackBuffer;
@@ -211,10 +216,19 @@ void D3D_DrawUnderwaterWarp (void)
 	// for the next frame
 	d3d_UpdateWarp = false;
 
-	// projection matrix
+	// this causes Z-fighting artefacts on alpha-blended overlay surfs, so send it through T&L
+	d3d_WorldMatrixStack->Reset ();
+	d3d_WorldMatrixStack->LoadIdentity ();
+
+	d3d_ViewMatrixStack->Reset ();
+	d3d_ViewMatrixStack->LoadIdentity ();
+
 	d3d_ProjMatrixStack->Reset ();
 	d3d_ProjMatrixStack->LoadIdentity ();
 	d3d_ProjMatrixStack->Ortho2D (0, d3d_CurrentMode.Width, d3d_CurrentMode.Height, 0, 0, 1);
+
+	// ensure
+	D3D_DisableAlphaBlend ();
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG1, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 	D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
@@ -225,30 +239,29 @@ void D3D_DrawUnderwaterWarp (void)
 	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
 	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
 
+	// T&L used - see above
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP);
 	D3D_SetTexture (0, underwatertexture);
 
-	float rdt = cl.time * r_waterwarptime.value;
+	float rdt = cl.time * r_waterwarptime.value * 0.5f;
 
 	for (int i = 0, v = 0; i < 32; i++, v += 66)
 	{
 		// retrieve the current verts
-		float *wv = underwaterverts;
-		wv += (v * VERTEXSIZE);
-
-		float *verts = wv;
+		uwvert_t *wv = underwaterverts + v;
+		uwvert_t *verts = wv;
 
 		// there's a potential optimization in here... we could precalc the warps as up to 4 verts will be shared...
-		for (int vv = 0; vv < 66; vv++, verts += VERTEXSIZE)
+		for (int vv = 0; vv < 66; vv++, verts++)
 		{
 			// we stashed the originally generated coords in verts 6 and 7 so bring them back to
 			// 4 and 5, warping as we go, for the render
-			verts[3] = (verts[5] + sin (verts[6] + rdt) * r_waterwarpscale.value) * 0.03125f;
-			verts[4] = (verts[6] + sin (verts[5] + rdt) * r_waterwarpscale.value) * 0.03125f;
+			verts->s1 = (verts->s2 + sin (verts->t2 + rdt) * r_waterwarpscale.value) * 0.03125f;
+			verts->t1 = (verts->t2 + sin (verts->s2 + rdt) * r_waterwarpscale.value) * 0.03125f;
 		}
 
-		D3D_DrawPrimitive (D3DPT_TRIANGLESTRIP, 64, wv, sizeof (float) * VERTEXSIZE);
+		D3D_DrawPrimitive (D3DPT_TRIANGLESTRIP, 64, wv, sizeof (uwvert_t));
 	}
 }
 
@@ -604,7 +617,7 @@ void R_DrawWaterChain (texture_t *t)
 void D3D_WaterCommonState (void)
 {
 	D3D_SetTextureAddressMode (D3DTADDRESS_WRAP);
-	D3D_SetTextureMipmap (0, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 	D3D_SetTexCoordIndexes (0);
 
 	D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
@@ -738,10 +751,19 @@ void D3D_DrawAlphaWaterSurfaces (void)
 #define SKYSPHERE_NUMVERTS (SKYGRID_SIZE_PLUS_1 * SKYGRID_SIZE_PLUS_1)
 #define SKYSPHERE_NUMTRIS (SKYGRID_SIZE * SKYGRID_SIZE * 2)
 
+typedef struct warpverts_s
+{
+	float x, y, z;
+	float s, t;
+} skyverts_t;
+
 cvar_t r_skywarp ("r_skywarp", 1, CVAR_ARCHIVE);
 cvar_t r_skybackscroll ("r_skybackscroll", 8, CVAR_ARCHIVE);
 cvar_t r_skyfrontscroll ("r_skyfrontscroll", 16, CVAR_ARCHIVE);
 cvar_t r_skyalpha ("r_skyalpha", 1, CVAR_ARCHIVE);
+
+// dynamic far clip plane for sky
+extern float r_clipdist;
 
 unsigned *skyalphatexels = NULL;
 
@@ -838,14 +860,14 @@ void D3D_DrawSkySphere (float scale)
 		// switch to the new fog modes for sky - just fog it as if it was further away
 		D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
 		D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
-		D3D_SetRenderStatef (D3DRS_FOGEND, gl_fogend.value * 1000);
+		D3D_SetRenderStatef (D3DRS_FOGEND, gl_fogend.value * 20 / 8192.0f * r_clipdist);
 	}
 
 	// darkplaces warp
 	// for all that they say "you VILL use ein index buffer, heil Bill", NOWHERE in the SDK is it
 	// documented that you need to call SetIndices to tell the device the index buffer to use.  Aside
 	// from the entry for SetIndices, of course, but NOWHERE else.  C'mon Microsoft, GET IT FUCKING RIGHT!
-	d3d_Device->SetStreamSource (0, d3d_DPSkyVerts, 0, sizeof (warpverts_t));
+	d3d_Device->SetStreamSource (0, d3d_DPSkyVerts, 0, sizeof (skyverts_t));
 	d3d_Device->SetIndices (d3d_DPSkyIndexes);
 
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
@@ -859,8 +881,8 @@ void D3D_DrawSkySphere (float scale)
 	D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
 	D3D_SetTextureAlphaMode (2, D3DTOP_DISABLE);
 
-	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
-	D3D_SetTextureMipmap (1, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
+	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, D3DTEXF_NONE);
 
 	D3D_SetTexCoordIndexes (0, 0);
 	D3D_SetTextureMatrixOp (D3DTTFF_COUNT2, D3DTTFF_COUNT2);
@@ -949,9 +971,9 @@ void MakeSkyVec (float s, float t, int axis, int vert)
 	int j, k;
 
 	// fill in verts
-	b[0] = s * 100000;
-	b[1] = t * 100000;
-	b[2] = 100000;
+	b[0] = s * r_clipdist;
+	b[1] = t * r_clipdist;
+	b[2] = r_clipdist;
 
 	for (j = 0; j < 3; j++)
 	{
@@ -976,7 +998,7 @@ void MakeSkyVec (float s, float t, int axis, int vert)
 }
 
 
-void R_DrawSkybox (void)
+void R_DrawSkybox ()
 {
 	int i;
 	float skymins[2] = {-1, -1};
@@ -994,7 +1016,7 @@ void R_DrawSkybox (void)
 		// switch to the new fog modes for sky - just fog it as if it was further away
 		D3D_SetRenderState (D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
 		D3D_SetRenderState (D3DRS_FOGTABLEMODE, D3DFOG_NONE);
-		D3D_SetRenderStatef (D3DRS_FOGEND, gl_fogend.value * 100);
+		D3D_SetRenderStatef (D3DRS_FOGEND, gl_fogend.value * 20.0f / 8192.0f * r_clipdist);
 	}
 
 	D3D_SetFVF (D3DFVF_XYZ | D3DFVF_TEX1);
@@ -1058,6 +1080,10 @@ void D3D_DrawSkyChain (void)
 	// no sky to draw!
 	if (!d3d_RenderDef.skychain) return;
 
+	// baseline projection for simple sky and clipping brushes
+	d3d_ProjMatrixStack->LoadIdentity ();
+	d3d_ProjMatrixStack->Frustum3D (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_clipdist);
+
 	if (!r_skywarp.value)
 	{
 		R_DrawSimpleSky (d3d_RenderDef.skychain);
@@ -1079,6 +1105,10 @@ void D3D_DrawSkyChain (void)
 	d3d_WorldMatrixStack->Push ();
 	d3d_WorldMatrixStack->Translate (r_origin[0], r_origin[1], r_origin[2]);
 
+	// double the far clip plane for the actual sky brushes because we're going to draw it farther away
+	d3d_ProjMatrixStack->LoadIdentity ();
+	d3d_ProjMatrixStack->Frustum3D (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_clipdist * 2);
+
 	if (SkyboxValid)
 	{
 		// skybox drawing
@@ -1087,9 +1117,11 @@ void D3D_DrawSkyChain (void)
 	else
 	{
 		// draw back layer
-		D3D_DrawSkySphere (100000);
+		// the DP sphere is calculated at a scale of 16 so bring it up to the full correct scale
+		D3D_DrawSkySphere (r_clipdist / 8);
 	}
 
+	// don't bother undoing the projection matrix as we're going to be resetting it for real anyway when we come to draw the world
 	d3d_WorldMatrixStack->Pop ();
 
 	// restore the depth func
@@ -1123,15 +1155,13 @@ void D3D_InitSkySphere (void)
 	float a, b, x, ax, ay, v[3], length;
 	float dx, dy, dz;
 
-	HRESULT hr;
-
 	dx = 16;
 	dy = 16;
 	dz = 16 / 3;
 
 	hr = d3d_Device->CreateVertexBuffer
 	(
-		SKYSPHERE_NUMVERTS * sizeof (warpverts_t),
+		SKYSPHERE_NUMVERTS * sizeof (skyverts_t),
 		D3DUSAGE_WRITEONLY | d3d_VertexBufferUsage,
 		0,
 		D3DPOOL_MANAGED,
@@ -1145,10 +1175,13 @@ void D3D_InitSkySphere (void)
 		return;
 	}
 
-	warpverts_t *ssv;
+	skyverts_t *ssv;
 
-	d3d_DPSkyVerts->Lock (0, SKYSPHERE_NUMVERTS * sizeof (warpverts_t), (void **) &ssv, 0);
-	warpverts_t *ssv2 = ssv;
+	d3d_DPSkyVerts->Lock (0, SKYSPHERE_NUMVERTS * sizeof (skyverts_t), (void **) &ssv, 0);
+	skyverts_t *ssv2 = ssv;
+
+	float maxv = 0;
+	float minv = 1048576;
 
 	for (j = 0; j <= SKYGRID_SIZE; j++)
 	{
@@ -1164,6 +1197,14 @@ void D3D_InitSkySphere (void)
 			v[0] = ax * x * dx;
 			v[1] = ay * x * dy;
 			v[2] = -sin ((b + 0.5) * M_PI) * dz;
+
+			if (v[0] > maxv) maxv = v[0];
+			if (v[1] > maxv) maxv = v[1];
+			if (v[2] > maxv) maxv = v[2];
+
+			if (v[0] < minv) minv = v[0];
+			if (v[1] < minv) minv = v[1];
+			if (v[2] < minv) minv = v[2];
 
 			// same calculation as classic Q1 sky but projected onto an actual physical sphere
 			// (rather than on flat surfs) and calced as if from an origin of [0,0,0] to prevent
@@ -1182,6 +1223,9 @@ void D3D_InitSkySphere (void)
 
 	d3d_DPSkyVerts->Unlock ();
 	d3d_DPSkyVerts->PreLoad ();
+
+	Con_DPrintf ("max is %0.3f\n", maxv);
+	Con_DPrintf ("min is %0.3f\n", minv);
 
 	hr = d3d_Device->CreateIndexBuffer
 	(
@@ -1233,15 +1277,28 @@ A sky texture is 256*128, with the right side being a masked overlay
 */
 void R_InitSky (miptex_t *mt)
 {
+	// sanity check
+	if ((mt->width % 4) || (mt->width < 4) || (mt->height % 2) || (mt->height < 2))
+	{
+		Host_Error ("R_InitSky: invalid sky dimensions (%i x %i)\n", mt->width, mt->height);
+		return;
+	}
+
 	// create the sky sphere (one time only)
 	D3D_InitSkySphere ();
 
 	int			i, j, p;
 	byte		*src;
-	unsigned	trans[128 * 128];
 	unsigned	transpix;
 	int			r, g, b;
 	unsigned	*rgba;
+
+	// because you never know when a mapper might use a non-standard size...
+	unsigned *trans = (unsigned *) Pool_Alloc (POOL_TEMP, mt->width * mt->height * sizeof (unsigned) / 2);
+
+	// copy out
+	int transwidth = mt->width / 2;
+	int transheight = mt->height;
 
 	// destroy any current textures we might have
 	SAFE_RELEASE (simpleskytexture);
@@ -1252,15 +1309,15 @@ void R_InitSky (miptex_t *mt)
 
 	// make an average value for the back to avoid
 	// a fringe on the top level
-	for (i = 0, r = 0, g = 0, b = 0; i < 128; i++)
+	for (i = 0, r = 0, g = 0, b = 0; i < transheight; i++)
 	{
-		for (j = 0; j < 128; j++)
+		for (j = 0; j < transwidth; j++)
 		{
-			p = src[i * 256 + j + 128];
+			p = src[i * mt->width + j + transwidth];
 
 			rgba = &d_8to24table[p];
 
-			trans[(i * 128) + j] = *rgba;
+			trans[(i * transwidth) + j] = *rgba;
 
 			r += ((byte *) rgba)[0];
 			g += ((byte *) rgba)[1];
@@ -1268,40 +1325,40 @@ void R_InitSky (miptex_t *mt)
 		}
 	}
 
-	((byte *) &transpix)[0] = BYTE_CLAMP (r / (128 * 128));
-	((byte *) &transpix)[1] = BYTE_CLAMP (g / (128 * 128));
-	((byte *) &transpix)[2] = BYTE_CLAMP (b / (128 * 128));
+	((byte *) &transpix)[0] = BYTE_CLAMP (r / (transwidth * transheight));
+	((byte *) &transpix)[1] = BYTE_CLAMP (g / (transwidth * transheight));
+	((byte *) &transpix)[2] = BYTE_CLAMP (b / (transwidth * transheight));
 	((byte *) &transpix)[3] = 0;
 
 	// upload it
-	D3D_LoadTexture (&solidskytexture, 128, 128, (byte *) trans, NULL, false, false);
+	D3D_LoadTexture (&solidskytexture, transwidth, transheight, (byte *) trans, NULL, false, false);
 
 	// bottom layer
-	for (i = 0; i < 128; i++)
+	for (i = 0; i < transheight; i++)
 	{
-		for (j = 0; j < 128; j++)
+		for (j = 0; j < transwidth; j++)
 		{
-			p = src[i * 256 + j];
+			p = src[i * mt->width + j];
 
 			if (p == 0)
-				trans[(i * 128) + j] = transpix;
+				trans[(i * transwidth) + j] = transpix;
 			else
-				trans[(i * 128) + j] = d_8to24table[p];
+				trans[(i * transwidth) + j] = d_8to24table[p];
 		}
 	}
 
 	// upload it
-	D3D_LoadTexture (&alphaskytexture, 128, 128, (byte *) trans, NULL, false, true);
+	D3D_LoadTexture (&alphaskytexture, transwidth, transheight, (byte *) trans, NULL, false, true);
 
 	// simple sky
 	((byte *) &transpix)[3] = 255;
 
-	for (i = 0; i < 128; i++)
-		for (j = 0; j < 128; j++)
-			trans[(i * 128) + j] = transpix;
+	for (i = 0; i < transheight; i++)
+		for (j = 0; j < transwidth; j++)
+			trans[(i * transwidth) + j] = transpix;
 
 	// upload it
-	D3D_LoadTexture (&simpleskytexture, 128, 128, (byte *) trans, NULL, false, true);
+	D3D_LoadTexture (&simpleskytexture, transwidth, transheight, (byte *) trans, NULL, false, true);
 
 	// no texels yet
 	skyalphatexels = NULL;

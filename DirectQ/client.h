@@ -44,8 +44,17 @@ typedef struct
 	float	entertime;
 	int		frags;
 	int		colors;			// two 4 bit fields
-	byte	translations[VID_GRADES*256];
+	int		ping;			// JPG - added this
+	int		addr;			// JPG - added this
+	byte	translations[VID_GRADES * 256];
 } scoreboard_t;
+
+// JPG - added this for teamscore status bar
+typedef struct
+{
+	int colors;
+	int frags;
+} teamscore_t;
 
 typedef struct
 {
@@ -185,7 +194,7 @@ typedef struct
 	float		pitchvel;
 	bool	nodrift;
 	float		driftmove;
-	double		laststop;
+	float		laststop;
 
 	float		viewheight;
 	float		crouch;			// local amount for smoothing stepups
@@ -197,11 +206,11 @@ typedef struct
 	int			intermission;	// don't change view angle, full screen, etc
 	int			completed_time;	// latched at intermission start
 	
-	double		mtime[2];		// the timestamp of last two messages	
-	double		time;			// clients view of time, should be between
+	float		mtime[2];		// the timestamp of last two messages	
+	float		time;			// clients view of time, should be between
 								// servertime and oldservertime to generate
 								// a lerp point for other data
-	double		oldtime;		// previous cl.time, time-oldtime is used
+	float		oldtime;		// previous cl.time, time-oldtime is used
 								// to decay light values and smooth step ups
 	
 
@@ -230,6 +239,19 @@ typedef struct
 
 	// frag scoreboard
 	scoreboard_t	*scores;		// [cl.maxclients]
+
+	teamscore_t		*teamscores;		// [13] - JPG for teamscores in status bar
+	bool			teamgame;			// JPG = true for match, false for individual
+	int				minutes;			// JPG - for match time in status bar
+	int				seconds;			// JPG - for match time in status bar
+	float			last_match_time;	// JPG - last time match time was obtained
+	float			last_ping_time;		// JPG - last time pings were obtained
+	bool			console_ping;		// JPG 1.05 - true if the ping came from the console
+	float			last_status_time;	// JPG 1.05 - last time status was obtained
+	bool			console_status;		// JPG 1.05 - true if the status came from the console
+	float			match_pause_time;	// JPG - time that match was paused (or 0)
+	vec3_t			lerpangles;			// JPG - angles now used by view.c so that smooth chasecam doesn't fuck up demos
+	vec3_t			death_location;		// JPG 3.20 - used for %d formatting
 } client_state_t;
 
 
@@ -308,8 +330,8 @@ void CL_Disconnect (void);
 void CL_Disconnect_f (void);
 void CL_NextDemo (void);
 
-// bumped to 16384 as static entities can also add on
-#define			MAX_VISEDICTS	16384
+// bumped for new value of MAX_EDICTS
+#define			MAX_VISEDICTS	65536
 
 // cl_input
 typedef struct

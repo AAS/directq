@@ -18,20 +18,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-// particle images
-#define IDR_PARTICLEDOT				200
-#define IDR_QMBBLOOD				210
-#define IDR_QMBBUBBLE				220
-#define IDR_QMBLIGHTNING			230
-#define IDR_QMBLIGHTNING_OLD		240
-#define IDR_QMBSMOKE				250
-#define IDR_QMBSPARK				260
-#define IDR_QMBTRAIL				270
+typedef struct location_s
+{
+	vec3_t a;		// min xyz corner
+	vec3_t b;		// max xyz corner
+	vec_t sd;		// sum of dimensions  // JPG 1.05 
+	char name[32];
+} location_t;
 
-// bitmaps and other images
-#define IDR_SPLASH					600
-#define IDR_CROSSHAIR				620
-#define IDR_YOUAREHERE				630
+// Load the locations for the current level from the location file
+void LOC_LoadLocations (void);
 
-// icons
-#define IDI_APPICON					900
+// Get the name of the location of a point
+char *LOC_GetLocation (vec3_t p);
+

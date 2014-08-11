@@ -66,7 +66,41 @@ cvar_t pr_checkextension ("pr_checkextension", "1", CVAR_READONLY);
 
 char *pr_extensions = NULL;
 
-char pr_string_temp[128];
+/*
+===============================================================================
+
+						TEMP STRINGS
+
+	Help to prevent buffer overflows, memory access violations, and
+	other fun by maintaining a rotating set of temp strings.
+
+===============================================================================
+*/
+
+#define PR_MAX_TEMP_STRING		1024
+#define PR_NUM_TEMP_STRINGS		32
+#define PR_TEMP_STRING_MASK		(PR_NUM_TEMP_STRINGS - 1)
+
+char *PR_GetTempString (void)
+{
+	static char **pr_temp_strings = NULL;
+	static int pr_temp_string_num = 0;
+
+	if (!pr_temp_strings)
+	{
+		// place these in the permanent pool cos they'll always be needed
+		pr_temp_strings = (char **) Pool_Alloc (POOL_PERMANENT, sizeof (char *) * PR_NUM_TEMP_STRINGS);
+
+		for (int i = 0; i < PR_NUM_TEMP_STRINGS; i++) pr_temp_strings[i] = (char *) Pool_Alloc (POOL_PERMANENT, PR_MAX_TEMP_STRING);
+	}
+
+	// go to a new temp string, rotate the buffer if needed, and ensure that it's null termed
+	(++pr_temp_string_num) &= PR_TEMP_STRING_MASK;
+	pr_temp_strings[pr_temp_string_num][0] = 0;
+
+	return pr_temp_strings[pr_temp_string_num];
+}
+
 
 /*
 ===============================================================================
@@ -78,25 +112,21 @@ char pr_string_temp[128];
 
 char *PF_VarString (int	first)
 {
-	int		i;
-	static char out[4096];
+	static char *out = NULL;
 
-	out[0] = 0;
-	int len = 0;
+	out = PR_GetTempString ();
 
-	for (i=first ; i<pr_argc ; i++)
+	for (int i = first, len = 0; i < pr_argc; i++)
 	{
 		char *append = G_STRING ((OFS_PARM0 + i * 3));
 
 		// prevent buffer overflow in this function
-		len += strlen (append);
+		len += strlen (append) + 1;
 
-		if (len > 4090) break;
+		if (len >= PR_MAX_TEMP_STRING) break;
 
 		strcat (out, append);
 	}
-
-	//strcat (out, "PF_VarString - Prevent Crash");
 
 	return out;
 }
@@ -350,20 +380,20 @@ void PF_sprint (void)
 	char		*s;
 	client_t	*client;
 	int			entnum;
-	
-	entnum = G_EDICTNUM(OFS_PARM0);
-	s = PF_VarString(1);
-	
+
+	entnum = G_EDICTNUM (OFS_PARM0);
+	s = PF_VarString (1);
+
 	if (entnum < 1 || entnum > svs.maxclients)
 	{
 		Con_Printf ("tried to sprint to a non-client\n");
 		return;
 	}
-		
-	client = &svs.clients[entnum-1];
-		
-	MSG_WriteChar (&client->message,svc_print);
-	MSG_WriteString (&client->message, s );
+
+	client = &svs.clients[entnum - 1];
+
+	MSG_WriteChar (&client->message, svc_print);
+	MSG_WriteString (&client->message, s);
 }
 
 
@@ -573,30 +603,36 @@ void PF_ambientsound (void)
 	samp = G_STRING(OFS_PARM1);
 	vol = G_FLOAT(OFS_PARM2);
 	attenuation = G_FLOAT(OFS_PARM3);
-	
-// check to see if samp was properly precached
-	for (soundnum=0, check = sv.sound_precache ; *check ; check++, soundnum++)
-		if (!strcmp(*check,samp))
+
+	// check to see if samp was properly precached
+	for (soundnum = 0, check = sv.sound_precache; *check; check++, soundnum++)
+		if (!strcmp (*check, samp))
 			break;
-			
+
 	if (!*check)
 	{
 		Con_Printf ("no precache: %s\n", samp);
 		return;
 	}
 
-// add an svc_spawnambient command to the level signon packet
+	// add an svc_spawnambient command to the level signon packet
+	if (soundnum > 255 && sv.Protocol == PROTOCOL_VERSION_FITZ)
+		MSG_WriteByte (&sv.signon, svc_spawnstaticsound2);
+	else MSG_WriteByte (&sv.signon, svc_spawnstaticsound);
 
-	MSG_WriteByte (&sv.signon,svc_spawnstaticsound);
-	for (i=0 ; i<3 ; i++)
-		MSG_WriteCoord(&sv.signon, pos[i]);
+	for (i = 0; i < 3; i++)
+		MSG_WriteCoord (&sv.signon, pos[i]);
 
-	SV_WriteByteShort2 (&sv.signon, soundnum, true);
+	if (soundnum > 255 && sv.Protocol == PROTOCOL_VERSION_FITZ)
+		MSG_WriteShort (&sv.signon, soundnum);
+	else if (sv.Protocol != PROTOCOL_VERSION_BJP2)
+		MSG_WriteByte (&sv.signon, soundnum);
+	else MSG_WriteShort (&sv.signon, soundnum);
 
-	MSG_WriteByte (&sv.signon, vol*255);
-	MSG_WriteByte (&sv.signon, attenuation*64);
-
+	MSG_WriteByte (&sv.signon, vol * 255);
+	MSG_WriteByte (&sv.signon, attenuation * 64);
 }
+
 
 /*
 =================
@@ -906,7 +942,7 @@ void PF_cvar (void)
 {
 	char	*str;
 	
-	str = G_STRING(OFS_PARM0);
+	str = G_STRING (OFS_PARM0);
 	
 	G_FLOAT(OFS_RETURN) = Cvar_VariableValue (str);
 }
@@ -923,8 +959,8 @@ void PF_cvar_set (void)
 {
 	char	*var, *val;
 
-	var = G_STRING(OFS_PARM0);
-	val = G_STRING(OFS_PARM1);
+	var = G_STRING (OFS_PARM0);
+	val = G_STRING (OFS_PARM1);
 
 	QC_DebugOutput ("Setting cvar \"%s\" to \"%s\"", var, val);
 
@@ -990,6 +1026,8 @@ void PF_ftos (void)
 	float	v;
 	v = G_FLOAT (OFS_PARM0);
 
+	char *pr_string_temp = PR_GetTempString ();
+
 	if (v == (int) v)
 		_snprintf (pr_string_temp, 128, "%d", (int) v);
 	else
@@ -1007,12 +1045,16 @@ void PF_fabs (void)
 
 void PF_vtos (void)
 {
+	char *pr_string_temp = PR_GetTempString ();
+
 	_snprintf (pr_string_temp, 128, "'%5.1f %5.1f %5.1f'", G_VECTOR(OFS_PARM0)[0], G_VECTOR(OFS_PARM0)[1], G_VECTOR(OFS_PARM0)[2]);
 	G_INT(OFS_RETURN) = pr_string_temp - pr_strings;
 }
 
 void PF_etos (void)
 {
+	char *pr_string_temp = PR_GetTempString ();
+
 	_snprintf (pr_string_temp, 128, "entity %i", G_EDICTNUM(OFS_PARM0));
 	G_INT(OFS_RETURN) = pr_string_temp - pr_strings;
 }
@@ -1055,7 +1097,7 @@ void PF_Find (void)
 
 	e = G_EDICTNUM(OFS_PARM0);
 	f = G_INT(OFS_PARM1);
-	s = G_STRING(OFS_PARM2);
+	s = G_STRING (OFS_PARM2);
 
 	if (!s)
 		PR_RunError ("PF_Find: bad search string");
@@ -1098,7 +1140,7 @@ void PF_precache_sound (void)
 	if (sv.state != ss_loading)
 		PR_RunError ("PF_Precache_*: Precache can only be done in spawn functions");
 		
-	s = G_STRING(OFS_PARM0);
+	s = G_STRING (OFS_PARM0);
 	G_INT(OFS_RETURN) = G_INT(OFS_PARM0);
 	PR_CheckEmptyString (s);
 	
@@ -1123,7 +1165,7 @@ void PF_precache_model (void)
 	if (sv.state != ss_loading)
 		PR_RunError ("PF_Precache_*: Precache can only be done in spawn functions");
 		
-	s = G_STRING(OFS_PARM0);
+	s = G_STRING (OFS_PARM0);
 	G_INT(OFS_RETURN) = G_INT(OFS_PARM0);
 	PR_CheckEmptyString (s);
 
@@ -1253,7 +1295,7 @@ void PF_lightstyle (void)
 	int			j;
 	
 	style = G_FLOAT(OFS_PARM0);
-	val = G_STRING(OFS_PARM1);
+	val = G_STRING (OFS_PARM1);
 
 // change the string in sv
 	sv.lightstyles[style] = val;
@@ -1614,7 +1656,7 @@ void PF_WriteLong (void)
 
 void PF_WriteAngle (void)
 {
-	MSG_WriteAngle (WriteDest(), G_FLOAT(OFS_PARM1));
+	MSG_WriteAngle (WriteDest(), G_FLOAT(OFS_PARM1), true);
 }
 
 void PF_WriteCoord (void)
@@ -1624,7 +1666,7 @@ void PF_WriteCoord (void)
 
 void PF_WriteString (void)
 {
-	MSG_WriteString (WriteDest(), G_STRING(OFS_PARM1));
+	MSG_WriteString (WriteDest(), G_STRING (OFS_PARM1));
 }
 
 
@@ -1641,23 +1683,52 @@ void PF_makestatic (void)
 {
 	edict_t	*ent;
 	int		i;
+	int		bits = 0;
 
-	ent = G_EDICT(OFS_PARM0);
+	ent = G_EDICT (OFS_PARM0);
 
-	MSG_WriteByte (&sv.signon,svc_spawnstatic);
-
-	SV_WriteByteShort (&sv.signon, SV_ModelIndex(pr_strings + ent->v.model));
-
-	MSG_WriteByte (&sv.signon, ent->v.frame);
-	MSG_WriteByte (&sv.signon, ent->v.colormap);
-	MSG_WriteByte (&sv.signon, ent->v.skin);
-	for (i=0 ; i<3 ; i++)
+	if (sv.Protocol == PROTOCOL_VERSION_FITZ)
 	{
-		MSG_WriteCoord(&sv.signon, ent->v.origin[i]);
-		MSG_WriteAngle(&sv.signon, ent->v.angles[i]);
+		// never send alpha
+		if (SV_ModelIndex (pr_strings + ent->v.model) & 0xFF00) bits |= B_LARGEMODEL;
+		if ((int) (ent->v.frame) & 0xFF00) bits |= B_LARGEFRAME;
+	}
+	else
+	{
+		if (SV_ModelIndex (pr_strings + ent->v.model) & 0xFF00 || (int) (ent->v.frame) & 0xFF00)
+		{
+			// can't display the correct model & frame, so don't show it at all
+			ED_Free (ent);
+			return;
+		}
 	}
 
-// throw the entity away now
+	if (bits)
+	{
+		MSG_WriteByte (&sv.signon, svc_spawnstatic2);
+		MSG_WriteByte (&sv.signon, bits);
+	}
+	else MSG_WriteByte (&sv.signon, svc_spawnstatic);
+
+	if (bits & B_LARGEMODEL)
+		MSG_WriteShort (&sv.signon, SV_ModelIndex (pr_strings + ent->v.model));
+	else SV_WriteByteShort (&sv.signon, SV_ModelIndex (pr_strings + ent->v.model));
+
+	if (bits & B_LARGEFRAME)
+		MSG_WriteShort (&sv.signon, ent->v.frame);
+	else MSG_WriteByte (&sv.signon, ent->v.frame);
+
+	MSG_WriteByte (&sv.signon, ent->v.colormap);
+	MSG_WriteByte (&sv.signon, ent->v.skin);
+
+	for (i = 0; i < 3; i++)
+	{
+		MSG_WriteCoord (&sv.signon, ent->v.origin[i]);
+		MSG_WriteAngle (&sv.signon, ent->v.angles[i], true);
+	}
+
+	// never send FQ alpha but the client must be capable of reading it if it receives it
+	// throw the entity away now
 	ED_Free (ent);
 }
 
@@ -1699,7 +1770,7 @@ void PF_changelevel (void)
 	if (svs.changelevel_issued) return;
 	svs.changelevel_issued = true;
 
-	s = G_STRING(OFS_PARM0);
+	s = G_STRING (OFS_PARM0);
 
 	Cbuf_AddText (va ("changelevel %s\n",s));
 }

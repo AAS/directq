@@ -48,9 +48,9 @@ Note: DS_FindTrack is a bit messy right now; I should go back and clean it up.
 */
 
 
+#include "quakedef.h"
 #include <DShow.h>
 #include <windows.h>
-#include "quakedef.h"
 #include "winquake.h"
 
 #pragma comment (lib, "Strmiids.lib")
@@ -131,8 +131,6 @@ public:
 		this->ds_Event = NULL;
 		this->ds_Graph = NULL;
 		this->ds_Position = NULL;
-
-		HRESULT hr;
 
 		// set up everything
 		if (FAILED (hr = CoCreateInstance (CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, IID_IGraphBuilder, (void **) &this->ds_Graph))) return;
@@ -228,7 +226,7 @@ void DS_Event (void)
 void DS_Init (void)
 {
 	// just attempt to initialize COM
-	HRESULT hr = CoInitialize (NULL);
+	hr = CoInitialize (NULL);
 
 	if (FAILED (hr))
 	{
@@ -290,7 +288,6 @@ bool DS_FindTrack (const char *trackdir, const char *musicdir, int track, bool l
 		if (track == seektrack)
 		{
 			wchar_t WCFileName[256];
-			HRESULT hr;
 
 			// convert to wide char cos DirectShow requires Wide Chars (bastards!)
 			mbstowcs (WCFileName, va ("%s\\%s", MusicPath, FindFileData.cFileName), 256);
@@ -363,6 +360,7 @@ void DS_Resume (void)
 {
 	if (!DSManager) return;
 
+	DSManager->ResumeTrack ();
 }
 
 

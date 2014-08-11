@@ -30,9 +30,9 @@ extern char *SkillNames[];
 extern char **spinbox_maps;
 extern char **spinbox_bsps;
 
-CQMenu menu_Search (&menu_TCPIPJoinGame, m_other);
-CQMenu menu_SList (&menu_TCPIPJoinGame, m_other);
-CQMenu menu_FunName (&menu_Setup, m_other);
+CQMenu menu_Search (m_other);
+CQMenu menu_SList (m_other);
+CQMenu menu_FunName (m_other);
 
 #define TAG_ID1OPTIONS			1
 #define TAG_HIPNOTICOPTIONS		2
@@ -74,7 +74,7 @@ void Menu_SetupApplyFunc (void)
 		Cbuf_AddText (va ("color %i %i\n", setup_shirt, setup_pants));
 
 	// return to the multiplayer menu
-	menu_Multiplayer.EnterMenu ();
+	Menu_StackPop ();
 }
 
 
@@ -145,6 +145,29 @@ int Menu_SetupCustomDraw (int y)
 }
 
 
+// if starting a new game (i.e. a DirectQ server) protocol 15 should be the default
+int selected_protocol = 0;
+
+int Menu_TCPIPProtoDesc (int y)
+{
+	if (selected_protocol == 0)
+		Menu_PrintCenter (y, "Use for best compatibility with all Quake Clients");
+	else if (selected_protocol == 1)
+		Menu_PrintCenter (y, "Extended protocol (models > 256 etc)");
+	else if (selected_protocol == 2)
+		Menu_PrintCenter (y, "Extended protocol (models > 256 etc)");
+	else if (selected_protocol == 3)
+		Menu_PrintCenter (y, "Extended protocol (sounds > 256), problems with Marcher");
+	else if (selected_protocol == 4)
+		Menu_PrintCenter (y, "Extended protocol (sounds > 256), more compatible but less functional");
+	else if (selected_protocol == 5)
+		Menu_PrintCenter (y, "Extended protocol, as BJP3 but extends coords and angles");
+	else Menu_PrintCenter (y, "Unknown protocol");
+
+	return y + 15;
+}
+
+
 int Menu_TCPIPCustomDraw (int y)
 {
 	Menu_Print (148 - strlen ("IP Address") * 8, y, "IP Address");
@@ -197,7 +220,7 @@ void Menu_TCPIPContinueToGameOptions (void)
 	Menu_TCPIPPostConfigCommon ();
 
 	// fire the game options menu entry function
-	menu_GameConfig.EnterMenu ();
+	Menu_StackPush (&menu_GameConfig);
 }
 
 
@@ -307,6 +330,9 @@ void Menu_GameConfigCustomEnter (void)
 }
 
 
+// adding protocol to the new game menu
+extern char *protolist[];
+
 void Menu_GameConfigBeginGame (void)
 {
 	// disconnet any current servers
@@ -315,6 +341,7 @@ void Menu_GameConfigBeginGame (void)
 	// so host_netport will be re-examined
 	Cbuf_AddText ("listen 0\n");
 	Cbuf_AddText (va ("maxplayers %u\n", (int) dummy_maxplayers.value));
+	Cbuf_AddText (va ("sv_protocol %s\n", protolist[selected_protocol]));
 	SCR_BeginLoadingPlaque ();
 
 	// copy cvar values back now that we're committed
@@ -341,7 +368,7 @@ void Menu_GameConfigBeginGame (void)
 
 
 bool Menu_SearchComplete = false;
-double Menu_SearchCompleteTime;
+float Menu_SearchCompleteTime;
 
 void Menu_SearchCustomEnter (void)
 {
@@ -369,15 +396,13 @@ int Menu_SearchCustomDraw (int y)
 
 	if (hostCacheCount)
 	{
-		menu_SList.EnterMenu ();
+		Menu_StackPush (&menu_SList);
 		return y;
 	}
 
 	Menu_PrintCenterWhite (y + 50, "No Quake Servers found");
 
 	if ((realtime - Menu_SearchCompleteTime) < 3.0) return y;
-
-	menu_TCPIPJoinGame.EnterMenu ();
 
 	return y;
 }
@@ -437,7 +462,7 @@ void NET_MenuReturn (void)
 	if (Menu_NetReturn)
 	{
 		Net_ErrorReturnTime = realtime + 5;
-		Menu_NetReturn->EnterMenu ();
+		Menu_StackPop ();
 	}
 
 	Menu_NetReturn = NULL;
@@ -612,7 +637,7 @@ void Menu_CustomNameCustomKey (int k)
 			Cbuf_Execute ();
 
 			// return to the setup menu
-			menu_Setup.EnterMenu ();
+			Menu_StackPop ();
 			return;
 		}
 		else if (custnamerow == 8)
@@ -785,6 +810,8 @@ void Menu_InitMultiplayerMenu (void)
 	menu_TCPIPNewGame.AddOption (new CQMenuCustomEnter (Menu_TCPIPCustomEnter));
 	menu_TCPIPNewGame.AddOption (new CQMenuCustomDraw (Menu_TCPIPCustomDraw));
 	menu_TCPIPNewGame.AddOption (new CQMenuCvarTextbox ("Port", &dummy_port, TBFLAG_ALLOWNUMBERS));
+	menu_TCPIPNewGame.AddOption (new CQMenuSpinControl ("Protocol", &selected_protocol, protolist));
+	menu_TCPIPNewGame.AddOption (new CQMenuCustomDraw (Menu_TCPIPProtoDesc));
 	menu_TCPIPNewGame.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_TCPIPNewGame.AddOption (new CQMenuCommand ("Continue to Game Options", Menu_TCPIPContinueToGameOptions));
 

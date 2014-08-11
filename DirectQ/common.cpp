@@ -360,22 +360,26 @@ void MSG_WriteCoord (sizebuf_t *sb, float f)
 }
 
 
-void MSG_WriteAngleCommon (sizebuf_t *sb, float f, int proto)
+void MSG_WriteAngleCommon (sizebuf_t *sb, float f, int proto, bool fitzhack)
 {
 	if (proto >= PROTOCOL_VERSION_MH)
 		MSG_WriteShort (sb, ((int) ((f * 65536) / 360)) & 65535);
+	else if (proto == PROTOCOL_VERSION_FITZ && fitzhack)
+		MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
+	else if (proto == PROTOCOL_VERSION_FITZ)
+		MSG_WriteShort (sb, Q_rint (f * 65536.0 / 360.0) & 65535);
 	else MSG_WriteByte (sb, ((int) ((f * 256) / 360)) & 255);
 }
 
 
-void MSG_WriteClientAngle (sizebuf_t *sb, float f)
+void MSG_WriteClientAngle (sizebuf_t *sb, float f, bool fitzhack)
 {
-	MSG_WriteAngleCommon (sb, f, cl.Protocol);
+	MSG_WriteAngleCommon (sb, f, cl.Protocol, fitzhack);
 }
 
-void MSG_WriteAngle (sizebuf_t *sb, float f)
+void MSG_WriteAngle (sizebuf_t *sb, float f, bool fitzhack)
 {
-	MSG_WriteAngleCommon (sb, f, sv.Protocol);
+	MSG_WriteAngleCommon (sb, f, sv.Protocol, fitzhack);
 }
 
 //
@@ -394,7 +398,7 @@ void MSG_BeginReading (void)
 int MSG_ReadChar (void)
 {
 	int     c;
-	
+
 	if (msg_readcount+1 > net_message.cursize)
 	{
 		msg_badread = true;
@@ -503,33 +507,50 @@ char *MSG_ReadString (void)
 
 float MSG_ReadCoord (void)
 {
-	if (cl.Protocol >= PROTOCOL_VERSION_MH)
+	if (cl.Protocol == PROTOCOL_VERSION_FITZ)
+		return MSG_ReadShort () * (1.0 / 8);
+	else if (cl.Protocol >= PROTOCOL_VERSION_MH)
 		return MSG_ReadFloat ();
-
-	return MSG_ReadShort() * (1.0 / 8);
+	else return MSG_ReadShort () * (1.0 / 8);
 }
 
 
-float MSG_ReadAngleCommon (int proto)
+float MSG_ReadAngleCommon (int proto, bool fitzhack)
 {
 	if (proto >= PROTOCOL_VERSION_MH)
+		return MSG_ReadShort () * (360.0 / 65536);
+	else if (proto == PROTOCOL_VERSION_FITZ && fitzhack)
+		return MSG_ReadChar () * (360.0 / 256);
+	else if (proto == PROTOCOL_VERSION_FITZ)
 		return MSG_ReadShort () * (360.0 / 65536);
 
 	return MSG_ReadChar () * (360.0 / 256);
 }
 
 
-float MSG_ReadServerAngle (void)
+float MSG_ReadServerAngle (bool fitzhack)
 {
-	return MSG_ReadAngleCommon (sv.Protocol);
+	return MSG_ReadAngleCommon (sv.Protocol, fitzhack);
 }
 
 
-float MSG_ReadAngle (void)
+float MSG_ReadAngle (bool fitzhack)
 {
-	return MSG_ReadAngleCommon (cl.Protocol);
+	return MSG_ReadAngleCommon (cl.Protocol, fitzhack);
 }
 
+
+// JPG - need this to check for ProQuake messages
+int MSG_PeekByte (void)
+{
+	if (msg_readcount + 1 > net_message.cursize)
+	{
+		msg_badread = true;
+		return -1;
+	}
+
+	return (unsigned char) net_message.data[msg_readcount];
+}
 
 //===========================================================================
 
@@ -574,7 +595,7 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 void SZ_Write (sizebuf_t *buf, void *data, int length)
 {
-	memcpy (SZ_GetSpace(buf,length),data,length);         
+	memcpy (SZ_GetSpace (buf,length), data, length);         
 }
 
 void SZ_Print (sizebuf_t *buf, char *data)
@@ -703,80 +724,11 @@ void COM_DefaultExtension (char *path, char *extension)
 ==============
 COM_Parse
 
-Parse a token out of a string
+Parse a token out of a string or parses a full line
 ==============
 */
-char *COM_Parse (char *data)
+char *COM_Parse (char *data, bool parsefullline)
 {
-#if 0
-	// regular q1 version
-	int             c;
-	int             len;
-	
-	len = 0;
-	com_token[0] = 0;
-	
-	if (!data)
-		return NULL;
-		
-// skip whitespace
-skipwhite:
-	while ( (c = *data) <= ' ')
-	{
-		if (c == 0)
-			return NULL;                    // end of file;
-		data++;
-	}
-	
-// skip // comments
-	if (c=='/' && data[1] == '/')
-	{
-		while (*data && *data != '\n')
-			data++;
-		goto skipwhite;
-	}
-	
-
-// handle quoted strings specially
-	if (c == '\"')
-	{
-		data++;
-		while (1)
-		{
-			c = *data++;
-			if (c=='\"' || !c)
-			{
-				com_token[len] = 0;
-				return data;
-			}
-			com_token[len] = c;
-			len++;
-		}
-	}
-
-// parse single characters
-	if (c=='{' || c=='}'|| c==')'|| c=='(' || c=='\'' || c==':')
-	{
-		com_token[len] = c;
-		len++;
-		com_token[len] = 0;
-		return data+1;
-	}
-
-// parse a regular word
-	do
-	{
-		com_token[len] = c;
-		data++;
-		len++;
-		c = *data;
-	if (c=='{' || c=='}'|| c==')'|| c=='(' || c=='\'' || c==':')
-			break;
-	} while (c>32);
-	
-	com_token[len] = 0;
-	return data;
-#else
 	// qw version
 	int c;
 	int len;
@@ -823,19 +775,18 @@ skipwhite:
 		}
 	}
 
-	// parse a regular word
+	// parse a regular word or line
 	do
 	{
 		com_token[len] = c;
 		data++;
 		len++;
 		c = *data;
-	} while (c > 32);
+	} while (c > (parsefullline ? 31 : 32));
 
 	com_token[len] = 0;
 
 	return data;
-#endif
 }
 
 
@@ -1083,7 +1034,7 @@ typedef struct
 
 typedef struct pack_s
 {
-	char    filename[MAX_OSPATH];
+	char    filename[MAX_PATH];
 	int             handle;
 	int             numfiles;
 	packfile_t      *files;
@@ -1092,7 +1043,7 @@ typedef struct pack_s
 
 typedef struct pk3_s
 {
-	char			filename[MAX_OSPATH];
+	char			filename[MAX_PATH];
 	int             numfiles;
 	packfile_t      *files;
 } pk3_t;
@@ -1116,11 +1067,11 @@ typedef struct
 
 #define MAX_FILES_IN_PACK       2048
 
-char    com_gamedir[MAX_OSPATH];
+char    com_gamedir[MAX_PATH];
 
 typedef struct searchpath_s
 {
-	char    filename[MAX_OSPATH];
+	char    filename[MAX_PATH];
 	pack_t  *pack;          // only one of filename / pack will be used
 	pk3_t *pk3;
 	struct searchpath_s *next;
@@ -1572,7 +1523,7 @@ int COM_FOpenFile (char *filename, void *hf)
 		}
 		else
 		{
-			char netpath[MAX_OSPATH];
+			char netpath[MAX_PATH];
 
 			// check for a file in the directory tree
 			_snprintf (netpath, 128, "%s/%s", search->filename, filename);
@@ -1758,7 +1709,7 @@ then loads and adds pak1.pak pak2.pak ...
 void COM_AddGameDirectory (char *dir)
 {
 	searchpath_t *search;
-	char pakfile[MAX_OSPATH];
+	char pakfile[MAX_PATH];
 
 	// copy to com_gamedir so that the last gamedir added will be the one used
 	strncpy (com_gamedir, dir, 127);
@@ -1960,7 +1911,7 @@ void COM_LoadAllStuff (void)
 {
 	host_basepal = (byte *) COM_LoadHunkFile ("gfx/palette.lmp");
 	host_colormap = (byte *) COM_LoadHunkFile ("gfx/colormap.lmp");
-	W_LoadWadFile ("gfx.wad");
+	if (!W_LoadWadFile ("gfx.wad")) Sys_Error ("Could not locate Quake on your computer");
 	Draw_Init ();
 	HUD_Init ();
 	SCR_Init ();
@@ -1976,7 +1927,8 @@ void COM_LoadAllStuff (void)
 
 void COM_LoadGame (char *gamename)
 {
-	SCR_UpdateScreen ();
+	// clear the screen to black so as to prevent graphical garbage
+	SCR_BlackScreen ();
 
 	if (host_initialized)
 	{
@@ -1987,7 +1939,7 @@ void COM_LoadGame (char *gamename)
 		COM_UnloadAllStuff ();
 	}
 
-	char basedir[MAX_OSPATH];
+	char basedir[MAX_PATH];
 
 	// -basedir <path>
 	// Overrides the system supplied base directory (under GAMENAME)

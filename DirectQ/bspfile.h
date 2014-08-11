@@ -108,8 +108,8 @@ typedef struct
 typedef struct miptex_s
 {
 	char		name[16];
-	unsigned	width, height;
-	unsigned	offsets[MIPLEVELS];		// four mip maps stored
+	unsigned int		width, height;
+	unsigned int		offsets[MIPLEVELS];		// four mip maps stored
 } miptex_t;
 
 

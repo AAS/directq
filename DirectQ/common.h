@@ -98,15 +98,15 @@ void MSG_WriteLong (sizebuf_t *sb, int c);
 void MSG_WriteFloat (sizebuf_t *sb, float f);
 void MSG_WriteString (sizebuf_t *sb, char *s);
 void MSG_WriteCoord (sizebuf_t *sb, float f);
-void MSG_WriteAngle (sizebuf_t *sb, float f);
+void MSG_WriteAngle (sizebuf_t *sb, float f, bool fitzhack);
 
 // these are to prevent crossing client/server boundaries when checking the
 // protocol to decide which data format to use.  in theory the two numbers are
 // the same so it should make no odds, but it just feels cleaner this way.
 // in an ideal world each of client and server would have their own logically
 // separate functions for reading and writing.
-void MSG_WriteClientAngle (sizebuf_t *sb, float f);
-float MSG_ReadServerAngle (void);
+void MSG_WriteClientAngle (sizebuf_t *sb, float f, bool fitzhack);
+float MSG_ReadServerAngle (bool fitzhack);
 
 extern	int			msg_readcount;
 extern	bool	msg_badread;		// set if a read goes beyond end of message
@@ -120,14 +120,17 @@ float MSG_ReadFloat (void);
 char *MSG_ReadString (void);
 
 float MSG_ReadCoord (void);
-float MSG_ReadAngle (void);
+float MSG_ReadAngle (bool fitzhack);
 
 //============================================================================
 
 extern	char		com_token[1024];
 extern	bool	com_eof;
 
-char *COM_Parse (char *data);
+#define COM_PARSE_TOKEN		false
+#define COM_PARSE_LINE		true
+
+char *COM_Parse (char *data, bool parsefullline = false);
 
 
 extern	int		com_argc;
@@ -151,7 +154,8 @@ char	*va(char *format, ...);
 extern int com_filesize;
 struct cache_user_s;
 
-extern	char	com_gamedir[MAX_OSPATH];
+// common.h doesn't know what MAX_PATH is
+extern	char	com_gamedir[260];
 
 // common.h doesn't know what a HANDLE is...
 int COM_FOpenFile (char *filename, void *hf);
@@ -171,3 +175,4 @@ void COM_HashData (byte *hash, const void *data, int size);
 #define COM_CheckHash(h1, h2) !(memcmp ((h1), (h2), 16))
 
 void COM_SortStringList (char **stringlist, bool ascending);
+

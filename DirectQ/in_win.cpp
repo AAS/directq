@@ -26,11 +26,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DIRECTINPUT_VERSION		0x0800
 #endif
 
+#include "quakedef.h"
 #include <dinput.h>
 #include <XInput.h>
-#include "quakedef.h"
 #include "winquake.h"
-#include "dosisms.h"
 
 // statically link
 #pragma comment (lib, "dinput8.lib")
@@ -331,20 +330,18 @@ bool IN_InitDInput (void)
 {
 	if (COM_CheckParm ("-nodinput")) return false;
 
-    HRESULT hr;
-
 	// register with DirectInput and get an IDirectInput to play with.
-	hr = DirectInput8Create (global_hInstance, DIRECTINPUT_VERSION, IID_IDirectInput8, (LPVOID *) &di_Object, NULL);
+	hr = DirectInput8Create (GetModuleHandle (NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (LPVOID *) &di_Object, NULL);
 
-	if (FAILED(hr))
+	if (FAILED (hr))
 	{
 		return false;
 	}
 
 	// obtain an interface to the system mouse device.
-	di_Object->CreateDevice (GUID_SysMouse, &di_Mouse, NULL);
+	hr = di_Object->CreateDevice (GUID_SysMouse, &di_Mouse, NULL);
 
-	if (FAILED(hr))
+	if (FAILED (hr))
 	{
 		Con_SafePrintf ("Couldn't open DI mouse device\n");
 		return false;
@@ -352,18 +349,18 @@ bool IN_InitDInput (void)
 
 	// set the data format to "mouse format".
 	// use the mouse2 format for up to 8 buttons
-	di_Mouse->SetDataFormat (&c_dfDIMouse2);
+	hr = di_Mouse->SetDataFormat (&c_dfDIMouse2);
 
-	if (FAILED(hr))
+	if (FAILED (hr))
 	{
 		Con_SafePrintf ("Couldn't set DI mouse format\n");
 		return false;
 	}
 
-	// set the cooperativity level.
-	di_Mouse->SetCooperativeLevel (d3d_Window, DISCL_EXCLUSIVE | DISCL_FOREGROUND);
+	// set the cooperative level.
+	hr = di_Mouse->SetCooperativeLevel (d3d_Window, DISCL_EXCLUSIVE | DISCL_FOREGROUND);
 
-	if (FAILED(hr))
+	if (FAILED (hr))
 	{
 		Con_SafePrintf ("Couldn't set DI coop level\n");
 		return false;
@@ -489,7 +486,6 @@ void IN_MouseMove (usercmd_t *cmd)
 {
 	int					mx, my;
 	int					i;
-	HRESULT				hr;
 
 	if (!mouseactive) return;
 

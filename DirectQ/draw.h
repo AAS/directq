@@ -39,6 +39,7 @@ void Draw_Fill (int x, int y, int w, int h, int c, int alpha = 255);
 void Draw_Fill (int x, int y, int w, int h, float r, float g, float b, float alpha = 1.0f);
 void Draw_FadeScreen (int alpha);
 void Draw_String (int x, int y, char *str);
+void Draw_StringOrange (int x, int y, char *str);
 void Draw_TextBox (int x, int y, int width, int height);
 qpic_t *Draw_PicFromWad (char *name);
 qpic_t *Draw_CachePic (char *path);

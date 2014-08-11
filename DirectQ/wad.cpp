@@ -65,16 +65,14 @@ void W_CleanupName (char *in, char *out)
 W_LoadWadFile
 ====================
 */
-void W_LoadWadFile (char *filename)
+bool W_LoadWadFile (char *filename)
 {
 	lumpinfo_t		*lump_p;
 	wadinfo_t		*header;
 	unsigned		i;
 	int				infotableofs;
 
-	wad_base = COM_LoadHunkFile (filename);
-
-	if (!wad_base) Sys_Error ("W_LoadWadFile: couldn't load %s", filename);
+	if (!(wad_base = COM_LoadHunkFile (filename))) return false;
 
 	header = (wadinfo_t *) wad_base;
 
@@ -95,6 +93,8 @@ void W_LoadWadFile (char *filename)
 		if (lump_p->type == TYP_QPIC)
 			SwapPic ( (qpic_t *)(wad_base + lump_p->filepos));
 	}
+
+	return true;
 }
 
 

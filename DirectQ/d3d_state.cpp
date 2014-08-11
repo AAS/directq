@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "winquake.h"
 
-extern DWORD d3d_ZbufferEnableFunction;
 extern bool d3d_ForceStateUpdates;
 
 void D3D_CheckDirtyMatrixes (void)
@@ -185,7 +184,8 @@ void D3D_SetDefaultStates (void)
 	{
 		DWORD rs;
 
-		HRESULT hr = d3d_Device->GetRenderState ((D3DRENDERSTATETYPE) i, &rs);
+		// we expect this to fail on some of the states as not every number from 0 to 255 is a render state!
+		hr = d3d_Device->GetRenderState ((D3DRENDERSTATETYPE) i, &rs);
 
 		if (SUCCEEDED (hr))
 		{
@@ -200,7 +200,6 @@ void D3D_SetDefaultStates (void)
 	for (int s = 0; s < 8; s++)
 	{
 		DWORD ss;
-		HRESULT hr;
 
 		for (int i = 0; i < 64; i++)
 		{
@@ -239,7 +238,7 @@ void D3D_SetDefaultStates (void)
 	// now we set all of our states to the dcoumented D3D defaults; this is
 	// to protect us against drivers who think they know better than we do.
 	// (note: i observed bad defaults coming through on Intel cards here, so the exercise is valid)
-	D3D_SetRenderState (D3DRS_ZENABLE, d3d_ZbufferEnableFunction);
+	D3D_SetRenderState (D3DRS_ZENABLE, D3DZB_TRUE);
 	D3D_SetRenderState (D3DRS_FILLMODE, D3DFILL_SOLID);
 	D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
 	D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
@@ -454,11 +453,108 @@ void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode, DWORD tmu2mode)
 }
 
 
-void D3D_SetTextureMipmap (DWORD stage, DWORD magfilter, DWORD minfilter, DWORD mipfilter)
+void D3D_SetTextureFilter (DWORD stage, D3DSAMPLERSTATETYPE type, D3DTEXTUREFILTERTYPE desired)
 {
-	D3D_SetSamplerState (stage, D3DSAMP_MAGFILTER, magfilter);
-	D3D_SetSamplerState (stage, D3DSAMP_MINFILTER, minfilter);
-	D3D_SetSamplerState (stage, D3DSAMP_MIPFILTER, mipfilter);
+	D3DTEXTUREFILTERTYPE actual = D3DTEXF_LINEAR;
+
+	switch (type)
+	{
+	case D3DSAMP_MAGFILTER:
+		switch (desired)
+		{
+		case D3DTEXF_ANISOTROPIC:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFANISOTROPIC)
+			{
+				actual = D3DTEXF_ANISOTROPIC;
+				break;
+			}
+
+		case D3DTEXF_LINEAR:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFLINEAR)
+			{
+				actual = D3DTEXF_LINEAR;
+				break;
+			}
+
+		default:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MAGFPOINT)
+			{
+				actual = D3DTEXF_POINT;
+				break;
+			}
+
+			actual = D3DTEXF_NONE;
+		}
+
+		break;
+
+	case D3DSAMP_MINFILTER:
+		switch (desired)
+		{
+		case D3DTEXF_ANISOTROPIC:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFANISOTROPIC)
+			{
+				actual = D3DTEXF_ANISOTROPIC;
+				break;
+			}
+
+		case D3DTEXF_LINEAR:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFLINEAR)
+			{
+				actual = D3DTEXF_LINEAR;
+				break;
+			}
+
+		default:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MINFPOINT)
+			{
+				actual = D3DTEXF_POINT;
+				break;
+			}
+
+			actual = D3DTEXF_NONE;
+		}
+
+		break;
+
+
+	case D3DSAMP_MIPFILTER:
+		switch (desired)
+		{
+		case D3DTEXF_ANISOTROPIC:
+			// there's no such thing as an anisotropic mip filter
+		case D3DTEXF_LINEAR:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MIPFLINEAR)
+			{
+				actual = D3DTEXF_LINEAR;
+				break;
+			}
+
+		default:
+			if (d3d_DeviceCaps.TextureFilterCaps & D3DPTFILTERCAPS_MIPFPOINT)
+			{
+				actual = D3DTEXF_POINT;
+				break;
+			}
+
+			actual = D3DTEXF_NONE;
+		}
+
+		break;
+
+	default:
+		return;
+	}
+
+	D3D_SetSamplerState (stage, type, actual);
+}
+
+
+void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE magfilter, D3DTEXTUREFILTERTYPE minfilter, D3DTEXTUREFILTERTYPE mipfilter)
+{
+	D3D_SetTextureFilter (stage, D3DSAMP_MAGFILTER, magfilter);
+	D3D_SetTextureFilter (stage, D3DSAMP_MINFILTER, minfilter);
+	D3D_SetTextureFilter (stage, D3DSAMP_MIPFILTER, mipfilter);
 }
 
 

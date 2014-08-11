@@ -23,7 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "winquake.h"
 #include "errno.h"
 #include "resource.h"
+#include "shlobj.h"
 
+// we need this a lot so define it just once
+HRESULT hr = S_OK;
 
 #define MINIMUM_WIN_MEMORY		0x1000000
 #define MAXIMUM_WIN_MEMORY		0x4000000
@@ -31,57 +34,83 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define PAUSE_SLEEP		50				// sleep time on pause or minimization
 #define NOT_FOCUS_SLEEP	20				// sleep time when not focus
 
-int			starttime;
 bool	ActiveApp, Minimized;
 bool	WinNT;
-
-static double		pfreq;
-static double		curtime = 0.0;
-static double		lastcurtime = 0.0;
-static int			lowshift;
-static bool		sc_return_on_enter = false;
-HANDLE				hinput, houtput;
-
-static char			*tracking_tag = "Clams & Mooses";
 
 static HANDLE	tevent;
 static HANDLE	hFile;
 static HANDLE	heventParent;
 static HANDLE	heventChild;
 
-void MaskExceptions (void);
-void Sys_InitFloatTime (void);
-void Sys_PushFPCW_SetHigh (void);
-void Sys_PopFPCW (void);
+volatile int sys_checksum;
 
-volatile int					sys_checksum;
 
-CRITICAL_SECTION TheCS;
-
-/*
-================
-Sys_PageIn
-================
-*/
-void Sys_PageIn (void *ptr, int size)
+// QueryPerformanceFrequency is EVIL on x64 and dual-core, so use the built-in high res multimedia timer
+// instead.  QuakeWorld and Quake II both use this, and it gets 1 millisecond resolution.
+class CQuakeTimer
 {
-	byte	*x;
-	int		m, n;
-
-// touch all the memory to make sure it's there. The 16-page skip is to
-// keep Win 95 from thinking we're trying to page ourselves in (we are
-// doing that, of course, but there's no reason we shouldn't)
-	x = (byte *)ptr;
-
-	for (n=0 ; n<4 ; n++)
+public:
+	CQuakeTimer (int resolution)
 	{
-		for (m=0 ; m<(size - 16 * 0x1000) ; m += 4)
+		this->First = true;
+		this->Resolution = resolution;
+		this->StartTime = 0;
+
+		if (timeBeginPeriod (this->Resolution) != TIMERR_NOERROR)
 		{
-			sys_checksum += *(int *)&x[m];
-			sys_checksum += *(int *)&x[m + 16 * 0x1000];
+			MessageBox
+			(
+				NULL,
+				"A high resolution multimedia timer was not found on your system",
+				"Error",
+				MB_OK | MB_ICONERROR
+			);
+
+			exit (666);
 		}
 	}
-}
+
+	~CQuakeTimer (void)
+	{
+		timeEndPeriod (this->Resolution);
+	}
+
+	float GetFloatTime (void)
+	{
+		DWORD now = timeGetTime ();
+
+		if (this->First)
+		{
+			this->First = false;
+			this->StartTime = now;
+			return 0.0f;
+		}
+
+		// check for wrap
+		if (now < this->StartTime)
+		{
+			// if we get a turnover we just set starttime to now, return 0, and hope for the best
+			// this may cause momentary weirdness but I'm not gonna leave my machine on for 49.7
+			// days to test it, and nor should you.
+			this->StartTime = now;
+			return 0.0f;
+		}
+
+		// no change (why is this not if (now == starttime)?
+		if (now - this->StartTime == 0) return 0.0f;
+
+		// return the time difference we got
+		return (float) (now - this->StartTime) / 1000.0f;
+	}
+
+private:
+	int Resolution;
+	bool First;
+	DWORD StartTime;
+};
+
+
+CQuakeTimer *Sys_Timer = NULL;
 
 
 int	Sys_FileExists (char *path)
@@ -96,6 +125,7 @@ int	Sys_FileExists (char *path)
 
 	return 0;
 }
+
 
 void Sys_mkdir (char *path)
 {
@@ -116,80 +146,25 @@ void Sys_mkdir (char *path)
 
 
 /*
-===============================================================================
-
-SYSTEM IO
-
-===============================================================================
-*/
-
-void Sys_SetFPCW (void)
-{
-}
-
-void Sys_PushFPCW_SetHigh (void)
-{
-}
-
-void Sys_PopFPCW (void)
-{
-}
-
-void MaskExceptions (void)
-{
-}
-
-
-/*
 ================
 Sys_Init
 ================
 */
 void Sys_Init (void)
 {
-	LARGE_INTEGER	PerformanceFreq;
-	unsigned int	lowpart, highpart;
 	OSVERSIONINFO	vinfo;
 
-	MaskExceptions ();
-	Sys_SetFPCW ();
+	// init our high-res multimedia timer (check in case we ever accidentally call Sys_FloatTime before this)
+	if (!Sys_Timer) Sys_Timer = new CQuakeTimer (1);
 
-	if (!QueryPerformanceFrequency (&PerformanceFreq))
-		Sys_Error ("No hardware timer available");
+	vinfo.dwOSVersionInfoSize = sizeof (vinfo);
 
-// get 32 out of the 64 time bits such that we have around
-// 1 microsecond resolution
-	lowpart = (unsigned int)PerformanceFreq.LowPart;
-	highpart = (unsigned int)PerformanceFreq.HighPart;
-	lowshift = 0;
-
-	while (highpart || (lowpart > 2000000.0))
-	{
-		lowshift++;
-		lowpart >>= 1;
-		lowpart |= (highpart & 1) << 31;
-		highpart >>= 1;
-	}
-
-	pfreq = 1.0 / (double)lowpart;
-
-	Sys_InitFloatTime ();
-
-	vinfo.dwOSVersionInfoSize = sizeof(vinfo);
-
-	if (!GetVersionEx (&vinfo))
-		Sys_Error ("Couldn't get OS info");
-
-	if ((vinfo.dwMajorVersion < 4) ||
-		(vinfo.dwPlatformId == VER_PLATFORM_WIN32s))
-	{
-		Sys_Error ("WinQuake requires at least Win95 or NT 4.0");
-	}
+	if (!GetVersionEx (&vinfo)) Sys_Error ("Couldn't get OS info");
+	if (vinfo.dwMajorVersion < 5) Sys_Error ("DirectQ requires at least Windows 2000");
 
 	if (vinfo.dwPlatformId == VER_PLATFORM_WIN32_NT)
 		WinNT = true;
-	else
-		WinNT = false;
+	else WinNT = false;
 }
 
 
@@ -201,7 +176,7 @@ void Sys_Error (char *error, ...)
 	char		*text4 = "***********************************\n";
 	char		*text5 = "\n";
 	DWORD		dummy;
-	double		starttime;
+	float		starttime;
 	static int	in_sys_error0 = 0;
 	static int	in_sys_error1 = 0;
 	static int	in_sys_error2 = 0;
@@ -264,108 +239,19 @@ void Sys_Quit (void)
 Sys_FloatTime
 ================
 */
-double Sys_FloatTime (void)
+float Sys_FloatTime (void)
 {
-	static int			sametimecount;
-	static unsigned int	oldtime;
-	static int			first = 1;
-	LARGE_INTEGER		PerformanceCount;
-	unsigned int		temp, t2;
-	double				time;
+	// this should be automatically initialized before the first call to here but let's make sure
+	if (!Sys_Timer) Sys_Timer = new CQuakeTimer (1);
 
-	Sys_PushFPCW_SetHigh ();
-
-	QueryPerformanceCounter (&PerformanceCount);
-
-	temp = ((unsigned int)PerformanceCount.LowPart >> lowshift) |
-		   ((unsigned int)PerformanceCount.HighPart << (32 - lowshift));
-
-	if (first)
-	{
-		oldtime = temp;
-		first = 0;
-	}
-	else
-	{
-	// check for turnover or backward time
-		if ((temp <= oldtime) && ((oldtime - temp) < 0x10000000))
-		{
-			oldtime = temp;	// so we can't get stuck
-		}
-		else
-		{
-			t2 = temp - oldtime;
-
-			time = (double)t2 * pfreq;
-			oldtime = temp;
-
-			curtime += time;
-
-			if (curtime == lastcurtime)
-			{
-				sametimecount++;
-
-				if (sametimecount > 100000)
-				{
-					curtime += 1.0;
-					sametimecount = 0;
-				}
-			}
-			else
-			{
-				sametimecount = 0;
-			}
-
-			lastcurtime = curtime;
-		}
-	}
-
-	Sys_PopFPCW ();
-
-    return curtime;
-}
-
-
-/*
-================
-Sys_InitFloatTime
-================
-*/
-void Sys_InitFloatTime (void)
-{
-	int		j;
-
-	Sys_FloatTime ();
-
-	j = COM_CheckParm("-starttime");
-
-	if (j)
-	{
-		curtime = (double) (atof(com_argv[j+1]));
-	}
-	else
-	{
-		curtime = 0.0;
-	}
-
-	lastcurtime = curtime;
-}
-
-
-char *Sys_ConsoleInput (void)
-{
-	return NULL;
-}
-
-void Sys_Sleep (void)
-{
-	Sleep (1);
+	// get the time
+	return Sys_Timer->GetFloatTime ();
 }
 
 
 void Sys_SendKeyEvents (void)
 {
-    MSG        msg;
+	MSG		msg;
 
 	while (PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE))
 	{
@@ -375,44 +261,12 @@ void Sys_SendKeyEvents (void)
 		if (!GetMessage (&msg, NULL, 0, 0))
 			Sys_Quit ();
 
-      	TranslateMessage (&msg);
-      	DispatchMessage (&msg);
+	  	TranslateMessage (&msg);
+	  	DispatchMessage (&msg);
 	}
 }
 
 
-void Sys_ThreadCatchup (void)
-{
-	// DON'T PANIC!!!
-	// per MSDN - "Specifies the time, in milliseconds, for which to suspend execution.
-	// A value of zero causes the thread to relinquish the remainder of its time slice
-	// to any other thread of equal priority that is ready to run. If there are no other
-	// threads of equal priority ready to run, the function returns immediately, and
-	// the thread continues execution."
-	// DON'T PANIC!!!
-	// DirectInput needs this, and anyway it makes the engine a more well-behaved citizen
-	// in a multi-threaded environment.  Got a few extra FPS from it too... (confirming my
-	// suspicion that something in Direct3D was running multi-threaded...
-	// DON'T PANIC!!!
-	Sleep (0);
-	// DON'T PANIC!!!
-}
-
-
-/*
-==============================================================================
-
- WINDOWS CRAP
-
-==============================================================================
-*/
-
-
-/*
-==================
-WinMain
-==================
-*/
 void SleepUntilInput (int time)
 {
 	MsgWaitForMultipleObjects (1, &tevent, FALSE, time, QS_ALLINPUT);
@@ -424,36 +278,423 @@ void SleepUntilInput (int time)
 WinMain
 ==================
 */
-HINSTANCE	global_hInstance;
 int			global_nCmdShow;
 char		*argv[MAX_NUM_ARGVS];
 static char	*empty_string = "";
 
-void Splash_Init (HINSTANCE hInstance);
+bool CheckKnownContent (char *mask);
+
+bool ValidateQuakeDirectory (char *quakedir)
+{
+	// check for known files that indicate a gamedir
+	if (CheckKnownContent (va ("%s/ID1/pak0.pak", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/config.cfg", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/autoexec.cfg", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/progs.dat", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/gfx.wad", quakedir))) return true;
+
+	// some gamedirs just have maps or models, or may have weirdly named paks
+	if (CheckKnownContent (va ("%s/ID1/maps/*.bsp", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/progs/*.mdl", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/*.pak", quakedir))) return true;
+
+	// some gamedirs are just used for keeping stuff separate
+	if (CheckKnownContent (va ("%s/ID1/*.sav", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/*.dem", quakedir))) return true;
+	if (CheckKnownContent (va ("%s/ID1/save/*.sav", quakedir))) return true;
+
+	// not quake
+	return false;
+}
+
+
+bool RecursiveCheckFolderForQuake (char *path)
+{
+	WIN32_FIND_DATA FindFileData;
+	HANDLE hFind = INVALID_HANDLE_VALUE;
+	char qpath[MAX_PATH];
+
+	_snprintf (qpath, MAX_PATH, "%s\\*.*", path);
+	hFind = FindFirstFile (qpath, &FindFileData);
+
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		// found no files
+		FindClose (hFind);
+		return false;
+	}
+
+	do
+	{
+		// directories only
+		if (!(FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+
+		// not interested in these types
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) continue;
+		if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
+
+		// don't do these as they can cause us to be recursing up and down the same folder tree multiple times!!!
+		if (!strcmp (FindFileData.cFileName, ".")) continue;
+		if (!strcmp (FindFileData.cFileName, "..")) continue;
+
+		// build the full path (we can stomp the one we came in with as it's no longer needed)
+		_snprintf (qpath, MAX_PATH, "%s\\%s", path, FindFileData.cFileName);
+
+		// see if this directory is Quake
+		if (ValidateQuakeDirectory (qpath))
+		{
+			// set to current directory
+			SetCurrentDirectory (qpath);
+			FindClose (hFind);
+			return true;
+		}
+
+		// check subdirs
+		if (RecursiveCheckFolderForQuake (qpath)) return true;
+	} while (FindNextFile (hFind, &FindFileData));
+
+	// done (not found)
+	FindClose (hFind);
+	return false;
+}
+
+char MyDesktopFolder[MAX_PATH];
+
+char *WellKnownDirectories[] =
+{
+	"Quake",
+	"Program Files\\Quake",
+	"Program Files\\Games\\Quake",
+	"Program Files (x86)\\Quake",
+	"Program Files (x86)\\Games\\Quake",
+	"Games\\Quake",
+	MyDesktopFolder,
+	NULL
+};
+
+bool CheckWellKnownDirectory (char *drive, char *wellknown)
+{
+	char path[MAX_PATH];
+
+	_snprintf (path, MAX_PATH, "%s%s", drive, wellknown);
+
+	if (ValidateQuakeDirectory (path))
+	{
+		SetCurrentDirectory (path);
+		return true;
+	}
+
+	return false;
+}
+
+
+typedef struct drivespec_s
+{
+	char letter[4];
+	bool valid;
+} drivespec_t;
+
+void SetQuakeDirectory (void)
+{
+	char currdir[MAX_PATH];
+
+	// some people install quake to their desktops
+	SHGetFolderPath (NULL, CSIDL_DESKTOP, NULL, SHGFP_TYPE_CURRENT, MyDesktopFolder);
+	strcat (MyDesktopFolder, "\\quake");
+
+	// if the current directory is the Quake directory, we search no more
+	GetCurrentDirectory (MAX_PATH, currdir);
+	if (ValidateQuakeDirectory (currdir)) return;
+
+	// set up all drives
+	drivespec_t drives[26];
+
+	// check each in turn and flag as valid or not
+	for (char c = 'A'; c <= 'Z'; c++)
+	{
+		// initially invalid
+		int dnum = c - 'A';
+		sprintf (drives[dnum].letter, "%c:\\", c);
+		drives[dnum].valid = false;
+
+		// start at c
+		if (c < 'C') continue;
+
+		UINT DriveType = GetDriveType (drives[dnum].letter);
+
+		// don't check these types
+		if (DriveType == DRIVE_NO_ROOT_DIR) continue;
+		if (DriveType == DRIVE_UNKNOWN) continue;
+		if (DriveType == DRIVE_CDROM) continue;
+		if (DriveType == DRIVE_RAMDISK) continue;
+
+		// it's valid for checking now
+		drives[dnum].valid = true;
+	}
+
+	// check all drives (we expect that it will be in C:\Quake 99% of the time)
+	// the first pass just checks the well-known directories for speed
+	// (e.g so that D:\Quake won't cause a full scan of C)
+	for (int d = 0; d < 26; d++)
+	{
+		if (!drives[d].valid) continue;
+
+		// check some well-known directories (where we might reasonably expect to find Quake)
+		for (int i = 0; ; i++)
+		{
+			if (!WellKnownDirectories[i]) break;
+			if (CheckWellKnownDirectory (drives[d].letter, WellKnownDirectories[i])) return;
+		}
+	}
+
+	// code disabled as a full hd scan without the user's consent is not a nice thing to do
+#ifdef _DEBUG
+	// second pass does a full scan of each drive
+	for (int d = 0; d < 26; d++)
+	{
+		// not a validated drive
+		if (!drives[d].valid) continue;
+
+		// check everything
+		if (RecursiveCheckFolderForQuake (drives[d].letter)) return;
+	}
+#endif
+
+	// oh shit
+	MessageBox (NULL, "Could not locate Quake on your PC.\n\nPerhaps you need to move DirectQ.exe into C:\\Quake?", "Error", MB_OK | MB_ICONERROR);
+	exit (666);
+}
+
+
+void Splash_Init (void);
+void IN_ActivateMouse (void);
+void IN_DeactivateMouse (void);
+void IN_HideMouse (void);
+void IN_ShowMouse (void);
+int MapKey (int key);
+void VID_UpdateWindowStatus (void);
+void ClearAllStates (void);
+LONG CDAudio_MessageHandler(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+void AppActivate (BOOL fActive, BOOL minimize)
+{
+	static bool	sound_active = false;
+	static bool vid_wassuspended = false;
+	extern bool vid_canalttab;
+
+	ActiveApp = fActive;
+	Minimized = minimize;
+
+	// enable/disable sound on focus gain/loss
+	if (!ActiveApp && sound_active)
+		sound_active = false;
+	else if (ActiveApp && !sound_active)
+		sound_active = true;
+
+	if (fActive)
+	{
+		IN_ActivateMouse ();
+		IN_HideMouse ();
+
+		if (modestate == MS_FULLDIB)
+		{
+			if (vid_canalttab && vid_wassuspended)
+			{
+				vid_wassuspended = false;
+
+				// ensure that the window is shown at at the top of the z order
+				ShowWindow (d3d_Window, SW_SHOWNORMAL);
+				SetForegroundWindow (d3d_Window);
+			}
+		}
+
+		// needed to reestablish the correct viewports
+		vid.recalc_refdef = 1;
+	}
+	else
+	{
+		IN_DeactivateMouse ();
+		IN_ShowMouse ();
+
+		if (modestate == MS_FULLDIB)
+		{
+			if (vid_canalttab)
+			{ 
+				vid_wassuspended = true;
+			}
+		}
+	}
+}
+
+
+/* main window procedure */
+LRESULT CALLBACK MainWndProc (HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
+{
+    LONG    lRet = 1;
+	int		fActive, fMinimized, temp;
+	extern unsigned int uiWheelMessage;
+	extern int window_x, window_y;
+
+	if (Msg == uiWheelMessage) Msg = WM_MOUSEWHEEL;
+
+    switch (Msg)
+    {
+	case WM_PAINT:
+		// minimal WM_PAINT processing
+		ValidateRect (hWnd, NULL);
+		break;
+
+	case WM_GRAPHEVENT:
+		DS_Event ();
+		break;
+
+	case WM_ERASEBKGND:
+		// don't let windows handle background erasures
+		break;
+
+	case WM_KILLFOCUS:
+		if (modestate == MS_FULLDIB)
+			ShowWindow (d3d_Window, SW_SHOWMINNOACTIVE);
+		break;
+
+	case WM_CREATE:
+		break;
+
+	case WM_MOVE:
+		window_x = (int) LOWORD (lParam);
+		window_y = (int) HIWORD (lParam);
+		VID_UpdateWindowStatus ();
+		break;
+
+	case WM_KEYDOWN:
+	case WM_SYSKEYDOWN:
+		Key_Event (MapKey (lParam), true);
+		break;
+
+	case WM_KEYUP:
+	case WM_SYSKEYUP:
+		Key_Event (MapKey (lParam), false);
+		break;
+
+	case WM_SYSCHAR:
+		// keep Alt-Space from happening
+		break;
+
+	// this is complicated because Win32 seems to pack multiple mouse events into
+	// one update sometimes, so we always check all states and look for events
+	case WM_LBUTTONDOWN:
+	case WM_LBUTTONUP:
+	case WM_RBUTTONDOWN:
+	case WM_RBUTTONUP:
+	case WM_MBUTTONDOWN:
+	case WM_MBUTTONUP:
+	case WM_MOUSEMOVE:
+		temp = 0;
+
+		if (wParam & MK_LBUTTON)
+			temp |= 1;
+
+		if (wParam & MK_RBUTTON)
+			temp |= 2;
+
+		if (wParam & MK_MBUTTON)
+			temp |= 4;
+
+		IN_MouseEvent (temp);
+
+		break;
+
+	// JACK: This is the mouse wheel with the Intellimouse
+	// Its delta is either positive or neg, and we generate the proper
+	// Event.
+	case WM_MOUSEWHEEL:
+		if ((short) HIWORD (wParam) > 0)
+		{
+			Key_Event (K_MWHEELUP, true);
+			Key_Event (K_MWHEELUP, false);
+		}
+		else
+		{
+			Key_Event (K_MWHEELDOWN, true);
+			Key_Event (K_MWHEELDOWN, false);
+		}
+
+		break;
+
+    case WM_SIZE:
+        break;
+
+   	case WM_CLOSE:
+		if (MessageBox (d3d_Window, "Are you sure you want to quit?", "Confirm Exit", MB_YESNO | MB_SETFOREGROUND | MB_ICONQUESTION) == IDYES)
+			Sys_Quit ();
+	    break;
+
+	case WM_ACTIVATE:
+		fActive = LOWORD (wParam);
+		fMinimized = (BOOL) HIWORD (wParam);
+		AppActivate (!(fActive == WA_INACTIVE), fMinimized);
+
+		// fix the leftover Alt from any Alt-Tab or the like that switched us away
+		ClearAllStates ();
+
+		break;
+
+   	case WM_DESTROY:
+		if (d3d_Window)
+			DestroyWindow (d3d_Window);
+
+        PostQuitMessage (0);
+	    break;
+
+	case MM_MCINOTIFY:
+        lRet = CDAudio_MessageHandler (hWnd, Msg, wParam, lParam);
+		break;
+
+    default:
+        // pass all unhandled messages to DefWindowProc
+        lRet = DefWindowProc (hWnd, Msg, wParam, lParam);
+	    break;
+    }
+
+    /* return 1 if handled message, 0 if not */
+    return lRet;
+}
+
 
 int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	quakeparms_t	parms;
-	double			time, oldtime, newtime;
-	static	char	cwd[1024];
+	float			time, oldtime, newtime;
+	static	char	cwd[MAX_PATH];
 	int				t;
 
-    // previous instances do not exist in Win32
+	// previous instances do not exist in Win32
 	// this is stupid as is can't be anothing but NULL...
-    if (hPrevInstance) return 0;
+	if (hPrevInstance) return 0;
 
-	SetProcessAffinityMask (GetCurrentProcess (), 1);
+	// Declare this process to be high DPI aware, and prevent automatic scaling
+	HINSTANCE hUser32 = LoadLibrary ("user32.dll");
 
-	// mark the entire program as a critical section so that the 
-	// multithreaded CRT and multithreading in DirectX don't trip us up.
-	InitializeCriticalSection (&TheCS);
-	EnterCriticalSection (&TheCS);
+	if (hUser32)
+	{
+		typedef BOOL (WINAPI *LPSetProcessDPIAware) (void);
+		LPSetProcessDPIAware pSetProcessDPIAware = (LPSetProcessDPIAware) GetProcAddress (hUser32, "SetProcessDPIAware");
 
-	// init memory pool
+		if (pSetProcessDPIAware) pSetProcessDPIAware ();
+		FreeLibrary (hUser32);
+	}
+
+	// init memory pools
+	// these need to be up before we get the directory as it uses va!!!
 	Pool_Init ();
 
-	global_hInstance = hInstance;
 	global_nCmdShow = nCmdShow;
+
+	// set the directory containing Quake
+	SetQuakeDirectory ();
 
 	if (!GetCurrentDirectory (sizeof (cwd), cwd))
 		Sys_Error ("Couldn't determine current directory");
@@ -510,17 +751,35 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	}
 
 	// initialize the splash screen
-	Splash_Init (hInstance);
+	Splash_Init ();
 
 	if (!(tevent = CreateEvent (NULL, FALSE, FALSE, NULL))) Sys_Error ("Couldn't create event");
 
+	WNDCLASS wc;
+
+	// set up and register the window class (d3d doesn't need CS_OWNDC)
+	wc.style = CS_HREDRAW | CS_VREDRAW | CS_CLASSDC;
+	wc.lpfnWndProc = (WNDPROC) MainWndProc;
+	wc.cbClsExtra = 0;
+	wc.cbWndExtra = 0;
+	wc.hInstance = hInstance;
+	wc.hIcon = 0;
+	wc.hCursor = LoadCursor (NULL,IDC_ARROW);
+	wc.hbrBackground = NULL;
+	wc.lpszMenuName = 0;
+	wc.lpszClassName = D3D_WINDOW_CLASS_NAME;
+
+	if (!RegisterClass (&wc))
+	{
+		Sys_Error ("D3D_CreateWindowClass: Failed to register Window Class");
+		return 666;
+	}
+
 	Sys_Init ();
-
 	Host_Init (&parms);
-
 	oldtime = Sys_FloatTime ();
 
-    /* main window message loop */
+	// main window message loop
 	while (1)
 	{
 		// yield the CPU for a little while when paused, minimized, or not the focus
@@ -539,13 +798,9 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 		Host_Frame (time);
 		oldtime = newtime;
-
-		// allow any other threads which may have been spawned by the application to grab a timeslice
-		// (DirectX seems to spawn a few undocumented threads here and there which cause problems if you don't do this)
-		Sys_ThreadCatchup ();
 	}
 
-    /* return success of application */
-    return TRUE;
+	// return success of application
+	return TRUE;
 }
 

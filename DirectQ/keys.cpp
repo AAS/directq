@@ -157,12 +157,25 @@ keyname_t keynames[] =
 char *protolist[] =
 {
 	"15",
+	"Fitz",
 	"BJP",
 	"BJP2",
 	"BJP3",
 	"MH",
 	NULL
 };
+
+char *d3d_filtermodelist[] =
+{
+	"GL_NEAREST",
+	"GL_LINEAR",
+	"GL_NEAREST_MIPMAP_NEAREST",
+	"GL_LINEAR_MIPMAP_NEAREST",
+	"GL_NEAREST_MIPMAP_LINEAR",
+	"GL_LINEAR_MIPMAP_LINEAR",
+	NULL
+};
+
 
 int Cmd_Match (char *partial, int matchcycle, bool conout);
 int match_count = 0;
@@ -368,6 +381,11 @@ void Key_Console (int key)
 		else if (!strnicmp (&key_lines[edit_line][1], "sv_protocol ", 12))
 		{
 			Key_ContentMatch (protolist, &contentcycle);
+			return;
+		}
+		else if (!strnicmp (&key_lines[edit_line][1], "gl_texturemode ", 15))
+		{
+			Key_ContentMatch (d3d_filtermodelist, &contentcycle);
 			return;
 		}
 		else contentcycle = 0;

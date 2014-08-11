@@ -50,6 +50,7 @@ void R_LightPoint (entity_t *e, float *c);
 LPDIRECT3DTEXTURE9 playertextures[16] = {NULL};
 
 void D3D_RotateForEntity (entity_t *e);
+extern DWORD D3D_OVERBRIGHT_MODULATE;
 
 /*
 =================================================================
@@ -474,8 +475,6 @@ void DelerpMuzzleFlashes (aliashdr_t *hdr)
 }
 
 
-vec3_t	shadevector;
-
 // precalculated dot products for quantized angles
 #define SHADEDOT_QUANT 16
 float	r_avertexnormal_dots[SHADEDOT_QUANT][256] =
@@ -494,13 +493,134 @@ typedef struct aliascache_s
 	float lightlerpoffset;
 	LPDIRECT3DTEXTURE9 d3d_Texture;
 	LPDIRECT3DTEXTURE9 d3d_Fullbright;
-	vec3_t shadevector;
+	vec3_t lightspot;
+	mplane_t *lightplane;
 } aliascache_t;
 
 // cache for alias models that have been prepared so that the data can be reused
 aliascache_t *d3d_PreparedAliasModels = NULL;
 
 int framesize = 0;
+extern vec3_t lightspot;
+extern mplane_t *lightplane;
+
+void D3D_DrawAliasShadow (aliascache_t *ac)
+{
+	// easier access
+	entity_t *e = ac->entity;
+
+	// set up transforms
+	d3d_WorldMatrixStack->Push ();
+	d3d_WorldMatrixStack->Translatev (e->origin);
+	d3d_WorldMatrixStack->Rotate (0, 0, 1, e->angles[1]);
+
+	// set up the draw lists
+	drawvertx_t *verts1 = (drawvertx_t *) e->model->ah->posedata;
+	drawvertx_t *verts2 = verts1;
+	verts1 += e->pose1 * e->model->ah->numorder;
+	verts2 += e->pose2 * e->model->ah->numorder;
+
+	int *order = e->model->ah->commands;
+
+	D3DPRIMITIVETYPE PrimitiveType;
+	DWORD shadecolor = D3DCOLOR_ARGB (BYTE_CLAMP (r_shadows.value * 255.0f), 0, 0, 0);
+
+	// lightspot will differ per entity
+	float lheight = e->origin[2] - ac->lightspot[2];
+	lheight = -lheight + 1.0f;
+
+	// largely the same as before except it removes the need to normalize
+	// (but how much of a big deal is that anyway???)
+	float theta = -e->angles[1] / 180 * M_PI;
+
+#define SHADE_SCALE		0.70710678118654752440084436210485
+	vec3_t shadevector =
+	{
+		cos (theta) * SHADE_SCALE,
+		sin (theta) * SHADE_SCALE,
+		SHADE_SCALE
+	};
+
+	float s1 = sin (e->angles[1] / 180 * M_PI);
+	float c1 = cos (e->angles[1] / 180 * M_PI);
+
+	while (1)
+	{
+		// get the vertex count and primitive type
+		int count = *order++;
+
+		// check for done
+		if (!count) break;
+
+		if (count < 0)
+		{
+			count = -count;
+			PrimitiveType = D3DPT_TRIANGLEFAN;
+		}
+		else PrimitiveType = D3DPT_TRIANGLESTRIP;
+
+		int numverts = 0;
+		float l1, l2, l, diff;
+		vec3_t xyz;
+
+		do
+		{
+			// shadow colour is constant
+			aliasverts[numverts].color = shadecolor;
+
+			// fill in vertexes
+			if (verts1->lerpvert)
+			{
+				xyz[0] = (float) verts1->v[0] * ac->frontlerp + (float) verts2->v[0] * ac->backlerp;
+				xyz[1] = (float) verts1->v[1] * ac->frontlerp + (float) verts2->v[1] * ac->backlerp;
+				xyz[2] = (float) verts1->v[2] * ac->frontlerp + (float) verts2->v[2] * ac->backlerp;
+			}
+			else if (ac->backlerp > ac->frontlerp)
+			{
+				xyz[0] = verts2->v[0];
+				xyz[1] = verts2->v[1];
+				xyz[2] = verts2->v[2];
+			}
+			else
+			{
+				xyz[0] = verts1->v[0];
+				xyz[1] = verts1->v[1];
+				xyz[2] = verts1->v[2];
+			}
+
+			// scale
+			aliasverts[numverts].x = xyz[0] * e->model->ah->scale[0] + e->model->ah->scale_origin[0];
+			aliasverts[numverts].y = xyz[1] * e->model->ah->scale[1] + e->model->ah->scale_origin[1];
+			aliasverts[numverts].z = xyz[2] * e->model->ah->scale[2] + e->model->ah->scale_origin[2];
+
+			aliasverts[numverts].x -= shadevector[0] * (aliasverts[numverts].z + lheight);
+			aliasverts[numverts].y -= shadevector[1] * (aliasverts[numverts].z + lheight);
+			aliasverts[numverts].z = lheight;
+
+			aliasverts[numverts].z += ((aliasverts[numverts].y * (s1 * ac->lightplane->normal[0])) - 
+						(aliasverts[numverts].x * (c1 * ac->lightplane->normal[0])) - 
+						(aliasverts[numverts].x * (s1 * ac->lightplane->normal[1])) - 
+						(aliasverts[numverts].y * (c1 * ac->lightplane->normal[1]))) + 
+						((1 - ac->lightplane->normal[2]) * 20) + 0.2;
+
+			// increment pointers and counters
+			verts1++;
+			verts2++;
+			numverts++;
+			order += 2;
+
+			framesize += sizeof (aliasverts_t);
+		} while (--count);
+
+		D3D_DrawPrimitive (PrimitiveType, numverts - 2, aliasverts, sizeof (aliasverts_t));
+
+		// correct r_speeds count
+		d3d_RenderDef.alias_polys++;
+	}
+
+	d3d_WorldMatrixStack->Pop ();
+}
+
 
 void D3D_DrawAliasFrame (aliascache_t *ac)
 {
@@ -511,7 +631,7 @@ void D3D_DrawAliasFrame (aliascache_t *ac)
 	if (ac->d3d_Fullbright)
 	{
 		D3D_SetTextureColorMode (0, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_DIFFUSE);
-		D3D_SetTextureColorMode (1, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_CURRENT);
+		D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
 
 		// luma pass
 		D3D_SetTexture (0, ac->d3d_Fullbright);
@@ -520,7 +640,7 @@ void D3D_DrawAliasFrame (aliascache_t *ac)
 	else
 	{
 		// straight up modulation
-		D3D_SetTextureColorMode (0, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_DIFFUSE);
+		D3D_SetTextureColorMode (0, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE);
 		D3D_SetTextureColorMode (1, D3DTOP_DISABLE);
 
 		// bind texture for baseline skin
@@ -602,9 +722,9 @@ void D3D_DrawAliasFrame (aliascache_t *ac)
 			aliasverts[numverts].color = D3DCOLOR_ARGB
 			(
 				BYTE_CLAMP (e->alphaval),
-				BYTE_CLAMP (l * e->shadelight[0]),
-				BYTE_CLAMP (l * e->shadelight[1]),
-				BYTE_CLAMP (l * e->shadelight[2])
+				vid.lightmap[BYTE_CLAMP (l * e->shadelight[0])],
+				vid.lightmap[BYTE_CLAMP (l * e->shadelight[1])],
+				vid.lightmap[BYTE_CLAMP (l * e->shadelight[2])]
 			);
 
 			// fill in vertexes
@@ -729,8 +849,8 @@ void D3D_InitAliasModelState (void)
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP);
 	D3D_SetTexCoordIndexes (0, 0);
 
-	D3D_SetTextureMipmap (0, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
-	D3D_SetTextureMipmap (1, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
+	D3D_SetTextureMipmap (0, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 
 	// smooth shading
 	if (gl_smoothmodels.value) D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
@@ -764,6 +884,7 @@ bool D3D_PrepareAliasModel (entity_t *e, aliascache_t *c)
 	// the model has not been culled now
 	c->entity = e;
 	c->culled = false;
+	c->lightplane = NULL;
 
 	// setup the frame for drawing and store the interpolation blend
 	c->backlerp = D3D_SetupAliasFrame (e, e->model->ah);
@@ -795,8 +916,9 @@ bool D3D_PrepareAliasModel (entity_t *e, aliascache_t *c)
 	c->shadedots1 = r_avertexnormal_dots[(int) ang_ceil & (SHADEDOT_QUANT - 1)];
 	c->shadedots2 = r_avertexnormal_dots[(int) ang_floor & (SHADEDOT_QUANT - 1)];
 
-	// store out shadevector for shadows
-	VectorCopy (shadevector, c->shadevector);
+	// store out for shadows
+	VectorCopy (lightspot, c->lightspot);
+	c->lightplane = lightplane;
 
 	// get texturing info
 	int anim = (int) (cl.time * 10) & 3;
@@ -837,6 +959,9 @@ void D3D_PrepareAliasModels (void)
 	// add 1 extra for NULL termination
 	if (!d3d_PreparedAliasModels)
 		d3d_PreparedAliasModels = (aliascache_t *) Pool_Alloc (POOL_PERMANENT, (MAX_VISEDICTS + 1) * sizeof (aliascache_t));
+
+	// hack to prevent potential double-drawing of gun model
+	d3d_PreparedAliasModels[0].entity = NULL;
 
 	// check for rendering (note - we expect this to always run in most circumstances)
 	if (!(d3d_RenderDef.renderflags & R_RENDERALIAS)) return;
@@ -907,6 +1032,61 @@ void D3D_DrawOpaqueAliasModels (void)
 
 		// back to flat shading
 		D3D_SetRenderState (D3DRS_SHADEMODE, D3DSHADE_FLAT);
+
+		if (r_shadows.value > 0.0f)
+		{
+			bool shadestate = false;
+
+			for (int i = 0;; i++)
+			{
+				if (!d3d_PreparedAliasModels[i].entity) break;
+				if (d3d_PreparedAliasModels[i].entity->alphaval < 255) continue;
+				if (!d3d_PreparedAliasModels[i].lightplane) continue;
+
+				if (!shadestate)
+				{
+					D3D_SetRenderState (D3DRS_ZWRITEENABLE, FALSE);
+					D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, TRUE);
+					D3D_SetRenderState (D3DRS_BLENDOP, D3DBLENDOP_ADD);
+					D3D_SetRenderState (D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+					D3D_SetRenderState (D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+					D3D_SetTextureStageState (0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+					D3D_SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+
+					D3D_SetFVF (D3DFVF_XYZ | D3DFVF_DIFFUSE);
+
+					if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
+					{
+						// of course, we all know that Direct3D lacks Stencil Buffer and Polygon Offset support,
+						// so what you're looking at here doesn't really exist.  Those of you who froth at the mouth
+						// and like to think it's still the 1990s had probably better look away now.
+						D3D_SetRenderState (D3DRS_STENCILENABLE, TRUE);
+						D3D_SetRenderState (D3DRS_STENCILFUNC, D3DCMP_EQUAL);
+						D3D_SetRenderState (D3DRS_STENCILREF, 0x00000001);
+						D3D_SetRenderState (D3DRS_STENCILMASK, 0x00000002);
+						D3D_SetRenderState (D3DRS_STENCILWRITEMASK, 0xFFFFFFFF);
+						D3D_SetRenderState (D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
+						D3D_SetRenderState (D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
+						D3D_SetRenderState (D3DRS_STENCILPASS, D3DSTENCILOP_INCRSAT);
+					}
+
+					shadestate = true;
+				}
+
+				D3D_DrawAliasShadow (&d3d_PreparedAliasModels[i]);
+			}
+
+			if (shadestate)
+			{
+				if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_D24S8)
+					D3D_SetRenderState (D3DRS_STENCILENABLE, FALSE);
+
+				D3D_SetRenderState (D3DRS_ALPHABLENDENABLE, FALSE);
+				D3D_SetRenderState (D3DRS_ZWRITEENABLE, TRUE);
+				D3D_SetTextureStageState (0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+				D3D_SetTextureStageState (0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+			}
+		}
 	}
 }
 
@@ -970,9 +1150,18 @@ void D3D_DrawViewModel (void)
 		if (r_refdef.fov_y > 68.038704f)
 		{
 			// adjust the projection matrix to keep the viewmodel the same shape and visibility at all FOVs
+			// zfar doesn't need to be > regular GLQuake 4096 here
 			d3d_ProjMatrixStack->Push ();
 			d3d_ProjMatrixStack->LoadIdentity ();
-			d3d_ProjMatrixStack->Perspective3D (68.038704f, (float) r_refdef.vrect.width / (float) r_refdef.vrect.height, 4, 4096);
+
+			// adjust this frustum for warps
+			d3d_ProjMatrixStack->Frustum3D
+			(
+				83.974434f / r_refdef.fov_x * d3d_RenderDef.fov_x,
+				68.038704f / r_refdef.fov_y * d3d_RenderDef.fov_y,
+				4,
+				4096
+			);
 		}
 	}
 
@@ -1003,6 +1192,9 @@ void D3D_DrawViewModel (void)
 
 	// draw it
 	D3D_DrawAliasFrame (&d3d_PreparedAliasModels[0]);
+
+	// this is a hack to prevent shadows from being drawn on this one if there are no other alias models available
+	d3d_PreparedAliasModels[0].lightplane = NULL;
 
 	if (d3d_RenderDef.automap)
 	{

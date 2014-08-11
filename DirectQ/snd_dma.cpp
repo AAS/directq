@@ -163,22 +163,18 @@ cmd_t S_SoundInfo_f_Cmd ("soundinfo", S_SoundInfo_f);
 
 void S_Init (void)
 {
-	if (COM_CheckParm("-nosound"))
-		return;
-
-	Con_Printf("Sound Initialization\n");
-
-	snd_initialized = true;
-
-	S_Startup ();
-
-	SND_InitScaletable ();
-
+	// always init this otherwise we'll crash during sound clearing
 	known_sfx = (sfx_t *) Pool_Alloc (POOL_PERMANENT, MAX_SFX * sizeof (sfx_t));
 	num_sfx = 0;
 
-	Con_Printf ("Sound sampling rate: %i\n", shm->speed);
+	if (COM_CheckParm("-nosound"))
+		return;
 
+	Con_Printf ("Sound Initialization\n");
+	snd_initialized = true;
+	S_Startup ();
+	SND_InitScaletable ();
+	Con_Printf ("Sound sampling rate: %i\n", shm->speed);
 	S_StopAllSounds (true);
 }
 
@@ -512,14 +508,13 @@ void S_StopAllSounds (bool clear)
 
 	total_channels = MAX_DYNAMIC_CHANNELS + NUM_AMBIENTS;	// no statics
 
-	for (i=0 ; i<MAX_CHANNELS ; i++)
+	for (i = 0; i < MAX_CHANNELS; i++)
 		if (channels[i].sfx)
 			channels[i].sfx = NULL;
 
-	memset(channels, 0, MAX_CHANNELS * sizeof(channel_t));
+	memset (channels, 0, MAX_CHANNELS * sizeof (channel_t));
 
-	if (clear)
-		S_ClearBuffer ();
+	if (clear) S_ClearBuffer ();
 }
 
 void S_StopAllSoundsC (void)
@@ -542,13 +537,12 @@ void S_ClearBuffer (void)
 	DWORD	dwSize;
 	DWORD	*pData;
 	int		reps;
-	HRESULT	hresult;
 
 	reps = 0;
 
-	while ((hresult = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pData, &dwSize, NULL, NULL, 0)) != DS_OK)
+	while ((hr = ds_SecondaryBuffer8->Lock(0, ds_SoundBufferSize, (LPVOID *) &pData, &dwSize, NULL, NULL, 0)) != DS_OK)
 	{
-		if (hresult != DSERR_BUFFERLOST)
+		if (hr != DSERR_BUFFERLOST)
 		{
 			Con_Printf ("S_ClearBuffer: DS::Lock Sound Buffer Failed\n");
 			S_Shutdown ();

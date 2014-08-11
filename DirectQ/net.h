@@ -116,12 +116,20 @@ struct qsockaddr
 #define CCREP_PLAYER_INFO	0x84
 #define CCREP_RULE_INFO		0x85
 
+// JPG - support for mods
+#define MOD_NONE			0x00
+#define MOD_PROQUAKE		0x01
+#define MOD_QSMACK			0x02
+
+// JPG 3.20 - flags
+#define PQF_CHEATFREE		1
+
 typedef struct qsocket_s
 {
 	struct qsocket_s	*next;
-	double			connecttime;
-	double			lastMessageTime;
-	double			lastSendTime;
+	float			connecttime;
+	float			lastMessageTime;
+	float			lastSendTime;
 
 	bool		disconnected;
 	bool		canSend;
@@ -218,7 +226,7 @@ extern int		unreliableMessagesReceived;
 
 qsocket_t *NET_NewQSocket (void);
 void NET_FreeQSocket(qsocket_t *);
-double SetNetTime(void);
+float SetNetTime(void);
 
 // allow discovery of up to 64 servers
 #define HOSTCACHESIZE	64
@@ -263,7 +271,7 @@ bool IsID(struct qsockaddr *addr);
 //
 //============================================================================
 
-extern	double		net_time;
+extern	float		net_time;
 extern	sizebuf_t	net_message;
 extern	int			net_activeconnections;
 
@@ -314,12 +322,12 @@ void NET_Poll(void);
 typedef struct _PollProcedure
 {
 	struct _PollProcedure	*next;
-	double					nextTime;
+	float					nextTime;
 	void					(*procedure)(void *);
 	void					*arg;
 } PollProcedure;
 
-void SchedulePollProcedure(PollProcedure *pp, double timeOffset);
+void SchedulePollProcedure(PollProcedure *pp, float timeOffset);
 
 extern	bool	tcpipAvailable;
 extern	char	my_tcpip_address[NET_NAMELEN];

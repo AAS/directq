@@ -1,0 +1,25 @@
+DIRECTQ LIMITS
+==============
+
+I'm going down the "high capacity" route with this engine, and am committed to this approach.  Several Q1 limits have already been extended.  This file will contain info on the current engine limitations.  So without any further ado...
+
+
+Edicts				8192
+Entities			8192
+Heapsize			Unlimited
+Known Models			8192
+Lightmaps			Unlimited
+Particles			Unlimited
+Static Entities			Unlimited
+Textures			Unlimited
+Visible Edicts			8192
+
+
+Note on "unlimited": I don't really mean "infinite", of course, your PC will obviously run out of resources first!
+
+None of the above require any special command-line switches or cvars - they are always on and automatic.
+
+Protocol version is still 15 only, so protocol 15 limits will override any of the above.
+
+A lot of these limits have been extended without hurting memory requirements (several actually require less memory than Win/GL Quake if you stick within ID1 limits).
+

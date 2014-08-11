@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // This is enables a simple IP banning mechanism
 #define BAN_TEST
 
+#include "quakedef.h"
+
 #ifdef BAN_TEST
 #if defined(_WIN32)
 #include <windows.h>
@@ -52,7 +54,6 @@ unsigned long inet_addr(const char *cp);
 #endif
 #endif	// BAN_TEST
 
-#include "quakedef.h"
 #include "net_dgrm.h"
 
 // these two macros are to make the code more readable
@@ -1195,21 +1196,19 @@ static qsocket_t *_Datagram_Connect (char *host)
 	int			newsock;
 	int			ret;
 	int			reps;
-	double		start_time;
+	float		start_time;
 	int			control;
 	char		*reason;
 
-	// see if we can resolve the host name
-	if (net_DriverFunc.GetAddrFromName(host, &sendaddr) == -1)
-		return NULL;
-
-	newsock = net_DriverFunc.OpenSocket (0);
-	if (newsock == -1)
-		return NULL;
+	// see if we can resolve the host name and attempt to open the socket
+	if (net_DriverFunc.GetAddrFromName (host, &sendaddr) == -1) return NULL;
+	if ((newsock = net_DriverFunc.OpenSocket (0)) == -1) return NULL;
 
 	sock = NET_NewQSocket ();
+
 	if (sock == NULL)
 		goto ErrorReturn2;
+
 	sock->socket = newsock;
 	sock->landriver = net_landriverlevel;
 
@@ -1218,12 +1217,13 @@ static qsocket_t *_Datagram_Connect (char *host)
 		goto ErrorReturn;
 
 	// send the connection request
-	Con_Printf("trying...\n"); SCR_UpdateScreen ();
+	Con_Printf ("Attempting connection to %s...\n", host);
+	SCR_UpdateScreen ();
 	start_time = net_time;
 
 	for (reps = 0; reps < 3; reps++)
 	{
-		SZ_Clear(&net_message);
+		SZ_Clear (&net_message);
 		// save space for the header, filled in later
 		MSG_WriteLong(&net_message, 0);
 		MSG_WriteByte(&net_message, CCREQ_CONNECT);
@@ -1279,9 +1279,10 @@ static qsocket_t *_Datagram_Connect (char *host)
 				}
 			}
 		}
+
 		while (ret == 0 && (SetNetTime() - start_time) < 2.5);
-		if (ret)
-			break;
+
+		if (ret) break;
 		Con_Printf("still trying...\n"); SCR_UpdateScreen ();
 		start_time = SetNetTime();
 	}

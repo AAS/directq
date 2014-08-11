@@ -45,7 +45,7 @@ WSADATA		winsockdata;
 
 //=============================================================================
 
-static double	blocktime;
+static float blocktime;
 
 BOOL PASCAL FAR BlockingHook(void)  
 { 

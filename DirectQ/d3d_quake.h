@@ -21,6 +21,46 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <d3d9.h>
 #include <d3dx9.h>
 
+extern HRESULT hr;
+
+/*
+==============================================================================================================================
+
+				LIGHTMAP CLASS
+
+	This is a linked list that is only accessible through it's head pointer; all list walking is done internally.
+
+==============================================================================================================================
+*/
+
+class CD3DLightmap
+{
+public:
+	CD3DLightmap (msurface_t *surf);
+	~CD3DLightmap (void);
+	void Upload (void);
+	void UploadModified (void);
+	void CalcLightmapTexCoords (msurface_t *surf, float *v, float *st);
+	void CheckSurfaceForModification (msurface_t *surf);
+	bool AllocBlock (msurface_t *surf);
+	void BindLightmap (int stage);
+
+private:
+	bool modified;
+	int size;
+	int *allocated;
+	RECT DirtyRect;
+	D3DLOCKED_RECT LockedRect;
+	LPDIRECT3DTEXTURE9 d3d_Texture;
+
+	// next lightmap in the chain
+	CD3DLightmap *next;
+};
+
+
+extern CD3DLightmap *d3d_Lightmaps;
+
+
 /*
 =======================================================================================================================
 
@@ -56,6 +96,7 @@ public:
 	void SetMatrix (D3DXMATRIX *m);
 	void Ortho2D (float left, float right, float bottom, float top, float znear, float zfar);
 	void Perspective3D (float fovy, float screenaspect, float znear, float zfar);
+	void Frustum3D (float fovx, float fovy, float znear, float zfar);
 	void CheckDirtyState (void);
 
 private:
@@ -64,6 +105,7 @@ private:
 	int currdepth;
 	bool pushed;
 	bool dirty;
+	bool RHtoLH;
 };
 
 
@@ -139,14 +181,6 @@ void D3D_FlushTextures (void);
 
 extern LPDIRECT3DTEXTURE9 r_notexture;
 
-// lightmaps
-void D3D_CreateSurfaceLightmap (msurface_t *surf);
-void D3D_UploadLightmaps (void);
-void D3D_ReleaseLightmaps (void);
-LPDIRECT3DTEXTURE9 D3D_GetLightmap (void *lm);
-void D3D_CheckLightmapModification (msurface_t *surf);
-void D3D_UploadModifiedLightmaps (void);
-
 // global stuff
 extern LPDIRECT3D9 d3d_Object;
 extern LPDIRECT3DDEVICE9 d3d_Device;
@@ -166,7 +200,6 @@ void D3D_Set2D (void);
 typedef struct d3d_global_caps_s
 {
 	D3DFORMAT DepthStencilFormat;
-	bool isNvidia;
 	bool supportDXT1;
 	bool supportDXT3;
 	bool supportDXT5;
@@ -226,6 +259,10 @@ typedef struct d3d_renderdef_s
 
 	entity_t worldentity;
 	float frametime;
+
+	// actual fov used for rendering
+	float fov_x;
+	float fov_y;
 } d3d_renderdef_t;
 
 
@@ -233,7 +270,9 @@ extern d3d_renderdef_t d3d_RenderDef;
 
 void D3D_BackfaceCull (DWORD D3D_CULLTYPE);
 
-extern DWORD d3d_3DFilterType;
+extern D3DTEXTUREFILTERTYPE d3d_3DFilterMin;
+extern D3DTEXTUREFILTERTYPE d3d_3DFilterMag;
+extern D3DTEXTUREFILTERTYPE d3d_3DFilterMip;
 
 // state management functions
 // these are wrappers around the real call that check the previous value for a change before issuing the API call
@@ -256,7 +295,7 @@ void D3D_EnableAlphaBlend (DWORD blendop, DWORD srcfactor, DWORD dstfactor, bool
 void D3D_DisableAlphaBlend (bool enablezwrite = true);
 void D3D_SetTexCoordIndexes (DWORD tmu0index, DWORD tmu1index = 1, DWORD tmu2index = 2);
 void D3D_SetTextureAddressMode (DWORD tmu0mode, DWORD tmu1mode = D3DTADDRESS_WRAP, DWORD tmu2mode = D3DTADDRESS_WRAP);
-void D3D_SetTextureMipmap (DWORD stage, DWORD magfilter, DWORD minfilter, DWORD mipfilter = D3DTEXF_NONE);
+void D3D_SetTextureMipmap (DWORD stage, D3DTEXTUREFILTERTYPE magfilter, D3DTEXTUREFILTERTYPE minfilter, D3DTEXTUREFILTERTYPE mipfilter = D3DTEXF_NONE);
 void D3D_SetTextureMatrixOp (DWORD tmu0op, DWORD tmu1op = D3DTTFF_DISABLE, DWORD tmu2op = D3DTTFF_DISABLE);
 void D3D_SetTextureColorMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_DIFFUSE);
 void D3D_SetTextureAlphaMode (DWORD stage, DWORD mode, DWORD arg1 = D3DTA_TEXTURE, DWORD arg2 = D3DTA_CURRENT);
@@ -267,3 +306,69 @@ void R_PrepareEntitiesOnList (entity_t **list, int count, int type, entityfunc_t
 
 void D3D_DrawTexturedPic (int x, int y, int w, int h, LPDIRECT3DTEXTURE9 texpic);
 bool R_CullBox (vec3_t mins, vec3_t maxs);
+
+float Lerp (float l1, float l2, float lerpfactor);
+
+typedef struct d3d_ModeDesc_s
+{
+	D3DDISPLAYMODE d3d_Mode;
+	bool AllowWindowed;
+	int BPP;
+	int ModeNum;
+
+	char ModeDesc[64];
+
+	struct d3d_ModeDesc_s *Next;
+} d3d_ModeDesc_t;
+
+bool D3D_CheckTextureFormat (D3DFORMAT textureformat, BOOL mandatory);
+
+void SCR_WriteSurfaceToTGA (char *filename, LPDIRECT3DSURFACE9 rts);
+void SCR_WriteTextureToTGA (char *filename, LPDIRECT3DTEXTURE9 rts);
+
+// TRUE if IDirect3DDevice9::BeginScene has been called
+extern BOOL d3d_SceneBegun;
+
+// enumeration to string conversion
+char *D3DTypeToString (D3DFORMAT enumval);
+char *D3DTypeToString (D3DMULTISAMPLE_TYPE enumval);
+char *D3DTypeToString (D3DBACKBUFFER_TYPE enumval);
+char *D3DTypeToString (D3DBASISTYPE enumval);
+char *D3DTypeToString (D3DBLEND enumval);
+char *D3DTypeToString (D3DBLENDOP enumval);
+char *D3DTypeToString (D3DCMPFUNC enumval);
+char *D3DTypeToString (D3DCOMPOSERECTSOP enumval);
+char *D3DTypeToString (D3DCUBEMAP_FACES enumval);
+char *D3DTypeToString (D3DCULL enumval);
+char *D3DTypeToString (D3DDEBUGMONITORTOKENS enumval);
+char *D3DTypeToString (D3DDECLMETHOD enumval);
+char *D3DTypeToString (D3DDECLTYPE enumval);
+char *D3DTypeToString (D3DDECLUSAGE enumval);
+char *D3DTypeToString (D3DDEGREETYPE enumval);
+char *D3DTypeToString (D3DDEVTYPE enumval);
+char *D3DTypeToString (D3DDISPLAYROTATION enumval);
+char *D3DTypeToString (D3DFILLMODE enumval);
+char *D3DTypeToString (D3DFOGMODE enumval);
+char *D3DTypeToString (D3DLIGHTTYPE enumval);
+char *D3DTypeToString (D3DMATERIALCOLORSOURCE enumval);
+char *D3DTypeToString (D3DPATCHEDGESTYLE enumval);
+char *D3DTypeToString (D3DPOOL enumval);
+char *D3DTypeToString (D3DPRIMITIVETYPE enumval);
+char *D3DTypeToString (D3DQUERYTYPE enumval);
+char *D3DTypeToString (D3DRENDERSTATETYPE enumval);
+char *D3DTypeToString (D3DRESOURCETYPE enumval);
+char *D3DTypeToString (D3DSAMPLER_TEXTURE_TYPE enumval);
+char *D3DTypeToString (D3DSAMPLERSTATETYPE enumval);
+char *D3DTypeToString (D3DSCANLINEORDERING enumval);
+char *D3DTypeToString (D3DSHADEMODE enumval);
+char *D3DTypeToString (D3DSTATEBLOCKTYPE enumval);
+char *D3DTypeToString (D3DSTENCILOP enumval);
+char *D3DTypeToString (D3DSWAPEFFECT enumval);
+char *D3DTypeToString (D3DTEXTUREADDRESS enumval);
+char *D3DTypeToString (D3DTEXTUREFILTERTYPE enumval);
+char *D3DTypeToString (D3DTEXTUREOP enumval);
+char *D3DTypeToString (D3DTEXTURESTAGESTATETYPE enumval);
+char *D3DTypeToString (D3DTEXTURETRANSFORMFLAGS enumval);
+char *D3DTypeToString (D3DTRANSFORMSTATETYPE enumval);
+char *D3DTypeToString (D3DVERTEXBLENDFLAGS enumval);
+char *D3DTypeToString (D3DZBUFFERTYPE enumval);

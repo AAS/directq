@@ -29,7 +29,7 @@ void R_TransformModelSurface (model_t *mod, msurface_t *surf);
 // OK, it happens in GLQuake which is argument for 0, but it didn't happen in
 // software, which is a bigger argument for 1.  So 1 it is.
 cvar_t r_zhack ("r_zfighthack", "1", CVAR_ARCHIVE);
-cvar_t r_instancedlight ("r_instancedlight", "0", CVAR_ARCHIVE);
+cvar_t r_instancedlight ("r_instancedlight", "1", CVAR_ARCHIVE);
 extern cvar_t r_warpspeed;
 
 // r_lightmap 1 uses the grey texture on account of 2 x overbrighting
@@ -42,7 +42,7 @@ void R_LightPoint (entity_t *e, float *c);
 void D3D_RotateForEntity (entity_t *e);
 void R_PushDlights (mnode_t *headnode);
 __inline void R_AddSurfToDrawLists (msurface_t *surf);
-
+extern DWORD D3D_OVERBRIGHT_MODULATE;
 
 /*
 =======================
@@ -233,6 +233,8 @@ bool R_PrepareBrushEntity (entity_t *e)
 R_SetInstancedStage0
 
 split out to keep code cleaner
+
+to do - lerp between lightmap value and shadelight for intermediate values of r_instancedlight
 =======================
 */
 void R_SetInstancedStage0 (entity_t *e)
@@ -240,9 +242,9 @@ void R_SetInstancedStage0 (entity_t *e)
 	DWORD bsplight = D3DCOLOR_ARGB
 	(
 		BYTE_CLAMP (e->alphaval),
-		BYTE_CLAMP (e->shadelight[0]),
-		BYTE_CLAMP (e->shadelight[1]),
-		BYTE_CLAMP (e->shadelight[2])
+		vid.lightmap[BYTE_CLAMP (e->shadelight[0])],
+		vid.lightmap[BYTE_CLAMP (e->shadelight[1])],
+		vid.lightmap[BYTE_CLAMP (e->shadelight[2])]
 	);
 
 	D3D_SetTextureColorMode (0, D3DTOP_SELECTARG2, D3DTA_TEXTURE, D3DTA_CONSTANT);
@@ -262,8 +264,8 @@ void R_SetBrushSurfaceStates (entity_t *e, int flag)
 {
 	// don't mipmap lightmaps, mipmap the world and fullbrights
 	D3D_SetTextureMipmap (0, D3DTEXF_LINEAR, D3DTEXF_LINEAR, D3DTEXF_NONE);
-	D3D_SetTextureMipmap (1, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
-	D3D_SetTextureMipmap (2, d3d_3DFilterType, d3d_3DFilterType, d3d_3DFilterType);
+	D3D_SetTextureMipmap (1, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
+	D3D_SetTextureMipmap (2, d3d_3DFilterMag, d3d_3DFilterMin, d3d_3DFilterMip);
 
 	D3D_SetTextureAddressMode (D3DTADDRESS_CLAMP, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP);
 	D3D_SetTexCoordIndexes (1, 0, 0);
@@ -281,7 +283,7 @@ void R_SetBrushSurfaceStates (entity_t *e, int flag)
 	}
 	else if (e->alphaval < 255)
 	{
-		if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.integer)
+		if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.value)
 		{
 			R_SetInstancedStage0 (e);
 			D3D_SetTextureAlphaMode (0, D3DTOP_SELECTARG1, D3DTA_CONSTANT, D3DTA_DIFFUSE);
@@ -293,7 +295,7 @@ void R_SetBrushSurfaceStates (entity_t *e, int flag)
 			D3D_SetTextureStageState (0, D3DTSS_CONSTANT, D3DCOLOR_ARGB (BYTE_CLAMP (e->alphaval), 255, 255, 255));
 		}
 	}
-	else if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.integer)
+	else if (e->model->bh->brushtype == MOD_BRUSH_INSTANCED && r_instancedlight.value)
 	{
 		R_SetInstancedStage0 (e);
 		D3D_SetTextureAlphaMode (0, D3DTOP_DISABLE);
@@ -308,7 +310,7 @@ void R_SetBrushSurfaceStates (entity_t *e, int flag)
 	if (flag & R_RENDERNOLUMA)
 	{
 		// second stage is the texture
-		D3D_SetTextureColorMode (1, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_CURRENT);
+		D3D_SetTextureColorMode (1, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
 
 		// ensure this is down because we can make multiple successive passes
 		D3D_SetTextureColorMode (2, D3DTOP_DISABLE);
@@ -319,7 +321,7 @@ void R_SetBrushSurfaceStates (entity_t *e, int flag)
 		D3D_SetTextureColorMode (1, D3DTOP_ADD, D3DTA_TEXTURE, D3DTA_CURRENT);
 
 		// third stage is the texture
-		D3D_SetTextureColorMode (2, D3DTOP_MODULATE2X, D3DTA_TEXTURE, D3DTA_CURRENT);
+		D3D_SetTextureColorMode (2, D3D_OVERBRIGHT_MODULATE, D3DTA_TEXTURE, D3DTA_CURRENT);
 	}
 
 	// common
@@ -381,8 +383,7 @@ void R_RefreshSurfaces (entity_t *e, int flag)
 		for (; surf; surf = surf->texturechain)
 		{
 			// bind the lightmap
-			// we need to send this through a getter as only d3d_rlight knows about the lightmap data type
-			D3D_SetTexture (0, D3D_GetLightmap (surf->d3d_Lightmap));
+			surf->d3d_Lightmap->BindLightmap (0);
 
 			// draw the surface from surf->polys
 			D3D_DrawPrimitive (D3DPT_TRIANGLEFAN, surf->polys->numverts - 2, surf->polys->verts, sizeof (glpolyvert_t));
@@ -510,12 +511,12 @@ bool R_DrawBrushModel (entity_t *e)
 		surf->texturechain = NULL;
 
 		// check flags
-		if (tex->d3d_Fullbright)
+		if (tex->d3d_Fullbright && d3d_DeviceCaps.MaxTextureBlendStages > 2)
 			d3d_RenderDef.brushrenderflags |= R_RENDERLUMA;
 		else d3d_RenderDef.brushrenderflags |= R_RENDERNOLUMA;
 
 		// check for modification to this lightmap; done even for instanced as they may have animating lightstyles
-		D3D_CheckLightmapModification (surf);
+		if (surf->d3d_Lightmap) surf->d3d_Lightmap->CheckSurfaceForModification (surf);
 
 		// transform the surf by the matrix stored for the model containing it
 		R_TransformModelSurface (clmodel, surf);
@@ -543,6 +544,20 @@ void D3D_DrawWorld (void)
 	ent.alphaval = 255;
 	ent.model->bh->brushtype = MOD_BRUSH_WORLD;
 
+	extern float r_clipdist;
+
+	// now update the projection matrix for the world
+	// note - DirectQ dirty matrix lazy transform setting won't actually send a matrix to Direct3D until it's actually used
+	// so you can update matrixes as many time as you want between renders without any performance impact beyond a few CPU cycles
+	if (!d3d_RenderDef.automap)
+	{
+		// standard perspective
+		d3d_ProjMatrixStack->LoadIdentity ();
+		d3d_ProjMatrixStack->Frustum3D (d3d_RenderDef.fov_x, d3d_RenderDef.fov_y, 4, r_clipdist);
+	}
+
 	if (d3d_RenderDef.brushrenderflags & R_RENDERNOLUMA) R_RefreshSurfaces (&ent, R_RENDERNOLUMA);
 	if (d3d_RenderDef.brushrenderflags & R_RENDERLUMA) R_RefreshSurfaces (&ent, R_RENDERLUMA);
 }
+
+

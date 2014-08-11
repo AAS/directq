@@ -42,9 +42,10 @@ cvar_t	cl_bob ("cl_bob","0.02");
 cvar_t	cl_bobcycle ("cl_bobcycle","0.6");
 cvar_t	cl_bobup ("cl_bobup","0.5");
 
-cvar_t	v_kicktime ("v_kicktime", "0.5");
-cvar_t	v_kickroll ("v_kickroll", "0.6");
-cvar_t	v_kickpitch ("v_kickpitch", "0.6");
+cvar_t	v_kicktime ("v_kicktime", "0.5", CVAR_ARCHIVE);
+cvar_t	v_kickroll ("v_kickroll", "0.6", CVAR_ARCHIVE);
+cvar_t	v_kickpitch ("v_kickpitch", "0.6", CVAR_ARCHIVE);
+cvar_t  v_gunkick ("v_gunkick", "1", CVAR_ARCHIVE);
 
 cvar_t	v_iyaw_cycle ("v_iyaw_cycle", "2");
 cvar_t	v_iroll_cycle ("v_iroll_cycle", "0.5");
@@ -788,8 +789,8 @@ void V_CalcRefdef (void)
 	view->frame = cl.stats[STAT_WEAPONFRAME];
 	view->colormap = vid.colormap;
 
-// set up the refresh position
-	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
+	// set up the refresh position
+	if (v_gunkick.value) VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
 
 	static float old_steptime = 0;
 

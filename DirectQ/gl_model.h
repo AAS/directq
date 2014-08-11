@@ -164,6 +164,7 @@ typedef struct msurface_s
 	byte		light_l, light_t;	// lightmap coordinates (relative to LIGHTMAP_SIZE, not 0 to 1)
 	byte		smax, tmax;			// lightmap extents (width and height) (relative to LIGHTMAP_SIZE, not 0 to 1)
 	byte		light_r, light_b;	// lightmap rect right and bottom (light_s + smax, light_t + tmax)
+	int			maxextent;
 
 	glpoly_t *polys;
 
@@ -176,7 +177,11 @@ typedef struct msurface_s
 	int			dlightbits[4];
 
 	// direct3d stuff
-	void		*d3d_Lightmap;
+	class CD3DLightmap *d3d_Lightmap;
+
+	// overbright factor for surf
+	int			overbright;
+	int			fullbright;
 
 	// the matrix used for transforming this surf
 	void		*matrix;
@@ -194,6 +199,7 @@ typedef struct msurface_s
 	float		dist;
 	float		midpoint[3];
 } msurface_t;
+
 
 typedef struct mnode_s
 {

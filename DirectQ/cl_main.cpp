@@ -200,7 +200,7 @@ void CL_SignonReply (void)
 		MSG_WriteString (&cls.message, "prespawn");
 		break;
 		
-	case 2:		
+	case 2:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, va("name \"%s\"\n", cl_name.string));
 	
@@ -212,7 +212,7 @@ void CL_SignonReply (void)
 		MSG_WriteString (&cls.message, str);
 		break;
 		
-	case 3:	
+	case 3:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "begin");
 		break;

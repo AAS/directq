@@ -286,7 +286,15 @@ void SV_TouchLinks ( edict_t *ent, areanode_t *node )
 	link_t	       *l, *next;
 	edict_t	       *touch;
 	int	       old_self, old_other, touched = 0, i;
-	static edict_t *list[MAX_EDICTS]; // Static due to recursive function
+
+	// Static due to recursive function
+	static edict_t **list = NULL;
+
+	if (!list)
+	{
+		// alloc first time (to keep it off the stack - 256K - ouch!)
+		list = (edict_t **) Pool_Alloc (POOL_PERMANENT, MAX_EDICTS * sizeof (edict_t *));
+	}
 
 loc0:;
 	// ensure
@@ -377,25 +385,24 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 	if (ent->free)
 		return;
 
-	// set the abs box
-	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) )
+	// set the abs box (omit the world from this...!)
+	if (ent->v.solid == SOLID_BSP && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && ent != sv.edicts)
 	{
 		// expand for rotation
 		float		max, v;
 		int			i;
 
 		max = 0;
-		for (i=0 ; i<3 ; i++)
+
+		for (i = 0; i < 3; i++)
 		{
-			v =fabs( ent->v.mins[i]);
-			if (v > max)
-				max = v;
-			v =fabs( ent->v.maxs[i]);
-			if (v > max)
-				max = v;
+			v = fabs (ent->v.mins[i]);
+			if (v > max) max = v;
+			v =fabs (ent->v.maxs[i]);
+			if (v > max) max = v;
 		}
 
-		for (i=0 ; i<3 ; i++)
+		for (i = 0; i < 3; i++)
 		{
 			ent->v.absmin[i] = ent->v.origin[i] - max;
 			ent->v.absmax[i] = ent->v.origin[i] + max;
@@ -407,10 +414,8 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 		VectorAdd (ent->v.origin, ent->v.maxs, ent->v.absmax);
 	}
 
-//
-// to make items easier to pick up and allow them to be grabbed off
-// of shelves, the abs sizes are expanded
-//
+	// to make items easier to pick up and allow them to be grabbed off
+	// of shelves, the abs sizes are expanded
 	if ((int)ent->v.flags & FL_ITEM)
 	{
 		ent->v.absmin[0] -= 15;
@@ -451,8 +456,7 @@ void SV_LinkEdict (edict_t *ent, bool touch_triggers)
 	// link it in
 	if (ent->v.solid == SOLID_TRIGGER)
 		InsertLinkBefore (&ent->area, &node->trigger_edicts);
-	else
-		InsertLinkBefore (&ent->area, &node->solid_edicts);
+	else InsertLinkBefore (&ent->area, &node->solid_edicts);
 
 	// if touch_triggers, touch all entities at this node and decend for more
 	if (touch_triggers)
