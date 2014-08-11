@@ -89,8 +89,8 @@ void ED_ParseGlobals (char *data);
 
 void ED_LoadFromFile (char *data);
 
-edict_t *GetEdictForNumber(int n);
-int GetNumberForEdict(edict_t *e);
+edict_t *GetEdictForNumber (int n);
+int GetNumberForEdict (edict_t *e);
 
 #define	NEXT_EDICT2(e) ((edict_t *) ((byte *)e + SVProgs->EdictSize))
 #define	NEXT_EDICT(e) (SVProgs->EdictPointers[(e)->ednum + 1])

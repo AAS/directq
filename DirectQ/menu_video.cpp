@@ -31,14 +31,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern bool WinDWM;
 
-extern cvar_t d3d_depthmode;
-
 char **menu_videomodes = NULL;
 int menu_videomodenum = 0;
-
-char **menu_depthmodes = NULL;
-int menu_depthmodenum = 0;
-extern D3DFORMAT d3d_SupportedDepthFormats[];
 
 char **menu_anisotropicmodes = NULL;
 int menu_anisonum = 0;
@@ -94,38 +88,6 @@ char **refrlist = NULL;
 int refrnum = 0;
 extern cvar_t vid_refreshrate;
 
-void VID_MenuGetDepthModes (void)
-{
-	// already done
-	if (menu_depthmodes) return;
-
-	menu_depthmodes = (char **) MainZone->Alloc (32 * sizeof (char *));
-
-	for (int i = 0; ; i++)
-	{
-		// ran out of formats
-		if (d3d_SupportedDepthFormats[i] == D3DFMT_UNKNOWN) break;
-
-		// format is good to use now
-		menu_depthmodes[i] = (char *) MainZone->Alloc (32);
-
-		switch (d3d_SupportedDepthFormats[i])
-		{//D3DFMT_D16, D3DFMT_D15S1, D3DFMT_D24S8, D3DFMT_D24X4S4, D3DFMT_D32, D3DFMT_D24X8
-		case D3DFMT_D16:		strcpy (menu_depthmodes[i], "16 bit");			break;
-		case D3DFMT_D15S1:		strcpy (menu_depthmodes[i], "15 bit/1 bit");	break;
-		case D3DFMT_D24S8:		strcpy (menu_depthmodes[i], "24 bit/8 bit");	break;
-		case D3DFMT_D24X4S4:	strcpy (menu_depthmodes[i], "24 bit/4 bit");	break;
-		case D3DFMT_D32:		strcpy (menu_depthmodes[i], "32 bit");			break;
-		case D3DFMT_D24X8:		strcpy (menu_depthmodes[i], "24 bit");			break;
-		default:				strcpy (menu_depthmodes[i], "Unknown");			break;
-		}
-
-		// ensure that the list is NULL terminated
-		menu_depthmodes[i + 1] = NULL;
-	}
-}
-
-
 void VID_ApplyModeChange (void)
 {
 	// run a screen update after each to make sure they only occur one at a time
@@ -133,9 +95,6 @@ void VID_ApplyModeChange (void)
 	SCR_UpdateScreen ();
 
 	Cvar_Set (&vid_vsync, dummy_vsync);
-	SCR_UpdateScreen ();
-
-	Cvar_Set (&d3d_depthmode, menu_depthmodenum);
 	SCR_UpdateScreen ();
 
 	Cvar_Set (&vid_refreshrate, d3d_AllowedRefreshRates[refrnum]);
@@ -152,7 +111,6 @@ bool Menu_VideoCheckNeedApply (void)
 	// we signal to show the apply option
 	if (menu_videomodenum != d3d_mode.integer) return true;
 	if (vid_vsync.integer != dummy_vsync) return true;
-	if (menu_depthmodenum != d3d_depthmode.integer) return true;
 	if (d3d_AllowedRefreshRates[refrnum] != vid_refreshrate.integer) return true;
 
 	// no apply needed
@@ -491,25 +449,8 @@ int Menu_VideoCustomDraw (int y)
 
 void Menu_VideoCustomEnter (void)
 {
-	// create the depth modes on first entry
-	VID_MenuGetDepthModes ();
-
 	// decode the video mode and set currently selected stuff
 	Menu_VideoDecodeVideoMode ();
-
-	// find the correct depth mode number
-	menu_depthmodenum = 0;
-
-	for (int i = 0; ; i++)
-	{
-		if (d3d_SupportedDepthFormats[i] == D3DFMT_UNKNOWN) break;
-
-		if (d3d_SupportedDepthFormats[i] == d3d_GlobalCaps.DepthStencilFormat)
-		{
-			menu_depthmodenum = i;
-			break;
-		}
-	}
 
 	if (r_occlusionqueries.integer < 0) Cvar_Set (&r_occlusionqueries, 0.0f);
 	if (r_occlusionqueries.integer > 3) Cvar_Set (&r_occlusionqueries, 3.0f);
@@ -564,7 +505,6 @@ void Menu_VideoBuild (void)
 		menu_Video.AddOption (TAG_FULLSCREEN_ENABLE, new CQMenuSpinControl ("Refresh Rate", &refrnum, &refrlist));
 
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
-	menu_Video.AddOption (new CQMenuSpinControl ("Depth/Stencil Format", &menu_depthmodenum, &menu_depthmodes));
 	menu_Video.AddOption (new CQMenuIntegerToggle ("Vertical Sync", &dummy_vsync, 0, 1));
 	menu_Video.AddOption (new CQMenuSpacer (DIVIDER_LINE));
 	menu_Video.AddOption (TAG_VIDMODEAPPLY, new CQMenuCommand ("Apply Video Mode Change", VID_ApplyModeChange));

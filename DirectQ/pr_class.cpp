@@ -308,9 +308,9 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 		this->XFunction->profile++;
 
 		st = &this->Statements[s];
-		a = (eval_t *)&this->Globals[(unsigned short)st->a];
-		b = (eval_t *)&this->Globals[(unsigned short)st->b];
-		c = (eval_t *)&this->Globals[(unsigned short)st->c];
+		a = (eval_t *) &this->Globals[(unsigned short) st->a];
+		b = (eval_t *) &this->Globals[(unsigned short) st->b];
+		c = (eval_t *) &this->Globals[(unsigned short) st->c];
 
 		if (!--runaway) this->RunError ("runaway loop error %d");
 		if (this->Trace) this->PrintStatement (st);
@@ -497,16 +497,16 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 
 		case OP_IFNOT:
 			if (!a->_int)
-				s += st->b - 1;	// offset the s++
+				s += (signed short) st->b - 1;	// offset the s++
 			break;
 
 		case OP_IF:
 			if (a->_int)
-				s += st->b - 1;	// offset the s++
+				s += (signed short) st->b - 1;	// offset the s++
 			break;
 
 		case OP_GOTO:
-			s += st->a - 1;	// offset the s++
+			s += (signed short) st->a - 1;	// offset the s++
 			break;
 
 		case OP_CALL0:
@@ -551,9 +551,9 @@ void CProgsDat::ExecuteProgram (func_t fnum)
 
 		case OP_DONE:
 		case OP_RETURN:
-			this->Globals[OFS_RETURN] = this->Globals[(unsigned short)st->a];
-			this->Globals[OFS_RETURN+1] = this->Globals[(unsigned short)st->a+1];
-			this->Globals[OFS_RETURN+2] = this->Globals[(unsigned short)st->a+2];
+			this->Globals[OFS_RETURN] = this->Globals[(unsigned short) st->a];
+			this->Globals[OFS_RETURN+1] = this->Globals[(unsigned short) st->a+1];
+			this->Globals[OFS_RETURN+2] = this->Globals[(unsigned short) st->a+2];
 
 			s = this->LeaveFunction ();
 

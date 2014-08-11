@@ -791,10 +791,9 @@ void R_ReleaseResourceTextures (void)
 void R_InitResourceTextures (void)
 {
 	// load any textures contained in exe resources
-	D3D_LoadResourceTexture (&particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
-
-	D3D_LoadResourceTexture (&crosshairtexture, IDR_CROSSHAIR, 0);
-	D3D_LoadResourceTexture (&yahtexture, IDR_YOUAREHERE, 0);
+	D3D_LoadResourceTexture ("particle", &particledottexture, IDR_PARTICLEDOT, IMAGE_MIPMAP);
+	D3D_LoadResourceTexture ("crosshairs", &crosshairtexture, IDR_CROSSHAIR, 0);
+	D3D_LoadResourceTexture ("YAH", &yahtexture, IDR_YOUAREHERE, 0);
 
 	// load the notexture properly
 	D3D_UploadTexture (&r_notexture, (byte *) (r_notexture_mip + 1), r_notexture_mip->width, r_notexture_mip->height, IMAGE_MIPMAP | IMAGE_NOCOMPRESS);

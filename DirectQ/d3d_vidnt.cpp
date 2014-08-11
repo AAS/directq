@@ -159,11 +159,6 @@ bool vid_canalttab = false;
 bool vid_initialized = false;
 bool scr_skipupdate;
 
-// 32/24 bit needs to come first because a 16 bit depth buffer is just not good enough for to prevent precision trouble in places
-D3DFORMAT d3d_AllowedDepthFormats[] = {D3DFMT_D32, D3DFMT_D24X8, D3DFMT_D16, D3DFMT_D24S8, D3DFMT_D24X4S4, D3DFMT_D15S1, D3DFMT_UNKNOWN};
-D3DFORMAT d3d_SupportedDepthFormats[32] = {D3DFMT_UNKNOWN};
-
-
 // RotateAxisLocal requires instantiating a class and filling it's members just to pass
 // 3 floats to it!  These little babies avoid that silly nonsense.  SORT IT OUT MICROSOFT!!!
 D3DXVECTOR3 XVECTOR (1, 0, 0);
@@ -196,7 +191,6 @@ void Splash_Destroy (void);
 // force an invalid mode on initial entry
 cvar_t		vid_mode ("vid_mode", "-666", CVAR_ARCHIVE);
 cvar_t		d3d_mode ("d3d_mode", "-1", CVAR_ARCHIVE);
-cvar_t		d3d_depthmode ("d3d_depthmode", "0", CVAR_ARCHIVE);
 cvar_t		vid_wait ("vid_wait", "0");
 cvar_t		v_gamma ("gamma", "1", CVAR_ARCHIVE);
 cvar_t		r_gamma ("r_gamma", "1", CVAR_ARCHIVE);
@@ -359,6 +353,59 @@ DWORD D3D_GetPresentInterval (void)
 }
 
 
+D3DFORMAT D3D_GetDepthStencilFormat (D3DDISPLAYMODE *mode)
+{
+	D3DFORMAT ModeFormat = mode->Format;
+
+	// 32/24 bit needs to come first because a 16 bit depth buffer is just not good enough for to prevent precision trouble in places
+	D3DFORMAT d3d_AllowedDepthFormats[] = {D3DFMT_D32, D3DFMT_D24X8, D3DFMT_D16, D3DFMT_D24S8, D3DFMT_D24X4S4, D3DFMT_D15S1, D3DFMT_UNKNOWN};
+
+	if (ModeFormat == D3DFMT_UNKNOWN) ModeFormat = d3d_DesktopMode.Format;
+
+	for (int i = 0;; i++)
+	{
+		// ran out of formats
+		if (d3d_AllowedDepthFormats[i] == D3DFMT_UNKNOWN) break;
+
+		// check that the format exists
+		hr = d3d_Object->CheckDeviceFormat
+		(
+			D3DADAPTER_DEFAULT,
+			D3DDEVTYPE_HAL,
+			ModeFormat,
+			D3DUSAGE_DEPTHSTENCIL,
+			D3DRTYPE_SURFACE,
+			d3d_AllowedDepthFormats[i]
+		);
+
+		// format does not exist
+		if (FAILED (hr)) continue;
+
+		// check that the format is compatible
+		hr = d3d_Object->CheckDepthStencilMatch
+		(
+			D3DADAPTER_DEFAULT,
+			D3DDEVTYPE_HAL,
+			ModeFormat,
+			ModeFormat,
+			d3d_AllowedDepthFormats[i]
+		);
+
+		// format is not compatible
+		if (FAILED (hr)) continue;
+
+		// format is good to use now
+		return d3d_AllowedDepthFormats[i];
+	}
+
+	// didn't find one
+	Sys_Error ("D3D_GetDepthStencilFormat: Failed to find a valid DepthStencil format");
+
+	// shut up compiler
+	return D3DFMT_UNKNOWN;
+}
+
+
 void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 {
 	Q_MemSet (pp, 0, sizeof (D3DPRESENT_PARAMETERS));
@@ -402,9 +449,9 @@ void D3D_SetPresentParams (D3DPRESENT_PARAMETERS *pp, D3DDISPLAYMODE *mode)
 	}
 
 	// create it without a depth buffer to begin with
-	d3d_GlobalCaps.DepthStencilFormat = D3DFMT_UNKNOWN;
-	pp->AutoDepthStencilFormat = D3DFMT_UNKNOWN;
-	pp->EnableAutoDepthStencil = FALSE;
+	d3d_GlobalCaps.DepthStencilFormat = D3D_GetDepthStencilFormat (mode);
+	pp->AutoDepthStencilFormat = d3d_GlobalCaps.DepthStencilFormat;
+	pp->EnableAutoDepthStencil = TRUE;
 	pp->Flags = 0;
 
 	pp->SwapEffect = D3DSWAPEFFECT_DISCARD;
@@ -541,18 +588,8 @@ void D3D_LoseDeviceResources (void)
 	D3D_LoseLightmapResources ();
 	VBO_DestroyBuffers ();
 
-	// destroy the old depth buffer
-	// this was an auto surface so it doesn't need to be released
-	d3d_Device->SetDepthStencilSurface (NULL);
-
 	// ensure that present params are valid
 	D3D_SetPresentParams (&d3d_PresentParams, &d3d_CurrentMode);
-
-	// set up the correct depth format
-	d3d_GlobalCaps.DepthStencilFormat = d3d_SupportedDepthFormats[d3d_depthmode.integer];
-	d3d_PresentParams.AutoDepthStencilFormat = d3d_SupportedDepthFormats[d3d_depthmode.integer];
-	d3d_PresentParams.EnableAutoDepthStencil = TRUE;
-	d3d_PresentParams.Flags = D3DPRESENTFLAG_DISCARD_DEPTHSTENCIL;
 }
 
 
@@ -2052,93 +2089,6 @@ void D3D_CheckAnisotropic (void)
 }
 
 
-void D3D_CheckDepthFormat (void)
-{
-	static int oldmode = ~d3d_depthmode.integer;
-
-	// check for first time or recreate the depth buffer
-	if (d3d_GlobalCaps.DepthStencilFormat == D3DFMT_UNKNOWN)
-	{
-		// enumerate supported formats
-		for (int i = 0, numd = 0; ; i++)
-		{
-			if (d3d_AllowedDepthFormats[i] == D3DFMT_UNKNOWN) break;
-
-			// check that the format exists
-			hr = d3d_Object->CheckDeviceFormat
-			(
-				D3DADAPTER_DEFAULT,
-				D3DDEVTYPE_HAL,
-				d3d_CurrentMode.Format,
-				D3DUSAGE_DEPTHSTENCIL,
-				D3DRTYPE_SURFACE,
-				d3d_AllowedDepthFormats[i]
-			);
-
-			// format does not exist
-			if (FAILED (hr)) continue;
-
-			// check that the format is compatible
-			hr = d3d_Object->CheckDepthStencilMatch
-			(
-				D3DADAPTER_DEFAULT,
-				D3DDEVTYPE_HAL,
-				d3d_CurrentMode.Format,
-				d3d_CurrentMode.Format,
-				d3d_AllowedDepthFormats[i]
-			);
-
-			// format is not compatible
-			if (FAILED (hr)) continue;
-
-			// add it to the list of supported formats
-			d3d_SupportedDepthFormats[numd] = d3d_AllowedDepthFormats[i];
-			d3d_SupportedDepthFormats[numd + 1] = D3DFMT_UNKNOWN;
-			numd++;
-		}
-	}
-
-	// check for a change or recreate the depth buffer
-	if (oldmode != d3d_depthmode.integer)
-	{
-		// ensure that the mode is a valid one
-		int newmode = 0;
-
-		// find the matching mode
-		for (int i = 0; ; i++)
-		{
-			if (d3d_SupportedDepthFormats[i] == D3DFMT_UNKNOWN) break;
-
-			if (i == d3d_depthmode.integer)
-			{
-				newmode = i;
-				break;
-			}
-		}
-
-		// update the selected mode
-		Cvar_Set (&d3d_depthmode, newmode);
-
-		// store back
-		oldmode = d3d_depthmode.integer;
-
-		// only restart if the mode actually changed
-		if (d3d_SupportedDepthFormats[d3d_depthmode.integer] != d3d_GlobalCaps.DepthStencilFormat)
-		{
-			// restart video
-			// note - using CreateDepthStencilSurface and SetDepthStencilSurface gives a depth buffer that's
-			// considerably slower than creating an auto one in the present params.
-			D3D_VidRestart_f ();
-
-			static bool firsttime = true;
-
-			if (!firsttime) Con_Printf ("Created depth buffer with format %s\n", D3DTypeToString (d3d_SupportedDepthFormats[d3d_depthmode.integer]));
-			firsttime = false;
-		}
-	}
-}
-
-
 void D3D_CheckRefreshRate (void)
 {
 	static int oldrr = ~vid_refreshrate.integer;
@@ -2194,7 +2144,6 @@ void D3D_BeginRendering (void)
 	D3D_CheckGamma ();
 	D3D_CheckVidMode (); if (vid_restarted) return;
 	D3D_CheckVSync (); if (vid_restarted) return;
-	D3D_CheckDepthFormat (); if (vid_restarted) return;
 	D3D_CheckRefreshRate (); if (vid_restarted) return;
 	D3D_CheckD3DXVersion (); if (vid_restarted) return;
 	D3D_CheckAnisotropic ();

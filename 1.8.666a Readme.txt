@@ -1,0 +1,5 @@
+This release fixes a bug with the user-selectable depth buffer format, by removing the ability for the user to select the
+depth buffer format!  With hindsight this "feature" was probably not necessary, and in any event it didn't work right.
+
+Special thanks to ORL on the quakeone.com forums for reporting this one and for working with me to identify the cause and
+the solution.

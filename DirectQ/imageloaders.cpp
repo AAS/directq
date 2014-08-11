@@ -42,7 +42,7 @@ HRESULT D3D_CreateExternalTexture (LPDIRECT3DTEXTURE9 *tex, int len, byte *data,
 		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
 		D3DPOOL_MANAGED,
 		D3DX_FILTER_LINEAR,
-		D3DX_FILTER_BOX | D3DX_FILTER_SRGB,
+		D3DX_FILTER_BOX,
 		0,
 		NULL,
 		NULL,
@@ -675,7 +675,7 @@ ext_tex_load:;
 }
 
 
-void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags)
+void D3D_LoadResourceTexture (char *name, LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags)
 {
 	hr = QD3DXCreateTextureFromResourceExA
 	(
@@ -689,7 +689,7 @@ void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags
 		D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
 		D3DPOOL_MANAGED,
 		D3DX_FILTER_LINEAR,
-		D3DX_FILTER_BOX | D3DX_FILTER_SRGB,
+		D3DX_FILTER_BOX,
 		0,
 		NULL,
 		NULL,
@@ -698,9 +698,35 @@ void D3D_LoadResourceTexture (LPDIRECT3DTEXTURE9 *tex, int ResourceID, int flags
 
 	if (FAILED (hr))
 	{
-		// a resource texture failing is a program crash bug
-		Sys_Error ("D3D_LoadResourceTexture: Failed to create texture");
-		return;
+		// try open the resource and load it as a file if the above fails
+		byte *resdata = NULL;
+		int reslen = Sys_LoadResourceData (ResourceID, (void **) &resdata);
+
+		hr = QD3DXCreateTextureFromFileInMemoryEx
+		(
+			d3d_Device,
+			resdata,
+			reslen,
+			D3DX_DEFAULT,
+			D3DX_DEFAULT,
+			(flags & IMAGE_MIPMAP) ? D3DX_DEFAULT : 1,
+			0,
+			D3D_GetTextureFormat (flags | IMAGE_ALPHA | IMAGE_32BIT),
+			D3DPOOL_MANAGED,
+			D3DX_FILTER_LINEAR,
+			D3DX_FILTER_BOX,
+			0,
+			NULL,
+			NULL,
+			tex
+		);
+
+		if (FAILED (hr))
+		{
+			// a resource texture failing is a program crash bug
+			Sys_Error ("D3D_LoadResourceTexture: Failed to create %s texture", name);
+			return;
+		}
 	}
 
 	// not much more we need to do here...

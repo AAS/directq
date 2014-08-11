@@ -1623,7 +1623,7 @@ void Mod_LoadPlanes (model_t *mod, byte *mod_base, lump_t *l)
 
 	// why double the number of planes???
 	out = (mplane_t *) MainHunk->Alloc (count * 2 * sizeof (mplane_t));	
-	
+
 	mod->brushhdr->planes = out;
 	mod->brushhdr->numplanes = count;
 

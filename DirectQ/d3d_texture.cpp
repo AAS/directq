@@ -307,7 +307,7 @@ void D3D_UploadTexture (LPDIRECT3DTEXTURE9 *texture, void *data, int width, int 
 	if (padbytes) Zone_Free (padbytes);
 
 	// good old box filter - triangle is way too slow, linear doesn't work well for mipmapping
-	if (flags & IMAGE_MIPMAP) QD3DXFilterTexture (texture[0], NULL, 0, D3DX_FILTER_BOX | D3DX_FILTER_SRGB);
+	if (flags & IMAGE_MIPMAP) QD3DXFilterTexture (texture[0], NULL, 0, D3DX_FILTER_BOX);
 
 	// tell Direct 3D that we're going to be needing to use this managed resource shortly
 	texture[0]->PreLoad ();
